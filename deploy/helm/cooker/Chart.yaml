@@ -1,0 +1,14 @@
+apiVersion: v2
+name: cooker
+description: CI/CD Management Tool for Docker & Kubernetes with OCI compliance
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - cicd
+  - docker
+  - kubernetes
+  - oci
+  - pipeline
+maintainers:
+  - name: Cooker Team

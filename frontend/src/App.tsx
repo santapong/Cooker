@@ -1,0 +1,22 @@
+import { Routes, Route } from 'react-router-dom'
+import MainLayout from './components/layout/MainLayout'
+import PipelinesPage from './pages/PipelinesPage'
+import PipelineEditorPage from './pages/PipelineEditorPage'
+import DockerPage from './pages/DockerPage'
+import KubernetesPage from './pages/KubernetesPage'
+import EnvironmentsPage from './pages/EnvironmentsPage'
+
+export default function App() {
+  return (
+    <MainLayout>
+      <Routes>
+        <Route path="/" element={<PipelinesPage />} />
+        <Route path="/pipelines" element={<PipelinesPage />} />
+        <Route path="/pipelines/:id/edit" element={<PipelineEditorPage />} />
+        <Route path="/docker" element={<DockerPage />} />
+        <Route path="/kubernetes" element={<KubernetesPage />} />
+        <Route path="/environments" element={<EnvironmentsPage />} />
+      </Routes>
+    </MainLayout>
+  )
+}
