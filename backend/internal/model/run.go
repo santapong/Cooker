@@ -1,0 +1,64 @@
+package model
+
+import "time"
+
+// RunStatus represents the state of a pipeline run or stage run.
+type RunStatus string
+
+const (
+	RunStatusPending   RunStatus = "pending"
+	RunStatusRunning   RunStatus = "running"
+	RunStatusSuccess   RunStatus = "success"
+	RunStatusFailed    RunStatus = "failed"
+	RunStatusCancelled RunStatus = "cancelled"
+)
+
+// PipelineRun is a concrete execution of a pipeline definition.
+type PipelineRun struct {
+	ID                 string              `json:"id" db:"id"`
+	PipelineID         string              `json:"pipelineId" db:"pipeline_id"`
+	Status             RunStatus           `json:"status" db:"status"`
+	StageRuns          []StageRun          `json:"stageRuns"`
+	EnvironmentStatuses []EnvironmentStatus `json:"environmentStatuses"`
+	Variables          map[string]string   `json:"variables"`
+	StartedAt          *time.Time          `json:"startedAt" db:"started_at"`
+	FinishedAt         *time.Time          `json:"finishedAt" db:"finished_at"`
+	Error              string              `json:"error,omitempty" db:"error"`
+}
+
+// StageRun tracks the execution of a single stage within a pipeline run.
+type StageRun struct {
+	StageID    string     `json:"stageId"`
+	Status     RunStatus  `json:"status"`
+	StartedAt  *time.Time `json:"startedAt"`
+	FinishedAt *time.Time `json:"finishedAt"`
+	Logs       string     `json:"logs,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	Artifacts  []Artifact `json:"artifacts,omitempty"`
+}
+
+// Artifact represents a pipeline output, tracked as an OCI content-addressable reference.
+type Artifact struct {
+	Type   string `json:"type"`   // "oci-image", "test-report", "log"
+	Ref    string `json:"ref"`    // e.g., "registry.example.com/app@sha256:abc..."
+	Digest string `json:"digest"` // OCI content-addressable digest
+}
+
+// EnvironmentStatus tracks deployment status per environment in a pipeline run.
+type EnvironmentStatus struct {
+	EnvironmentID string     `json:"environmentId"`
+	Status        EnvStatus  `json:"status"`
+	PromotedAt    *time.Time `json:"promotedAt,omitempty"`
+	ApprovedBy    string     `json:"approvedBy,omitempty"`
+}
+
+// EnvStatus represents the deployment state for an environment.
+type EnvStatus string
+
+const (
+	EnvStatusPending          EnvStatus = "pending"
+	EnvStatusDeploying        EnvStatus = "deploying"
+	EnvStatusDeployed         EnvStatus = "deployed"
+	EnvStatusFailed           EnvStatus = "failed"
+	EnvStatusAwaitingApproval EnvStatus = "awaiting_approval"
+)

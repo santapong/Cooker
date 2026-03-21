@@ -1,0 +1,64 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/cooker-ci/cooker
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: nginx
+  hosts:
+    - host: cooker.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+# Docker socket access (for local Docker management)
+docker:
+  enabled: true
+  socketPath: /var/run/docker.sock
+
+# Kubernetes access
+kubernetes:
+  inCluster: true
+
+# OIDC/SSO Authentication
+oidc:
+  enabled: false
+  issuerUrl: ""
+  clientId: ""
+  clientSecret: ""
+  redirectUrl: ""
+
+# Database
+postgresql:
+  enabled: true
+  auth:
+    database: cooker
+    username: cooker
+    password: cooker
+
+# Cache
+redis:
+  enabled: true
+
+# RBAC
+serviceAccount:
+  create: true
+  name: cooker
+rbac:
+  create: true
+  clusterWide: true
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
