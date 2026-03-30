@@ -4,6 +4,7 @@ node_modules/
 # Build output
 bin/
 frontend/dist/
+*.tsbuildinfo
 
 # Environment
 .env
