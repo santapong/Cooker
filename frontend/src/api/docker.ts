@@ -1,5 +1,6 @@
-import { get, post, del } from './client';
+import { get, post, put, del } from './client';
 import type { ImageInfo, ContainerInfo } from '../types/docker';
+import type { ComposeGraph, ComposeService } from '../types/compose';
 
 export const dockerApi = {
   listImages: () => get<ImageInfo[]>('/docker/images'),
@@ -13,4 +14,9 @@ export const dockerApi = {
     post<{ id: string }>('/docker/containers', config),
   stopContainer: (id: string) => post(`/docker/containers/${id}/stop`),
   deleteContainer: (id: string) => del(`/docker/containers/${id}`),
+
+  parseCompose: (composePath?: string) =>
+    post<ComposeGraph>('/docker/compose/parse', composePath ? { composePath } : {}),
+  updateComposeService: (name: string, config: Partial<ComposeService>) =>
+    put<void>(`/docker/compose/services/${name}`, config),
 };

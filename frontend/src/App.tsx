@@ -3,6 +3,7 @@ import MainLayout from './components/layout/MainLayout'
 import PipelinesPage from './pages/PipelinesPage'
 import PipelineEditorPage from './pages/PipelineEditorPage'
 import DockerPage from './pages/DockerPage'
+import ComposePage from './pages/ComposePage'
 import KubernetesPage from './pages/KubernetesPage'
 import EnvironmentsPage from './pages/EnvironmentsPage'
 
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/pipelines" element={<PipelinesPage />} />
         <Route path="/pipelines/:id/edit" element={<PipelineEditorPage />} />
         <Route path="/docker" element={<DockerPage />} />
+        <Route path="/docker/compose" element={<ComposePage />} />
         <Route path="/kubernetes" element={<KubernetesPage />} />
         <Route path="/environments" element={<EnvironmentsPage />} />
       </Routes>

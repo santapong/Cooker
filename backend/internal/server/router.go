@@ -40,6 +40,8 @@ func (s *Server) registerRoutes() {
 		docker.POST("/containers/:id/stop", handler.StopContainer)
 		docker.DELETE("/containers/:id", handler.DeleteContainer)
 		docker.GET("/containers/:id/logs", handler.GetContainerLogs)
+		docker.POST("/compose/parse", handler.ParseComposeFile)
+		docker.PUT("/compose/services/:name", handler.UpdateComposeService)
 	}
 
 	// OCI Registry routes
