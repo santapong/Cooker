@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 const navItems = [
   { path: '/pipelines', label: 'Pipelines', icon: 'P' },
   { path: '/docker', label: 'Docker', icon: 'D' },
+  { path: '/docker/compose', label: 'Compose', icon: 'C' },
   { path: '/kubernetes', label: 'Kubernetes', icon: 'K' },
   { path: '/environments', label: 'Environments', icon: 'E' },
 ];
