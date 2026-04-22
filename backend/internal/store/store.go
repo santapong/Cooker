@@ -3,9 +3,14 @@ package store
 
 import (
 	"context"
+	"errors"
 
 	"github.com/cooker-ci/cooker/internal/model"
 )
+
+// ErrNotFound is returned by store implementations when a requested
+// entity does not exist. Callers should use errors.Is to check.
+var ErrNotFound = errors.New("store: not found")
 
 // PipelineStore manages pipeline persistence.
 type PipelineStore interface {
@@ -31,4 +36,32 @@ type EnvironmentStore interface {
 	Create(ctx context.Context, env *model.Environment) error
 	Update(ctx context.Context, env *model.Environment) error
 	Delete(ctx context.Context, id string) error
+}
+
+// Store aggregates all data-access interfaces and a cleanup hook.
+// Construct with New and pass to the server and handler layers.
+type Store struct {
+	Pipelines    PipelineStore
+	Runs         RunStore
+	Environments EnvironmentStore
+	close        func() error
+}
+
+// New builds a Store. closeFn may be nil when no cleanup is required
+// (e.g., in-memory stores).
+func New(p PipelineStore, r RunStore, e EnvironmentStore, closeFn func() error) *Store {
+	return &Store{
+		Pipelines:    p,
+		Runs:         r,
+		Environments: e,
+		close:        closeFn,
+	}
+}
+
+// Close releases resources held by the underlying driver, if any.
+func (s *Store) Close() error {
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
