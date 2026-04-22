@@ -3,9 +3,12 @@
 package auth
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gin-gonic/gin"
 
 	"github.com/cooker-ci/cooker/internal/config"
@@ -20,60 +23,114 @@ type Claims struct {
 	Roles   []string `json:"roles"`
 }
 
-// OIDCMiddleware returns a Gin middleware that validates OIDC bearer tokens.
-// When OIDC is disabled (dev mode), it sets a default user context.
-func OIDCMiddleware(cfg config.OIDCConfig) gin.HandlerFunc {
+// Middleware validates OIDC bearer tokens on incoming requests.
+//
+// When OIDC is disabled (dev mode) it injects a deterministic admin
+// user. When enabled it discovers the provider at construction time so
+// Cooker fails fast on misconfiguration, and uses the resulting
+// IDTokenVerifier to check `iss`, `aud`, `exp`, and signature on every
+// request.
+type Middleware struct {
+	cfg      config.OIDCConfig
+	verifier *oidc.IDTokenVerifier
+}
+
+// NewMiddleware builds an OIDC middleware. Returns an error when
+// OIDC is enabled but the issuer is unreachable or required fields are
+// missing.
+func NewMiddleware(ctx context.Context, cfg config.OIDCConfig) (*Middleware, error) {
+	m := &Middleware{cfg: cfg}
+	if !cfg.Enabled {
+		return m, nil
+	}
+	if cfg.IssuerURL == "" {
+		return nil, fmt.Errorf("oidc enabled but COOKER_OIDC_ISSUER_URL is empty")
+	}
+	if cfg.ClientID == "" {
+		return nil, fmt.Errorf("oidc enabled but COOKER_OIDC_CLIENT_ID is empty")
+	}
+	provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
+	if err != nil {
+		return nil, fmt.Errorf("oidc: discover provider %q: %w", cfg.IssuerURL, err)
+	}
+	m.verifier = provider.Verifier(&oidc.Config{ClientID: cfg.ClientID})
+	return m, nil
+}
+
+// Handler returns a Gin middleware that validates OIDC bearer tokens.
+func (m *Middleware) Handler() gin.HandlerFunc {
+	if !m.cfg.Enabled {
+		return devHandler()
+	}
 	return func(c *gin.Context) {
-		if !cfg.Enabled {
-			// Dev mode: skip authentication, set default user
-			c.Set("user", &Claims{
-				Subject: "dev-user",
-				Email:   "dev@cooker.local",
-				Name:    "Developer",
-				Groups:  []string{"admin"},
-				Roles:   []string{string(RoleAdmin)},
-			})
-			c.Next()
+		token, ok := bearerToken(c)
+		if !ok {
 			return
 		}
-
-		// Extract Bearer token from Authorization header
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "missing Authorization header",
-			})
-			return
-		}
-
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "invalid Authorization header format, expected: Bearer <token>",
-			})
-			return
-		}
-
-		token := parts[1]
-
-		// TODO: Validate token using go-oidc provider
-		// provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
-		// verifier := provider.Verifier(&oidc.Config{ClientID: cfg.ClientID})
-		// idToken, err := verifier.Verify(ctx, token)
-		// idToken.Claims(&claims)
-
-		// Placeholder: parse JWT claims (in production, use go-oidc verifier)
-		claims, err := parseTokenClaims(token)
+		idToken, err := m.verifier.Verify(c.Request.Context(), token)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid token: " + err.Error(),
 			})
 			return
 		}
-
+		var raw struct {
+			Subject string   `json:"sub"`
+			Email   string   `json:"email"`
+			Name    string   `json:"name"`
+			Groups  []string `json:"groups"`
+		}
+		if err := idToken.Claims(&raw); err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "cannot parse token claims: " + err.Error(),
+			})
+			return
+		}
+		claims := &Claims{
+			Subject: raw.Subject,
+			Email:   raw.Email,
+			Name:    raw.Name,
+			Groups:  raw.Groups,
+			Roles:   MapGroupsToRoles(raw.Groups),
+		}
 		c.Set("user", claims)
 		c.Next()
 	}
+}
+
+// devHandler injects a default admin user when OIDC is disabled.
+func devHandler() gin.HandlerFunc {
+	devUser := &Claims{
+		Subject: "dev-user",
+		Email:   "dev@cooker.local",
+		Name:    "Developer",
+		Groups:  []string{"cooker-admins"},
+		Roles:   []string{string(RoleAdmin)},
+	}
+	return func(c *gin.Context) {
+		c.Set("user", devUser)
+		c.Next()
+	}
+}
+
+// bearerToken pulls the bearer token out of the Authorization header.
+// Aborts the request with 401 if missing or malformed and returns ok=false.
+func bearerToken(c *gin.Context) (string, bool) {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"error": "missing Authorization header",
+		})
+		return "", false
+	}
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") || strings.TrimSpace(parts[1]) == "" {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"error": "invalid Authorization header format, expected: Bearer <token>",
+		})
+		return "", false
+	}
+	return strings.TrimSpace(parts[1]), true
 }
 
 // GetUser extracts the authenticated user from the Gin context.
@@ -87,17 +144,4 @@ func GetUser(c *gin.Context) *Claims {
 		return nil
 	}
 	return claims
-}
-
-// parseTokenClaims is a placeholder for JWT parsing.
-// In production, this is replaced by go-oidc token verification.
-func parseTokenClaims(token string) (*Claims, error) {
-	_ = token
-	return &Claims{
-		Subject: "placeholder",
-		Email:   "user@example.com",
-		Name:    "Placeholder User",
-		Groups:  []string{"viewer"},
-		Roles:   []string{string(RoleViewer)},
-	}, nil
 }

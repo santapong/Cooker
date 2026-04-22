@@ -8,12 +8,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins in development
-	},
-}
-
 // Client represents a single WebSocket connection.
 type Client struct {
 	hub     *WebSocketHub
@@ -24,6 +18,7 @@ type Client struct {
 
 // WebSocketHub manages all WebSocket connections and message broadcasting.
 type WebSocketHub struct {
+	upgrader   websocket.Upgrader
 	mu         sync.RWMutex
 	clients    map[string]map[*Client]bool // channel -> clients
 	broadcast  chan BroadcastMessage
@@ -37,9 +32,24 @@ type BroadcastMessage struct {
 	Data    []byte
 }
 
-// NewWebSocketHub creates a new hub.
-func NewWebSocketHub() *WebSocketHub {
+// NewWebSocketHub creates a new hub. allowedOrigins controls which
+// Origin headers are accepted on the WebSocket upgrade; ["*"] means
+// allow any. Rejected origins produce HTTP 403 from the gorilla upgrader.
+func NewWebSocketHub(allowedOrigins []string) *WebSocketHub {
+	allowAll, set := originSet(allowedOrigins)
 	return &WebSocketHub{
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				if allowAll {
+					return true
+				}
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return false
+				}
+				return set[origin]
+			},
+		},
 		clients:    make(map[string]map[*Client]bool),
 		broadcast:  make(chan BroadcastMessage, 256),
 		register:   make(chan *Client),
@@ -108,7 +118,7 @@ func (h *WebSocketHub) HandleKubeWatch(w http.ResponseWriter, r *http.Request, n
 }
 
 func (h *WebSocketHub) handleConnection(w http.ResponseWriter, r *http.Request, channel string) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
 		return

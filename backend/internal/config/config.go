@@ -3,16 +3,18 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds all application configuration.
 type Config struct {
-	Port        int
-	DatabaseURL string
-	RedisURL    string
-	OIDC        OIDCConfig
-	Docker      DockerConfig
-	Kubernetes  KubernetesConfig
+	Port           int
+	DatabaseURL    string
+	RedisURL       string
+	AllowedOrigins []string
+	OIDC           OIDCConfig
+	Docker         DockerConfig
+	Kubernetes     KubernetesConfig
 }
 
 // OIDCConfig holds SSO/OIDC authentication configuration.
@@ -27,9 +29,9 @@ type OIDCConfig struct {
 
 // DockerConfig holds Docker Engine connection settings.
 type DockerConfig struct {
-	Host       string // e.g., "unix:///var/run/docker.sock" or "tcp://host:2376"
-	TLSVerify  bool
-	CertPath   string
+	Host      string // e.g., "unix:///var/run/docker.sock" or "tcp://host:2376"
+	TLSVerify bool
+	CertPath  string
 }
 
 // KubernetesConfig holds Kubernetes connection settings.
@@ -41,9 +43,10 @@ type KubernetesConfig struct {
 // Load reads configuration from environment variables with sensible defaults.
 func Load() *Config {
 	return &Config{
-		Port:        getEnvInt("COOKER_PORT", 8080),
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://cooker:cooker@localhost:5432/cooker?sslmode=disable"),
-		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
+		Port:           getEnvInt("COOKER_PORT", 8080),
+		DatabaseURL:    getEnv("DATABASE_URL", "postgres://cooker:cooker@localhost:5432/cooker?sslmode=disable"),
+		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
+		AllowedOrigins: getEnvCSV("COOKER_ALLOWED_ORIGINS", []string{"http://localhost:5173", "http://localhost:3000"}),
 		OIDC: OIDCConfig{
 			Enabled:      getEnvBool("COOKER_OIDC_ENABLED", false),
 			IssuerURL:    getEnv("COOKER_OIDC_ISSUER_URL", ""),
@@ -87,4 +90,22 @@ func getEnvBool(key string, fallback bool) bool {
 		}
 	}
 	return fallback
+}
+
+func getEnvCSV(key string, fallback []string) []string {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return fallback
+	}
+	return out
 }

@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
+	"github.com/cooker-ci/cooker/internal/auth"
 	"github.com/cooker-ci/cooker/internal/config"
 	"github.com/gin-gonic/gin"
 )
@@ -12,28 +14,37 @@ type Server struct {
 	router *gin.Engine
 	config *config.Config
 	wsHub  *WebSocketHub
+	oidcMW *auth.Middleware
 }
 
 // New creates a new Server instance with all routes and middleware.
 func New(cfg *config.Config) (*Server, error) {
+	// OIDC provider discovery happens here so misconfiguration fails fast
+	// rather than showing up as 500s on the first authenticated request.
+	oidcMW, err := auth.NewMiddleware(context.Background(), cfg.OIDC)
+	if err != nil {
+		return nil, err
+	}
+
 	router := gin.Default()
-	wsHub := NewWebSocketHub()
+	wsHub := NewWebSocketHub(cfg.AllowedOrigins)
 
 	s := &Server{
 		router: router,
 		config: cfg,
 		wsHub:  wsHub,
+		oidcMW: oidcMW,
 	}
 
 	// CORS middleware
-	router.Use(corsMiddleware())
+	router.Use(corsMiddleware(cfg.AllowedOrigins))
 
-	// Health check
+	// Health check (unauthenticated on purpose)
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "cooker"})
 	})
 
-	// Register API routes
+	// Register API routes (the /api/v1 group applies OIDC middleware)
 	s.registerRoutes()
 
 	// Start WebSocket hub
@@ -47,18 +58,39 @@ func (s *Server) Run(addr string) error {
 	return s.router.Run(addr)
 }
 
-func corsMiddleware() gin.HandlerFunc {
+func corsMiddleware(allowed []string) gin.HandlerFunc {
+	allowAll, set := originSet(allowed)
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.GetHeader("Origin")
+		switch {
+		case allowAll:
+			c.Header("Access-Control-Allow-Origin", "*")
+		case origin != "" && set[origin]:
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
 		c.Header("Access-Control-Allow-Credentials", "true")
 
-		if c.Request.Method == "OPTIONS" {
+		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
 
 		c.Next()
 	}
+}
+
+func originSet(allowed []string) (bool, map[string]bool) {
+	if len(allowed) == 1 && allowed[0] == "*" {
+		return true, nil
+	}
+	set := make(map[string]bool, len(allowed))
+	for _, o := range allowed {
+		if o != "" {
+			set[o] = true
+		}
+	}
+	return false, set
 }

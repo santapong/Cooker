@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"reflect"
 	"testing"
 )
 
@@ -11,6 +12,7 @@ func TestLoad_Defaults(t *testing.T) {
 	os.Unsetenv("DATABASE_URL")
 	os.Unsetenv("REDIS_URL")
 	os.Unsetenv("COOKER_OIDC_ENABLED")
+	os.Unsetenv("COOKER_ALLOWED_ORIGINS")
 
 	cfg := Load()
 
@@ -31,6 +33,10 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.Kubernetes.InCluster {
 		t.Error("Kubernetes in-cluster should be false by default")
+	}
+	wantOrigins := []string{"http://localhost:5173", "http://localhost:3000"}
+	if !reflect.DeepEqual(cfg.AllowedOrigins, wantOrigins) {
+		t.Errorf("unexpected default AllowedOrigins: %v", cfg.AllowedOrigins)
 	}
 }
 
@@ -135,5 +141,26 @@ func TestLoad_InvalidBool(t *testing.T) {
 	cfg := Load()
 	if cfg.OIDC.Enabled {
 		t.Error("expected fallback false for invalid bool")
+	}
+}
+
+func TestLoad_AllowedOriginsCustom(t *testing.T) {
+	os.Setenv("COOKER_ALLOWED_ORIGINS", "https://app.example.com, https://admin.example.com")
+	defer os.Unsetenv("COOKER_ALLOWED_ORIGINS")
+
+	cfg := Load()
+	want := []string{"https://app.example.com", "https://admin.example.com"}
+	if !reflect.DeepEqual(cfg.AllowedOrigins, want) {
+		t.Errorf("AllowedOrigins = %v, want %v", cfg.AllowedOrigins, want)
+	}
+}
+
+func TestLoad_AllowedOriginsWildcard(t *testing.T) {
+	os.Setenv("COOKER_ALLOWED_ORIGINS", "*")
+	defer os.Unsetenv("COOKER_ALLOWED_ORIGINS")
+
+	cfg := Load()
+	if !reflect.DeepEqual(cfg.AllowedOrigins, []string{"*"}) {
+		t.Errorf("AllowedOrigins = %v, want [\"*\"]", cfg.AllowedOrigins)
 	}
 }
