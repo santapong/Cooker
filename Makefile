@@ -1,4 +1,4 @@
-.PHONY: all build clean dev test lint
+.PHONY: all build clean dev test lint uat-up uat-down uat-logs uat-shell uat-reset
 
 # Variables
 BINARY_NAME=cooker
@@ -64,6 +64,33 @@ helm-upgrade:
 
 helm-uninstall:
 	helm uninstall cooker
+
+# --- UAT (self-contained testers' stack) ---
+# See docs/UAT.md for the full runbook. Brings up cooker + postgres
+# + a local CNCF Distribution registry + a single-node k3s cluster.
+# Teardown removes all volumes so state never survives across runs.
+UAT_COMPOSE=docker compose -f docker-compose.uat.yml --env-file .env.uat
+
+uat-up:
+	@[ -f .env.uat ] || echo "COOKER_SECRET_KEY=$$(head -c 32 /dev/urandom | base64)" > .env.uat
+	$(UAT_COMPOSE) up -d --build
+	@echo
+	@echo "Cooker UAT ready at http://localhost:8080"
+	@echo "  logs:  make uat-logs"
+	@echo "  shell: make uat-shell"
+	@echo "  down:  make uat-down"
+
+uat-down:
+	-$(UAT_COMPOSE) down -v --remove-orphans
+	rm -f .env.uat
+
+uat-logs:
+	$(UAT_COMPOSE) logs -f cooker
+
+uat-shell:
+	$(UAT_COMPOSE) exec cooker sh
+
+uat-reset: uat-down uat-up
 
 clean:
 	rm -rf bin/ $(FRONTEND_DIR)/dist $(FRONTEND_DIR)/node_modules

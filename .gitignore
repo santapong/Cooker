@@ -10,6 +10,8 @@ frontend/dist/
 .env
 .env.local
 .env.*.local
+# UAT secret-key file — generated per-tester by `make uat-up`
+.env.uat
 
 # IDE
 .vscode/

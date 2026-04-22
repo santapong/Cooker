@@ -19,7 +19,19 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /cooker ./cmd/cooker/
 
 # --- Final image ---
 FROM alpine:3.19
-RUN apk add --no-cache ca-certificates
+# git:        used by internal/source/github to clone App repos
+# docker-cli: Cooker shells `docker build/push` via a bind-mounted sock
+# kubectl:    pinned static binary; internal/deployer/kubectl.go shells to it
+#
+# UAT runs the container as root so the bind-mounted docker.sock
+# (host-owned GID) and the read-only kubeconfig mount Just Work on
+# Linux, macOS, and WSL. Production Helm/K8s deploys override the
+# user — see deploy/helm/cooker.
+ARG KUBECTL_VERSION=v1.29.4
+RUN apk add --no-cache ca-certificates git docker-cli \
+ && wget -qO /usr/local/bin/kubectl \
+      https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl \
+ && chmod +x /usr/local/bin/kubectl
 COPY --from=backend-build /cooker /usr/local/bin/cooker
 COPY --from=frontend-build /app/frontend/dist /usr/share/cooker/static
 
