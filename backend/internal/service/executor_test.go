@@ -8,6 +8,7 @@ import (
 
 	"github.com/cooker-ci/cooker/internal/builder"
 	"github.com/cooker-ci/cooker/internal/deployer"
+	"github.com/cooker-ci/cooker/internal/gitops"
 	"github.com/cooker-ci/cooker/internal/model"
 	"github.com/cooker-ci/cooker/internal/pusher"
 )
@@ -67,6 +68,23 @@ func (m *mockDeployer) Deploy(_ context.Context, req deployer.Request) (deployer
 	m.calls = append(m.calls, req)
 	if m.err != nil {
 		return deployer.Result{}, m.err
+	}
+	return m.res, nil
+}
+
+type mockGitOps struct {
+	mu    sync.Mutex
+	calls []gitops.Request
+	res   gitops.Result
+	err   error
+}
+
+func (m *mockGitOps) Commit(_ context.Context, req gitops.Request) (gitops.Result, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, req)
+	if m.err != nil {
+		return gitops.Result{}, m.err
 	}
 	return m.res, nil
 }
@@ -510,5 +528,61 @@ func TestExecutor_DeployStage_RequiresManifestOrHelm(t *testing.T) {
 	err := NewExecutor().Execute(context.Background(), p, run)
 	if err == nil {
 		t.Fatal("expected error for deploy stage missing manifest and helm")
+	}
+}
+
+func TestExecutor_GitOpsCommit_DispatchesToWriter(t *testing.T) {
+	mg := &mockGitOps{res: gitops.Result{CommitSHA: "abc1234"}}
+
+	p := &model.Pipeline{
+		ID: "pipe-go",
+		Stages: []model.Stage{
+			{ID: "g", Name: "GitOps", Type: model.StageTypeGitOpsCommit, Config: model.StageConfig{
+				GitOpsRepo:    "git@github.com:org/gitops.git",
+				GitOpsBranch:  "main",
+				GitOpsPath:    "envs/prod/values.yaml",
+				GitOpsContent: "image: ${IMAGE}",
+				GitOpsMessage: "deploy prod",
+			}},
+		},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-go",
+		PipelineID: "pipe-go",
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "g", Status: model.RunStatusPending}},
+	}
+
+	exec := NewExecutor(WithGitOps(mg))
+	if err := exec.Execute(context.Background(), p, run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mg.calls) != 1 {
+		t.Fatalf("expected 1 gitops call, got %d", len(mg.calls))
+	}
+	sr := run.StageRuns[0]
+	if len(sr.Artifacts) != 1 || sr.Artifacts[0].Digest != "abc1234" {
+		t.Errorf("artifact: got %+v", sr.Artifacts)
+	}
+	if sr.Artifacts[0].Ref != "git@github.com:org/gitops.git@main" {
+		t.Errorf("ref: got %q", sr.Artifacts[0].Ref)
+	}
+}
+
+func TestExecutor_GitOpsCommit_RequiresRepoAndPath(t *testing.T) {
+	p := &model.Pipeline{
+		ID: "pipe-go-bad",
+		Stages: []model.Stage{
+			{ID: "g", Name: "GitOps", Type: model.StageTypeGitOpsCommit, Config: model.StageConfig{}},
+		},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-go-bad",
+		PipelineID: "pipe-go-bad",
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "g", Status: model.RunStatusPending}},
+	}
+	if err := NewExecutor().Execute(context.Background(), p, run); err == nil {
+		t.Fatal("expected validation error")
 	}
 }

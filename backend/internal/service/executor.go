@@ -8,6 +8,7 @@ import (
 
 	"github.com/cooker-ci/cooker/internal/builder"
 	"github.com/cooker-ci/cooker/internal/deployer"
+	"github.com/cooker-ci/cooker/internal/gitops"
 	"github.com/cooker-ci/cooker/internal/model"
 	"github.com/cooker-ci/cooker/internal/pusher"
 	"github.com/cooker-ci/cooker/pkg/dagrunner"
@@ -20,6 +21,7 @@ type Executor struct {
 	builder  builder.Builder
 	pusher   pusher.Pusher
 	deployer deployer.Deployer
+	gitops   gitops.Writer
 }
 
 // Option configures a new Executor. Use the With* constructors.
@@ -53,6 +55,15 @@ func WithDeployer(d deployer.Deployer) Option {
 	}
 }
 
+// WithGitOps injects the GitOps writer used by gitops-commit stages.
+func WithGitOps(g gitops.Writer) Option {
+	return func(e *Executor) {
+		if g != nil {
+			e.gitops = g
+		}
+	}
+}
+
 // NewExecutor creates a pipeline executor. Without options it uses
 // Noop backends so Execute is safe to call in tests and dry runs.
 func NewExecutor(opts ...Option) *Executor {
@@ -60,6 +71,7 @@ func NewExecutor(opts ...Option) *Executor {
 		builder:  builder.Noop{},
 		pusher:   pusher.Noop{},
 		deployer: deployer.Noop{},
+		gitops:   gitops.Noop{},
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -112,6 +124,8 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			stageErr = e.executeApproval(ctx, stage)
 		case model.StageTypeCustom:
 			stageErr = e.executeCustom(ctx, stage)
+		case model.StageTypeGitOpsCommit:
+			stageErr = e.executeGitOpsCommit(ctx, stage, stageRun)
 		default:
 			stageErr = fmt.Errorf("unknown stage type: %s", stage.Type)
 		}
@@ -265,5 +279,33 @@ func (e *Executor) executeApproval(ctx context.Context, stage *model.Stage) erro
 func (e *Executor) executeCustom(ctx context.Context, stage *model.Stage) error {
 	// TODO: Execute custom script
 	log.Printf("  Custom: script=%s timeout=%s", stage.Config.Script, stage.Config.Timeout)
+	return nil
+}
+
+func (e *Executor) executeGitOpsCommit(ctx context.Context, stage *model.Stage, sr *model.StageRun) error {
+	if stage.Config.GitOpsRepo == "" {
+		return fmt.Errorf("gitops stage %q: gitopsRepo is required", stage.Name)
+	}
+	if stage.Config.GitOpsPath == "" {
+		return fmt.Errorf("gitops stage %q: gitopsPath is required", stage.Name)
+	}
+	req := gitops.Request{
+		Repo:    stage.Config.GitOpsRepo,
+		Branch:  stage.Config.GitOpsBranch,
+		Path:    stage.Config.GitOpsPath,
+		Content: []byte(stage.Config.GitOpsContent),
+		Message: stage.Config.GitOpsMessage,
+	}
+	res, err := e.gitops.Commit(ctx, req)
+	if err != nil {
+		return fmt.Errorf("gitops: %w", err)
+	}
+	sr.Artifacts = append(sr.Artifacts, model.Artifact{
+		Type: "gitops-commit",
+		Ref:  stage.Config.GitOpsRepo + "@" + stage.Config.GitOpsBranch,
+		// Digest holds the commit SHA — naming is approximate but
+		// keeps one artifact shape across backends.
+		Digest: res.CommitSHA,
+	})
 	return nil
 }
