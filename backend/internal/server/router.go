@@ -14,20 +14,22 @@ func (s *Server) registerRoutes() {
 	// when OIDC is disabled).
 	api := s.router.Group("/api/v1", s.oidcMW.Handler())
 
+	h := s.handler
+
 	// Pipeline routes
 	pipelines := api.Group("/pipelines")
 	{
-		pipelines.GET("", handler.ListPipelines)
-		pipelines.POST("", handler.CreatePipeline)
-		pipelines.GET("/:id", handler.GetPipeline)
-		pipelines.PUT("/:id", handler.UpdatePipeline)
-		pipelines.DELETE("/:id", handler.DeletePipeline)
-		pipelines.POST("/:id/validate", handler.ValidatePipeline)
-		pipelines.POST("/:id/run", handler.RunPipeline)
-		pipelines.GET("/:id/runs", handler.ListPipelineRuns)
-		pipelines.GET("/:id/runs/:runId", handler.GetPipelineRun)
-		pipelines.POST("/:id/runs/:runId/cancel", handler.CancelPipelineRun)
-		pipelines.GET("/:id/runs/:runId/logs/:stageId", handler.GetStageLogs)
+		pipelines.GET("", h.ListPipelines)
+		pipelines.POST("", h.CreatePipeline)
+		pipelines.GET("/:id", h.GetPipeline)
+		pipelines.PUT("/:id", h.UpdatePipeline)
+		pipelines.DELETE("/:id", h.DeletePipeline)
+		pipelines.POST("/:id/validate", h.ValidatePipeline)
+		pipelines.POST("/:id/run", h.RunPipeline)
+		pipelines.GET("/:id/runs", h.ListPipelineRuns)
+		pipelines.GET("/:id/runs/:runId", h.GetPipelineRun)
+		pipelines.POST("/:id/runs/:runId/cancel", h.CancelPipelineRun)
+		pipelines.GET("/:id/runs/:runId/logs/:stageId", h.GetStageLogs)
 	}
 
 	// Docker routes
@@ -73,16 +75,16 @@ func (s *Server) registerRoutes() {
 	// Environment routes
 	environments := api.Group("/environments")
 	{
-		environments.GET("", handler.ListEnvironments)
-		environments.POST("", handler.CreateEnvironment)
-		environments.PUT("/:id", handler.UpdateEnvironment)
-		environments.DELETE("/:id", handler.DeleteEnvironment)
+		environments.GET("", h.ListEnvironments)
+		environments.POST("", h.CreateEnvironment)
+		environments.PUT("/:id", h.UpdateEnvironment)
+		environments.DELETE("/:id", h.DeleteEnvironment)
 	}
 
 	// Promotion routes (nested under pipeline runs)
-	api.POST("/pipelines/:id/runs/:runId/promote", handler.PromoteRun)
-	api.POST("/pipelines/:id/runs/:runId/approve", handler.ApprovePromotion)
-	api.GET("/pipelines/:id/runs/:runId/env-status", handler.GetEnvStatus)
+	api.POST("/pipelines/:id/runs/:runId/promote", h.PromoteRun)
+	api.POST("/pipelines/:id/runs/:runId/approve", h.ApprovePromotion)
+	api.GET("/pipelines/:id/runs/:runId/env-status", h.GetEnvStatus)
 
 	// Settings routes
 	settings := api.Group("/settings")

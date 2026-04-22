@@ -10,18 +10,18 @@ import (
 	"github.com/cooker-ci/cooker/internal/model"
 )
 
-// In-memory store for environments. Will be replaced with PostgreSQL.
-var environments = make(map[string]*model.Environment)
-
-func ListEnvironments(c *gin.Context) {
-	result := make([]*model.Environment, 0, len(environments))
-	for _, e := range environments {
-		result = append(result, e)
+func (h *Handler) ListEnvironments(c *gin.Context) {
+	envs, err := h.Store.Environments.List(c.Request.Context())
+	if abortStoreErr(c, err, "environments not found") {
+		return
 	}
-	c.JSON(http.StatusOK, result)
+	if envs == nil {
+		envs = []*model.Environment{}
+	}
+	c.JSON(http.StatusOK, envs)
 }
 
-func CreateEnvironment(c *gin.Context) {
+func (h *Handler) CreateEnvironment(c *gin.Context) {
 	var env model.Environment
 	if err := c.ShouldBindJSON(&env); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -34,15 +34,17 @@ func CreateEnvironment(c *gin.Context) {
 		env.Variables = make(map[string]string)
 	}
 
-	environments[env.ID] = &env
+	if err := h.Store.Environments.Create(c.Request.Context(), &env); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusCreated, env)
 }
 
-func UpdateEnvironment(c *gin.Context) {
+func (h *Handler) UpdateEnvironment(c *gin.Context) {
 	id := c.Param("id")
-	existing, ok := environments[id]
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "environment not found"})
+	existing, err := h.Store.Environments.Get(c.Request.Context(), id)
+	if abortStoreErr(c, err, "environment not found") {
 		return
 	}
 
@@ -54,22 +56,25 @@ func UpdateEnvironment(c *gin.Context) {
 
 	env.ID = id
 	env.CreatedAt = existing.CreatedAt
-	environments[id] = &env
 
+	if err := h.Store.Environments.Update(c.Request.Context(), &env); err != nil {
+		if abortStoreErr(c, err, "environment not found") {
+			return
+		}
+	}
 	c.JSON(http.StatusOK, env)
 }
 
-func DeleteEnvironment(c *gin.Context) {
-	id := c.Param("id")
-	if _, ok := environments[id]; !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "environment not found"})
-		return
+func (h *Handler) DeleteEnvironment(c *gin.Context) {
+	if err := h.Store.Environments.Delete(c.Request.Context(), c.Param("id")); err != nil {
+		if abortStoreErr(c, err, "environment not found") {
+			return
+		}
 	}
-	delete(environments, id)
 	c.JSON(http.StatusOK, gin.H{"message": "environment deleted"})
 }
 
-func PromoteRun(c *gin.Context) {
+func (h *Handler) PromoteRun(c *gin.Context) {
 	runID := c.Param("runId")
 	c.JSON(http.StatusOK, gin.H{
 		"message": "promotion initiated",
@@ -77,7 +82,7 @@ func PromoteRun(c *gin.Context) {
 	})
 }
 
-func ApprovePromotion(c *gin.Context) {
+func (h *Handler) ApprovePromotion(c *gin.Context) {
 	runID := c.Param("runId")
 	var req struct {
 		ApprovedBy string `json:"approvedBy" binding:"required"`
@@ -94,7 +99,7 @@ func ApprovePromotion(c *gin.Context) {
 	})
 }
 
-func GetEnvStatus(c *gin.Context) {
+func (h *Handler) GetEnvStatus(c *gin.Context) {
 	runID := c.Param("runId")
 	c.JSON(http.StatusOK, gin.H{
 		"runId":    runID,
