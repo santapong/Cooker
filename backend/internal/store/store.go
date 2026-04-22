@@ -38,22 +38,35 @@ type EnvironmentStore interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// AppStore manages App persistence (Phase 3).
+type AppStore interface {
+	List(ctx context.Context) ([]*model.App, error)
+	Get(ctx context.Context, id string) (*model.App, error)
+	GetByRepo(ctx context.Context, repo, branch string) (*model.App, error)
+	Create(ctx context.Context, a *model.App) error
+	Update(ctx context.Context, a *model.App) error
+	Delete(ctx context.Context, id string) error
+}
+
 // Store aggregates all data-access interfaces and a cleanup hook.
 // Construct with New and pass to the server and handler layers.
 type Store struct {
 	Pipelines    PipelineStore
 	Runs         RunStore
 	Environments EnvironmentStore
+	Apps         AppStore
 	close        func() error
 }
 
 // New builds a Store. closeFn may be nil when no cleanup is required
-// (e.g., in-memory stores).
-func New(p PipelineStore, r RunStore, e EnvironmentStore, closeFn func() error) *Store {
+// (e.g., in-memory stores). Apps may be nil during migration; callers
+// that need the App API must provide an implementation.
+func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, closeFn func() error) *Store {
 	return &Store{
 		Pipelines:    p,
 		Runs:         r,
 		Environments: e,
+		Apps:         a,
 		close:        closeFn,
 	}
 }

@@ -91,6 +91,21 @@ func (s *Server) registerRoutes() {
 	api.POST("/pipelines/:id/runs/:runId/approve", h.ApprovePromotion)
 	api.GET("/pipelines/:id/runs/:runId/env-status", h.GetEnvStatus)
 
+	// App routes — the user-facing "Deploy" button and its CRUD.
+	apps := api.Group("/apps")
+	{
+		apps.GET("", h.ListApps)
+		apps.POST("", h.CreateApp)
+		apps.GET("/:id", h.GetApp)
+		apps.PUT("/:id", h.UpdateApp)
+		apps.DELETE("/:id", h.DeleteApp)
+		apps.POST("/:id/deploy", h.DeployApp)
+		apps.PUT("/:id/webhook", h.SetAppWebhookSecret)
+	}
+
+	// GitHub webhook receiver (unauthenticated — HMAC is the auth).
+	s.router.POST("/webhooks/github", h.GitHubWebhook)
+
 	// Settings routes
 	settings := api.Group("/settings")
 	{
