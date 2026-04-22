@@ -46,6 +46,19 @@ func (s *Server) registerRoutes() {
 		docker.GET("/containers/:id/logs", handler.GetContainerLogs)
 		docker.POST("/compose/parse", handler.ParseComposeFile)
 		docker.PUT("/compose/services/:name", handler.UpdateComposeService)
+
+		// Networks
+		docker.GET("/networks", h.ListDockerNetworks)
+		docker.POST("/networks", h.CreateDockerNetwork)
+		docker.GET("/networks/:id", h.GetDockerNetwork)
+		docker.DELETE("/networks/:id", h.DeleteDockerNetwork)
+		docker.POST("/networks/:id/connect", h.ConnectContainerToNetwork)
+
+		// Volumes
+		docker.GET("/volumes", h.ListDockerVolumes)
+		docker.POST("/volumes", h.CreateDockerVolume)
+		docker.GET("/volumes/:name", h.GetDockerVolume)
+		docker.DELETE("/volumes/:name", h.DeleteDockerVolume)
 	}
 
 	// OCI Registry routes
