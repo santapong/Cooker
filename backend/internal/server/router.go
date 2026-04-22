@@ -145,6 +145,9 @@ func (s *Server) registerRoutes() {
 		ws.GET("/pipeline-run/:runId", func(c *gin.Context) {
 			s.wsHub.HandlePipelineRun(c.Writer, c.Request, c.Param("runId"))
 		})
+		ws.GET("/app-run/:runId", func(c *gin.Context) {
+			s.wsHub.handleConnection(c.Writer, c.Request, "app-run:"+c.Param("runId"))
+		})
 		ws.GET("/docker/build/:buildId", func(c *gin.Context) {
 			s.wsHub.HandleDockerBuild(c.Writer, c.Request, c.Param("buildId"))
 		})

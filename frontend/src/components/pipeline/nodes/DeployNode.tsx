@@ -16,11 +16,11 @@ export default function DeployNode({ data }: NodeProps) {
           ? `NS: ${(data.config as Record<string, string>).namespace}`
           : 'Configure deploy...'}
       </div>
-      {data.environmentId && (
+      {data.environmentId ? (
         <div style={{ fontSize: 10, color: '#3b82f6', marginTop: 4 }}>
-          Env: {data.environmentId as string}
+          Env: {String(data.environmentId)}
         </div>
-      )}
+      ) : null}
       <Handle type="source" position={Position.Right} style={{ width: 8, height: 8, backgroundColor: '#3b82f6' }} />
     </div>
   );

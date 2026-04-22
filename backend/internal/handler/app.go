@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -130,23 +132,81 @@ func (h *Handler) SetAppWebhookSecret(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "rotated"})
 }
 
-// DeployApp triggers a pipeline run for an App. This is the "Deploy
-// button" endpoint. The current implementation is a placeholder
-// that records intent — the Clone→Build→Push→Deploy DAG
-// synthesis lives in a follow-up once the source/github git clone
-// is wired (roadmap Phase 3).
+// DeployApp synthesises a Clone→Build→Push→Deploy run for the App
+// and streams progress over the app-run:<runId> WebSocket channel.
+// Returns immediately with a 202 and the run ID; the run executes
+// in a background goroutine bounded by a fresh context (the HTTP
+// request context would cancel as soon as we reply).
 func (h *Handler) DeployApp(c *gin.Context) {
 	a, err := h.Store.Apps.Get(c.Request.Context(), c.Param("id"))
 	if abortStoreErr(c, err, "app not found") {
 		return
 	}
+	if h.AppDeployer == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "app deployer not configured",
+		})
+		return
+	}
+
+	// A run ID the client can subscribe to before the work starts.
+	runID := uuid.New().String()
+	channel := "app-run:" + runID
+
+	go h.runAppDeploy(a, runID, channel)
+
 	c.JSON(http.StatusAccepted, gin.H{
-		"appId":     a.ID,
-		"repo":      a.GitHubRepo,
-		"branch":    a.Branch,
-		"status":    "queued",
-		"buildPlan": a.BuildPlan, // may be nil → detected at run time
+		"appId":    a.ID,
+		"runId":    runID,
+		"channel":  channel,
+		"status":   "running",
+		"stream":   "/ws/app-run/" + runID,
+		"repo":     a.GitHubRepo,
+		"branch":   a.Branch,
 	})
+}
+
+// runAppDeploy is the background worker. Keeps the deploy running
+// past the HTTP request that started it and funnels log lines to
+// the WebSocket hub.
+func (h *Handler) runAppDeploy(a *model.App, runID, channel string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	sink := &wsLogSink{channel: channel, broadcast: h.WSBroadcast}
+	sink.writef("[start] app=%s repo=%s branch=%s run=%s\n", a.Name, a.GitHubRepo, a.Branch, runID)
+
+	run, err := h.AppDeployer.Deploy(ctx, a, sink)
+	if err != nil {
+		sink.writef("[error] %v\n", err)
+	}
+	if run != nil {
+		// Persist the synthesised run so the UI can poll/browse it.
+		if persistErr := h.Store.Runs.Create(ctx, run); persistErr != nil {
+			sink.writef("[warn] persist run: %v\n", persistErr)
+		}
+		sink.writef("[final] status=%s\n", run.Status)
+	}
+	sink.writef("[end] run=%s\n", runID)
+}
+
+// wsLogSink writes log lines as WebSocket messages on the given
+// channel. Zero-value broadcast drops writes so the deployer can
+// run in contexts without a hub (tests).
+type wsLogSink struct {
+	channel   string
+	broadcast func(channel string, data []byte)
+}
+
+func (w *wsLogSink) Write(p []byte) (int, error) {
+	if w.broadcast != nil && w.channel != "" {
+		w.broadcast(w.channel, append([]byte(nil), p...))
+	}
+	return len(p), nil
+}
+
+func (w *wsLogSink) writef(format string, args ...any) {
+	_, _ = w.Write([]byte(fmt.Sprintf(format, args...)))
 }
 
 // GitHubWebhook receives push events from GitHub and, for Apps with

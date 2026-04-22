@@ -10,13 +10,19 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/cooker-ci/cooker/internal/crypto"
+	"github.com/cooker-ci/cooker/internal/service"
 	"github.com/cooker-ci/cooker/internal/store"
 )
 
 // Handler owns the dependencies shared by request handlers.
 type Handler struct {
-	Store *store.Store
-	Codec *crypto.Codec
+	Store       *store.Store
+	Codec       *crypto.Codec
+	AppDeployer *service.AppDeployer
+	// WSBroadcast, when non-nil, publishes progress events to a
+	// WebSocket channel. Wired by the server to
+	// (*server.WebSocketHub).Broadcast.
+	WSBroadcast func(channel string, data []byte)
 }
 
 // New constructs a Handler bound to the given store. Codec is

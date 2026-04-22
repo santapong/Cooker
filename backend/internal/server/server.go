@@ -6,9 +6,13 @@ import (
 	"net/http"
 
 	"github.com/cooker-ci/cooker/internal/auth"
+	"github.com/cooker-ci/cooker/internal/builder"
 	"github.com/cooker-ci/cooker/internal/config"
 	"github.com/cooker-ci/cooker/internal/crypto"
+	"github.com/cooker-ci/cooker/internal/deployer"
 	"github.com/cooker-ci/cooker/internal/handler"
+	"github.com/cooker-ci/cooker/internal/pusher"
+	"github.com/cooker-ci/cooker/internal/service"
 	"github.com/cooker-ci/cooker/internal/store"
 	"github.com/cooker-ci/cooker/internal/store/memory"
 	"github.com/cooker-ci/cooker/internal/store/postgres"
@@ -53,12 +57,26 @@ func New(cfg *config.Config) (*Server, error) {
 	router := gin.Default()
 	wsHub := NewWebSocketHub(cfg.AllowedOrigins)
 
+	// Build the executor with backends chosen from config. Unknown
+	// values fall back to Noop with a log line so booting never
+	// fails just because an operator typo'd an env var.
+	exec := service.NewExecutor(
+		service.WithBuilder(selectBuilder(cfg.BuilderBackend)),
+		service.WithPusher(selectPusher(cfg.PusherBackend)),
+		service.WithDeployer(selectDeployer(cfg.DeployerBackend, cfg.Kubernetes.Kubeconfig)),
+	)
+	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
+
+	h := handler.New(st, codec)
+	h.AppDeployer = appDeployer
+	h.WSBroadcast = wsHub.Broadcast
+
 	s := &Server{
 		router:  router,
 		config:  cfg,
 		wsHub:   wsHub,
 		oidcMW:  oidcMW,
-		handler: handler.New(st, codec),
+		handler: h,
 		store:   st,
 	}
 
@@ -128,6 +146,41 @@ func corsMiddleware(allowed []string) gin.HandlerFunc {
 		}
 
 		c.Next()
+	}
+}
+
+func selectBuilder(kind string) builder.Builder {
+	switch kind {
+	case "docker":
+		return builder.NewDockerSock()
+	case "buildkit":
+		return builder.NewBuildKit("")
+	default:
+		return builder.Noop{}
+	}
+}
+
+func selectPusher(kind string) pusher.Pusher {
+	switch kind {
+	case "docker":
+		return pusher.NewDockerSock()
+	case "crane":
+		return pusher.NewCrane()
+	default:
+		return pusher.Noop{}
+	}
+}
+
+func selectDeployer(kind, kubeconfig string) deployer.Deployer {
+	switch kind {
+	case "kubectl":
+		d := deployer.NewKubectl()
+		d.Kubeconfig = kubeconfig
+		return d
+	case "clientgo":
+		return deployer.NewClientGo(kubeconfig)
+	default:
+		return deployer.Noop{}
 	}
 }
 

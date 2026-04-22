@@ -1,5 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import MainLayout from './components/layout/MainLayout'
+import AppsPage from './pages/AppsPage'
+import AppDetailPage from './pages/AppDetailPage'
 import PipelinesPage from './pages/PipelinesPage'
 import PipelineEditorPage from './pages/PipelineEditorPage'
 import DockerPage from './pages/DockerPage'
@@ -11,7 +13,9 @@ export default function App() {
   return (
     <MainLayout>
       <Routes>
-        <Route path="/" element={<PipelinesPage />} />
+        <Route path="/" element={<AppsPage />} />
+        <Route path="/apps" element={<AppsPage />} />
+        <Route path="/apps/:id" element={<AppDetailPage />} />
         <Route path="/pipelines" element={<PipelinesPage />} />
         <Route path="/pipelines/:id/edit" element={<PipelineEditorPage />} />
         <Route path="/docker" element={<DockerPage />} />
