@@ -6,18 +6,39 @@ import (
 	"log"
 	"time"
 
+	"github.com/cooker-ci/cooker/internal/builder"
 	"github.com/cooker-ci/cooker/internal/model"
 	"github.com/cooker-ci/cooker/pkg/dagrunner"
 )
 
 // Executor runs pipelines using the DAG runner and reports progress.
+// Production wiring injects a Builder; tests inject a mock.
 type Executor struct {
-	// In production: Docker service, K8s service, Registry service, WebSocket hub
+	builder builder.Builder
+	// Future deps: pusher, deployer, ws hub.
 }
 
-// NewExecutor creates a new pipeline executor.
-func NewExecutor() *Executor {
-	return &Executor{}
+// Option configures a new Executor. Use the With* constructors.
+type Option func(*Executor)
+
+// WithBuilder injects the image builder used by build stages.
+// Passing nil is a no-op (the default Noop builder is kept).
+func WithBuilder(b builder.Builder) Option {
+	return func(e *Executor) {
+		if b != nil {
+			e.builder = b
+		}
+	}
+}
+
+// NewExecutor creates a pipeline executor. Without options it uses a
+// Noop builder so Execute is safe to call in tests and dry runs.
+func NewExecutor(opts ...Option) *Executor {
+	e := &Executor{builder: builder.Noop{}}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
 // Execute runs a pipeline and returns the completed PipelineRun.
@@ -54,7 +75,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		var stageErr error
 		switch stage.Type {
 		case model.StageTypeBuild:
-			stageErr = e.executeBuild(ctx, stage)
+			stageErr = e.executeBuild(ctx, stage, stageRun)
 		case model.StageTypeTest:
 			stageErr = e.executeTest(ctx, stage)
 		case model.StageTypePush:
@@ -104,10 +125,25 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 	return nil
 }
 
-func (e *Executor) executeBuild(ctx context.Context, stage *model.Stage) error {
-	// TODO: Call Docker Engine SDK to build image
-	log.Printf("  Build: dockerfile=%s context=%s tags=%v",
-		stage.Config.Dockerfile, stage.Config.Context, stage.Config.Tags)
+func (e *Executor) executeBuild(ctx context.Context, stage *model.Stage, sr *model.StageRun) error {
+	req := builder.Request{
+		ContextDir: stage.Config.Context,
+		Dockerfile: stage.Config.Dockerfile,
+		Tags:       stage.Config.Tags,
+		BuildArgs:  stage.Config.BuildArgs,
+		Platforms:  stage.Config.Platforms,
+	}
+	res, err := e.builder.Build(ctx, req)
+	if err != nil {
+		return fmt.Errorf("build: %w", err)
+	}
+	for _, tag := range res.Tags {
+		sr.Artifacts = append(sr.Artifacts, model.Artifact{
+			Type:   "oci-image",
+			Ref:    tag,
+			Digest: res.ImageID,
+		})
+	}
 	return nil
 }
 

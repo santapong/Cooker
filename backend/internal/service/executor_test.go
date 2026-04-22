@@ -2,10 +2,38 @@ package service
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
 
+	"github.com/cooker-ci/cooker/internal/builder"
 	"github.com/cooker-ci/cooker/internal/model"
 )
+
+// mockBuilder records every Build call and returns a configured
+// response. Safe for concurrent use.
+type mockBuilder struct {
+	mu    sync.Mutex
+	calls []builder.Request
+	res   builder.Result
+	err   error
+}
+
+func (m *mockBuilder) Build(_ context.Context, req builder.Request) (builder.Result, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, req)
+	if m.err != nil {
+		return builder.Result{}, m.err
+	}
+	return m.res, nil
+}
+
+func (m *mockBuilder) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.calls)
+}
 
 func TestExecutor_ExecuteSimplePipeline(t *testing.T) {
 	p := &model.Pipeline{
@@ -196,5 +224,130 @@ func TestExecutor_ContextCancellation(t *testing.T) {
 	err := executor.Execute(ctx, p, run)
 	if err == nil {
 		t.Fatal("expected error from cancelled context")
+	}
+}
+
+func TestExecutor_BuildStage_DispatchesToBuilder(t *testing.T) {
+	mb := &mockBuilder{res: builder.Result{
+		ImageID: "sha256:deadbeef",
+		Tags:    []string{"registry.example.com/app:v1"},
+	}}
+
+	p := &model.Pipeline{
+		ID: "pipe-build",
+		Stages: []model.Stage{
+			{ID: "b", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{
+				Dockerfile: "Dockerfile",
+				Context:    "/tmp/ctx",
+				Tags:       []string{"registry.example.com/app:v1"},
+				BuildArgs:  map[string]string{"GO_VERSION": "1.24"},
+			}},
+		},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-build",
+		PipelineID: "pipe-build",
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "b", Status: model.RunStatusPending}},
+	}
+
+	exec := NewExecutor(WithBuilder(mb))
+	if err := exec.Execute(context.Background(), p, run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if mb.callCount() != 1 {
+		t.Fatalf("expected 1 build call, got %d", mb.callCount())
+	}
+	req := mb.calls[0]
+	if req.ContextDir != "/tmp/ctx" {
+		t.Errorf("ContextDir: got %q", req.ContextDir)
+	}
+	if req.Dockerfile != "Dockerfile" {
+		t.Errorf("Dockerfile: got %q", req.Dockerfile)
+	}
+	if len(req.Tags) != 1 || req.Tags[0] != "registry.example.com/app:v1" {
+		t.Errorf("Tags: got %v", req.Tags)
+	}
+	if req.BuildArgs["GO_VERSION"] != "1.24" {
+		t.Errorf("BuildArgs missing: got %v", req.BuildArgs)
+	}
+
+	sr := run.StageRuns[0]
+	if sr.Status != model.RunStatusSuccess {
+		t.Errorf("stage status: got %s", sr.Status)
+	}
+	if len(sr.Artifacts) != 1 {
+		t.Fatalf("expected 1 artifact, got %d", len(sr.Artifacts))
+	}
+	art := sr.Artifacts[0]
+	if art.Type != "oci-image" || art.Ref != "registry.example.com/app:v1" || art.Digest != "sha256:deadbeef" {
+		t.Errorf("artifact: got %+v", art)
+	}
+}
+
+func TestExecutor_BuildStage_BuilderErrorFailsStage(t *testing.T) {
+	wantErr := errors.New("boom")
+	mb := &mockBuilder{err: wantErr}
+
+	p := &model.Pipeline{
+		ID: "pipe-buildfail",
+		Stages: []model.Stage{
+			{ID: "b", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{
+				Context: "/tmp/ctx",
+				Tags:    []string{"app:v1"},
+			}},
+		},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-buildfail",
+		PipelineID: "pipe-buildfail",
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "b", Status: model.RunStatusPending}},
+	}
+
+	exec := NewExecutor(WithBuilder(mb))
+	err := exec.Execute(context.Background(), p, run)
+	if err == nil {
+		t.Fatal("expected error from failed builder")
+	}
+	if run.Status != model.RunStatusFailed {
+		t.Errorf("run status: got %s", run.Status)
+	}
+	if run.StageRuns[0].Status != model.RunStatusFailed {
+		t.Errorf("stage status: got %s", run.StageRuns[0].Status)
+	}
+	if run.StageRuns[0].Error == "" {
+		t.Error("stage run should record the error")
+	}
+}
+
+func TestExecutor_DefaultBuilderIsNoop(t *testing.T) {
+	// No WithBuilder → Noop. Build stage should still succeed.
+	p := &model.Pipeline{
+		ID: "pipe-default",
+		Stages: []model.Stage{
+			{ID: "b", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{
+				Context: "/tmp/ctx",
+				Tags:    []string{"app:v1"},
+			}},
+		},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-default",
+		PipelineID: "pipe-default",
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "b", Status: model.RunStatusPending}},
+	}
+
+	exec := NewExecutor()
+	if err := exec.Execute(context.Background(), p, run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != model.RunStatusSuccess {
+		t.Errorf("run status: got %s", run.Status)
+	}
+	if len(run.StageRuns[0].Artifacts) != 1 {
+		t.Errorf("noop should still emit an artifact; got %d", len(run.StageRuns[0].Artifacts))
 	}
 }
