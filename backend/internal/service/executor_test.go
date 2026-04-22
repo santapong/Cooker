@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/cooker-ci/cooker/internal/builder"
+	"github.com/cooker-ci/cooker/internal/deployer"
 	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/cooker-ci/cooker/internal/pusher"
 )
 
 // mockBuilder records every Build call and returns a configured
@@ -33,6 +35,40 @@ func (m *mockBuilder) callCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.calls)
+}
+
+type mockPusher struct {
+	mu    sync.Mutex
+	calls []pusher.Request
+	res   pusher.Result
+	err   error
+}
+
+func (m *mockPusher) Push(_ context.Context, req pusher.Request) (pusher.Result, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, req)
+	if m.err != nil {
+		return pusher.Result{}, m.err
+	}
+	return m.res, nil
+}
+
+type mockDeployer struct {
+	mu    sync.Mutex
+	calls []deployer.Request
+	res   deployer.Result
+	err   error
+}
+
+func (m *mockDeployer) Deploy(_ context.Context, req deployer.Request) (deployer.Result, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, req)
+	if m.err != nil {
+		return deployer.Result{}, m.err
+	}
+	return m.res, nil
 }
 
 func TestExecutor_ExecuteSimplePipeline(t *testing.T) {
@@ -100,7 +136,7 @@ func TestExecutor_AllStageTypes(t *testing.T) {
 			{ID: "s1", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{}},
 			{ID: "s2", Name: "Test", Type: model.StageTypeTest, Config: model.StageConfig{}},
 			{ID: "s3", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{}},
-			{ID: "s4", Name: "Deploy", Type: model.StageTypeDeploy, Config: model.StageConfig{}},
+			{ID: "s4", Name: "Deploy", Type: model.StageTypeDeploy, Config: model.StageConfig{ManifestPath: "k8s/app.yaml"}},
 			{ID: "s5", Name: "Approval", Type: model.StageTypeApproval, Config: model.StageConfig{}},
 			{ID: "s6", Name: "Custom", Type: model.StageTypeCustom, Config: model.StageConfig{}},
 		},
@@ -349,5 +385,130 @@ func TestExecutor_DefaultBuilderIsNoop(t *testing.T) {
 	}
 	if len(run.StageRuns[0].Artifacts) != 1 {
 		t.Errorf("noop should still emit an artifact; got %d", len(run.StageRuns[0].Artifacts))
+	}
+}
+
+func TestExecutor_PushStage_DispatchesToPusher(t *testing.T) {
+	mp := &mockPusher{res: pusher.Result{Digest: "sha256:cafef00d"}}
+
+	p := &model.Pipeline{
+		ID: "pipe-push",
+		Stages: []model.Stage{
+			{ID: "p", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{
+				Image:      "app:v1",
+				Registry:   "registry.example.com",
+				Repository: "team/app:v1",
+			}},
+		},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-push",
+		PipelineID: "pipe-push",
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "p", Status: model.RunStatusPending}},
+	}
+
+	exec := NewExecutor(WithPusher(mp))
+	if err := exec.Execute(context.Background(), p, run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mp.calls) != 1 {
+		t.Fatalf("expected 1 push call, got %d", len(mp.calls))
+	}
+	req := mp.calls[0]
+	if req.Source != "app:v1" {
+		t.Errorf("Source: got %q", req.Source)
+	}
+	if req.Target != "registry.example.com/team/app:v1" {
+		t.Errorf("Target: got %q", req.Target)
+	}
+	sr := run.StageRuns[0]
+	if len(sr.Artifacts) != 1 || sr.Artifacts[0].Digest != "sha256:cafef00d" {
+		t.Errorf("artifact: got %+v", sr.Artifacts)
+	}
+}
+
+func TestExecutor_PushStage_SkipsRegistryPrefixWhenAlreadyQualified(t *testing.T) {
+	mp := &mockPusher{res: pusher.Result{Digest: "sha256:aa"}}
+	p := &model.Pipeline{
+		ID: "pipe-push2",
+		Stages: []model.Stage{
+			{ID: "p", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{
+				Image:      "app:v1",
+				Registry:   "registry.example.com",
+				Repository: "ghcr.io/org/app:v1",
+			}},
+		},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-push2",
+		PipelineID: "pipe-push2",
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "p", Status: model.RunStatusPending}},
+	}
+	if err := NewExecutor(WithPusher(mp)).Execute(context.Background(), p, run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mp.calls[0].Target != "ghcr.io/org/app:v1" {
+		t.Errorf("already-qualified repository should not be re-prefixed; got %q", mp.calls[0].Target)
+	}
+}
+
+func TestExecutor_DeployStage_DispatchesToDeployer(t *testing.T) {
+	md := &mockDeployer{res: deployer.Result{AppliedResources: []string{"deployment.apps/web"}}}
+
+	p := &model.Pipeline{
+		ID: "pipe-deploy",
+		Stages: []model.Stage{
+			{ID: "d", Name: "Deploy", Type: model.StageTypeDeploy, Config: model.StageConfig{
+				Namespace:    "prod",
+				ManifestPath: "k8s/web.yaml",
+			}},
+		},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-deploy",
+		PipelineID: "pipe-deploy",
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "d", Status: model.RunStatusPending}},
+	}
+
+	exec := NewExecutor(WithDeployer(md))
+	if err := exec.Execute(context.Background(), p, run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(md.calls) != 1 {
+		t.Fatalf("expected 1 deploy call, got %d", len(md.calls))
+	}
+	req := md.calls[0]
+	if req.Kind != deployer.KindManifest {
+		t.Errorf("Kind: got %q", req.Kind)
+	}
+	if req.Namespace != "prod" {
+		t.Errorf("Namespace: got %q", req.Namespace)
+	}
+	sr := run.StageRuns[0]
+	if len(sr.Artifacts) != 1 || sr.Artifacts[0].Ref != "deployment.apps/web" {
+		t.Errorf("artifact: got %+v", sr.Artifacts)
+	}
+}
+
+func TestExecutor_DeployStage_RequiresManifestOrHelm(t *testing.T) {
+	p := &model.Pipeline{
+		ID: "pipe-deploy-empty",
+		Stages: []model.Stage{
+			{ID: "d", Name: "Deploy", Type: model.StageTypeDeploy, Config: model.StageConfig{Namespace: "prod"}},
+		},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-deploy-empty",
+		PipelineID: "pipe-deploy-empty",
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "d", Status: model.RunStatusPending}},
+	}
+	err := NewExecutor().Execute(context.Background(), p, run)
+	if err == nil {
+		t.Fatal("expected error for deploy stage missing manifest and helm")
 	}
 }
