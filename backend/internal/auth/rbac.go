@@ -11,7 +11,8 @@ type Role string
 
 const (
 	RoleAdmin    Role = "admin"    // Full access: manage pipelines, deploy to prod, configure settings
-	RoleOperator Role = "operator" // Can run pipelines, approve promotions, manage environments
+	RoleOperator Role = "operator" // Can run pipelines, manage environments
+	RoleApprover Role = "approver" // Narrow role dedicated to promotion approval
 	RoleViewer   Role = "viewer"   // Read-only access to all resources
 )
 
@@ -42,10 +43,29 @@ func RequireRole(roles ...Role) gin.HandlerFunc {
 	}
 }
 
-// CanApprovePromotion checks if the user has permission to approve environment promotions.
+// CanApprovePromotion checks if the user has permission to approve
+// environment promotions. Admins and dedicated approvers qualify;
+// operators and viewers do not (operators can still trigger runs).
 func CanApprovePromotion(claims *Claims) bool {
+	if claims == nil {
+		return false
+	}
 	for _, role := range claims.Roles {
-		if role == string(RoleAdmin) || role == string(RoleOperator) {
+		if role == string(RoleAdmin) || role == string(RoleApprover) {
+			return true
+		}
+	}
+	return false
+}
+
+// CanRevealSecret returns true only for admins. Operators and
+// approvers see redacted "***" values.
+func CanRevealSecret(claims *Claims) bool {
+	if claims == nil {
+		return false
+	}
+	for _, role := range claims.Roles {
+		if role == string(RoleAdmin) {
 			return true
 		}
 	}
@@ -58,6 +78,7 @@ func MapGroupsToRoles(groups []string) []string {
 	roleMap := map[string]string{
 		"cooker-admins":    string(RoleAdmin),
 		"cooker-operators": string(RoleOperator),
+		"cooker-approvers": string(RoleApprover),
 		"cooker-viewers":   string(RoleViewer),
 	}
 

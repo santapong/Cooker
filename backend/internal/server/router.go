@@ -79,6 +79,11 @@ func (s *Server) registerRoutes() {
 		environments.POST("", h.CreateEnvironment)
 		environments.PUT("/:id", h.UpdateEnvironment)
 		environments.DELETE("/:id", h.DeleteEnvironment)
+		// Per-environment secret management. Each handler enforces
+		// its own RBAC — admin-only for read, write, and delete.
+		environments.GET("/:id/secrets/:key", h.RevealSecret)
+		environments.PUT("/:id/secrets/:key", h.PutSecret)
+		environments.DELETE("/:id/secrets/:key", h.DeleteSecret)
 	}
 
 	// Promotion routes (nested under pipeline runs)

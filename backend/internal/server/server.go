@@ -7,6 +7,7 @@ import (
 
 	"github.com/cooker-ci/cooker/internal/auth"
 	"github.com/cooker-ci/cooker/internal/config"
+	"github.com/cooker-ci/cooker/internal/crypto"
 	"github.com/cooker-ci/cooker/internal/handler"
 	"github.com/cooker-ci/cooker/internal/store"
 	"github.com/cooker-ci/cooker/internal/store/memory"
@@ -43,6 +44,12 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, err
 	}
 
+	codec, err := crypto.NewCodec(cfg.SecretKey)
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("crypto: %w", err)
+	}
+
 	router := gin.Default()
 	wsHub := NewWebSocketHub(cfg.AllowedOrigins)
 
@@ -51,7 +58,7 @@ func New(cfg *config.Config) (*Server, error) {
 		config:  cfg,
 		wsHub:   wsHub,
 		oidcMW:  oidcMW,
-		handler: handler.New(st),
+		handler: handler.New(st, codec),
 		store:   st,
 	}
 

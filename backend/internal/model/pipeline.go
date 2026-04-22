@@ -63,6 +63,15 @@ type StageConfig struct {
 	Script  string `json:"script,omitempty"`
 	Timeout string `json:"timeout,omitempty"`
 	Retries int    `json:"retries,omitempty"`
+
+	// Env overrides the stage's environment variables. Values here win
+	// over anything inherited from the Pipeline.Variables or the
+	// resolved Environment.PlainVars.
+	Env map[string]string `json:"env,omitempty"`
+	// SecretRefs names Environment.Secrets entries the executor must
+	// decrypt and inject into this stage's runtime. The stage never
+	// sees ciphertext; resolution happens just before execution.
+	SecretRefs []string `json:"secretRefs,omitempty"`
 }
 
 // Edge connects two stages in the pipeline graph.

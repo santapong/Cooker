@@ -9,10 +9,20 @@ func TestCanApprovePromotion_Admin(t *testing.T) {
 	}
 }
 
-func TestCanApprovePromotion_Operator(t *testing.T) {
-	claims := &Claims{Roles: []string{string(RoleOperator)}}
+func TestCanApprovePromotion_Approver(t *testing.T) {
+	claims := &Claims{Roles: []string{string(RoleApprover)}}
 	if !CanApprovePromotion(claims) {
-		t.Error("operator should be able to approve promotions")
+		t.Error("approver should be able to approve promotions")
+	}
+}
+
+func TestCanApprovePromotion_Operator(t *testing.T) {
+	// Operators can run pipelines but not rubber-stamp promotions —
+	// the dedicated approver role exists precisely to separate those
+	// duties.
+	claims := &Claims{Roles: []string{string(RoleOperator)}}
+	if CanApprovePromotion(claims) {
+		t.Error("operator alone should NOT be able to approve promotions")
 	}
 }
 
@@ -24,9 +34,24 @@ func TestCanApprovePromotion_Viewer(t *testing.T) {
 }
 
 func TestCanApprovePromotion_MultipleRoles(t *testing.T) {
-	claims := &Claims{Roles: []string{string(RoleViewer), string(RoleOperator)}}
+	claims := &Claims{Roles: []string{string(RoleViewer), string(RoleApprover)}}
 	if !CanApprovePromotion(claims) {
-		t.Error("user with operator role should be able to approve")
+		t.Error("user with approver role should be able to approve")
+	}
+}
+
+func TestCanRevealSecret(t *testing.T) {
+	if !CanRevealSecret(&Claims{Roles: []string{string(RoleAdmin)}}) {
+		t.Error("admin should reveal secrets")
+	}
+	if CanRevealSecret(&Claims{Roles: []string{string(RoleApprover)}}) {
+		t.Error("approver should NOT reveal secrets")
+	}
+	if CanRevealSecret(&Claims{Roles: []string{string(RoleOperator)}}) {
+		t.Error("operator should NOT reveal secrets")
+	}
+	if CanRevealSecret(nil) {
+		t.Error("nil claims must not authorize")
 	}
 }
 

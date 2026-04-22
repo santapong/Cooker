@@ -12,9 +12,12 @@ type Config struct {
 	DatabaseURL    string
 	RedisURL       string
 	AllowedOrigins []string
-	OIDC           OIDCConfig
-	Docker         DockerConfig
-	Kubernetes     KubernetesConfig
+	// SecretKey is a base64-encoded 32-byte key for AES-GCM
+	// encryption of secrets at rest. Empty disables the secret API.
+	SecretKey  string
+	OIDC       OIDCConfig
+	Docker     DockerConfig
+	Kubernetes KubernetesConfig
 }
 
 // OIDCConfig holds SSO/OIDC authentication configuration.
@@ -47,6 +50,7 @@ func Load() *Config {
 		DatabaseURL:    getEnv("DATABASE_URL", "postgres://cooker:cooker@localhost:5432/cooker?sslmode=disable"),
 		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
 		AllowedOrigins: getEnvCSV("COOKER_ALLOWED_ORIGINS", []string{"http://localhost:5173", "http://localhost:3000"}),
+		SecretKey:      getEnv("COOKER_SECRET_KEY", ""),
 		OIDC: OIDCConfig{
 			Enabled:      getEnvBool("COOKER_OIDC_ENABLED", false),
 			IssuerURL:    getEnv("COOKER_OIDC_ISSUER_URL", ""),
