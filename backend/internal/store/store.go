@@ -48,6 +48,15 @@ type AppStore interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// HostStore manages managed-host persistence (Phase 4).
+type HostStore interface {
+	List(ctx context.Context) ([]*model.Host, error)
+	Get(ctx context.Context, id string) (*model.Host, error)
+	Create(ctx context.Context, h *model.Host) error
+	Update(ctx context.Context, h *model.Host) error
+	Delete(ctx context.Context, id string) error
+}
+
 // Store aggregates all data-access interfaces and a cleanup hook.
 // Construct with New and pass to the server and handler layers.
 type Store struct {
@@ -55,18 +64,19 @@ type Store struct {
 	Runs         RunStore
 	Environments EnvironmentStore
 	Apps         AppStore
+	Hosts        HostStore
 	close        func() error
 }
 
 // New builds a Store. closeFn may be nil when no cleanup is required
-// (e.g., in-memory stores). Apps may be nil during migration; callers
-// that need the App API must provide an implementation.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, closeFn func() error) *Store {
+// (e.g., in-memory stores).
+func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, h HostStore, closeFn func() error) *Store {
 	return &Store{
 		Pipelines:    p,
 		Runs:         r,
 		Environments: e,
 		Apps:         a,
+		Hosts:        h,
 		close:        closeFn,
 	}
 }

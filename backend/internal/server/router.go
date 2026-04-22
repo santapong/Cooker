@@ -103,6 +103,16 @@ func (s *Server) registerRoutes() {
 		apps.PUT("/:id/webhook", h.SetAppWebhookSecret)
 	}
 
+	// Managed hosts (Phase 4).
+	hosts := api.Group("/hosts")
+	{
+		hosts.GET("", h.ListHosts)
+		hosts.POST("", h.CreateHost)
+		hosts.GET("/:id", h.GetHost)
+		hosts.PUT("/:id", h.UpdateHost)
+		hosts.DELETE("/:id", h.DeleteHost)
+	}
+
 	// GitHub webhook receiver (unauthenticated — HMAC is the auth).
 	s.router.POST("/webhooks/github", h.GitHubWebhook)
 
