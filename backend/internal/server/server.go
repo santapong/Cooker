@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
+	"github.com/cooker-ci/cooker/internal/auth"
 	"github.com/cooker-ci/cooker/internal/config"
 	"github.com/gin-gonic/gin"
 )
@@ -12,10 +14,18 @@ type Server struct {
 	router *gin.Engine
 	config *config.Config
 	wsHub  *WebSocketHub
+	oidcMW *auth.Middleware
 }
 
 // New creates a new Server instance with all routes and middleware.
 func New(cfg *config.Config) (*Server, error) {
+	// OIDC provider discovery happens here so misconfiguration fails fast
+	// rather than showing up as 500s on the first authenticated request.
+	oidcMW, err := auth.NewMiddleware(context.Background(), cfg.OIDC)
+	if err != nil {
+		return nil, err
+	}
+
 	router := gin.Default()
 	wsHub := NewWebSocketHub(cfg.AllowedOrigins)
 
@@ -23,17 +33,18 @@ func New(cfg *config.Config) (*Server, error) {
 		router: router,
 		config: cfg,
 		wsHub:  wsHub,
+		oidcMW: oidcMW,
 	}
 
 	// CORS middleware
 	router.Use(corsMiddleware(cfg.AllowedOrigins))
 
-	// Health check
+	// Health check (unauthenticated on purpose)
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "cooker"})
 	})
 
-	// Register API routes
+	// Register API routes (the /api/v1 group applies OIDC middleware)
 	s.registerRoutes()
 
 	// Start WebSocket hub
@@ -71,8 +82,6 @@ func corsMiddleware(allowed []string) gin.HandlerFunc {
 	}
 }
 
-// originSet returns (allowAll, lookup) for the given origin list.
-// A single-element list of ["*"] flags permissive mode.
 func originSet(allowed []string) (bool, map[string]bool) {
 	if len(allowed) == 1 && allowed[0] == "*" {
 		return true, nil

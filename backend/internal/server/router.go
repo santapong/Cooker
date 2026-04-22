@@ -10,7 +10,9 @@ import (
 
 // registerRoutes sets up all API routes.
 func (s *Server) registerRoutes() {
-	api := s.router.Group("/api/v1")
+	// All /api/v1 routes require a valid OIDC session (or the dev user
+	// when OIDC is disabled).
+	api := s.router.Group("/api/v1", s.oidcMW.Handler())
 
 	// Pipeline routes
 	pipelines := api.Group("/pipelines")
@@ -92,7 +94,7 @@ func (s *Server) registerRoutes() {
 		settings.POST("/clusters", handler.AddClusterConfig)
 	}
 
-	// WebSocket routes
+	// WebSocket routes (unauthenticated for now; see server.go comment)
 	ws := s.router.Group("/ws")
 	{
 		ws.GET("/pipeline-run/:runId", func(c *gin.Context) {
