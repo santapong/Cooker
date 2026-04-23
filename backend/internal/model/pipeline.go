@@ -18,12 +18,13 @@ type Pipeline struct {
 type StageType string
 
 const (
-	StageTypeBuild    StageType = "build"
-	StageTypeTest     StageType = "test"
-	StageTypeDeploy   StageType = "deploy"
-	StageTypePush     StageType = "push"
-	StageTypeApproval StageType = "approval"
-	StageTypeCustom   StageType = "custom"
+	StageTypeBuild         StageType = "build"
+	StageTypeTest          StageType = "test"
+	StageTypeDeploy        StageType = "deploy"
+	StageTypePush          StageType = "push"
+	StageTypeApproval      StageType = "approval"
+	StageTypeCustom        StageType = "custom"
+	StageTypeGitOpsCommit  StageType = "gitops-commit"
 )
 
 // Stage is a single step in a pipeline, rendered as a node in the graph UI.
@@ -63,6 +64,25 @@ type StageConfig struct {
 	Script  string `json:"script,omitempty"`
 	Timeout string `json:"timeout,omitempty"`
 	Retries int    `json:"retries,omitempty"`
+
+	// Env overrides the stage's environment variables. Values here win
+	// over anything inherited from the Pipeline.Variables or the
+	// resolved Environment.PlainVars.
+	Env map[string]string `json:"env,omitempty"`
+	// SecretRefs names Environment.Secrets entries the executor must
+	// decrypt and inject into this stage's runtime. The stage never
+	// sees ciphertext; resolution happens just before execution.
+	SecretRefs []string `json:"secretRefs,omitempty"`
+
+	// GitOps (StageTypeGitOpsCommit)
+	GitOpsRepo    string `json:"gitopsRepo,omitempty"`    // e.g., git@github.com:org/gitops.git
+	GitOpsBranch  string `json:"gitopsBranch,omitempty"`  // defaults to "main"
+	GitOpsPath    string `json:"gitopsPath,omitempty"`    // path within the repo to update
+	GitOpsMessage string `json:"gitopsMessage,omitempty"` // commit message template
+	// GitOpsContent is the manifest (or values.yaml) body Cooker
+	// should commit at GitOpsPath. Templating (${IMAGE}, etc.)
+	// happens at run time.
+	GitOpsContent string `json:"gitopsContent,omitempty"`
 }
 
 // Edge connects two stages in the pipeline graph.

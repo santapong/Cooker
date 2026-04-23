@@ -103,7 +103,8 @@ export default function PipelineCanvas() {
         fitView
         style={{ backgroundColor: '#0f172a' }}
       >
-        <Controls style={{ button: { backgroundColor: '#334155', color: '#f1f5f9' } }} />
+        <Controls />
+
         <MiniMap
           nodeColor={() => '#3b82f6'}
           style={{ backgroundColor: '#1e293b' }}

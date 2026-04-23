@@ -19,6 +19,8 @@ func New() *store.Store {
 		&pipelines{m: map[string]*model.Pipeline{}},
 		&runs{m: map[string]*model.PipelineRun{}},
 		&environments{m: map[string]*model.Environment{}},
+		&apps{m: map[string]*model.App{}},
+		&hosts{m: map[string]*model.Host{}},
 		nil,
 	)
 }
@@ -168,6 +170,123 @@ func (s *environments) Delete(_ context.Context, id string) error {
 	defer s.mu.Unlock()
 	if _, ok := s.m[id]; !ok {
 		return fmt.Errorf("environment %s: %w", id, store.ErrNotFound)
+	}
+	delete(s.m, id)
+	return nil
+}
+
+type apps struct {
+	mu sync.RWMutex
+	m  map[string]*model.App
+}
+
+func (s *apps) List(_ context.Context) ([]*model.App, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*model.App, 0, len(s.m))
+	for _, a := range s.m {
+		out = append(out, a)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	return out, nil
+}
+
+func (s *apps) Get(_ context.Context, id string) (*model.App, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	a, ok := s.m[id]
+	if !ok {
+		return nil, fmt.Errorf("app %s: %w", id, store.ErrNotFound)
+	}
+	return a, nil
+}
+
+func (s *apps) GetByRepo(_ context.Context, repo, branch string) (*model.App, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, a := range s.m {
+		if a.GitHubRepo == repo && a.Branch == branch {
+			return a, nil
+		}
+	}
+	return nil, fmt.Errorf("app %s@%s: %w", repo, branch, store.ErrNotFound)
+}
+
+func (s *apps) Create(_ context.Context, a *model.App) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[a.ID] = a
+	return nil
+}
+
+func (s *apps) Update(_ context.Context, a *model.App) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[a.ID]; !ok {
+		return fmt.Errorf("app %s: %w", a.ID, store.ErrNotFound)
+	}
+	s.m[a.ID] = a
+	return nil
+}
+
+func (s *apps) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[id]; !ok {
+		return fmt.Errorf("app %s: %w", id, store.ErrNotFound)
+	}
+	delete(s.m, id)
+	return nil
+}
+
+type hosts struct {
+	mu sync.RWMutex
+	m  map[string]*model.Host
+}
+
+func (s *hosts) List(_ context.Context) ([]*model.Host, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*model.Host, 0, len(s.m))
+	for _, h := range s.m {
+		out = append(out, h)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (s *hosts) Get(_ context.Context, id string) (*model.Host, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	h, ok := s.m[id]
+	if !ok {
+		return nil, fmt.Errorf("host %s: %w", id, store.ErrNotFound)
+	}
+	return h, nil
+}
+
+func (s *hosts) Create(_ context.Context, h *model.Host) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[h.ID] = h
+	return nil
+}
+
+func (s *hosts) Update(_ context.Context, h *model.Host) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[h.ID]; !ok {
+		return fmt.Errorf("host %s: %w", h.ID, store.ErrNotFound)
+	}
+	s.m[h.ID] = h
+	return nil
+}
+
+func (s *hosts) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[id]; !ok {
+		return fmt.Errorf("host %s: %w", id, store.ErrNotFound)
 	}
 	delete(s.m, id)
 	return nil

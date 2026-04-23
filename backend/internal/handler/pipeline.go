@@ -10,18 +10,18 @@ import (
 	"github.com/cooker-ci/cooker/internal/model"
 )
 
-// In-memory store for MVP. Will be replaced with PostgreSQL.
-var pipelines = make(map[string]*model.Pipeline)
-
-func ListPipelines(c *gin.Context) {
-	result := make([]*model.Pipeline, 0, len(pipelines))
-	for _, p := range pipelines {
-		result = append(result, p)
+func (h *Handler) ListPipelines(c *gin.Context) {
+	pipelines, err := h.Store.Pipelines.List(c.Request.Context())
+	if abortStoreErr(c, err, "pipelines not found") {
+		return
 	}
-	c.JSON(http.StatusOK, result)
+	if pipelines == nil {
+		pipelines = []*model.Pipeline{}
+	}
+	c.JSON(http.StatusOK, pipelines)
 }
 
-func CreatePipeline(c *gin.Context) {
+func (h *Handler) CreatePipeline(c *gin.Context) {
 	var p model.Pipeline
 	if err := c.ShouldBindJSON(&p); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -43,25 +43,25 @@ func CreatePipeline(c *gin.Context) {
 		p.Edges = []model.Edge{}
 	}
 
-	pipelines[p.ID] = &p
+	if err := h.Store.Pipelines.Create(c.Request.Context(), &p); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusCreated, p)
 }
 
-func GetPipeline(c *gin.Context) {
-	id := c.Param("id")
-	p, ok := pipelines[id]
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "pipeline not found"})
+func (h *Handler) GetPipeline(c *gin.Context) {
+	p, err := h.Store.Pipelines.Get(c.Request.Context(), c.Param("id"))
+	if abortStoreErr(c, err, "pipeline not found") {
 		return
 	}
 	c.JSON(http.StatusOK, p)
 }
 
-func UpdatePipeline(c *gin.Context) {
+func (h *Handler) UpdatePipeline(c *gin.Context) {
 	id := c.Param("id")
-	existing, ok := pipelines[id]
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "pipeline not found"})
+	existing, err := h.Store.Pipelines.Get(c.Request.Context(), id)
+	if abortStoreErr(c, err, "pipeline not found") {
 		return
 	}
 
@@ -74,26 +74,27 @@ func UpdatePipeline(c *gin.Context) {
 	p.ID = id
 	p.CreatedAt = existing.CreatedAt
 	p.UpdatedAt = time.Now()
-	pipelines[id] = &p
 
+	if err := h.Store.Pipelines.Update(c.Request.Context(), &p); err != nil {
+		if abortStoreErr(c, err, "pipeline not found") {
+			return
+		}
+	}
 	c.JSON(http.StatusOK, p)
 }
 
-func DeletePipeline(c *gin.Context) {
-	id := c.Param("id")
-	if _, ok := pipelines[id]; !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "pipeline not found"})
-		return
+func (h *Handler) DeletePipeline(c *gin.Context) {
+	if err := h.Store.Pipelines.Delete(c.Request.Context(), c.Param("id")); err != nil {
+		if abortStoreErr(c, err, "pipeline not found") {
+			return
+		}
 	}
-	delete(pipelines, id)
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
-func ValidatePipeline(c *gin.Context) {
-	id := c.Param("id")
-	p, ok := pipelines[id]
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "pipeline not found"})
+func (h *Handler) ValidatePipeline(c *gin.Context) {
+	p, err := h.Store.Pipelines.Get(c.Request.Context(), c.Param("id"))
+	if abortStoreErr(c, err, "pipeline not found") {
 		return
 	}
 
@@ -105,11 +106,9 @@ func ValidatePipeline(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"valid": true, "errors": []string{}})
 }
 
-func RunPipeline(c *gin.Context) {
-	id := c.Param("id")
-	p, ok := pipelines[id]
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "pipeline not found"})
+func (h *Handler) RunPipeline(c *gin.Context) {
+	p, err := h.Store.Pipelines.Get(c.Request.Context(), c.Param("id"))
+	if abortStoreErr(c, err, "pipeline not found") {
 		return
 	}
 
@@ -117,7 +116,7 @@ func RunPipeline(c *gin.Context) {
 		ID:         uuid.New().String(),
 		PipelineID: p.ID,
 		Status:     model.RunStatusPending,
-		StageRuns:  make([]model.StageRun, 0),
+		StageRuns:  make([]model.StageRun, 0, len(p.Stages)),
 		Variables:  p.Variables,
 	}
 
@@ -128,22 +127,47 @@ func RunPipeline(c *gin.Context) {
 		})
 	}
 
+	if err := h.Store.Runs.Create(c.Request.Context(), run); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusAccepted, run)
 }
 
-func ListPipelineRuns(c *gin.Context) {
-	c.JSON(http.StatusOK, []model.PipelineRun{})
+func (h *Handler) ListPipelineRuns(c *gin.Context) {
+	runs, err := h.Store.Runs.List(c.Request.Context(), c.Param("id"))
+	if abortStoreErr(c, err, "runs not found") {
+		return
+	}
+	if runs == nil {
+		runs = []*model.PipelineRun{}
+	}
+	c.JSON(http.StatusOK, runs)
 }
 
-func GetPipelineRun(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "pipeline run details placeholder"})
+func (h *Handler) GetPipelineRun(c *gin.Context) {
+	run, err := h.Store.Runs.Get(c.Request.Context(), c.Param("runId"))
+	if abortStoreErr(c, err, "run not found") {
+		return
+	}
+	c.JSON(http.StatusOK, run)
 }
 
-func CancelPipelineRun(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "cancelled"})
+func (h *Handler) CancelPipelineRun(c *gin.Context) {
+	run, err := h.Store.Runs.Get(c.Request.Context(), c.Param("runId"))
+	if abortStoreErr(c, err, "run not found") {
+		return
+	}
+	run.Status = model.RunStatusCancelled
+	if err := h.Store.Runs.Update(c.Request.Context(), run); err != nil {
+		if abortStoreErr(c, err, "run not found") {
+			return
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "cancelled", "runId": run.ID})
 }
 
-func GetStageLogs(c *gin.Context) {
+func (h *Handler) GetStageLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"logs": ""})
 }
 

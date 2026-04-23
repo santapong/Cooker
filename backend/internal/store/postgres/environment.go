@@ -23,7 +23,7 @@ func NewEnvironmentStore(db *sql.DB) *EnvironmentStore {
 
 func (s *EnvironmentStore) List(ctx context.Context) ([]*model.Environment, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, sort_order, target, promotion, variables, created_at FROM environments ORDER BY sort_order ASC`)
+		`SELECT id, name, sort_order, target, promotion, variables, secrets, created_at FROM environments ORDER BY sort_order ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing environments: %w", err)
 	}
@@ -42,7 +42,7 @@ func (s *EnvironmentStore) List(ctx context.Context) ([]*model.Environment, erro
 
 func (s *EnvironmentStore) Get(ctx context.Context, id string) (*model.Environment, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, sort_order, target, promotion, variables, created_at FROM environments WHERE id = $1`, id)
+		`SELECT id, name, sort_order, target, promotion, variables, secrets, created_at FROM environments WHERE id = $1`, id)
 	e, err := scanEnvironment(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("environment %s: %w", id, store.ErrNotFound)
@@ -59,14 +59,18 @@ func (s *EnvironmentStore) Create(ctx context.Context, e *model.Environment) err
 	if err != nil {
 		return fmt.Errorf("marshal promotion: %w", err)
 	}
-	varsJSON, err := json.Marshal(e.Variables)
+	varsJSON, err := json.Marshal(e.PlainVars)
 	if err != nil {
-		return fmt.Errorf("marshal variables: %w", err)
+		return fmt.Errorf("marshal plain vars: %w", err)
+	}
+	secretsJSON, err := marshalSecrets(e.Secrets)
+	if err != nil {
+		return fmt.Errorf("marshal secrets: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO environments (id, name, sort_order, target, promotion, variables, created_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		e.ID, e.Name, e.Order, targetJSON, promoJSON, varsJSON, e.CreatedAt)
+		`INSERT INTO environments (id, name, sort_order, target, promotion, variables, secrets, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		e.ID, e.Name, e.Order, targetJSON, promoJSON, varsJSON, secretsJSON, e.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("creating environment: %w", err)
 	}
@@ -82,13 +86,17 @@ func (s *EnvironmentStore) Update(ctx context.Context, e *model.Environment) err
 	if err != nil {
 		return fmt.Errorf("marshal promotion: %w", err)
 	}
-	varsJSON, err := json.Marshal(e.Variables)
+	varsJSON, err := json.Marshal(e.PlainVars)
 	if err != nil {
-		return fmt.Errorf("marshal variables: %w", err)
+		return fmt.Errorf("marshal plain vars: %w", err)
+	}
+	secretsJSON, err := marshalSecrets(e.Secrets)
+	if err != nil {
+		return fmt.Errorf("marshal secrets: %w", err)
 	}
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE environments SET name=$2, sort_order=$3, target=$4, promotion=$5, variables=$6 WHERE id=$1`,
-		e.ID, e.Name, e.Order, targetJSON, promoJSON, varsJSON)
+		`UPDATE environments SET name=$2, sort_order=$3, target=$4, promotion=$5, variables=$6, secrets=$7 WHERE id=$1`,
+		e.ID, e.Name, e.Order, targetJSON, promoJSON, varsJSON, secretsJSON)
 	if err != nil {
 		return fmt.Errorf("updating environment: %w", err)
 	}
@@ -113,8 +121,8 @@ func (s *EnvironmentStore) Delete(ctx context.Context, id string) error {
 
 func scanEnvironment(row scannable) (*model.Environment, error) {
 	e := &model.Environment{}
-	var targetJSON, promoJSON, varsJSON []byte
-	if err := row.Scan(&e.ID, &e.Name, &e.Order, &targetJSON, &promoJSON, &varsJSON, &e.CreatedAt); err != nil {
+	var targetJSON, promoJSON, varsJSON, secretsJSON []byte
+	if err := row.Scan(&e.ID, &e.Name, &e.Order, &targetJSON, &promoJSON, &varsJSON, &secretsJSON, &e.CreatedAt); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(targetJSON, &e.Target); err != nil {
@@ -123,8 +131,49 @@ func scanEnvironment(row scannable) (*model.Environment, error) {
 	if err := json.Unmarshal(promoJSON, &e.Promotion); err != nil {
 		return nil, fmt.Errorf("unmarshal promotion: %w", err)
 	}
-	if err := json.Unmarshal(varsJSON, &e.Variables); err != nil {
-		return nil, fmt.Errorf("unmarshal variables: %w", err)
+	if err := json.Unmarshal(varsJSON, &e.PlainVars); err != nil {
+		return nil, fmt.Errorf("unmarshal plain vars: %w", err)
 	}
+	secrets, err := unmarshalSecrets(secretsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal secrets: %w", err)
+	}
+	e.Secrets = secrets
 	return e, nil
+}
+
+// marshalSecrets encodes a map[string][]byte as JSONB where each
+// value is base64'd. JSONB can't hold raw bytes, and using base64
+// keeps the column human-inspectable.
+func marshalSecrets(m map[string][]byte) ([]byte, error) {
+	if len(m) == 0 {
+		return []byte("{}"), nil
+	}
+	enc := make(map[string]string, len(m))
+	for k, v := range m {
+		enc[k] = base64StdEncode(v)
+	}
+	return json.Marshal(enc)
+}
+
+func unmarshalSecrets(b []byte) (map[string][]byte, error) {
+	if len(b) == 0 || string(b) == "{}" {
+		return nil, nil
+	}
+	var enc map[string]string
+	if err := json.Unmarshal(b, &enc); err != nil {
+		return nil, err
+	}
+	if len(enc) == 0 {
+		return nil, nil
+	}
+	out := make(map[string][]byte, len(enc))
+	for k, v := range enc {
+		dec, err := base64StdDecode(v)
+		if err != nil {
+			return nil, fmt.Errorf("decode secret %q: %w", k, err)
+		}
+		out[k] = dec
+	}
+	return out, nil
 }

@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +12,49 @@ import (
 
 	"github.com/cooker-ci/cooker/internal/model"
 )
+
+// composeBaseDir is the only directory ParseComposeFile reads from.
+// Overridable at runtime (tests and future configurability) via
+// SetComposeBaseDir. An authenticated caller can name a file inside
+// this directory but can never escape it.
+var composeBaseDir = "."
+
+// SetComposeBaseDir sets the base directory the compose-parse
+// handler reads from. Intended for tests and for the server to
+// point at a dedicated config dir at boot.
+func SetComposeBaseDir(dir string) { composeBaseDir = dir }
+
+// resolveComposePath validates name and returns an absolute path
+// inside composeBaseDir. Rejects anything that looks like a path
+// (contains "/" or "\", starts with ".", is absolute, or resolves
+// outside the base after cleaning). Callers get a generic error so
+// the response never reveals the base directory.
+func resolveComposePath(name string) (string, error) {
+	if name == "" {
+		name = "docker-compose.yml"
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return "", errors.New("invalid filename")
+	}
+	if strings.HasPrefix(name, ".") {
+		// Blocks "..", ".env", and hidden-file probing.
+		return "", errors.New("invalid filename")
+	}
+	if filepath.IsAbs(name) {
+		return "", errors.New("invalid filename")
+	}
+	baseAbs, err := filepath.Abs(composeBaseDir)
+	if err != nil {
+		return "", errors.New("server misconfigured")
+	}
+	candidate := filepath.Join(baseAbs, name)
+	// Defence in depth: even though the checks above reject separators
+	// we re-verify containment after path resolution.
+	if !strings.HasPrefix(candidate, baseAbs+string(os.PathSeparator)) && candidate != baseAbs {
+		return "", errors.New("invalid filename")
+	}
+	return candidate, nil
+}
 
 func ListDockerImages(c *gin.Context) {
 	// Placeholder: will use Docker Engine SDK
@@ -108,20 +153,25 @@ func ParseComposeFile(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req)
 
-	path := req.ComposePath
-	if path == "" {
-		path = "docker-compose.yml"
+	resolved, err := resolveComposePath(req.ComposePath)
+	if err != nil {
+		// Intentionally generic: the concrete reason (absolute path,
+		// traversal, separator) doesn't help a legitimate caller and
+		// helps an attacker map the allowlist.
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid compose filename"})
+		return
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(resolved)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot read compose file: " + err.Error()})
+		// Don't echo the resolved path — it would leak composeBaseDir.
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot read compose file"})
 		return
 	}
 
 	var cf composeFile
 	if err := yaml.Unmarshal(data, &cf); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid YAML: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid YAML"})
 		return
 	}
 

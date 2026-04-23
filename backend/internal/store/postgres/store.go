@@ -49,6 +49,8 @@ func NewStore(ctx context.Context, databaseURL string) (*store.Store, error) {
 		NewPipelineStore(db),
 		NewRunStore(db),
 		NewEnvironmentStore(db),
+		NewAppStore(db),
+		NewHostStore(db),
 		db.Close,
 	), nil
 }

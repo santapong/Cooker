@@ -15,6 +15,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to create server: %v", err)
 	}
+	defer func() {
+		if err := srv.Close(); err != nil {
+			log.Printf("shutdown: store close: %v", err)
+		}
+	}()
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	log.Printf("Cooker starting on %s", addr)

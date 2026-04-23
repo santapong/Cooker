@@ -1,0 +1,56 @@
+// Package deployer defines the deployment abstraction used by the
+// pipeline executor. Implementations back this with client-go, Helm,
+// kubectl, or a no-op.
+package deployer
+
+import (
+	"context"
+	"errors"
+)
+
+// ErrUnavailable is returned when the deployment backend is not
+// reachable or not configured.
+var ErrUnavailable = errors.New("deployer: unavailable")
+
+// Kind identifies the flavour of the deployment request.
+type Kind string
+
+const (
+	KindManifest Kind = "manifest" // raw Kubernetes YAML / JSON
+	KindHelm     Kind = "helm"     // Helm chart + values
+	KindCompose  Kind = "compose"  // docker-compose deploy (dev)
+)
+
+// Request describes a single deployment. Exactly one of Manifest or
+// HelmChart should be set (Kind selects which).
+type Request struct {
+	Kind      Kind
+	Namespace string // Kubernetes namespace; ignored by compose
+	// Manifest is raw YAML (possibly multi-doc) when Kind==KindManifest.
+	Manifest []byte
+	// HelmChart is the chart path or OCI ref when Kind==KindHelm.
+	HelmChart string
+	// HelmValues, when non-nil, is merged onto the chart's default values.
+	HelmValues map[string]interface{}
+	// ReleaseName is the Helm release name (required for KindHelm).
+	ReleaseName string
+	// Image, when non-empty, is substituted into the manifest/values as
+	// the container image ref. Convention: ${IMAGE} placeholder in
+	// manifests, or .image.repository/tag keys in Helm values.
+	Image string
+}
+
+// Result reports the outcome of a successful apply.
+type Result struct {
+	// AppliedResources is a short list of "kind/namespace/name" strings
+	// describing what landed in the cluster. Empty for Helm (the chart
+	// decides) and compose.
+	AppliedResources []string
+}
+
+// Deployer applies workloads to a target (Kubernetes cluster, Docker
+// host, cloud runtime). Implementations must be safe for concurrent
+// use by multiple goroutines.
+type Deployer interface {
+	Deploy(ctx context.Context, req Request) (Result, error)
+}

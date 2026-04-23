@@ -12,9 +12,20 @@ type Config struct {
 	DatabaseURL    string
 	RedisURL       string
 	AllowedOrigins []string
-	OIDC           OIDCConfig
-	Docker         DockerConfig
-	Kubernetes     KubernetesConfig
+	// SecretKey is a base64-encoded 32-byte key for AES-GCM
+	// encryption of secrets at rest. Empty disables the secret API.
+	SecretKey string
+	// Registry is the default image registry prefix used when an
+	// App doesn't override it (e.g., "registry.example.com/cooker").
+	Registry string
+	// Backends select runtime implementations. Empty defaults to
+	// "noop" so tests and dev boot; UAT sets these to real values.
+	BuilderBackend  string // "noop" | "docker" | "buildkit"
+	PusherBackend   string // "noop" | "docker" | "crane"
+	DeployerBackend string // "noop" | "kubectl" | "clientgo"
+	OIDC            OIDCConfig
+	Docker          DockerConfig
+	Kubernetes      KubernetesConfig
 }
 
 // OIDCConfig holds SSO/OIDC authentication configuration.
@@ -47,6 +58,11 @@ func Load() *Config {
 		DatabaseURL:    getEnv("DATABASE_URL", "postgres://cooker:cooker@localhost:5432/cooker?sslmode=disable"),
 		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
 		AllowedOrigins: getEnvCSV("COOKER_ALLOWED_ORIGINS", []string{"http://localhost:5173", "http://localhost:3000"}),
+		SecretKey:       getEnv("COOKER_SECRET_KEY", ""),
+		Registry:        getEnv("COOKER_REGISTRY", "localhost:5000/cooker"),
+		BuilderBackend:  getEnv("COOKER_BUILDER", "noop"),
+		PusherBackend:   getEnv("COOKER_PUSHER", "noop"),
+		DeployerBackend: getEnv("COOKER_DEPLOYER", "noop"),
 		OIDC: OIDCConfig{
 			Enabled:      getEnvBool("COOKER_OIDC_ENABLED", false),
 			IssuerURL:    getEnv("COOKER_OIDC_ISSUER_URL", ""),

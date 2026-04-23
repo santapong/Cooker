@@ -1,0 +1,14 @@
+# Containerd registry mirror for the UAT k3s node. Tells k3s that
+# any pull of registry:5000/* should hit the in-compose-network
+# Distribution service over plaintext HTTP. Cooker pushes to the
+# exact same "registry:5000/..." string via the host's docker
+# daemon, so the manifest image reference and the containerd pull
+# address match byte-for-byte.
+mirrors:
+  "registry:5000":
+    endpoint:
+      - "http://registry:5000"
+configs:
+  "registry:5000":
+    tls:
+      insecure_skip_verify: true
