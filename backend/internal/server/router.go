@@ -5,30 +5,42 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/cooker-ci/cooker/internal/auth"
 	"github.com/cooker-ci/cooker/internal/handler"
 )
 
 // registerRoutes sets up all API routes.
+//
+// Authorization model: the /api/v1 group requires a valid OIDC
+// session (or the dev user when OIDC is disabled). On top of that,
+// state-changing routes are gated by auth.RequireRole so that a
+// user with only RoleViewer cannot mutate resources. The two
+// shortcut middlewares below — `writeRole` and `adminRole` — capture
+// the two policies: most writes need operator OR admin; destructive
+// deletes and credential rotations need admin. Secret reveal, webhook
+// rotation, and promotion approval keep their per-handler checks so
+// RBAC is enforced both at the router and at the point of sensitive
+// action, which is what a reader auditing the handler expects to see.
 func (s *Server) registerRoutes() {
-	// All /api/v1 routes require a valid OIDC session (or the dev user
-	// when OIDC is disabled).
 	api := s.router.Group("/api/v1", s.oidcMW.Handler())
 
 	h := s.handler
+	writeRole := auth.RequireRole(auth.RoleOperator, auth.RoleAdmin)
+	adminRole := auth.RequireRole(auth.RoleAdmin)
 
 	// Pipeline routes
 	pipelines := api.Group("/pipelines")
 	{
 		pipelines.GET("", h.ListPipelines)
-		pipelines.POST("", h.CreatePipeline)
+		pipelines.POST("", writeRole, h.CreatePipeline)
 		pipelines.GET("/:id", h.GetPipeline)
-		pipelines.PUT("/:id", h.UpdatePipeline)
-		pipelines.DELETE("/:id", h.DeletePipeline)
+		pipelines.PUT("/:id", writeRole, h.UpdatePipeline)
+		pipelines.DELETE("/:id", adminRole, h.DeletePipeline)
 		pipelines.POST("/:id/validate", h.ValidatePipeline)
-		pipelines.POST("/:id/run", h.RunPipeline)
+		pipelines.POST("/:id/run", writeRole, h.RunPipeline)
 		pipelines.GET("/:id/runs", h.ListPipelineRuns)
 		pipelines.GET("/:id/runs/:runId", h.GetPipelineRun)
-		pipelines.POST("/:id/runs/:runId/cancel", h.CancelPipelineRun)
+		pipelines.POST("/:id/runs/:runId/cancel", writeRole, h.CancelPipelineRun)
 		pipelines.GET("/:id/runs/:runId/logs/:stageId", h.GetStageLogs)
 	}
 
@@ -37,28 +49,28 @@ func (s *Server) registerRoutes() {
 	{
 		docker.GET("/images", handler.ListDockerImages)
 		docker.GET("/images/:id", handler.GetDockerImage)
-		docker.POST("/images/build", handler.BuildDockerImage)
-		docker.DELETE("/images/:id", handler.DeleteDockerImage)
+		docker.POST("/images/build", writeRole, handler.BuildDockerImage)
+		docker.DELETE("/images/:id", adminRole, handler.DeleteDockerImage)
 		docker.GET("/containers", handler.ListContainers)
-		docker.POST("/containers", handler.CreateContainer)
-		docker.POST("/containers/:id/stop", handler.StopContainer)
-		docker.DELETE("/containers/:id", handler.DeleteContainer)
+		docker.POST("/containers", writeRole, handler.CreateContainer)
+		docker.POST("/containers/:id/stop", writeRole, handler.StopContainer)
+		docker.DELETE("/containers/:id", adminRole, handler.DeleteContainer)
 		docker.GET("/containers/:id/logs", handler.GetContainerLogs)
 		docker.POST("/compose/parse", handler.ParseComposeFile)
-		docker.PUT("/compose/services/:name", handler.UpdateComposeService)
+		docker.PUT("/compose/services/:name", writeRole, handler.UpdateComposeService)
 
 		// Networks
 		docker.GET("/networks", h.ListDockerNetworks)
-		docker.POST("/networks", h.CreateDockerNetwork)
+		docker.POST("/networks", writeRole, h.CreateDockerNetwork)
 		docker.GET("/networks/:id", h.GetDockerNetwork)
-		docker.DELETE("/networks/:id", h.DeleteDockerNetwork)
-		docker.POST("/networks/:id/connect", h.ConnectContainerToNetwork)
+		docker.DELETE("/networks/:id", adminRole, h.DeleteDockerNetwork)
+		docker.POST("/networks/:id/connect", writeRole, h.ConnectContainerToNetwork)
 
 		// Volumes
 		docker.GET("/volumes", h.ListDockerVolumes)
-		docker.POST("/volumes", h.CreateDockerVolume)
+		docker.POST("/volumes", writeRole, h.CreateDockerVolume)
 		docker.GET("/volumes/:name", h.GetDockerVolume)
-		docker.DELETE("/volumes/:name", h.DeleteDockerVolume)
+		docker.DELETE("/volumes/:name", adminRole, h.DeleteDockerVolume)
 	}
 
 	// OCI Registry routes
@@ -67,8 +79,8 @@ func (s *Server) registerRoutes() {
 		registry.GET("/repositories", handler.ListRepositories)
 		registry.GET("/:name/tags", handler.ListTags)
 		registry.GET("/:name/manifests/:ref", handler.GetManifest)
-		registry.POST("/push", handler.PushImage)
-		registry.POST("/pull", handler.PullImage)
+		registry.POST("/push", writeRole, handler.PushImage)
+		registry.POST("/pull", writeRole, handler.PullImage)
 		registry.GET("/:name/referrers/:digest", handler.GetReferrers)
 	}
 
@@ -78,29 +90,34 @@ func (s *Server) registerRoutes() {
 		kubernetes.GET("/namespaces", handler.ListNamespaces)
 		kubernetes.GET("/workloads", handler.ListWorkloads)
 		kubernetes.GET("/workloads/:ns/:kind/:name", handler.GetWorkload)
-		kubernetes.POST("/workloads/:ns/:kind/:name/scale", handler.ScaleWorkload)
-		kubernetes.POST("/workloads/:ns/:kind/:name/restart", handler.RestartWorkload)
+		kubernetes.POST("/workloads/:ns/:kind/:name/scale", writeRole, handler.ScaleWorkload)
+		kubernetes.POST("/workloads/:ns/:kind/:name/restart", writeRole, handler.RestartWorkload)
 		kubernetes.GET("/pods/:ns/:name/logs", handler.GetPodLogs)
-		kubernetes.POST("/apply", handler.ApplyManifest)
-		kubernetes.DELETE("/:ns/:kind/:name", handler.DeleteResource)
+		kubernetes.POST("/apply", writeRole, handler.ApplyManifest)
+		kubernetes.DELETE("/:ns/:kind/:name", adminRole, handler.DeleteResource)
 	}
 
 	// Environment routes
 	environments := api.Group("/environments")
 	{
 		environments.GET("", h.ListEnvironments)
-		environments.POST("", h.CreateEnvironment)
-		environments.PUT("/:id", h.UpdateEnvironment)
-		environments.DELETE("/:id", h.DeleteEnvironment)
-		// Per-environment secret management. Each handler enforces
-		// its own RBAC — admin-only for read, write, and delete.
-		environments.GET("/:id/secrets/:key", h.RevealSecret)
-		environments.PUT("/:id/secrets/:key", h.PutSecret)
-		environments.DELETE("/:id/secrets/:key", h.DeleteSecret)
+		environments.POST("", writeRole, h.CreateEnvironment)
+		environments.PUT("/:id", writeRole, h.UpdateEnvironment)
+		environments.DELETE("/:id", adminRole, h.DeleteEnvironment)
+		// Per-environment secret management. Each handler additionally
+		// enforces admin-only via CanRevealSecret; the adminRole
+		// middleware here is belt-and-braces so unauthenticated probing
+		// of the route table gets a uniform 403 before touching the
+		// handler body.
+		environments.GET("/:id/secrets/:key", adminRole, h.RevealSecret)
+		environments.PUT("/:id/secrets/:key", adminRole, h.PutSecret)
+		environments.DELETE("/:id/secrets/:key", adminRole, h.DeleteSecret)
 	}
 
 	// Promotion routes (nested under pipeline runs)
-	api.POST("/pipelines/:id/runs/:runId/promote", h.PromoteRun)
+	api.POST("/pipelines/:id/runs/:runId/promote", writeRole, h.PromoteRun)
+	// ApprovePromotion keeps its CanApprovePromotion check; the handler
+	// is the authority on which roles count (admin OR approver).
 	api.POST("/pipelines/:id/runs/:runId/approve", h.ApprovePromotion)
 	api.GET("/pipelines/:id/runs/:runId/env-status", h.GetEnvStatus)
 
@@ -108,38 +125,46 @@ func (s *Server) registerRoutes() {
 	apps := api.Group("/apps")
 	{
 		apps.GET("", h.ListApps)
-		apps.POST("", h.CreateApp)
+		apps.POST("", writeRole, h.CreateApp)
 		apps.GET("/:id", h.GetApp)
-		apps.PUT("/:id", h.UpdateApp)
-		apps.DELETE("/:id", h.DeleteApp)
-		apps.POST("/:id/deploy", h.DeployApp)
-		apps.PUT("/:id/webhook", h.SetAppWebhookSecret)
+		apps.PUT("/:id", writeRole, h.UpdateApp)
+		apps.DELETE("/:id", adminRole, h.DeleteApp)
+		apps.POST("/:id/deploy", writeRole, h.DeployApp)
+		// Webhook rotation re-checks admin in the handler; keeping the
+		// gate here means a viewer can't even reach it to probe codec
+		// behaviour.
+		apps.PUT("/:id/webhook", adminRole, h.SetAppWebhookSecret)
 	}
 
 	// Managed hosts (Phase 4).
 	hosts := api.Group("/hosts")
 	{
 		hosts.GET("", h.ListHosts)
-		hosts.POST("", h.CreateHost)
+		hosts.POST("", writeRole, h.CreateHost)
 		hosts.GET("/:id", h.GetHost)
-		hosts.PUT("/:id", h.UpdateHost)
-		hosts.DELETE("/:id", h.DeleteHost)
+		hosts.PUT("/:id", writeRole, h.UpdateHost)
+		hosts.DELETE("/:id", adminRole, h.DeleteHost)
 	}
 
 	// GitHub webhook receiver (unauthenticated — HMAC is the auth).
 	s.router.POST("/webhooks/github", h.GitHubWebhook)
 
-	// Settings routes
+	// Settings routes — treating as admin-only because they change
+	// how Cooker talks to external systems (registries, clusters).
 	settings := api.Group("/settings")
 	{
 		settings.GET("/registries", handler.ListRegistryConfigs)
-		settings.POST("/registries", handler.AddRegistryConfig)
-		settings.DELETE("/registries/:id", handler.DeleteRegistryConfig)
+		settings.POST("/registries", adminRole, handler.AddRegistryConfig)
+		settings.DELETE("/registries/:id", adminRole, handler.DeleteRegistryConfig)
 		settings.GET("/clusters", handler.ListClusterConfigs)
-		settings.POST("/clusters", handler.AddClusterConfig)
+		settings.POST("/clusters", adminRole, handler.AddClusterConfig)
 	}
 
-	// WebSocket routes (unauthenticated for now; see server.go comment)
+	// WebSocket routes. Known gap: browsers cannot send Authorization
+	// on WS upgrade so these channels are protected only by the
+	// unguessability of the UUIDv4 runId/buildId. Tightening this to
+	// a short-lived ticket exchanged over /api/v1 is tracked for the
+	// multi-tenant follow-up.
 	ws := s.router.Group("/ws")
 	{
 		ws.GET("/pipeline-run/:runId", func(c *gin.Context) {
