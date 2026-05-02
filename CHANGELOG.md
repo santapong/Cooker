@@ -22,9 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/MULTI_REPLICA.md` — sticky-session + Redis-shared-state guide for multi-replica deploys, with NGINX/ALB/Traefik/HAProxy/Envoy examples. Closes the docs portion of **P3**.
   - `docs/RUNBOOK.md` — incident response runbook covering hung builds, Postgres down, OIDC unreachable, KeepSave outage, OOMKilled. Closes **P8** runbook.
   - `docs/adr/` — three accepted ADRs covering the strategy-pattern interfaces, the secrets-manager rationale, and the JSONB graph-storage decision. Closes **P8** ADRs.
+  - `docs/openapi.yaml` — OpenAPI 3.1 sketch covering pipelines, runs, environments + secrets, apps + webhook, and the GitHub webhook entry point. Closes the OpenAPI sketch portion of **P8**; full generated spec via `swaggo/swag` remains a follow-up.
   - README §Deployment now documents TLS at ingress and Postgres SSL with concrete config snippets. Closes the docs portion of **P1.3** and **P1.4**.
   - README §Operations table indexes RUNBOOK, MULTI_REPLICA, SECURITY, and the backlog so operators land on the right doc faster.
 - **Frontend `ErrorBoundary`** at the app root (`frontend/src/components/ErrorBoundary.tsx`, wired in `App.tsx`). Catches uncaught render errors so the React tree no longer crashes to a blank page; provides Try-again and Go-home recovery paths. Closes **P5** error-boundary item.
+- **Frontend `Skeleton` + `SkeletonStack`** components (`frontend/src/components/Skeleton.tsx`). Shimmer-animated content placeholders. `ProtectedRoute` now uses a SkeletonStack while auth state restores instead of "Loading..." text. Closes the loading-skeletons portion of **P5**.
 
 ### Changed
 
