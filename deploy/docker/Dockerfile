@@ -7,6 +7,22 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci --ignore-scripts
 COPY frontend/ ./
+# Vite reads VITE_* env vars at build time and bakes them into the
+# bundle. The OIDC provider URL and client ID are public values
+# (the client secret is never used in the browser PKCE flow), so it
+# is safe to bake them into the JS bundle.
+ARG VITE_OIDC_ENABLED=false
+ARG VITE_OIDC_AUTHORITY=
+ARG VITE_OIDC_CLIENT_ID=
+ARG VITE_OIDC_REDIRECT_URI=
+ARG VITE_OIDC_POST_LOGOUT_REDIRECT_URI=
+ARG VITE_OIDC_SCOPE=
+ENV VITE_OIDC_ENABLED=$VITE_OIDC_ENABLED \
+    VITE_OIDC_AUTHORITY=$VITE_OIDC_AUTHORITY \
+    VITE_OIDC_CLIENT_ID=$VITE_OIDC_CLIENT_ID \
+    VITE_OIDC_REDIRECT_URI=$VITE_OIDC_REDIRECT_URI \
+    VITE_OIDC_POST_LOGOUT_REDIRECT_URI=$VITE_OIDC_POST_LOGOUT_REDIRECT_URI \
+    VITE_OIDC_SCOPE=$VITE_OIDC_SCOPE
 RUN npm run build
 
 # --- Backend build ---

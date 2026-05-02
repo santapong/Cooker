@@ -72,7 +72,11 @@ helm-uninstall:
 UAT_COMPOSE=docker compose -f docker-compose.uat.yml --env-file .env.uat
 
 uat-up:
-	@[ -f .env.uat ] || echo "COOKER_SECRET_KEY=$$(head -c 32 /dev/urandom | base64)" > .env.uat
+	@if [ ! -f .env.uat ]; then \
+	  cp .env.uat.example .env.uat; \
+	  echo "COOKER_SECRET_KEY=$$(head -c 32 /dev/urandom | base64)" >> .env.uat; \
+	  echo "Created .env.uat from .env.uat.example. Edit it to enable OIDC."; \
+	fi
 	$(UAT_COMPOSE) up -d --build
 	@echo
 	@echo "Cooker UAT ready at http://localhost:8080"
