@@ -78,7 +78,7 @@ jobs:
         run: helm lint deploy/helm/cooker
       - name: helm template (default values)
         run: helm template cooker deploy/helm/cooker > /tmp/default.yaml
-      - name: helm template (production with OIDC)
+      - name: helm template (production with OIDC + ingress + TLS)
         run: |
           helm template cooker deploy/helm/cooker \
             --set cookerEnv=production \
@@ -88,12 +88,65 @@ jobs:
             --set oidc.clientId=test-client \
             --set oidc.clientSecretRef.name=cooker-oidc \
             --set secretKey.existingSecret=cooker-secret-key \
+            --set ingress.enabled=true \
+            --set 'ingress.tls[0].secretName=cooker-tls' \
+            --set 'ingress.tls[0].hosts[0]=cooker.example.com' \
+            --set database.host=postgres.cooker.svc.cluster.local \
+            --set database.passwordSecretRef.name=cooker-db \
             > /tmp/prod.yaml
+          # Confirm sslmode actually rendered into the DATABASE_URL.
+          grep -q 'sslmode=require' /tmp/prod.yaml || {
+            echo "ERROR: DATABASE_URL did not render with ?sslmode=require" >&2
+            grep -n DATABASE_URL /tmp/prod.yaml >&2 || true
+            exit 1
+          }
+      - name: helm template (production+OIDC+ingress without TLS must fail)
+        run: |
+          # Asserts the fail-guard in templates/ingress.yaml fires when an
+          # operator enables ingress in production with OIDC but forgets
+          # to provision a TLS certificate. See SECURITY.md > production
+          # checklist.
+          if helm template cooker deploy/helm/cooker \
+            --set cookerEnv=production \
+            --set 'oidc.allowedOrigins={https://cooker.example.com}' \
+            --set oidc.enabled=true \
+            --set oidc.issuerUrl=https://accounts.google.com \
+            --set oidc.clientId=test-client \
+            --set oidc.clientSecretRef.name=cooker-oidc \
+            --set secretKey.existingSecret=cooker-secret-key \
+            --set ingress.enabled=true \
+            > /tmp/should-fail.yaml 2>/tmp/fail-stderr; then
+            echo "ERROR: helm template should have failed but rendered successfully" >&2
+            cat /tmp/should-fail.yaml >&2
+            exit 1
+          fi
+          grep -q 'ingress.tls must be set' /tmp/fail-stderr || {
+            echo "ERROR: helm failed but not with the expected ingress.tls message:" >&2
+            cat /tmp/fail-stderr >&2
+            exit 1
+          }
+      - name: helm template (kaniko builder)
+        run: |
+          helm template cooker deploy/helm/cooker \
+            --set builder.kind=kaniko \
+            --set builder.kaniko.contextPVC=cooker-build-context \
+            > /tmp/kaniko.yaml
+          # docker.sock volume must be absent under kaniko.
+          if grep -q 'docker-socket' /tmp/kaniko.yaml; then
+            echo "ERROR: docker-socket volume rendered with builder.kind=kaniko" >&2
+            grep -n docker-socket /tmp/kaniko.yaml >&2
+            exit 1
+          fi
+          # RBAC must be present.
+          grep -q 'kind: Role' /tmp/kaniko.yaml || {
+            echo "ERROR: Kaniko Role not rendered" >&2; exit 1; }
+          grep -q 'kind: RoleBinding' /tmp/kaniko.yaml || {
+            echo "ERROR: Kaniko RoleBinding not rendered" >&2; exit 1; }
       - name: kubeconform
         run: |
           curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz -o /tmp/kc.tar.gz
           tar -xzf /tmp/kc.tar.gz -C /tmp
-          /tmp/kubeconform -strict -summary -ignore-missing-schemas /tmp/default.yaml /tmp/prod.yaml
+          /tmp/kubeconform -strict -summary -ignore-missing-schemas /tmp/default.yaml /tmp/prod.yaml /tmp/kaniko.yaml
 
   docker:
     runs-on: ubuntu-latest

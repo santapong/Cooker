@@ -1,0 +1,51 @@
+{{/*
+RBAC required by the Kaniko builder. Cooker submits one batch/v1.Job
+per image build, watches it, streams pod logs, then deletes it. The
+ServiceAccount needs:
+  - jobs:        create + get + watch + delete  (build lifecycle)
+  - pods:        list + get + watch              (find the pod the
+                                                  Job spawned)
+  - pods/log:    get                             (stream build output
+                                                  to the user)
+Scoped to the namespace the build Job runs in (defaults to the release
+namespace) — explicitly NOT cluster-wide.
+
+Only rendered when builder.kind=kaniko, so the docker / noop / buildkit
+shapes don't carry permissions they never use.
+*/}}
+{{- if eq .Values.builder.kind "kaniko" -}}
+{{- $ns := .Values.builder.kaniko.namespace | default .Release.Namespace -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "cooker.fullname" . }}-kaniko-builder
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "cooker.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "watch", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "cooker.fullname" . }}-kaniko-builder
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "cooker.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "cooker.fullname" . }}-kaniko-builder
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name | default (include "cooker.fullname" .) }}
+    namespace: {{ .Release.Namespace | quote }}
+{{- end }}

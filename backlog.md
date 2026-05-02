@@ -8,7 +8,7 @@ Items are grouped by area and roughly prioritized within each group.
 
 ## Production readiness summary
 
-After the `claude/uat-ready-*` PR series and the `claude/cooker-backlog-readme-com8z` PR (#17) merged, Cooker is **production-quality, not yet production-default.** The dangerous defaults are gone — but a usable production deployment still depends on operator decisions that the chart can't make for you.
+After the `claude/uat-ready-*` PR series, the `claude/cooker-backlog-readme-com8z` PR (#17), and the `claude/complete-p1-backlog-qN4FP` PR (closing all P1 code-side items) merged, Cooker is **production-quality.** The dangerous defaults are gone, Kaniko ships as an in-cluster builder, audit logging is on by default in production, the chart fails template-render if `production+OIDC+ingress` is missing TLS, and `DATABASE_URL` is rendered with `?sslmode=require`. Remaining production-readiness gaps are operator-side (TLS provisioning, OIDC IdP setup, Postgres backend choice).
 
 ### Deployment-shape readiness matrix
 
@@ -20,15 +20,15 @@ After the `claude/uat-ready-*` PR series and the `claude/cooker-backlog-readme-c
 | **Multi-replica without sticky sessions or Redis-backed limiter/tickets** | ❌ Will break: users get random 401s on WS reconnect, rate limits don't enforce correctly. |
 | **Anything without TLS + OIDC** | ❌ Sign-in flow won't work — most IdPs refuse non-HTTPS redirect URIs. |
 
-### Why "not production-default"
+### Operator-side concerns (still your call)
 
-Five operator-side concerns block a flat "yes" on production-readiness, in priority order:
+The chart can't make these decisions for you:
 
-1. **TLS at ingress** is required for OIDC. Cooker doesn't terminate TLS itself.
-2. **`/var/run/docker.sock` bind-mount** still gives Cooker root-equivalent access to the host's Docker daemon, even with the container running as UID 65532. An RCE in Cooker → full host control. Fix: switch to **Kaniko** (in-cluster, rootless image builder); `builder.Builder` interface makes this clean. Detailed below.
+1. **TLS at ingress** is required for OIDC. Cooker doesn't terminate TLS itself; provision a cert with cert-manager (or equivalent) and reference it in `ingress.tls`. The chart now refuses to render if `cookerEnv=production AND oidc.enabled=true AND ingress.enabled=true AND ingress.tls is empty`.
+2. **Builder choice** — set `builder.kind=kaniko` in production. The `docker` builder still ships for single-node test clusters but gives the Cooker container root-equivalent access to the host Docker daemon. The chart conditionally drops the `docker.sock` mount when `builder.kind != "docker"`.
 3. **Multi-replica state** — rate limiter and WebSocket ticket store are per-process. Pin sticky sessions at ingress (works fine; documented in `docs/MULTI_REPLICA.md`) or implement Redis-backed versions (P3).
-4. **Postgres SSL** — default `DATABASE_URL` doesn't set `sslmode=require`. Operator override.
-5. **Audit logging** — no implementation. Mutations log to stdout but aren't structured for SIEM. Detailed below.
+4. **Postgres SSL** — `?sslmode=` now renders into `DATABASE_URL` from `postgresql.sslMode` (default `require`). Set `database.host` to a TLS-capable Postgres for the chart to wire it through.
+5. **Audit destination** — `COOKER_AUDIT_DESTINATION=stdout` (the default) routes via the cluster log stack. Set `COOKER_AUDIT_DESTINATION=file` + `COOKER_AUDIT_FILE_PATH` if you'd rather pair with a sidecar tail-shipper.
 
 ### What "OCI compliance" means here
 
@@ -42,42 +42,24 @@ What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-
 
 ### P1 — Production hardening (operator-side)
 
-#### ⭐ P1.1 — Kaniko builder adapter
+All P1 code-side items are closed (see "Closed (recent)" below). The
+remaining bullet is operator-side only:
 
-Closes the docker.sock RCE-to-host gap. Highest-priority remaining item.
-
-**Why not in PR #17:** ~1 day of focused work. Pulls `client-go` Job APIs, needs a fake-K8s test, requires Helm-template conditionals to drop the docker.sock mount. Best as its own focused PR so reviewers can audit the RBAC story in isolation.
-
-**Files to add:** `backend/internal/builder/kaniko.go`, `backend/internal/builder/kaniko_test.go`.
-**Files to modify:** `backend/internal/server/server.go` (`selectBuilder` switch), `backend/internal/config/config.go` (doc-string), `deploy/helm/cooker/values.yaml` (`builder.kind` + `builder.kaniko.*`), `deploy/helm/cooker/templates/deployment.yaml` (drop docker.sock when `builder.kind=kaniko`), `deploy/helm/cooker/templates/rbac.yaml` (`Job` create/get/delete in own namespace), `SECURITY.md`, `docs/architecture.md`.
-
-#### ⭐ P1.2 — Audit logging middleware (slog-based)
-
-**Why not in PR #17:** ~2 hours of focused work. Best as its own PR so the redaction rules and the per-route audit-eligible list can be reviewed cleanly.
-
-**Files to add:** `backend/internal/audit/audit.go`, `backend/internal/audit/audit_test.go`, `backend/internal/server/middleware_audit.go`.
-**Files to modify:** `backend/cmd/cooker/main.go`, `backend/internal/server/server.go`, `backend/internal/server/router.go`, `SECURITY.md`.
-**Config:** `COOKER_AUDIT_ENABLED` (default `true` in production), `COOKER_AUDIT_DESTINATION` (default `stdout`).
-**Redaction:** secret values never appear; OIDC raw JWTs never appear; bodies of `PUT /environments/:id/secrets/:key` and `PUT /apps/:id/webhook` are not logged in `extra`.
-
-#### P1.3 — TLS at ingress (chart hardening)
-
-- [x] `ingress.tls` value documented + cert-manager example.
-- [x] README §Deployment → TLS at ingress.
-- [ ] SECURITY.md production checklist alignment.
-- [ ] `templates/ingress.yaml` should fail-template when `cookerEnv=production` and `oidc.enabled=true` and `ingress.tls` is empty.
-
-#### P1.4 — PostgreSQL SSL (chart hardening)
-
-- [x] Documented in README + values.yaml.
-- [x] `postgresql.sslMode` Helm value, default `require`.
-- [ ] Render `?sslmode={{ .Values.postgresql.sslMode }}` into `DATABASE_URL` in `templates/deployment.yaml`.
-- [ ] For bundled `bitnami/postgresql`, flip `tls.enabled=true` and pass-through CA bundle config.
-
-#### P1.5 — Renovate
+#### P1.5 — Renovate (operator step)
 
 - [x] `renovate.json` shipped.
-- [ ] Operator step: enable Renovate / Dependabot on the repo (one-time UI toggle).
+- [ ] **Operator step (cannot be done in code):** enable Renovate or
+      Dependabot on the repo via the GitHub UI — Settings → Code
+      security and analysis → Dependabot, or install the Renovate
+      GitHub App. One-time toggle.
+
+#### P1.4 follow-up — bundled bitnami/postgresql TLS passthrough
+
+- [ ] If bundling Postgres in-chart (currently no subchart in
+      `Chart.yaml`), flip `tls.enabled=true` on the bitnami/postgresql
+      subchart and pass through the CA bundle config. Deferred — bundling
+      Postgres is a larger architectural decision; today operators bring
+      their own Postgres and reference it via `database.host`.
 
 ---
 
@@ -183,12 +165,75 @@ All three items below add Go module deps; they share a single follow-up PR that 
 
 `backend/internal/transport/tsnet/` is build-tagged. Removing the build tag is ~2 hours; provisioning own auth keys via OAuth is ~half day. Adds a sizeable dep — default-off is the right call until there's a user need.
 
+#### P9.5 — Buildah builder adapter (alternative to Kaniko)
+
+A third in-cluster builder alongside Kaniko, slotting into the same
+`builder.Builder` interface and the same `batch/v1.Job` Pod pattern. Job
+runs `quay.io/buildah/stable` instead of `gcr.io/kaniko-project/executor`.
+
+**Why an operator would pick Buildah over Kaniko:**
+
+- Full Dockerfile feature parity with BuildKit — `RUN --mount=type=cache`,
+  `RUN --mount=type=secret`, `RUN --mount=type=ssh`, heredocs. Kaniko silently
+  ignores these directives.
+- Better layer cache when paired with `--layers --cache-to=registry://...`.
+- Active maintenance pace (Red Hat / containers.org); Kaniko's release
+  cadence has slowed.
+
+**Why an operator would not:**
+
+- Rootless Buildah needs `CAP_SETUID` + `CAP_SETGID` for its user-namespace
+  setup. PodSecurityAdmission "restricted" drops both — operators must opt
+  the build namespace into "baseline" or a custom profile. Kaniko avoids
+  this with `runAsUser=0` inside the container only.
+- Larger image (~150 MB vs Kaniko's ~50 MB).
+- Storage driver choice: needs `overlay` (with fuse-overlayfs on the
+  nodes) or `vfs` (slower, no kernel module). Kaniko bundles its own.
+
+**Files to add:** `backend/internal/builder/buildah.go`,
+`backend/internal/builder/buildah_test.go`.
+
+**Files to modify:**
+- `backend/internal/server/server.go` — `selectBuilder` add
+  `case "buildah": return builder.NewBuildah(...)`.
+- `backend/internal/config/config.go` — `KubernetesConfig.BuildahImage`,
+  `BuildahServiceAccount`, `BuildahStorageDriver` (`overlay` | `vfs`).
+- `deploy/helm/cooker/values.yaml` — `builder.buildah.{image, namespace,
+  serviceAccount, contextPVC, storageDriver}`. Document the PSA story
+  inline.
+- `deploy/helm/cooker/templates/deployment.yaml` — extend the
+  `COOKER_BUILDER=kaniko` env block to include buildah's env-vars when
+  `builder.kind=buildah`.
+- `deploy/helm/cooker/templates/rbac.yaml` — extend the gate from
+  `eq .Values.builder.kind "kaniko"` to
+  `or (eq .Values.builder.kind "kaniko") (eq .Values.builder.kind "buildah")`.
+  Same Role + RoleBinding apply (Job + Pod create/get/delete/watch in
+  the build namespace).
+- `SECURITY.md` — add Buildah row to the "image build isolation" table
+  with the PSA caveat called out.
+- `.github/workflows/ci.yml` — extend the helm-template matrix with a
+  `builder.kind=buildah` render that asserts (a) docker-socket is absent,
+  (b) RBAC objects are present.
+
+**CLI fallback option (lighter alt):** shell out to `buildah bud` from a
+sidecar container in the cooker pod, no Job submission. Fewer moving
+parts, but needs the Cooker container image to bundle buildah (~150 MB)
+and the user-namespace capability on the cooker pod itself. Not
+recommended for production.
+
+**Effort:** ~1 day for the Job-based version (mostly the PSA story and
+the `--cache-to` registry wiring); ~half day for the CLI shell-out.
+
 ---
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, and the `claude/cooker-backlog-readme-com8z` PR (#17):
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), and the `claude/complete-p1-backlog-qN4FP` PR:
 
+- ✅ **Kaniko builder adapter** (`internal/builder/kaniko.go` + tests, `selectBuilder` wiring, `builder.kind`/`builder.kaniko.*` chart values, `templates/rbac.yaml`, docker.sock conditionally dropped in deployment.yaml). Closes the docker.sock RCE-to-host gap. — P1.1
+- ✅ **Audit logging middleware** (`internal/audit/`, `internal/server/middleware_audit.go`, `COOKER_AUDIT_*` config, on-by-default in production, redaction documented). — P1.2
+- ✅ **Ingress TLS chart guard** — `templates/ingress.yaml` fails template-render when `cookerEnv=production` AND `oidc.enabled=true` AND `ingress.enabled=true` AND `ingress.tls` is empty; CI matrix asserts both pass and fail paths. SECURITY.md aligned. — P1.3
+- ✅ **PostgreSQL `?sslmode=` rendering** — `database.{host,port,name,username,passwordSecretRef}` values block; `templates/deployment.yaml` constructs `DATABASE_URL` with `?sslmode={{ .Values.postgresql.sslMode }}`. — P1.4
 - ✅ **Skeleton + SkeletonStack components** + ProtectedRoute integration — P5 loading-skeletons
 - ✅ **OpenAPI 3.1 sketch** at `docs/openapi.yaml` — P8
 - ✅ **App-root `ErrorBoundary`** (frontend) — P5 error-boundary

@@ -66,9 +66,41 @@ ingress:
   tls: []
   annotations: {}
 
-# Docker socket access (for local Docker management). Production
-# should switch to Kaniko (in-cluster, rootless) — tracked in
-# backlog P1.1.
+# Builder selection.
+#   docker  — shells out to the local Docker daemon via the bind-
+#             mounted host socket. Convenient on single-node test
+#             clusters; gives the Cooker container root-equivalent
+#             access to the host's Docker. NOT recommended for
+#             production.
+#   kaniko  — submits a Kubernetes Job that runs the Kaniko executor
+#             in-cluster. No host docker.sock, no host root path.
+#             Requires the Cooker pod and the Kaniko Job to share a
+#             PVC for the build context (set via builder.kaniko.contextPVC).
+#             RBAC objects (Role + RoleBinding) ship in
+#             templates/rbac.yaml when this kind is selected.
+#   buildkit — stub; not yet wired. See backlog P9.1.
+#   noop    — accept builds without doing anything (test only).
+builder:
+  kind: docker
+  kaniko:
+    # Kaniko executor image. Pin to a known version for reproducible
+    # builds; "latest" is documented but not recommended in production.
+    image: gcr.io/kaniko-project/executor:latest
+    # Namespace the Job is created in. Cooker's ServiceAccount must
+    # have Job + Pod RBAC here. Defaults to the release namespace.
+    namespace: ""
+    # ServiceAccount the Kaniko Job's pod runs as. Empty uses the
+    # namespace default; production should reference a dedicated SA
+    # with registry-credential mounts.
+    serviceAccount: ""
+    # PVC mounted at the build-context path on both Cooker and the
+    # Kaniko Job. Operators stage source there before invoking the
+    # builder. Empty falls back to emptyDir which won't see Cooker's
+    # source — only useful for chart smoke tests.
+    contextPVC: ""
+
+# Host-Docker access. Used only when builder.kind=docker; the
+# templates skip rendering the volume + mount otherwise.
 docker:
   enabled: true
   socketPath: /var/run/docker.sock
@@ -107,24 +139,37 @@ oidc:
   clientSecret: ""
 
 # Database
+#
+# When database.host is set, the chart renders a DATABASE_URL env var
+# of the form
+#   postgres://<username>:$(DB_PASSWORD)@<host>:<port>/<name>?sslmode=<sslMode>
+# and pulls DB_PASSWORD from the referenced Secret.
+#
+# When database.host is empty (default), the chart does NOT render
+# DATABASE_URL — operators are expected to set it via extraEnv or a
+# pod-spec override (preserving the historical behaviour).
+database:
+  host: ""              # e.g. postgres.cooker.svc.cluster.local
+  port: 5432
+  name: cooker
+  username: cooker
+  passwordSecretRef:
+    name: ""            # name of a pre-created Secret containing the DB password
+    key: "password"
+
 postgresql:
   enabled: true
   auth:
     database: cooker
     username: cooker
     password: cooker
-  # SSL/TLS to PostgreSQL. Cooker appends ?sslmode=<value> to the
-  # DATABASE_URL it builds. Production should use "require" at
-  # minimum; "verify-full" when a CA bundle is mounted into the
-  # Cooker pod and the operator has provisioned a CA-signed
-  # PostgreSQL cert.
+  # SSL/TLS to PostgreSQL. The chart appends ?sslmode=<value> to the
+  # DATABASE_URL it constructs from the database.* block above.
+  # Production should use "require" at minimum; "verify-full" when a
+  # CA bundle is mounted into the Cooker pod and the operator has
+  # provisioned a CA-signed PostgreSQL cert.
   #
   # Possible values: disable | allow | prefer | require | verify-ca | verify-full
-  #
-  # Note: chart-side rendering of this value into the constructed
-  # DATABASE_URL is a follow-up; today operators set sslmode via the
-  # full DATABASE_URL override or via the bitnami/postgresql
-  # subchart's tls block. Tracked in backlog P1.4.
   sslMode: require
 
 # Cache

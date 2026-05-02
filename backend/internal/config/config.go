@@ -32,7 +32,7 @@ type Config struct {
 	AllowedOrigins []string
 	SecretKey      string
 	Registry       string
-	BuilderBackend  string // "noop" | "docker" | "buildkit"
+	BuilderBackend  string // "noop" | "docker" | "buildkit" | "kaniko"
 	PusherBackend   string // "noop" | "docker" | "crane"
 	DeployerBackend string // "noop" | "kubectl" | "clientgo"
 	// SecretsBackend selects how environment secrets are stored.
@@ -44,6 +44,7 @@ type Config struct {
 	Docker          DockerConfig
 	Kubernetes      KubernetesConfig
 	KeepSave        KeepSaveConfig
+	Audit           AuditConfig
 }
 
 // RateLimitConfig tunes per-user rate limiting on expensive endpoints.
@@ -74,6 +75,19 @@ type DockerConfig struct {
 type KubernetesConfig struct {
 	InCluster  bool
 	Kubeconfig string
+	// Namespace is the namespace Cooker creates Kaniko build Jobs in.
+	// Cooker's ServiceAccount needs Job + Pod RBAC here. Default: "cooker".
+	Namespace string
+	// KanikoImage pins the Kaniko executor image. Default: latest.
+	KanikoImage string
+	// KanikoServiceAccount runs the Kaniko Job's pod. Empty uses the
+	// namespace's default ServiceAccount.
+	KanikoServiceAccount string
+	// KanikoContextPVC is the PersistentVolumeClaim mounted at the
+	// build-context path on both Cooker and the Kaniko Job. Operators
+	// stage source there before invoking the builder. Empty is
+	// development-only (emptyDir fallback won't see Cooker's source).
+	KanikoContextPVC string
 }
 
 // KeepSaveConfig configures the KeepSave secrets backend. Required
@@ -82,6 +96,15 @@ type KeepSaveConfig struct {
 	URL       string // base URL of the KeepSave server, e.g. http://keepsave:8080
 	ProjectID string // single project that owns all of Cooker's secrets
 	APIKey    string // X-API-Key value; per-environment scoping is fine
+}
+
+// AuditConfig configures the audit-log middleware. When Enabled,
+// every authenticated POST/PUT/PATCH/DELETE under /api/v1 produces
+// one structured event. Defaults: on in production, off elsewhere.
+type AuditConfig struct {
+	Enabled     bool
+	Destination string // "stdout" | "file"
+	FilePath    string // required when Destination == "file"
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -122,13 +145,22 @@ func Load() *Config {
 			CertPath:  getEnv("DOCKER_CERT_PATH", ""),
 		},
 		Kubernetes: KubernetesConfig{
-			InCluster:  getEnvBool("COOKER_K8S_IN_CLUSTER", false),
-			Kubeconfig: getEnv("KUBECONFIG", ""),
+			InCluster:            getEnvBool("COOKER_K8S_IN_CLUSTER", false),
+			Kubeconfig:           getEnv("KUBECONFIG", ""),
+			Namespace:            getEnv("COOKER_K8S_NAMESPACE", "cooker"),
+			KanikoImage:          getEnv("COOKER_KANIKO_IMAGE", "gcr.io/kaniko-project/executor:latest"),
+			KanikoServiceAccount: getEnv("COOKER_KANIKO_SERVICE_ACCOUNT", ""),
+			KanikoContextPVC:     getEnv("COOKER_KANIKO_CONTEXT_PVC", ""),
 		},
 		KeepSave: KeepSaveConfig{
 			URL:       getEnv("COOKER_SECRETS_KEEPSAVE_URL", ""),
 			ProjectID: getEnv("COOKER_SECRETS_KEEPSAVE_PROJECT_ID", ""),
 			APIKey:    getEnv("COOKER_SECRETS_KEEPSAVE_API_KEY", ""),
+		},
+		Audit: AuditConfig{
+			Enabled:     getEnvBool("COOKER_AUDIT_ENABLED", env.IsProduction()),
+			Destination: getEnv("COOKER_AUDIT_DESTINATION", "stdout"),
+			FilePath:    getEnv("COOKER_AUDIT_FILE_PATH", ""),
 		},
 	}
 }
@@ -171,6 +203,18 @@ func (c *Config) Validate() error {
 	}
 	if !c.OIDC.Enabled {
 		log.Printf("warning: COOKER_OIDC_ENABLED=false in production; the backend will inject a dev admin user on every request")
+	}
+	if c.Audit.Enabled {
+		switch c.Audit.Destination {
+		case "stdout":
+			// fine
+		case "file":
+			if c.Audit.FilePath == "" {
+				problems = append(problems, "COOKER_AUDIT_FILE_PATH is required when COOKER_AUDIT_DESTINATION=file")
+			}
+		default:
+			problems = append(problems, fmt.Sprintf("unknown COOKER_AUDIT_DESTINATION %q (want \"stdout\" or \"file\")", c.Audit.Destination))
+		}
 	}
 	if len(problems) > 0 {
 		return errors.New("config: " + strings.Join(problems, "; "))

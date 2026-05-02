@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/cooker-ci/cooker/internal/audit"
 	"github.com/cooker-ci/cooker/internal/auth"
 	"github.com/cooker-ci/cooker/internal/builder"
 	"github.com/cooker-ci/cooker/internal/config"
@@ -33,6 +34,7 @@ type Server struct {
 	handler   *handler.Handler
 	store     *store.Store
 	wsTickets *wsTicketStore
+	audit     audit.Sink
 }
 
 // New creates a new Server instance with all routes and middleware.
@@ -65,8 +67,19 @@ func New(cfg *config.Config) (*Server, error) {
 	wsHub := NewWebSocketHub(cfg.AllowedOrigins)
 	wsTickets := newWSTicketStore(60 * time.Second)
 
+	auditSink, err := newAuditSink(cfg.Audit)
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("audit: %w", err)
+	}
+
+	bld, err := selectBuilder(cfg.BuilderBackend, cfg.Kubernetes)
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("builder: %w", err)
+	}
 	exec := service.NewExecutor(
-		service.WithBuilder(selectBuilder(cfg.BuilderBackend)),
+		service.WithBuilder(bld),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
 		service.WithDeployer(selectDeployer(cfg.DeployerBackend, cfg.Kubernetes.Kubeconfig)),
 	)
@@ -84,6 +97,7 @@ func New(cfg *config.Config) (*Server, error) {
 		handler:   h,
 		store:     st,
 		wsTickets: wsTickets,
+		audit:     auditSink,
 	}
 
 	router.Use(corsMiddleware(cfg.AllowedOrigins))
@@ -99,10 +113,33 @@ func New(cfg *config.Config) (*Server, error) {
 func (s *Server) Run(addr string) error { return s.router.Run(addr) }
 
 func (s *Server) Close() error {
-	if s == nil || s.store == nil {
+	if s == nil {
+		return nil
+	}
+	if s.audit != nil {
+		_ = s.audit.Close()
+	}
+	if s.store == nil {
 		return nil
 	}
 	return s.store.Close()
+}
+
+// newAuditSink builds the configured audit sink, or returns nil when
+// auditing is disabled. A nil Sink causes auditMiddleware to act as a
+// passthrough — which is what dev-mode wants by default.
+func newAuditSink(cfg config.AuditConfig) (audit.Sink, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	switch cfg.Destination {
+	case "", "stdout":
+		return audit.NewStdoutSink(nil), nil
+	case "file":
+		return audit.NewFileSink(cfg.FilePath)
+	default:
+		return nil, fmt.Errorf("unknown destination %q", cfg.Destination)
+	}
 }
 
 func newStore(ctx context.Context, cfg *config.Config) (*store.Store, error) {
@@ -137,14 +174,22 @@ func corsMiddleware(allowed []string) gin.HandlerFunc {
 	}
 }
 
-func selectBuilder(kind string) builder.Builder {
+func selectBuilder(kind string, k8s config.KubernetesConfig) (builder.Builder, error) {
 	switch kind {
 	case "docker":
-		return builder.NewDockerSock()
+		return builder.NewDockerSock(), nil
 	case "buildkit":
-		return builder.NewBuildKit("")
+		return builder.NewBuildKit(""), nil
+	case "kaniko":
+		return builder.NewKaniko(builder.KanikoConfig{
+			Kubeconfig:     k8s.Kubeconfig,
+			Namespace:      k8s.Namespace,
+			Image:          k8s.KanikoImage,
+			ServiceAccount: k8s.KanikoServiceAccount,
+			ContextPVC:     k8s.KanikoContextPVC,
+		})
 	default:
-		return builder.Noop{}
+		return builder.Noop{}, nil
 	}
 }
 

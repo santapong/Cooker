@@ -23,6 +23,10 @@ import (
 // action, which is what a reader auditing the handler expects to see.
 func (s *Server) registerRoutes() {
 	api := s.router.Group("/api/v1", s.oidcMW.Handler())
+	// Audit middleware sits immediately after auth so claims are in
+	// context. It self-filters to mutating verbs; GETs pass through
+	// untouched.
+	api.Use(auditMiddleware(s.audit))
 
 	h := s.handler
 	writeRole := auth.RequireRole(auth.RoleOperator, auth.RoleAdmin)
