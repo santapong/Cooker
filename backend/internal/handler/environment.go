@@ -107,8 +107,6 @@ func (h *Handler) PutSecret(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// Existence check: 404 cleanly when env doesn't exist, before we
-	// hand off to the backend.
 	if _, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id")); abortStoreErr(c, err, "environment not found") {
 		return
 	}
@@ -207,15 +205,30 @@ func (h *Handler) GetEnvStatus(c *gin.Context) {
 }
 
 // requireSecrets aborts with 503 when no secrets backend is
-// configured. For backend=database this happens when COOKER_SECRET_KEY
-// is empty; for backend=keepsave it should never happen because boot
-// validation rejects partial config.
+// configured. Used by environment secret CRUD which delegates to
+// the secrets.Manager. For backend=database this triggers when
+// COOKER_SECRET_KEY is empty; for backend=keepsave it should never
+// trigger because boot validation rejects partial config.
 func (h *Handler) requireSecrets(c *gin.Context) bool {
 	if h.Secrets != nil {
 		return true
 	}
 	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
 		"error": "secrets disabled: set COOKER_SECRET_KEY (database backend) or configure COOKER_SECRETS_BACKEND=keepsave",
+	})
+	return false
+}
+
+// requireCodec aborts with 503 when no AES codec is configured.
+// Distinct from requireSecrets: the codec also encrypts data outside
+// the secrets.Manager (App webhook secrets), so app webhook handlers
+// gate on this even when the secrets backend is keepsave.
+func (h *Handler) requireCodec(c *gin.Context) bool {
+	if h.Codec != nil && h.Codec.Active() {
+		return true
+	}
+	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+		"error": "codec disabled: set COOKER_SECRET_KEY",
 	})
 	return false
 }
