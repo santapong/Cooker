@@ -322,6 +322,48 @@ helm:
 - [ ] **Architecture Decision Records (ADR)** for the bigger decisions (JSONB graph storage, in-memory + Postgres dual store, single-binary deployment). `docs/architecture.md` mentions them in passing; full ADRs would help future contributors.
 - [ ] **Run the OCI distribution-spec conformance suite** against Cooker's `/registry` proxy endpoints and publish the result. Until that runs, the "OCI compliant" claim in README is a documented intention, not a certified state.
 
+## P9 — Native SDK adapters and additional deploy targets
+
+> **Not blockers for production.** Each item below has a working CLI fallback that ships today (or is an additive new capability). The native-SDK rewrites give lower latency, fewer external CLI dependencies in the container, and richer error reporting — all nice-to-have, none required. Prioritize these only after P1–P4 land or if a specific user need surfaces.
+
+### P9.1 — Replace CLI shell-outs with native Go SDKs
+
+| File | Today | Replace with | Why bother |
+|---|---|---|---|
+| `backend/internal/builder/buildkit.go` | Stub; CLI fallback via `COOKER_BUILDER=docker` shells `docker build` | BuildKit gRPC client (`github.com/moby/buildkit/client`) | No `docker-cli` binary needed in the container; faster and correctly streams progress; no subprocess fan-out per build |
+| `backend/internal/pusher/crane.go` | Stub; CLI fallback via `COOKER_PUSHER=docker` shells `docker push` | `github.com/google/go-containerregistry/pkg/crane` | No `docker-cli`; richer auth (OAuth flows, ECR/GCR token refresh); supports push by digest |
+| `backend/internal/deployer/clientgo.go` | Stub; CLI fallback via `COOKER_DEPLOYER=kubectl` shells `kubectl apply` | `k8s.io/client-go` dynamic client | No `kubectl` binary needed; structured errors instead of stderr text parsing; can do partial-success rollback |
+
+**Effort:** medium per adapter (~1 day each). All three plug into the existing strategy interfaces (`builder.Builder`, `pusher.Pusher`, `deployer.Deployer` defined at `internal/{builder,pusher,deployer}/{builder,pusher,deployer}.go`). The `select<Kind>` switches in `internal/server/server.go:152-185` already have the case branches; you only need to fill in the constructor.
+
+**Caveat:** swapping out the CLI fallbacks shrinks the Dockerfile attack surface (no more `docker-cli` in `apk add`) but requires bumping the Go module set (BuildKit pulls a lot). Check binary size impact before / after.
+
+### P9.2 — Additional deploy targets
+
+`internal/deploytarget/target.go` exposes a `Target` interface with one implementation today (`cloudrun/`, also stubbed). Adding a target = implement the interface + call `deploytarget.Register(...)` in the package's `init()`. The strategy pattern is already wired.
+
+| Adapter | Stub location | Underlying SDK | Notes |
+|---|---|---|---|
+| **Cloud Run** | `internal/deploytarget/cloudrun/` (returns `ErrUnavailable`) | `cloud.google.com/go/run/apiv2` | Needs GCP service-account credentials; expose via env var |
+| **AWS ECS / Fargate** | not yet stubbed | `github.com/aws/aws-sdk-go-v2/service/ecs` | Tasks defined as JSON; map Pipeline stages → task definitions |
+| **Fly.io** | not yet stubbed | `flyctl` SDK or REST API at `https://api.machines.dev` | Per-region machine deploy |
+| **Render** | not yet stubbed | REST API `https://api.render.com/v1/` | Service-deploy POST |
+
+**Effort:** ~1 day per target including basic e2e test. Each adapter is independent.
+
+### P9.3 — GitOpsCommit node
+
+- `backend/internal/gitops/gogit.go` — `go-git` writer is **stubbed** (Noop returns a deterministic fake SHA per `internal/gitops/noop.go`). When implemented, the GitOpsCommit pipeline node will commit a manifest change to a Git repo (e.g., for FluxCD / ArgoCD pull-based deploys).
+- `internal/gitops/writer.go` defines the interface; `gogit.go` is the placeholder.
+- **Effort:** medium (~half day). Need to handle SSH key auth, signed commits if requested, and conflict-retry on concurrent writes.
+
+### P9.4 — Tailscale `tsnet` transport
+
+- `backend/internal/transport/tsnet/` is **build-tagged**; default builds don't include it.
+- Allows Cooker to join a Tailnet and reach private K8s API servers / private registries without a public VPN.
+- **Effort:** small (~2 hours) to remove the build tag and document. Larger (~half day) if Cooker needs to provision its own Tailscale auth keys via OAuth.
+- **Caveat:** adding `tailscale.com/tsnet` is a sizeable dependency; default-off is the right call until there's a user need.
+
 ---
 
 ## Closed (recent)
