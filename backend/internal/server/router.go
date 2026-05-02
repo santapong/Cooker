@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/cooker-ci/cooker/internal/auth"
@@ -168,12 +170,31 @@ func (s *Server) registerRoutes() {
 		settings.POST("/clusters", adminRole, handler.AddClusterConfig)
 	}
 
-	// WebSocket routes. Known gap: browsers cannot send Authorization
-	// on WS upgrade so these channels are protected only by the
-	// unguessability of the UUIDv4 runId/buildId. Tightening this to
-	// a short-lived ticket exchanged over /api/v1 is tracked for the
-	// multi-tenant follow-up.
-	ws := s.router.Group("/ws")
+	// Ticket exchange for WebSocket upgrades. The browser POSTs here
+	// over the authenticated /api/v1 group, gets back a single-use
+	// 60-second ticket, then opens /ws/... with ?ticket=<value>.
+	api.POST("/ws-tickets", func(c *gin.Context) {
+		claims := auth.GetUser(c)
+		if claims == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+			return
+		}
+		tok, exp, err := s.wsTickets.Issue(claims.Subject)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "ticket issuance failed"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"ticket":     tok,
+			"expires_at": exp.UTC().Format("2006-01-02T15:04:05Z"),
+		})
+	})
+
+	// WebSocket routes. Each request must present a single-use
+	// ticket obtained from POST /api/v1/ws-tickets. The ticket
+	// gate runs before the upgrade so unauthenticated probing
+	// gets 401 without ever touching the hub.
+	ws := s.router.Group("/ws", s.wsTicketGate())
 	{
 		ws.GET("/pipeline-run/:runId", func(c *gin.Context) {
 			s.wsHub.HandlePipelineRun(c.Writer, c.Request, c.Param("runId"))
