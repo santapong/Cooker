@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # Run on PRs to main and to any in-flight stacked PR branches
+    # under claude/** so each stacked PR in a series gets verified
+    # without waiting for the parent to merge first.
+    branches:
+      - main
+      - "claude/**"
 
 jobs:
   backend:
