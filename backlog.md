@@ -165,6 +165,65 @@ All three items below add Go module deps; they share a single follow-up PR that 
 
 `backend/internal/transport/tsnet/` is build-tagged. Removing the build tag is ~2 hours; provisioning own auth keys via OAuth is ~half day. Adds a sizeable dep — default-off is the right call until there's a user need.
 
+#### P9.5 — Buildah builder adapter (alternative to Kaniko)
+
+A third in-cluster builder alongside Kaniko, slotting into the same
+`builder.Builder` interface and the same `batch/v1.Job` Pod pattern. Job
+runs `quay.io/buildah/stable` instead of `gcr.io/kaniko-project/executor`.
+
+**Why an operator would pick Buildah over Kaniko:**
+
+- Full Dockerfile feature parity with BuildKit — `RUN --mount=type=cache`,
+  `RUN --mount=type=secret`, `RUN --mount=type=ssh`, heredocs. Kaniko silently
+  ignores these directives.
+- Better layer cache when paired with `--layers --cache-to=registry://...`.
+- Active maintenance pace (Red Hat / containers.org); Kaniko's release
+  cadence has slowed.
+
+**Why an operator would not:**
+
+- Rootless Buildah needs `CAP_SETUID` + `CAP_SETGID` for its user-namespace
+  setup. PodSecurityAdmission "restricted" drops both — operators must opt
+  the build namespace into "baseline" or a custom profile. Kaniko avoids
+  this with `runAsUser=0` inside the container only.
+- Larger image (~150 MB vs Kaniko's ~50 MB).
+- Storage driver choice: needs `overlay` (with fuse-overlayfs on the
+  nodes) or `vfs` (slower, no kernel module). Kaniko bundles its own.
+
+**Files to add:** `backend/internal/builder/buildah.go`,
+`backend/internal/builder/buildah_test.go`.
+
+**Files to modify:**
+- `backend/internal/server/server.go` — `selectBuilder` add
+  `case "buildah": return builder.NewBuildah(...)`.
+- `backend/internal/config/config.go` — `KubernetesConfig.BuildahImage`,
+  `BuildahServiceAccount`, `BuildahStorageDriver` (`overlay` | `vfs`).
+- `deploy/helm/cooker/values.yaml` — `builder.buildah.{image, namespace,
+  serviceAccount, contextPVC, storageDriver}`. Document the PSA story
+  inline.
+- `deploy/helm/cooker/templates/deployment.yaml` — extend the
+  `COOKER_BUILDER=kaniko` env block to include buildah's env-vars when
+  `builder.kind=buildah`.
+- `deploy/helm/cooker/templates/rbac.yaml` — extend the gate from
+  `eq .Values.builder.kind "kaniko"` to
+  `or (eq .Values.builder.kind "kaniko") (eq .Values.builder.kind "buildah")`.
+  Same Role + RoleBinding apply (Job + Pod create/get/delete/watch in
+  the build namespace).
+- `SECURITY.md` — add Buildah row to the "image build isolation" table
+  with the PSA caveat called out.
+- `.github/workflows/ci.yml` — extend the helm-template matrix with a
+  `builder.kind=buildah` render that asserts (a) docker-socket is absent,
+  (b) RBAC objects are present.
+
+**CLI fallback option (lighter alt):** shell out to `buildah bud` from a
+sidecar container in the cooker pod, no Job submission. Fewer moving
+parts, but needs the Cooker container image to bundle buildah (~150 MB)
+and the user-namespace capability on the cooker pod itself. Not
+recommended for production.
+
+**Effort:** ~1 day for the Job-based version (mostly the PSA story and
+the `--cache-to` registry wiring); ~half day for the CLI shell-out.
+
 ---
 
 ## Closed (recent)
