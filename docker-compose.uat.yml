@@ -128,6 +128,15 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile
+      # Vite bakes VITE_* values into the static bundle at build time.
+      # When OIDC is enabled, set these in .env.uat (see .env.uat.example).
+      args:
+        VITE_OIDC_ENABLED: ${VITE_OIDC_ENABLED:-false}
+        VITE_OIDC_AUTHORITY: ${VITE_OIDC_AUTHORITY:-}
+        VITE_OIDC_CLIENT_ID: ${VITE_OIDC_CLIENT_ID:-}
+        VITE_OIDC_REDIRECT_URI: ${VITE_OIDC_REDIRECT_URI:-}
+        VITE_OIDC_POST_LOGOUT_REDIRECT_URI: ${VITE_OIDC_POST_LOGOUT_REDIRECT_URI:-}
+        VITE_OIDC_SCOPE: ${VITE_OIDC_SCOPE:-}
     image: cooker:uat
     environment:
       DATABASE_URL: postgres://cooker:cooker@postgres:5432/cooker?sslmode=disable
@@ -137,8 +146,15 @@ services:
       COOKER_PUSHER: docker
       COOKER_DEPLOYER: kubectl
       KUBECONFIG: /etc/cooker/kube/kubeconfig.yaml
-      COOKER_OIDC_ENABLED: "false"
-      COOKER_ALLOWED_ORIGINS: http://localhost:8080
+      # OIDC config is read from .env.uat (see .env.uat.example).
+      # When COOKER_OIDC_ENABLED=false the backend injects a dev admin
+      # user so pipeline/deploy tests can run without an IdP.
+      COOKER_OIDC_ENABLED: ${COOKER_OIDC_ENABLED:-false}
+      COOKER_OIDC_ISSUER_URL: ${COOKER_OIDC_ISSUER_URL:-}
+      COOKER_OIDC_CLIENT_ID: ${COOKER_OIDC_CLIENT_ID:-}
+      COOKER_OIDC_CLIENT_SECRET: ${COOKER_OIDC_CLIENT_SECRET:-}
+      COOKER_OIDC_REDIRECT_URL: ${COOKER_OIDC_REDIRECT_URL:-http://localhost:8080/callback}
+      COOKER_ALLOWED_ORIGINS: ${COOKER_ALLOWED_ORIGINS:-http://localhost:8080}
       # COOKER_SECRET_KEY is injected via .env.uat by `make uat-up`.
       COOKER_SECRET_KEY: ${COOKER_SECRET_KEY:-}
     volumes:

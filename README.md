@@ -29,7 +29,7 @@ A web-based CI/CD management tool with a **graph-based UI** for visually buildin
 - **Frontend**: React + TypeScript + React Flow (visual DAG editor) + Zustand
 - **Backend**: Go + Gin + Docker SDK + client-go + go-containerregistry
 - **Database**: PostgreSQL + Redis
-- **Auth**: OIDC/OAuth 2.0 with PKCE (Keycloak, Okta, Azure AD, Google, GitHub)
+- **Auth**: OIDC/OAuth 2.0 with PKCE (Keycloak, Okta, Azure AD, Google, GitHub) — disabled by default in local/UAT (the backend injects a dev admin user); see [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) to enable.
 
 See [docs/architecture.md](docs/architecture.md) for the full architecture document.
 
@@ -157,7 +157,9 @@ See [SECURITY.md](SECURITY.md) for the production deployment security checklist.
 
 | Document | Description |
 |----------|-------------|
-| [docs/architecture.md](docs/architecture.md) | System architecture, component details, data flow, OCI integration, design decisions |
+| [docs/architecture.md](docs/architecture.md) | System architecture, component map, data flow, OCI integration |
+| [docs/design.md](docs/design.md) | Design patterns, conventions, auth flow, testing strategy, contributor checklist |
+| [docs/UAT.md](docs/UAT.md) | UAT runbook and how to enable OIDC sign-in for testers |
 | [CHANGELOG.md](CHANGELOG.md) | Version history following Keep a Changelog format |
 | [SECURITY.md](SECURITY.md) | Security policy, auth architecture, production hardening checklist |
 

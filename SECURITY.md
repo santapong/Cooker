@@ -33,6 +33,8 @@ Cooker uses **OpenID Connect (OIDC)** with **OAuth 2.0 PKCE** flow for authentic
 - **Session management**: Short-lived access tokens with refresh token rotation
 - **Supported providers**: Keycloak, Okta, Azure AD, Google, GitHub
 
+> **Default in local & UAT:** OIDC is **disabled** (`COOKER_OIDC_ENABLED=false`) and the backend injects a dev admin user so contributors and testers can exercise the API without an IdP. Production deployments **must** enable OIDC — see the checklist below and [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) for how to wire Google or another provider.
+
 ### Authorization (RBAC)
 
 Role-based access control with three tiers:

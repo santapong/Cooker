@@ -7,7 +7,15 @@ interface Props {
 }
 
 export default function ProtectedRoute({ children, requiredRoles }: Props) {
-  const { user, isAuthenticated, login } = useAuth();
+  const { user, isAuthenticated, isLoading, login } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>
+        Loading…
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return (

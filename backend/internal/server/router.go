@@ -1,8 +1,6 @@
 package server
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 
 	"github.com/cooker-ci/cooker/internal/auth"
@@ -181,14 +179,13 @@ func (s *Server) registerRoutes() {
 		})
 	}
 
-	// Serve frontend static files in production
+	// Serve frontend static files in production. The OIDC redirect
+	// URI (/callback) is handled entirely in the browser via PKCE —
+	// the backend never sees the auth code, so no server-side
+	// callback handler is needed. NoRoute serves index.html for all
+	// unmatched paths, including /callback.
 	s.router.NoRoute(func(c *gin.Context) {
 		c.File("/usr/share/cooker/static/index.html")
 	})
 	s.router.Static("/assets", "/usr/share/cooker/static/assets")
-
-	// Auth callback (for OIDC redirect)
-	s.router.GET("/auth/callback", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "OIDC callback placeholder"})
-	})
 }

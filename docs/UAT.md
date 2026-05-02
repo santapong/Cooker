@@ -241,9 +241,10 @@ issue with the commit SHA.
   no LoadBalancer. Services are `ClusterIP`; reach deployed apps
   via `make uat-shell && kubectl port-forward svc/<name> 8000:80`.
 - Registry has no auth and no TLS.
-- **No authentication** on the Cooker API in UAT mode. Every
-  request is treated as the built-in admin `dev-user`. Do not
-  expose port 8080 to the internet.
+- **Authentication is off by default** in UAT — every request is
+  treated as the built-in admin `dev-user`. To exercise the real
+  OIDC flow, see "Enabling OIDC sign-in for UAT" below. Do not
+  expose port 8080 to the internet while auth is off.
 - **WebSocket reconnect is not automatic.** If the Cooker
   container restarts mid-deploy, refresh the App detail page
   and trigger a new deploy.
@@ -255,6 +256,84 @@ issue with the commit SHA.
   pipeline ID `app-<appId>`** which doesn't appear in the
   Pipelines list. Intentional for the current phase; a proper
   "App runs" view is a follow-up.
+
+## Enabling OIDC sign-in for UAT
+
+UAT defaults to auth-off because most testers don't want to wire
+an IdP just to click Deploy. When you do need to exercise the
+real sign-in flow (e.g. before promoting a build to staging), do
+this:
+
+1. **Copy the env template** if you haven't already:
+
+   ```sh
+   cp .env.uat.example .env.uat
+   ```
+
+   `make uat-up` does this automatically on first run and appends
+   a fresh `COOKER_SECRET_KEY`.
+
+2. **Pick a provider section** in `.env.uat` (Google or KeepSave),
+   uncomment it, fill in the values, save.
+
+3. **Rebuild the stack** so Vite re-bakes the `VITE_OIDC_*` values
+   into the JS bundle:
+
+   ```sh
+   make uat-reset
+   ```
+
+4. Visit http://localhost:8080 — you'll be redirected to the IdP
+   login page; after sign-in you land back at `/callback` and
+   then the Apps page.
+
+### Provider: Google
+
+Easiest for solo testing. Google issues real OIDC JWTs and the
+backend validates them out of the box.
+
+1. https://console.cloud.google.com/apis/credentials → **Create
+   Credentials** → **OAuth client ID** → type **Web application**.
+2. **Authorized redirect URI**: `http://localhost:8080/callback`.
+3. Copy the **Client ID** (the secret is not used — the browser
+   uses PKCE).
+4. In `.env.uat`, uncomment the **Provider preset: Google**
+   block and paste the Client ID into both
+   `COOKER_OIDC_CLIENT_ID` and `VITE_OIDC_CLIENT_ID`.
+
+> Caveat: Google does not emit a `groups` claim by default, so
+> all signed-in users fall back to the **viewer** role per
+> `backend/internal/auth/rbac.go:95`. To exercise admin/operator
+> flows, prefer KeepSave (or stand up Keycloak — out of scope
+> for UAT).
+
+### Provider: KeepSave
+
+Use this when you want full RBAC (admin / operator / approver /
+viewer roles) backed by your own IdP.
+
+1. Register Cooker as an OIDC client in KeepSave with redirect
+   URI `http://localhost:8080/callback` and PKCE enabled.
+2. Configure KeepSave to emit a `groups` claim containing one of:
+   `cooker-admins`, `cooker-operators`, `cooker-approvers`, or
+   `cooker-viewers` (mapping in `backend/internal/auth/rbac.go:77`).
+3. In `.env.uat`, uncomment the **Provider preset: KeepSave**
+   block and set:
+   - `COOKER_OIDC_ISSUER_URL` / `VITE_OIDC_AUTHORITY` to your
+     KeepSave base URL (it must serve
+     `/.well-known/openid-configuration`).
+   - `COOKER_OIDC_CLIENT_ID` / `VITE_OIDC_CLIENT_ID` to the
+     client ID you registered.
+
+### Switching back to auth-off
+
+```sh
+make uat-down
+# edit .env.uat: comment out COOKER_OIDC_ENABLED / VITE_OIDC_ENABLED
+make uat-up
+```
+
+Or `rm .env.uat && make uat-up` for a clean slate.
 
 ## Post-UAT follow-ups
 
