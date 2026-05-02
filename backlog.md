@@ -159,54 +159,6 @@ func (k *Kaniko) Build(ctx context.Context, spec builder.Spec, log io.Writer) (b
 - OIDC tokens (raw JWT) never appear (only the `sub` claim).
 - Request bodies that may contain credentials (`PUT /environments/:id/secrets/:key`, `PUT /apps/:id/webhook`) are not logged in the `extra` field.
 
-**Implementation outline (~2 hours):**
-```go
-// backend/internal/audit/audit.go
-type Event struct {
-    Action    string                 `json:"action"`
-    Target    Target                 `json:"target"`
-    Result    string                 `json:"result"`
-    Extra     map[string]any         `json:"extra,omitempty"`
-}
-type Target struct{ Kind, ID string; Extra map[string]any `json:",omitempty"` }
-
-type Logger struct{ s *slog.Logger }
-
-func (l *Logger) Log(ctx context.Context, e Event) {
-    actor := auth.GetUser(ctx)  // *Claims or nil
-    l.s.LogAttrs(ctx, slog.LevelInfo, "audit",
-        slog.String("action", e.Action),
-        slog.Any("actor", actor),
-        slog.Any("target", e.Target),
-        slog.String("result", e.Result),
-        ...
-    )
-}
-```
-
-```go
-// backend/internal/server/middleware_audit.go
-func auditAction(logger *audit.Logger, action string) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        start := time.Now()
-        c.Next()
-        result := "success"
-        if c.Writer.Status() >= 400 { result = "denied" }
-        logger.Log(c.Request.Context(), audit.Event{
-            Action: action,
-            Target: audit.Target{Kind: kindFromRoute(c), ID: c.Param("id")},
-            Result: result,
-            Extra:  map[string]any{"duration_ms": time.Since(start).Milliseconds()},
-        })
-    }
-}
-```
-
-**Verification:**
-- Unit: emit one event per audit-eligible action, assert JSON shape and required fields.
-- Unit: secret reveal logs the *key* but not the *value* — assert via golden test.
-- Manual: trigger a deploy, confirm one `audit` line on stdout with the right shape; pipe into `jq` for sanity.
-
 **Risk:** low. Pure addition; no behavior change. The biggest risk is volume — if a user deploys 1000 apps in a script, the audit log grows linearly. Mitigation: operators should ship logs to a real backend (Loki, Datadog, etc.) and rotate stdout; sampling is **not** appropriate for audit logs.
 
 ---
@@ -232,10 +184,10 @@ Cooker doesn't terminate TLS itself; the ingress controller (or cloud LB) must. 
 
 ---
 
-## P2 — Secrets manager integration (planned)
+## P2 — Secrets manager integration
 
-- [ ] **PR G — KeepSave secrets manager.** **Backlog.** Will be planned in a separate session once the user walks through KeepSave's API. The integration is purely additive: define a `secrets.Manager` interface (`Get`, `Put`, `Delete`, `List`), add `internal/secrets/keepsave/` adapter, and switch `internal/handler/environment.go` to call it. The DB-backed encrypted column keeps working as the default and as a fallback. Helm values: `secrets.backend: keepsave|database`, `secrets.keepsave.{url,authMode,...}`.
-- [ ] **HashiCorp Vault adapter.** Same `secrets.Manager` interface, second adapter. Pulls via Vault Agent injector pattern.
+- [x] **P2.1 — KeepSave secrets manager.** **Closed.** `secrets.Manager` interface lives at `backend/internal/secrets/manager.go`; `database` adapter wraps the existing AES-GCM logic and `keepsave` adapter delegates to a KeepSave server over HTTP. Selection via `COOKER_SECRETS_BACKEND`. KeepSave is system of record when selected. See [README §Secrets backends](README.md#secrets-backends). Follow-ups: swap the internal HTTP client for the published Go SDK (currently lacks a `go.mod`); add Helm chart values + deployment template wiring; surface KeepSave's `/promote` endpoint as a Cooker secret-promotion handler.
+- [ ] **HashiCorp Vault adapter.** Same `secrets.Manager` interface, third adapter. Pulls via Vault Agent injector pattern.
 - [ ] **AWS Secrets Manager / GCP Secret Manager adapters.** Cloud-native deployments.
 
 ## P3 — Auth and authorization extensions
@@ -368,8 +320,9 @@ helm:
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series and PR #6:
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, and the `claude/cooker-backlog-readme-com8z` PR:
 
+- ✅ **KeepSave secrets-manager backend** — `secrets.Manager` interface + `database`/`keepsave` adapters; selectable via `COOKER_SECRETS_BACKEND`. P2.1.
 - ✅ **OIDC PKCE wiring** (frontend + backend) — PR #6
 - ✅ **kubectl SHA verification** in the Dockerfile — PR #6
 - ✅ **HEALTHCHECK directive** — PR #6
