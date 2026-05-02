@@ -23,23 +23,20 @@ import (
 // credentials, no network, or is not implemented in this build.
 var ErrUnavailable = errors.New("deploytarget: unavailable")
 
+// ErrDuplicateKind is returned by Register when an adapter for the
+// same Kind has already been registered. Callers can either treat
+// this as fatal (use MustRegister) or surface it through their own
+// startup-validation path.
+var ErrDuplicateKind = errors.New("deploytarget: duplicate kind")
+
 // Spec describes one deployment request in target-agnostic terms.
 // Adapters translate this to K8s manifests, a cloud-run service
 // YAML, or a Docker container spec as appropriate.
 type Spec struct {
-	// AppID identifies the App this deployment belongs to. Adapters
-	// use it to tag resources for later Status/Logs/Rollback calls.
-	AppID string
-	// Image is the fully-qualified image reference (includes tag or
-	// digest).
-	Image string
-	// Env is the merged environment (PlainVars + resolved secrets)
-	// for the container.
-	Env map[string]string
-	// Ports is the set of container ports the service exposes.
-	Ports []int
-	// Replicas is the desired replica count. Zero means "backend
-	// default" (Cloud Run autoscales; K8s picks 1).
+	AppID    string
+	Image    string
+	Env      map[string]string
+	Ports    []int
 	Replicas int
 }
 
@@ -54,38 +51,39 @@ type Status struct {
 // Target is the plugin interface. Adapters must be safe for
 // concurrent use.
 type Target interface {
-	// Kind returns the stable identifier used when routing an App's
-	// DeployTarget.Kind to a specific adapter.
 	Kind() model.DeployTargetKind
-	// Deploy applies spec to the target runtime.
 	Deploy(ctx context.Context, spec Spec) error
-	// Status reports the current health of the deployment.
 	Status(ctx context.Context, appID string) (Status, error)
-	// Logs streams container logs for appID into out until ctx is
-	// cancelled or the stream ends.
 	Logs(ctx context.Context, appID string, out io.Writer) error
-	// Rollback restores the previous revision of appID.
 	Rollback(ctx context.Context, appID string) error
 }
 
-// registry is the global adapter registry. Adapters register in
-// their own init() so importing the package is enough to make the
-// Kind available to the server.
 var (
 	registry   = map[model.DeployTargetKind]Target{}
 	registryMu sync.RWMutex
 )
 
-// Register adds t to the registry. Panics on duplicate Kind so
-// misconfigured binaries fail loudly at startup rather than in the
-// middle of a deploy.
-func Register(t Target) {
+// Register adds t to the registry. Returns ErrDuplicateKind when an
+// adapter for the same Kind is already registered. Callers wiring
+// adapters at boot should either log.Fatal on the error or use
+// MustRegister for the same effect with less ceremony.
+func Register(t Target) error {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	if _, dup := registry[t.Kind()]; dup {
-		panic(fmt.Sprintf("deploytarget: duplicate Kind %q", t.Kind()))
+		return fmt.Errorf("%w: %q", ErrDuplicateKind, t.Kind())
 	}
 	registry[t.Kind()] = t
+	return nil
+}
+
+// MustRegister is the panic-on-error convenience wrapper around
+// Register. Use from init() blocks where a duplicate registration
+// indicates a programming error and should fail loudly at startup.
+func MustRegister(t Target) {
+	if err := Register(t); err != nil {
+		panic(err)
+	}
 }
 
 // Lookup returns the registered adapter for kind. Callers should
@@ -101,7 +99,7 @@ func Lookup(kind model.DeployTargetKind) (Target, error) {
 }
 
 // ResetForTest clears the registry. Tests in adjacent packages use
-// this to avoid duplicate-kind panics across test runs.
+// this to avoid duplicate-kind state across test runs.
 func ResetForTest() {
 	registryMu.Lock()
 	defer registryMu.Unlock()
