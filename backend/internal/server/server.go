@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/cooker-ci/cooker/internal/auth"
 	"github.com/cooker-ci/cooker/internal/builder"
@@ -21,12 +22,13 @@ import (
 
 // Server holds the HTTP server and all dependencies.
 type Server struct {
-	router  *gin.Engine
-	config  *config.Config
-	wsHub   *WebSocketHub
-	oidcMW  *auth.Middleware
-	handler *handler.Handler
-	store   *store.Store
+	router    *gin.Engine
+	config    *config.Config
+	wsHub     *WebSocketHub
+	oidcMW    *auth.Middleware
+	handler   *handler.Handler
+	store     *store.Store
+	wsTickets *wsTicketStore
 }
 
 // New creates a new Server instance with all routes and middleware.
@@ -56,6 +58,9 @@ func New(cfg *config.Config) (*Server, error) {
 
 	router := gin.Default()
 	wsHub := NewWebSocketHub(cfg.AllowedOrigins)
+	// 60-second single-use tickets for WS upgrades. See wsticket.go
+	// for the threat model.
+	wsTickets := newWSTicketStore(60 * time.Second)
 
 	// Build the executor with backends chosen from config. Unknown
 	// values fall back to Noop with a log line so booting never
@@ -72,12 +77,13 @@ func New(cfg *config.Config) (*Server, error) {
 	h.WSBroadcast = wsHub.Broadcast
 
 	s := &Server{
-		router:  router,
-		config:  cfg,
-		wsHub:   wsHub,
-		oidcMW:  oidcMW,
-		handler: h,
-		store:   st,
+		router:    router,
+		config:    cfg,
+		wsHub:     wsHub,
+		oidcMW:    oidcMW,
+		handler:   h,
+		store:     st,
+		wsTickets: wsTickets,
 	}
 
 	// CORS middleware
