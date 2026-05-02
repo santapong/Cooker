@@ -30,6 +30,7 @@ A web-based CI/CD management tool with a **graph-based UI** for visually buildin
 - **Backend**: Go + Gin + Docker SDK + client-go + go-containerregistry
 - **Database**: PostgreSQL + Redis
 - **Auth**: OIDC/OAuth 2.0 with PKCE (Keycloak, Okta, Azure AD, Google, GitHub) — disabled by default in local/UAT (the backend injects a dev admin user); see [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) to enable.
+- **Secrets**: pluggable backends — AES-GCM at rest in Postgres (default) or delegated to a [KeepSave](https://github.com/santapong/keepsave) server. See [Secrets backends](#secrets-backends).
 
 See [docs/architecture.md](docs/architecture.md) for the full architecture document.
 
@@ -64,6 +65,7 @@ docker compose up
 - **OCI Registry Integration** - Push/pull via distribution-spec, browse tags, inspect manifests, referrers API for supply chain metadata
 - **Kubernetes Dashboard** - Manage workloads, scale, restart, view logs across clusters and namespaces
 - **SSO Authentication** - OpenID Connect with PKCE, RBAC (admin, operator, viewer roles)
+- **Pluggable secrets backend** - AES-GCM in Postgres or delegated to a [KeepSave](https://github.com/santapong/keepsave) server (per-project API keys, AES-256-GCM at rest, key rotation, env-to-env promotion)
 - **Live Execution** - WebSocket-powered real-time pipeline status, build logs, and K8s event streaming
 - **Environment Swim Lanes** - Visual grouping of pipeline stages by deployment environment
 
@@ -95,7 +97,7 @@ Base path: `/api/v1`
 | **Docker** | List/inspect images (OCI manifest), build, list/manage containers |
 | **Registry** | List repos/tags, get manifests, push/pull, referrers API |
 | **Kubernetes** | List namespaces/workloads, scale, restart, pod logs, apply manifests |
-| **Environments** | CRUD, promote, approve, per-env status |
+| **Environments** | CRUD, promote, approve, per-env status, secret CRUD (admin-only) |
 | **WebSocket** | Pipeline run stream, Docker build stream, K8s watch events |
 
 ## Project Structure
@@ -117,6 +119,7 @@ Base path: `/api/v1`
 │   │   ├── auth/          OIDC middleware, RBAC
 │   │   ├── handler/       HTTP handlers (pipeline, Docker, K8s, registry, env)
 │   │   ├── service/       Business logic (executor, promoter)
+│   │   ├── secrets/       Secrets manager interface + adapters (database, keepsave)
 │   │   ├── model/         Domain types
 │   │   ├── oci/           OCI image-spec types, media types, validation
 │   │   └── store/         PostgreSQL persistence + migrations
@@ -167,6 +170,39 @@ helm install cooker deploy/helm/cooker/ \
 ```
 
 See [SECURITY.md](SECURITY.md) for the production deployment security checklist.
+
+## Secrets backends
+
+Cooker supports two backends for environment-scoped secrets, selected at boot via `COOKER_SECRETS_BACKEND`. The `Manager` interface lives at `backend/internal/secrets/manager.go`; adapters are independent packages. Switching is purely a config change — handler logic and the on-the-wire API are identical between backends.
+
+| Backend | When to use | Storage | Encryption |
+|---|---|---|---|
+| `database` *(default)* | Single-Cooker installs; no separate secrets infra | `environments.secrets` JSONB column | AES-GCM (`COOKER_SECRET_KEY`, base64-encoded 32 bytes) |
+| `keepsave` | Multi-tenant or audit-heavy environments; dedicated secrets infra | [KeepSave](https://github.com/santapong/keepsave) server (system of record) | AES-256-GCM at rest, managed by KeepSave; per-project DEKs |
+
+### `database` (default)
+
+```bash
+COOKER_SECRETS_BACKEND=database          # or unset
+COOKER_SECRET_KEY=$(head -c 32 /dev/urandom | base64)
+```
+
+In production with this backend, `COOKER_SECRET_KEY` is required and validated at boot. With no key set, the secret API returns `503` so the operator notices the gap rather than silently storing plaintext.
+
+### `keepsave`
+
+A single KeepSave project owns all of Cooker's secrets. Cooker's environment **name** (`prod`, `uat`, etc.) maps to KeepSave's `environment` query parameter; per-environment isolation comes from KeepSave's per-env API-key scoping. KeepSave's `/promote` endpoint is available for future wiring of Cooker's secret-promotion flow.
+
+```bash
+COOKER_SECRETS_BACKEND=keepsave
+COOKER_SECRETS_KEEPSAVE_URL=http://keepsave:8080
+COOKER_SECRETS_KEEPSAVE_PROJECT_ID=<cooker-project-uuid>
+COOKER_SECRETS_KEEPSAVE_API_KEY=ks_xxxx
+```
+
+With this backend, `COOKER_SECRET_KEY` is no longer required — KeepSave handles encryption. Production startup validation rejects partial config: any one of the three KeepSave variables missing is fatal.
+
+**Switching backends:** secrets do not auto-migrate. Plan a one-shot copy step (read from old, write to new) before flipping the env var. Both reads and writes go to a single backend at runtime — there is no live dual-write.
 
 ## Documentation
 
