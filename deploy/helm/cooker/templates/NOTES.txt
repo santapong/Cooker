@@ -1,0 +1,39 @@
+Cooker {{ .Chart.AppVersion }} deployed to namespace {{ .Release.Namespace }}.
+
+Access:
+{{- if .Values.ingress.enabled }}
+  https://{{ (index .Values.ingress.hosts 0).host }}
+{{- else }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "cooker.fullname" . }} 8080:{{ .Values.service.port }}
+  open http://localhost:8080
+{{- end }}
+
+{{- if eq .Values.cookerEnv "production" }}
+
+Production checklist:
+{{- if not .Values.oidc.enabled }}
+  [WARNING] OIDC is disabled. Cooker injects a static dev admin
+            user on every request. Set --set oidc.enabled=true
+            and configure issuerUrl / clientId / clientSecret*
+            before exposing this deployment.
+{{- end }}
+{{- if not (or .Values.secretKey.value .Values.secretKey.existingSecret) }}
+  [ERROR]   COOKER_SECRET_KEY not configured. The backend will
+            refuse to start in production (config.Validate() fails).
+            Either:
+              --set secretKey.existingSecret=<your-secret-name>
+            or:
+              --set secretKey.value=<base64-encoded 32 bytes>
+{{- end }}
+{{- if and .Values.oidc.enabled .Values.oidc.clientSecret (not .Values.oidc.clientSecretRef.name) }}
+  [WARNING] OIDC client secret is set inline via oidc.clientSecret.
+            For production, set oidc.clientSecretRef.name to a
+            pre-existing Kubernetes Secret managed out-of-band
+            (sealed-secrets, external-secrets, vault-injector).
+{{- end }}
+{{- if not .Values.oidc.allowedOrigins }}
+  [ERROR]   oidc.allowedOrigins is empty. Production fails fast on
+            empty COOKER_ALLOWED_ORIGINS. Set
+              --set 'oidc.allowedOrigins={https://cooker.example.com}'
+{{- end }}
+{{- end }}
