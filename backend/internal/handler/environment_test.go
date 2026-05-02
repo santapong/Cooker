@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -91,7 +92,7 @@ func TestSecretRoundTrip_AdminOnly(t *testing.T) {
 	h := newTestHandler(t)
 
 	env := &model.Environment{ID: "env1", Name: "prod", PlainVars: map[string]string{"DEBUG": "false"}}
-	if err := h.Store.Environments.Create(nil, env); err != nil {
+	if err := h.Store.Environments.Create(context.Background(), env); err != nil {
 		t.Fatal(err)
 	}
 
