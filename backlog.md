@@ -51,48 +51,14 @@ These can't ship inside the chart because they depend on the operator's environm
 - `backend/internal/builder/kaniko_test.go` — contract test against the `Builder` interface (smoke + error-path).
 
 **Files to modify:**
-- `backend/internal/server/server.go:152-161` — extend `selectBuilder` switch to handle `case "kaniko"`.
-- `backend/internal/config/config.go:23` — keep doc-string in sync (`"noop" | "docker" | "buildkit" | "kaniko"`).
+- `backend/internal/server/server.go` — extend `selectBuilder` switch to handle `case "kaniko"`.
+- `backend/internal/config/config.go` — keep doc-string in sync (`"noop" | "docker" | "buildkit" | "kaniko"`).
 - `deploy/helm/cooker/values.yaml` — new `builder.kind: docker|buildkit|kaniko` value, default `kaniko` for production. New `builder.kaniko.{image, registryAuthSecret, cachingEnabled}` sub-values.
 - `deploy/helm/cooker/templates/deployment.yaml` — when `builder.kind=kaniko`, **drop the docker.sock volume mount entirely** and remove the `group_add` requirement. Conditional logic in the existing `{{- if .Values.docker.enabled }}` block.
-- `deploy/helm/cooker/templates/rbac.yaml` — Cooker's ServiceAccount needs `pods` create/get/delete (or `Job` resources) in its own namespace if it spawns Kaniko pods directly, OR `secrets get` if Cooker passes registry credentials to a kaniko pod template. Decide one of the two patterns below.
+- `deploy/helm/cooker/templates/rbac.yaml` — Cooker's ServiceAccount needs `pods` create/get/delete (or `Job` resources) in its own namespace if it spawns Kaniko pods directly, OR `secrets get` if Cooker passes registry credentials to a kaniko pod template.
 - `SECURITY.md` Docker Socket Security section — mark Kaniko as the default in the chart, leave docker.sock as a UAT/dev fallback.
 - `docs/architecture.md` builder section — add Kaniko as a first-class adapter.
 - `backlog.md` — close this item; add to "Closed" log.
-
-**Two Kaniko integration patterns — pick one:**
-
-| Pattern | Pros | Cons |
-|---|---|---|
-| **(a) Cooker spawns Kaniko Pods via client-go.** Cooker creates a `Job` per build with the Kaniko image, mounts the source as an emptyDir, points at the registry. Cooker watches the Job to completion, streams logs via `kubectl logs -f`. | Cooker owns the lifecycle; cleanup is straightforward. Build isolation per-pod. | Requires `Job` create/get/delete RBAC in the namespace. Latency per build (pod startup ~5s). |
-| **(b) Cooker calls a Tekton / Argo Workflows pipeline.** Cooker just submits a CR and watches its status. Build happens in a fully separate operator's domain. | Industry-standard pattern; reuses existing CI/CD operator if installed. | Adds a hard dependency on Tekton or Argo. Operator must install one. |
-
-Recommend **(a)** for the first iteration — fewer external dependencies, fits the existing strategy-pattern. Add (b) as a separate adapter later if there's demand.
-
-**Implementation outline (~half a day):**
-```go
-// backend/internal/builder/kaniko.go
-type Kaniko struct {
-    Client      kubernetes.Interface
-    Namespace   string  // where to spawn build pods
-    Image       string  // gcr.io/kaniko-project/executor:v1.21.0
-    PullSecrets []string
-}
-
-func (k *Kaniko) Build(ctx context.Context, spec builder.Spec, log io.Writer) (builder.Result, error) {
-    job := buildJob(spec, k.Image, k.Namespace, k.PullSecrets)
-    created, err := k.Client.BatchV1().Jobs(k.Namespace).Create(ctx, job, metav1.CreateOptions{})
-    if err != nil { return builder.Result{}, err }
-    defer cleanup(ctx, k.Client, created)
-    return waitAndStreamLogs(ctx, k.Client, created, log)
-}
-```
-
-**Verification:**
-- Unit: contract test against the existing `TestBuilder*` patterns in `builder_test.go`.
-- E2E: extend `make uat-up` (or a new `make uat-up-kaniko`) to use Kaniko instead of docker, and re-run the Apps Deploy test from `docs/UAT.md` Scenario 1.
-- Helm: `helm template --set builder.kind=kaniko` produces a Deployment with **no** docker.sock volume.
-- Manual: run a build, confirm the resulting image works (`crane manifest registry/cooker/demo:tag`).
 
 **Risk:** medium. The biggest risk is Kaniko pod RBAC — if the namespace is restricted, the operator needs to widen it. Document the minimal RBAC clearly. UAT compose can keep using docker (faster local iteration) while production defaults to Kaniko.
 
@@ -137,56 +103,40 @@ func (k *Kaniko) Build(ctx context.Context, spec builder.Spec, log io.Writer) (b
 }
 ```
 
-**Files to add:**
-- `backend/internal/audit/audit.go` — `Logger` type wrapping `*slog.Logger` with `LogAction(ctx, Event)`. Convenience helpers per action category.
-- `backend/internal/audit/audit_test.go` — verify JSON shape, redaction (no token bodies, no secret values), required fields.
-- `backend/internal/server/middleware_audit.go` — Gin middleware that wraps an audit-eligible handler: capture user from context, capture request URI for action mapping, capture status, emit event after handler completes.
-
-**Files to modify:**
-- `backend/cmd/cooker/main.go` — initialize `slog.New(slog.NewJSONHandler(os.Stdout, ...))` and wire into `server.New(cfg, auditLogger)`.
-- `backend/internal/server/server.go` — accept `*audit.Logger`; pass into router setup.
-- `backend/internal/server/router.go` — apply the audit middleware to each of the routes listed above. Stays explicit (per-route, not blanket) so the audit surface is reviewable in the router.
-- `backend/internal/handler/environment.go` — `RevealSecret` already has admin gating; audit must include the *key* but **never** the *value*.
-- `SECURITY.md` — update the "Set up audit logging" checklist item, document the schema and the redaction guarantees.
-- `backlog.md` — close this item.
-
-**Configuration:**
-- `COOKER_AUDIT_ENABLED` (default `true` in production, `false` in dev/uat).
-- `COOKER_AUDIT_DESTINATION` (default `stdout`; future: `file:/var/log/cooker/audit.jsonl`, `syslog://...`, etc.).
-
 **Redaction rules (codified in tests):**
 - Secret values never appear (only key names).
 - OIDC tokens (raw JWT) never appear (only the `sub` claim).
 - Request bodies that may contain credentials (`PUT /environments/:id/secrets/:key`, `PUT /apps/:id/webhook`) are not logged in the `extra` field.
 
-**Risk:** low. Pure addition; no behavior change. The biggest risk is volume — if a user deploys 1000 apps in a script, the audit log grows linearly. Mitigation: operators should ship logs to a real backend (Loki, Datadog, etc.) and rotate stdout; sampling is **not** appropriate for audit logs.
+**Risk:** low. Pure addition; no behavior change.
 
 ---
 
 ### P1.3 — TLS termination at ingress
 
-Cooker doesn't terminate TLS itself; the ingress controller (or cloud LB) must. Tasks:
-
-- Set `ingress.tls` in `deploy/helm/cooker/values.yaml` to a sane example (`secretName: cooker-tls`).
-- Document cert-manager + Let's Encrypt in the README's Helm install example.
-- SECURITY.md production checklist already references this; add the explicit `--set ingress.tls[0].secretName=...` line to the install snippet.
+- [x] `ingress.tls` value documented in `deploy/helm/cooker/values.yaml` with cert-manager example.
+- [x] Helm install snippet in README updated to set `ingress.tls[0].secretName=cooker-tls`.
+- [x] README `Deployment → TLS at ingress` section with cert-manager + Let's Encrypt walk-through.
+- [ ] SECURITY.md production checklist still references this; add the explicit `--set ingress.tls[0].secretName=...` line to the install snippet.
+- [ ] `deploy/helm/cooker/templates/ingress.yaml` should validate that `ingress.tls` is non-empty when `cookerEnv=production` and `oidc.enabled=true` (helper failure for misconfigured production).
 
 ### P1.4 — PostgreSQL SSL
 
-- Document the `?sslmode=require` flag (or `verify-full` for proper cert validation) in the README and `docs/UAT.md`.
-- Add a Helm value `postgresql.sslMode` so the chart can render the `DATABASE_URL` query string for the operator.
-- For the bundled `bitnami/postgresql` subchart (if used), also flip `tls.enabled=true`.
+- [x] `?sslmode=require` documented in the README and `values.yaml`.
+- [x] `postgresql.sslMode` Helm value with default `require`.
+- [ ] Render `?sslmode={{ .Values.postgresql.sslMode }}` into the constructed `DATABASE_URL` in `templates/deployment.yaml`.
+- [ ] For the bundled `bitnami/postgresql` subchart, also flip `tls.enabled=true` and pass-through CA bundle config.
 
 ### P1.5 — Base image / dependency rolling updates
 
-- Add a Renovate or Dependabot config covering: `backend/go.mod`, `frontend/package.json`, the `KUBECTL_VERSION` ARG in `deploy/docker/Dockerfile`, the Alpine base, the Helm `appVersion`, the Postgres + Redis chart versions.
-- Auto-merge minor/patch on green CI; major bumps need a human PR review.
+- [x] `renovate.json` at the repo root: weekly Mon-AM schedule, automerge minor/patch on green CI, major bumps gated on human review, custom regex manager for `KUBECTL_VERSION` ARG in the Dockerfile.
+- [ ] Operator step: enable Renovate / Dependabot on the repo (one-time UI toggle).
 
 ---
 
 ## P2 — Secrets manager integration
 
-- [x] **P2.1 — KeepSave secrets manager.** **Closed.** `secrets.Manager` interface lives at `backend/internal/secrets/manager.go`; `database` adapter wraps the existing AES-GCM logic and `keepsave` adapter delegates to a KeepSave server over HTTP. Selection via `COOKER_SECRETS_BACKEND`. KeepSave is system of record when selected. See [README §Secrets backends](README.md#secrets-backends). Follow-ups: swap the internal HTTP client for the published Go SDK (currently lacks a `go.mod`); add Helm chart values + deployment template wiring; surface KeepSave's `/promote` endpoint as a Cooker secret-promotion handler.
+- [x] **P2.1 — KeepSave secrets manager.** **Closed.** `secrets.Manager` interface lives at `backend/internal/secrets/manager.go`; `database` adapter wraps the existing AES-GCM logic and `keepsave` adapter delegates to a KeepSave server over HTTP. Selection via `COOKER_SECRETS_BACKEND`. KeepSave is system of record when selected. See [README §Secrets backends](README.md#secrets-backends). Follow-ups: swap the internal HTTP client for the published Go SDK (currently lacks a `go.mod`); render KeepSave env-vars + `secretKeyRef` in the Helm `deployment.yaml`; surface KeepSave's `/promote` endpoint as a Cooker secret-promotion handler.
 - [ ] **HashiCorp Vault adapter.** Same `secrets.Manager` interface, third adapter. Pulls via Vault Agent injector pattern.
 - [ ] **AWS Secrets Manager / GCP Secret Manager adapters.** Cloud-native deployments.
 
@@ -205,7 +155,7 @@ Cooker doesn't terminate TLS itself; the ingress controller (or cloud LB) must. 
 
 ## P5 — Frontend UX
 
-- [ ] **Theme the sign-in landing page** (the gate inside `frontend/src/auth/ProtectedRoute.tsx`). Currently inline-styled placeholder; user mentioned a Claude-generated design that may apply here.
+- [ ] **Theme the sign-in landing page** (the gate inside `frontend/src/auth/ProtectedRoute.tsx`). Currently inline-styled placeholder; user has a Claude-generated design that may apply here. **Awaiting design source** (file path / screenshot / external link) before scoping.
 - [ ] **Loading skeletons** instead of `Loading…` text for auth restoration and protected pages.
 - [ ] **Error boundary** at the app root (currently uncaught render errors crash the React tree).
 - [ ] **OIDC silent renew UI feedback** when `automaticSilentRenew` fails — surface a "session expired, please sign in again" toast instead of silently kicking to the IdP.
@@ -213,51 +163,10 @@ Cooker doesn't terminate TLS itself; the ingress controller (or cloud LB) must. 
 
 ## P6 — Backend code quality and CI
 
-### ⭐ P6.1 — `helm lint` + `helm template` in CI
-
-**Why:** PR D's chart templates were validated by hand (no `helm` binary in the dev environment). PR C added `oidc-secret.yaml` and `secret-key.yaml` templates with conditional rendering. A typo in `{{- if ... }}` blocks would silently break the chart and not be caught until someone tries to `helm install`.
-
-**Implementation (~10 minutes):**
-
-Add a new job to `.github/workflows/ci.yml`:
-
-```yaml
-helm:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: azure/setup-helm@v4
-      with:
-        version: v3.14.0
-    - name: helm lint
-      run: helm lint deploy/helm/cooker
-    - name: helm template (default values)
-      run: helm template cooker deploy/helm/cooker > /tmp/default.yaml
-    - name: helm template (production-with-oidc)
-      run: |
-        helm template cooker deploy/helm/cooker \
-          --set cookerEnv=production \
-          --set 'oidc.allowedOrigins={https://cooker.example.com}' \
-          --set oidc.enabled=true \
-          --set oidc.issuerUrl=https://accounts.google.com \
-          --set oidc.clientId=test-client \
-          --set oidc.clientSecretRef.name=cooker-oidc \
-          --set secretKey.existingSecret=cooker-secret-key \
-          > /tmp/prod.yaml
-    - name: kubeval the rendered manifests
-      run: |
-        wget -q https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz
-        tar -xzf kubeconform-linux-amd64.tar.gz
-        ./kubeconform -strict -summary /tmp/default.yaml /tmp/prod.yaml
-```
-
-**Verification:** push to a branch; the new `helm` check should appear and pass.
-
-### P6.2 — Other quality items
-
-- [ ] **Replace `panic(...)` in `internal/deploytarget/target.go:86`** with a returned error from `Register()` and a startup-time check. The current `MustRegister`-style is fine but doesn't compose well if we ever want plug-ins to register at runtime.
-- [ ] **`golangci-lint` in CI.** `Makefile` already has a `lint-backend` target; CI doesn't invoke it. Add a step (use `golangci/golangci-lint-action@v6`).
-- [ ] **`gofmt -l` check in CI.** Catch style drift before merge. One-liner: `test -z "$(gofmt -l . | tee /dev/stderr)"`.
+- [x] **P6.1 — `helm lint` + `helm template` + `kubeconform` in CI.** New `helm` job in `.github/workflows/ci.yml` runs lint, templates default and production-with-OIDC values, and validates rendered manifests with kubeconform.
+- [x] **`gofmt -l` check in CI.** Backend job fails when any Go file isn't gofmt'd.
+- [x] **Replace `panic(...)` in `internal/deploytarget/target.go`** — `Register` now returns `ErrDuplicateKind`; `MustRegister` wraps the panic-on-error semantics for `init()` callers. Tests cover both contracts.
+- [ ] **`golangci-lint` in CI.** `Makefile` already has a `lint-backend` target; CI doesn't invoke it. Add a step (use `golangci/golangci-lint-action@v6`). Skipped from the wave-1 sweep to avoid surfacing pre-existing lint debt in this PR; do as a follow-up with a tuned `.golangci.yml`.
 - [ ] **Go version bump to 1.24+.** `golang.org/x/time@v0.5.0` is pinned because newer versions need 1.25. Update `go.mod`, `Dockerfile`, and `.github/workflows/ci.yml` together; also unpin the `x/time` version.
 - [ ] **Replace `internal/handler/network.go` and `internal/handler/volume.go` placeholder responses** with real Docker SDK calls. Currently they return mock IDs.
 
@@ -286,13 +195,13 @@ helm:
 | `backend/internal/pusher/crane.go` | Stub; CLI fallback via `COOKER_PUSHER=docker` shells `docker push` | `github.com/google/go-containerregistry/pkg/crane` | No `docker-cli`; richer auth (OAuth flows, ECR/GCR token refresh); supports push by digest |
 | `backend/internal/deployer/clientgo.go` | Stub; CLI fallback via `COOKER_DEPLOYER=kubectl` shells `kubectl apply` | `k8s.io/client-go` dynamic client | No `kubectl` binary needed; structured errors instead of stderr text parsing; can do partial-success rollback |
 
-**Effort:** medium per adapter (~1 day each). All three plug into the existing strategy interfaces (`builder.Builder`, `pusher.Pusher`, `deployer.Deployer` defined at `internal/{builder,pusher,deployer}/{builder,pusher,deployer}.go`). The `select<Kind>` switches in `internal/server/server.go:152-185` already have the case branches; you only need to fill in the constructor.
+**Effort:** medium per adapter (~1 day each). All three plug into the existing strategy interfaces (`builder.Builder`, `pusher.Pusher`, `deployer.Deployer`). The `select<Kind>` switches in `internal/server/server.go` already have the case branches; you only need to fill in the constructor.
 
 **Caveat:** swapping out the CLI fallbacks shrinks the Dockerfile attack surface (no more `docker-cli` in `apk add`) but requires bumping the Go module set (BuildKit pulls a lot). Check binary size impact before / after.
 
 ### P9.2 — Additional deploy targets
 
-`internal/deploytarget/target.go` exposes a `Target` interface with one implementation today (`cloudrun/`, also stubbed). Adding a target = implement the interface + call `deploytarget.Register(...)` in the package's `init()`. The strategy pattern is already wired.
+`internal/deploytarget/target.go` exposes a `Target` interface with one implementation today (`cloudrun/`, also stubbed). Adding a target = implement the interface + call `deploytarget.MustRegister(...)` in the package's `init()`. The strategy pattern is already wired.
 
 | Adapter | Stub location | Underlying SDK | Notes |
 |---|---|---|---|
@@ -320,8 +229,13 @@ helm:
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, and the `claude/cooker-backlog-readme-com8z` PR:
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, and the `claude/cooker-backlog-readme-com8z` PR (#17):
 
+- ✅ **`helm lint` + `helm template` + kubeconform CI** — P6.1
+- ✅ **`gofmt -l` CI check** — P6.2
+- ✅ **`deploytarget.Register` returns error; `MustRegister` for init() callers** — P6.2
+- ✅ **Renovate config** — P1.5
+- ✅ **TLS-at-ingress + Postgres `sslMode` documentation + values** — P1.3 / P1.4 (chart rendering still pending)
 - ✅ **KeepSave secrets-manager backend** — `secrets.Manager` interface + `database`/`keepsave` adapters; selectable via `COOKER_SECRETS_BACKEND`. P2.1.
 - ✅ **OIDC PKCE wiring** (frontend + backend) — PR #6
 - ✅ **kubectl SHA verification** in the Dockerfile — PR #6
