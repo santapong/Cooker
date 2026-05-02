@@ -134,5 +134,5 @@ Referrer-Policy: strict-origin-when-cross-origin
 - [ ] Enable PostgreSQL SSL connections
 - [ ] Set up audit logging
 - [x] Run the container as non-root *(image runs as UID 65532 by default)*
-- [ ] Enable network policies to restrict pod-to-pod traffic
+- [x] Enable network policies to restrict pod-to-pod traffic *(NetworkPolicy ships with the Helm chart, gated by `networkPolicy.enabled`; raw manifest at `deploy/kubernetes/network-policy.yaml`)*
 - [ ] Regularly update base images and dependencies
