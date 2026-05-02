@@ -79,7 +79,7 @@ When Cooker mounts the Docker socket (`/var/run/docker.sock`):
 
 - **CORS**: Configurable allowed origins via `COOKER_ALLOWED_ORIGINS`. Defaults to `localhost:5173,localhost:3000` for `COOKER_ENV=dev|uat`; defaults to **deny-all** for `COOKER_ENV=production` so missing config is loud, not silent.
 - **`Allow-Credentials`**: explicitly **off**. Cooker authenticates via `Authorization: Bearer <jwt>` headers, not cookies — credentials mode adds no value and would block wildcard reflection.
-- **WebSocket**: same-origin policy enforced via the `gorilla/websocket` upgrader's `CheckOrigin`, sharing the CORS allowlist.
+- **WebSocket**: two-layer auth — same-origin policy via `gorilla/websocket` `CheckOrigin` (sharing the CORS allowlist) **and** a single-use ticket. Clients `POST /api/v1/ws-tickets` over the authenticated API to obtain a 60-second ticket and open `/ws/...` with `?ticket=<value>`. Tickets are consumed on first use; replay is rejected.
 - **Ingress**: TLS termination recommended at the ingress controller level.
 - **Internal traffic**: Backend-to-database and backend-to-Redis communication should use encrypted connections in production.
 
