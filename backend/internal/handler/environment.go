@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/cooker-ci/cooker/internal/auth"
 	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/cooker-ci/cooker/internal/secrets"
 )
 
 // ListEnvironments returns all environments with secrets redacted so
@@ -31,15 +33,10 @@ func (h *Handler) CreateEnvironment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// New environments never carry secrets on create; use the dedicated
-	// /secrets endpoint so ciphertext never flows through general
-	// CRUD handlers.
 	env.Secrets = nil
 	env.ID = uuid.New().String()
 	env.CreatedAt = time.Now()
 	if env.PlainVars == nil {
-		// Back-compat: accept the legacy `variables` field from clients
-		// that haven't migrated yet.
 		env.PlainVars = env.Variables
 	}
 	if env.PlainVars == nil {
@@ -68,8 +65,6 @@ func (h *Handler) UpdateEnvironment(c *gin.Context) {
 	}
 	env.ID = id
 	env.CreatedAt = existing.CreatedAt
-	// Preserve secrets across PUT — clients update secrets via the
-	// dedicated endpoint, never via the general PUT body.
 	env.Secrets = existing.Secrets
 	if env.PlainVars == nil {
 		env.PlainVars = env.Variables
@@ -94,15 +89,14 @@ func (h *Handler) DeleteEnvironment(c *gin.Context) {
 }
 
 // PutSecret upserts a single secret for an environment. Admin only.
-// The request body is {"value":"..."}; the value is AES-GCM sealed
-// with the handler's codec before it hits the store.
+// Storage is delegated to the configured secrets.Manager (database
+// or KeepSave); this handler only authorizes and routes.
 func (h *Handler) PutSecret(c *gin.Context) {
-	if !h.requireCodec(c) {
+	if !h.requireSecrets(c) {
 		return
 	}
 	claims := auth.GetUser(c)
 	if !auth.CanRevealSecret(claims) {
-		// Writing a secret is equally sensitive as revealing one.
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
 		return
 	}
@@ -113,30 +107,19 @@ func (h *Handler) PutSecret(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	env, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id"))
-	if abortStoreErr(c, err, "environment not found") {
+	if _, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id")); abortStoreErr(c, err, "environment not found") {
 		return
 	}
-	sealed, err := h.Codec.Seal([]byte(req.Value))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "seal: " + err.Error()})
-		return
-	}
-	if env.Secrets == nil {
-		env.Secrets = make(map[string][]byte)
-	}
-	env.Secrets[c.Param("key")] = sealed
-	if err := h.Store.Environments.Update(c.Request.Context(), env); err != nil {
+	if err := h.Secrets.Put(c.Request.Context(), c.Param("id"), c.Param("key"), []byte(req.Value)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "status": "stored"})
 }
 
-// RevealSecret decrypts and returns a single secret's plaintext.
-// Admin only. Redacted values come from the regular GET endpoints.
+// RevealSecret returns a single secret's plaintext. Admin only.
 func (h *Handler) RevealSecret(c *gin.Context) {
-	if !h.requireCodec(c) {
+	if !h.requireSecrets(c) {
 		return
 	}
 	claims := auth.GetUser(c)
@@ -144,36 +127,35 @@ func (h *Handler) RevealSecret(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
 		return
 	}
-	env, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id"))
-	if abortStoreErr(c, err, "environment not found") {
+	if _, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id")); abortStoreErr(c, err, "environment not found") {
 		return
 	}
-	sealed, ok := env.Secrets[c.Param("key")]
-	if !ok {
+	value, err := h.Secrets.Get(c.Request.Context(), c.Param("id"), c.Param("key"))
+	if errors.Is(err, secrets.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "secret not found"})
 		return
 	}
-	plain, err := h.Codec.Open(sealed)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "open: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "value": string(plain)})
+	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "value": string(value)})
 }
 
 // DeleteSecret removes a secret key from the environment. Admin only.
 func (h *Handler) DeleteSecret(c *gin.Context) {
+	if !h.requireSecrets(c) {
+		return
+	}
 	claims := auth.GetUser(c)
 	if !auth.CanRevealSecret(claims) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
 		return
 	}
-	env, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id"))
-	if abortStoreErr(c, err, "environment not found") {
+	if _, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id")); abortStoreErr(c, err, "environment not found") {
 		return
 	}
-	delete(env.Secrets, c.Param("key"))
-	if err := h.Store.Environments.Update(c.Request.Context(), env); err != nil {
+	if err := h.Secrets.Delete(c.Request.Context(), c.Param("id"), c.Param("key")); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -190,8 +172,7 @@ func (h *Handler) PromoteRun(c *gin.Context) {
 
 // ApprovePromotion records an approval for a promotion. Requires the
 // caller to hold RoleAdmin or RoleApprover; the approver identity is
-// taken from the OIDC claims, not the request body, so an attacker
-// with a viewer token cannot forge an admin-looking approval.
+// taken from the OIDC claims, not the request body.
 func (h *Handler) ApprovePromotion(c *gin.Context) {
 	claims := auth.GetUser(c)
 	if !auth.CanApprovePromotion(claims) {
@@ -202,8 +183,6 @@ func (h *Handler) ApprovePromotion(c *gin.Context) {
 	}
 
 	runID := c.Param("runId")
-	// Accept an optional note; ignore any "approvedBy" field in the
-	// body — the trusted identity is claims.Email.
 	var req struct {
 		Note string `json:"note"`
 	}
@@ -225,14 +204,31 @@ func (h *Handler) GetEnvStatus(c *gin.Context) {
 	})
 }
 
-// requireCodec aborts with 503 if no secret key is configured. The
-// operator needs to set COOKER_SECRET_KEY before secrets work.
+// requireSecrets aborts with 503 when no secrets backend is
+// configured. Used by environment secret CRUD which delegates to
+// the secrets.Manager. For backend=database this triggers when
+// COOKER_SECRET_KEY is empty; for backend=keepsave it should never
+// trigger because boot validation rejects partial config.
+func (h *Handler) requireSecrets(c *gin.Context) bool {
+	if h.Secrets != nil {
+		return true
+	}
+	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+		"error": "secrets disabled: set COOKER_SECRET_KEY (database backend) or configure COOKER_SECRETS_BACKEND=keepsave",
+	})
+	return false
+}
+
+// requireCodec aborts with 503 when no AES codec is configured.
+// Distinct from requireSecrets: the codec also encrypts data outside
+// the secrets.Manager (App webhook secrets), so app webhook handlers
+// gate on this even when the secrets backend is keepsave.
 func (h *Handler) requireCodec(c *gin.Context) bool {
 	if h.Codec != nil && h.Codec.Active() {
 		return true
 	}
 	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-		"error": "secrets disabled: set COOKER_SECRET_KEY",
+		"error": "codec disabled: set COOKER_SECRET_KEY",
 	})
 	return false
 }

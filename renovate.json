@@ -1,0 +1,56 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard",
+    ":maintainLockFilesWeekly"
+  ],
+  "rangeStrategy": "bump",
+  "timezone": "UTC",
+  "schedule": ["before 6am on monday"],
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 8,
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Auto-merge minor and patch updates on green CI",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Major bumps require human review",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "addLabels": ["breaking"]
+    },
+    {
+      "description": "Group all GitHub Actions in one PR per week",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "Pin Docker base images by digest for reproducibility",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "pinDigests": true
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"]
+  },
+  "customManagers": [
+    {
+      "description": "Track KUBECTL_VERSION ARG in the Dockerfile",
+      "customType": "regex",
+      "fileMatch": ["^deploy/docker/Dockerfile$"],
+      "matchStrings": ["ARG KUBECTL_VERSION=(?<currentValue>v\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "kubernetes/kubernetes",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    }
+  ]
+}

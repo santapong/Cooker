@@ -67,9 +67,37 @@ jobs:
         working-directory: frontend
         run: npm test -- --passWithNoTests
 
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+      - name: helm lint
+        run: helm lint deploy/helm/cooker
+      - name: helm template (default values)
+        run: helm template cooker deploy/helm/cooker > /tmp/default.yaml
+      - name: helm template (production with OIDC)
+        run: |
+          helm template cooker deploy/helm/cooker \
+            --set cookerEnv=production \
+            --set 'oidc.allowedOrigins={https://cooker.example.com}' \
+            --set oidc.enabled=true \
+            --set oidc.issuerUrl=https://accounts.google.com \
+            --set oidc.clientId=test-client \
+            --set oidc.clientSecretRef.name=cooker-oidc \
+            --set secretKey.existingSecret=cooker-secret-key \
+            > /tmp/prod.yaml
+      - name: kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz -o /tmp/kc.tar.gz
+          tar -xzf /tmp/kc.tar.gz -C /tmp
+          /tmp/kubeconform -strict -summary -ignore-missing-schemas /tmp/default.yaml /tmp/prod.yaml
+
   docker:
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, helm]
     steps:
       - uses: actions/checkout@v4
       - name: Build Docker image

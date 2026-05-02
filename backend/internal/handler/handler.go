@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/cooker-ci/cooker/internal/crypto"
+	"github.com/cooker-ci/cooker/internal/secrets"
 	"github.com/cooker-ci/cooker/internal/service"
 	"github.com/cooker-ci/cooker/internal/store"
 )
@@ -17,23 +18,24 @@ import (
 // Handler owns the dependencies shared by request handlers.
 type Handler struct {
 	Store       *store.Store
+	// Codec is retained for backward compatibility with handlers that
+	// still reach for AES-GCM directly; new code should go through
+	// Secrets instead. Secret endpoints (Put/Reveal/Delete) delegate
+	// to Secrets and ignore Codec.
 	Codec       *crypto.Codec
+	Secrets     secrets.Manager
 	AppDeployer *service.AppDeployer
-	// WSBroadcast, when non-nil, publishes progress events to a
-	// WebSocket channel. Wired by the server to
-	// (*server.WebSocketHub).Broadcast.
 	WSBroadcast func(channel string, data []byte)
 }
 
-// New constructs a Handler bound to the given store. Codec is
-// optional; when nil or inactive the secret endpoints return 503 so
-// the operator knows to set COOKER_SECRET_KEY.
-func New(s *store.Store, codec *crypto.Codec) *Handler {
-	return &Handler{Store: s, Codec: codec}
+// New constructs a Handler bound to the given store. secs may be nil
+// when no secrets backend is configured (dev mode with backend=database
+// and no COOKER_SECRET_KEY set); the secret endpoints will return 503.
+func New(s *store.Store, codec *crypto.Codec, secs secrets.Manager) *Handler {
+	return &Handler{Store: s, Codec: codec, Secrets: secs}
 }
 
-// abortStoreErr maps common store errors to HTTP responses. Returns
-// true when it wrote a response so the caller can return early.
+// abortStoreErr maps common store errors to HTTP responses.
 func abortStoreErr(c *gin.Context, err error, notFoundMsg string) bool {
 	if err == nil {
 		return false

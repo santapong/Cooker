@@ -30,8 +30,9 @@ A web-based CI/CD management tool with a **graph-based UI** for visually buildin
 - **Backend**: Go + Gin + Docker SDK + client-go + go-containerregistry
 - **Database**: PostgreSQL + Redis
 - **Auth**: OIDC/OAuth 2.0 with PKCE (Keycloak, Okta, Azure AD, Google, GitHub) — disabled by default in local/UAT (the backend injects a dev admin user); see [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) to enable.
+- **Secrets**: pluggable backends — AES-GCM at rest in Postgres (default) or delegated to a [KeepSave](https://github.com/santapong/keepsave) server. See [Secrets backends](#secrets-backends).
 
-See [docs/architecture.md](docs/architecture.md) for the full architecture document.
+See [docs/architecture.md](docs/architecture.md) for the full architecture document and [docs/adr/](docs/adr/) for the structural decisions and their rationale.
 
 ## OCI Compliance
 
@@ -64,6 +65,7 @@ docker compose up
 - **OCI Registry Integration** - Push/pull via distribution-spec, browse tags, inspect manifests, referrers API for supply chain metadata
 - **Kubernetes Dashboard** - Manage workloads, scale, restart, view logs across clusters and namespaces
 - **SSO Authentication** - OpenID Connect with PKCE, RBAC (admin, operator, viewer roles)
+- **Pluggable secrets backend** - AES-GCM in Postgres or delegated to a [KeepSave](https://github.com/santapong/keepsave) server (per-project API keys, AES-256-GCM at rest, key rotation, env-to-env promotion)
 - **Live Execution** - WebSocket-powered real-time pipeline status, build logs, and K8s event streaming
 - **Environment Swim Lanes** - Visual grouping of pipeline stages by deployment environment
 
@@ -95,7 +97,7 @@ Base path: `/api/v1`
 | **Docker** | List/inspect images (OCI manifest), build, list/manage containers |
 | **Registry** | List repos/tags, get manifests, push/pull, referrers API |
 | **Kubernetes** | List namespaces/workloads, scale, restart, pod logs, apply manifests |
-| **Environments** | CRUD, promote, approve, per-env status |
+| **Environments** | CRUD, promote, approve, per-env status, secret CRUD (admin-only) |
 | **WebSocket** | Pipeline run stream, Docker build stream, K8s watch events |
 
 ## Project Structure
@@ -103,7 +105,7 @@ Base path: `/api/v1`
 ```
 ├── frontend/              React + TypeScript + Vite
 │   └── src/
-│       ├── components/    React Flow nodes, edges, panels, layout
+│       ├── components/    React Flow nodes, edges, panels, layout, ErrorBoundary
 │       ├── stores/        Zustand (pipeline, Docker, K8s, environment)
 │       ├── api/           Typed API client per domain
 │       ├── auth/          OIDC provider + protected routes
@@ -117,6 +119,8 @@ Base path: `/api/v1`
 │   │   ├── auth/          OIDC middleware, RBAC
 │   │   ├── handler/       HTTP handlers (pipeline, Docker, K8s, registry, env)
 │   │   ├── service/       Business logic (executor, promoter)
+│   │   ├── secrets/       Secrets manager interface + adapters (database, keepsave)
+│   │   ├── deploytarget/  Deploy target interface + adapters (cloudrun, ...)
 │   │   ├── model/         Domain types
 │   │   ├── oci/           OCI image-spec types, media types, validation
 │   │   └── store/         PostgreSQL persistence + migrations
@@ -128,10 +132,17 @@ Base path: `/api/v1`
 │   ├── kubernetes/        Raw manifests (namespace, deployment, service, ingress, RBAC)
 │   └── helm/cooker/       Helm chart
 ├── docs/
-│   └── architecture.md    Full architecture document
+│   ├── architecture.md    Full architecture document
+│   ├── design.md          Design patterns, conventions, contributor checklist
+│   ├── UAT.md             UAT runbook + how to enable OIDC for testers
+│   ├── MULTI_REPLICA.md   Sticky-session + multi-replica gotchas
+│   ├── RUNBOOK.md         Incident response — symptom-driven
+│   └── adr/               Architecture decision records
 ├── CHANGELOG.md           Version history
 ├── SECURITY.md            Security policy and guidelines
+├── backlog.md             Open work (planned, scoped, not shipped)
 ├── docker-compose.yml     Local development stack
+├── renovate.json          Dependabot/Renovate configuration
 └── Makefile               Build orchestration
 ```
 
@@ -163,10 +174,101 @@ helm install cooker deploy/helm/cooker/ \
   --set oidc.clientId=cooker \
   --set oidc.clientSecretRef.name=cooker-oidc \
   --set oidc.redirectUrl=https://cooker.example.com/callback \
-  --set secretKey.existingSecret=cooker-secret-key
+  --set secretKey.existingSecret=cooker-secret-key \
+  --set 'ingress.tls[0].secretName=cooker-tls' \
+  --set 'ingress.tls[0].hosts[0]=cooker.example.com'
 ```
 
 See [SECURITY.md](SECURITY.md) for the production deployment security checklist.
+
+### TLS at ingress
+
+OIDC sign-in **requires HTTPS** — most IdPs reject non-HTTPS redirect URIs. Cooker doesn't terminate TLS itself; the ingress controller (or cloud LB) does. Pattern: provision the certificate with [cert-manager](https://cert-manager.io/) + Let's Encrypt and reference the resulting Secret in `values.yaml`:
+
+```yaml
+# values.yaml
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: cooker.example.com
+      paths: [{ path: /, pathType: Prefix }]
+  tls:
+    - secretName: cooker-tls
+      hosts: [cooker.example.com]
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+```
+
+The `--set` flags in the `helm install` snippet above set the same values from the command line.
+
+### PostgreSQL SSL
+
+Production should not connect to PostgreSQL over plaintext. Two paths, depending on how Postgres is provisioned:
+
+1. **External PostgreSQL** (managed RDS / Cloud SQL / on-prem) — set the full `DATABASE_URL` with `?sslmode=require` (or `verify-full` if you mount a CA bundle into the pod):
+
+   ```bash
+   helm install cooker deploy/helm/cooker/ \
+     --set 'env[0].name=DATABASE_URL' \
+     --set 'env[0].value=postgres://user:pass@db.internal:5432/cooker?sslmode=require'
+   ```
+
+2. **Bundled `bitnami/postgresql` subchart** — set `postgresql.sslMode` (already documented in `values.yaml`) and the bitnami subchart's `tls.enabled=true` to provision a CA-signed server cert.
+
+Valid `sslmode` values, in increasing strictness: `disable | allow | prefer | require | verify-ca | verify-full`. Use **`require`** as the floor for production and **`verify-full`** when you have a CA bundle.
+
+> **Note:** chart-side rendering of `postgresql.sslMode` into the constructed `DATABASE_URL` is a follow-up. Today operators set the full URL via `env` overrides as shown above. Tracked in backlog `P1.4`.
+
+### Multi-replica deployments
+
+Two pieces of Cooker state are per-process today: the rate limiter and the WebSocket ticket store. Running 2+ replicas requires either sticky sessions at the ingress (recommended now) or Redis-backed shared state (open backlog item P3). Concrete ingress annotations for NGINX, ALB, Traefik, HAProxy, and Envoy + the failure modes you'd see without action are in [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md).
+
+## Secrets backends
+
+Cooker supports two backends for environment-scoped secrets, selected at boot via `COOKER_SECRETS_BACKEND`. The `Manager` interface lives at `backend/internal/secrets/manager.go`; adapters are independent packages. Switching is purely a config change — handler logic and the on-the-wire API are identical between backends.
+
+| Backend | When to use | Storage | Encryption |
+|---|---|---|---|
+| `database` *(default)* | Single-Cooker installs; no separate secrets infra | `environments.secrets` JSONB column | AES-GCM (`COOKER_SECRET_KEY`, base64-encoded 32 bytes) |
+| `keepsave` | Multi-tenant or audit-heavy environments; dedicated secrets infra | [KeepSave](https://github.com/santapong/keepsave) server (system of record) | AES-256-GCM at rest, managed by KeepSave; per-project DEKs |
+
+### `database` (default)
+
+```bash
+COOKER_SECRETS_BACKEND=database          # or unset
+COOKER_SECRET_KEY=$(head -c 32 /dev/urandom | base64)
+```
+
+In production with this backend, `COOKER_SECRET_KEY` is required and validated at boot. With no key set, the secret API returns `503` so the operator notices the gap rather than silently storing plaintext.
+
+### `keepsave`
+
+A single KeepSave project owns all of Cooker's secrets. Cooker's environment **name** (`prod`, `uat`, etc.) maps to KeepSave's `environment` query parameter; per-environment isolation comes from KeepSave's per-env API-key scoping. KeepSave's `/promote` endpoint is available for future wiring of Cooker's secret-promotion flow.
+
+```bash
+COOKER_SECRETS_BACKEND=keepsave
+COOKER_SECRETS_KEEPSAVE_URL=http://keepsave:8080
+COOKER_SECRETS_KEEPSAVE_PROJECT_ID=<cooker-project-uuid>
+COOKER_SECRETS_KEEPSAVE_API_KEY=ks_xxxx
+```
+
+With this backend, `COOKER_SECRET_KEY` is no longer required — KeepSave handles encryption. Production startup validation rejects partial config: any one of the three KeepSave variables missing is fatal.
+
+**Switching backends:** secrets do not auto-migrate. Plan a one-shot copy step (read from old, write to new) before flipping the env var. Both reads and writes go to a single backend at runtime — there is no live dual-write.
+
+See [ADR-0002](docs/adr/0002-secrets-manager.md) for the full rationale (tenancy, system-of-record, alternatives rejected).
+
+## Operations
+
+| What you need | Where to look |
+|---|---|
+| TLS / cert-manager / production install | This README — *Deployment → TLS at ingress* |
+| Multi-replica + sticky sessions | [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md) |
+| Incident response (build hung, DB down, OIDC unreachable, KeepSave outage, OOMKilled) | [docs/RUNBOOK.md](docs/RUNBOOK.md) |
+| Secrets backend selection + switching | This README — *Secrets backends* |
+| Production hardening checklist | [SECURITY.md](SECURITY.md) |
+| Open work, sequencing, effort estimates | [backlog.md](backlog.md) |
 
 ## Documentation
 
@@ -175,8 +277,12 @@ See [SECURITY.md](SECURITY.md) for the production deployment security checklist.
 | [docs/architecture.md](docs/architecture.md) | System architecture, component map, data flow, OCI integration |
 | [docs/design.md](docs/design.md) | Design patterns, conventions, auth flow, testing strategy, contributor checklist |
 | [docs/UAT.md](docs/UAT.md) | UAT runbook and how to enable OIDC sign-in for testers |
+| [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md) | Sticky-session + Redis-shared-state guidance for multi-replica deploys |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | Incident response: symptom → checks → cause → mitigation |
+| [docs/adr/](docs/adr/) | Architecture decision records (strategy interfaces, secrets manager, JSONB) |
 | [CHANGELOG.md](CHANGELOG.md) | Version history following Keep a Changelog format |
 | [SECURITY.md](SECURITY.md) | Security policy, auth architecture, production hardening checklist |
+| [backlog.md](backlog.md) | Open work, sequencing, effort estimates |
 
 ## Contributing
 

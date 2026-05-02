@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -13,6 +14,9 @@ import (
 	"github.com/cooker-ci/cooker/internal/deployer"
 	"github.com/cooker-ci/cooker/internal/handler"
 	"github.com/cooker-ci/cooker/internal/pusher"
+	"github.com/cooker-ci/cooker/internal/secrets"
+	"github.com/cooker-ci/cooker/internal/secrets/database"
+	"github.com/cooker-ci/cooker/internal/secrets/keepsave"
 	"github.com/cooker-ci/cooker/internal/service"
 	"github.com/cooker-ci/cooker/internal/store"
 	"github.com/cooker-ci/cooker/internal/store/memory"
@@ -32,14 +36,9 @@ type Server struct {
 }
 
 // New creates a new Server instance with all routes and middleware.
-// The store is constructed from cfg.DatabaseURL: an empty URL selects
-// the in-memory backend (useful for tests and development), otherwise
-// Cooker connects to PostgreSQL and applies embedded migrations.
 func New(cfg *config.Config) (*Server, error) {
 	ctx := context.Background()
 
-	// OIDC provider discovery happens here so misconfiguration fails fast
-	// rather than showing up as 500s on the first authenticated request.
 	oidcMW, err := auth.NewMiddleware(ctx, cfg.OIDC)
 	if err != nil {
 		return nil, err
@@ -56,15 +55,16 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("crypto: %w", err)
 	}
 
+	secMgr, err := selectSecretsManager(cfg, st, codec)
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("secrets: %w", err)
+	}
+
 	router := gin.Default()
 	wsHub := NewWebSocketHub(cfg.AllowedOrigins)
-	// 60-second single-use tickets for WS upgrades. See wsticket.go
-	// for the threat model.
 	wsTickets := newWSTicketStore(60 * time.Second)
 
-	// Build the executor with backends chosen from config. Unknown
-	// values fall back to Noop with a log line so booting never
-	// fails just because an operator typo'd an env var.
 	exec := service.NewExecutor(
 		service.WithBuilder(selectBuilder(cfg.BuilderBackend)),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
@@ -72,7 +72,7 @@ func New(cfg *config.Config) (*Server, error) {
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 
-	h := handler.New(st, codec)
+	h := handler.New(st, codec, secMgr)
 	h.AppDeployer = appDeployer
 	h.WSBroadcast = wsHub.Broadcast
 
@@ -86,30 +86,18 @@ func New(cfg *config.Config) (*Server, error) {
 		wsTickets: wsTickets,
 	}
 
-	// CORS middleware
 	router.Use(corsMiddleware(cfg.AllowedOrigins))
-
-	// Health check (unauthenticated on purpose)
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "cooker"})
 	})
 
-	// Register API routes (the /api/v1 group applies OIDC middleware)
 	s.registerRoutes()
-
-	// Start WebSocket hub
 	go wsHub.Run()
-
 	return s, nil
 }
 
-// Run starts the HTTP server.
-func (s *Server) Run(addr string) error {
-	return s.router.Run(addr)
-}
+func (s *Server) Run(addr string) error { return s.router.Run(addr) }
 
-// Close releases resources owned by the server (currently the store).
-// Safe to call on a nil Server.
 func (s *Server) Close() error {
 	if s == nil || s.store == nil {
 		return nil
@@ -117,9 +105,6 @@ func (s *Server) Close() error {
 	return s.store.Close()
 }
 
-// newStore picks a backend based on config. An empty DatabaseURL means
-// the operator opted into the in-memory store; otherwise we require a
-// working Postgres connection at boot.
 func newStore(ctx context.Context, cfg *config.Config) (*store.Store, error) {
 	if cfg.DatabaseURL == "" {
 		return memory.New(), nil
@@ -144,16 +129,10 @@ func corsMiddleware(allowed []string) gin.HandlerFunc {
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
-		// Cooker authenticates via Authorization: Bearer <jwt>, not
-		// cookies. Allow-Credentials would also forbid the wildcard
-		// origin reflection above, so it adds nothing and removes
-		// flexibility — leave it off.
-
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
-
 		c.Next()
 	}
 }
@@ -190,6 +169,32 @@ func selectDeployer(kind, kubeconfig string) deployer.Deployer {
 		return deployer.NewClientGo(kubeconfig)
 	default:
 		return deployer.Noop{}
+	}
+}
+
+// selectSecretsManager constructs the configured Manager. Returning
+// (nil, nil) is intentional for the dev-mode "database backend with
+// no key configured" case: server boots with secret endpoints gated
+// by Handler.requireSecrets returning 503 — same observable behavior
+// as pre-Manager Cooker.
+func selectSecretsManager(cfg *config.Config, st *store.Store, codec *crypto.Codec) (secrets.Manager, error) {
+	switch cfg.SecretsBackend {
+	case "keepsave":
+		if cfg.KeepSave.URL == "" || cfg.KeepSave.ProjectID == "" || cfg.KeepSave.APIKey == "" {
+			return nil, fmt.Errorf("keepsave backend requires COOKER_SECRETS_KEEPSAVE_URL, _PROJECT_ID, _API_KEY")
+		}
+		client := keepsave.NewClient(cfg.KeepSave.URL, cfg.KeepSave.APIKey)
+		log.Printf("secrets: backend=keepsave url=%s project=%s", cfg.KeepSave.URL, cfg.KeepSave.ProjectID)
+		return keepsave.New(client, st.Environments, cfg.KeepSave.ProjectID), nil
+	case "database", "":
+		if codec == nil || !codec.Active() {
+			log.Printf("secrets: backend=database (codec inactive — secret endpoints will return 503 until COOKER_SECRET_KEY is set)")
+			return nil, nil
+		}
+		log.Printf("secrets: backend=database (AES-GCM)")
+		return database.New(st.Environments, codec), nil
+	default:
+		return nil, fmt.Errorf("unknown secrets backend %q", cfg.SecretsBackend)
 	}
 }
 

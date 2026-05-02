@@ -12,13 +12,15 @@ import (
 	"github.com/cooker-ci/cooker/internal/auth"
 	"github.com/cooker-ci/cooker/internal/crypto"
 	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/cooker-ci/cooker/internal/secrets/database"
 	"github.com/cooker-ci/cooker/internal/store/memory"
 )
 
 func init() { gin.SetMode(gin.TestMode) }
 
-// newTestHandler returns a Handler with an in-memory store and an
-// active codec. The codec makes secret endpoints exercisable.
+// newTestHandler returns a Handler with an in-memory store, an active
+// codec, and the database secrets manager wired through. Mirrors the
+// production wiring path so secret endpoints exercise the same flow.
 func newTestHandler(t *testing.T) *Handler {
 	t.Helper()
 	key, err := crypto.GenerateKey()
@@ -29,7 +31,8 @@ func newTestHandler(t *testing.T) *Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(memory.New(), codec)
+	st := memory.New()
+	return New(st, codec, database.New(st.Environments, codec))
 }
 
 func newRequest(method, target string, body any) *http.Request {
@@ -42,8 +45,6 @@ func newRequest(method, target string, body any) *http.Request {
 	return req
 }
 
-// withUser injects a Claims into the gin.Context before running fn.
-// Mirrors what auth.Middleware does in production.
 func withUser(h gin.HandlerFunc, claims *auth.Claims) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set("user", claims)
@@ -73,8 +74,6 @@ func TestApprovePromotion_ApproverAllowed_UsesClaimsEmail(t *testing.T) {
 	r.POST("/pipelines/:id/runs/:runId/approve", withUser(h.ApprovePromotion, approver))
 
 	w := httptest.NewRecorder()
-	// Attacker tries to spoof approvedBy in the body — it should be
-	// ignored; the response must use the OIDC-verified email.
 	r.ServeHTTP(w, newRequest(http.MethodPost, "/pipelines/p1/runs/r1/approve", map[string]string{"approvedBy": "evil@example.com", "note": "shipping"}))
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -91,7 +90,6 @@ func TestApprovePromotion_ApproverAllowed_UsesClaimsEmail(t *testing.T) {
 func TestSecretRoundTrip_AdminOnly(t *testing.T) {
 	h := newTestHandler(t)
 
-	// Seed an environment directly in the store.
 	env := &model.Environment{ID: "env1", Name: "prod", PlainVars: map[string]string{"DEBUG": "false"}}
 	if err := h.Store.Environments.Create(nil, env); err != nil {
 		t.Fatal(err)
@@ -106,14 +104,12 @@ func TestSecretRoundTrip_AdminOnly(t *testing.T) {
 	r.GET("/ops/environments/:id/secrets/:key", withUser(h.RevealSecret, operator))
 	r.GET("/environments", withUser(h.ListEnvironments, operator))
 
-	// PUT as admin
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, newRequest(http.MethodPut, "/environments/env1/secrets/DB_PASSWORD", map[string]string{"value": "hunter2"}))
 	if w.Code != http.StatusOK {
 		t.Fatalf("put: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Reveal as admin
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/environments/env1/secrets/DB_PASSWORD", nil))
 	if w.Code != http.StatusOK {
@@ -127,14 +123,12 @@ func TestSecretRoundTrip_AdminOnly(t *testing.T) {
 		t.Errorf("round-trip: got %q want hunter2", body["value"])
 	}
 
-	// Reveal as operator → 403
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ops/environments/env1/secrets/DB_PASSWORD", nil))
 	if w.Code != http.StatusForbidden {
 		t.Errorf("operator reveal: expected 403, got %d", w.Code)
 	}
 
-	// List as operator → secrets redacted to "***"
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/environments", nil))
 	if w.Code != http.StatusOK {
@@ -158,8 +152,8 @@ func TestSecretRoundTrip_AdminOnly(t *testing.T) {
 	}
 }
 
-func TestSecrets_ReturnsServiceUnavailable_WhenNoCodec(t *testing.T) {
-	h := New(memory.New(), nil)
+func TestSecrets_ReturnsServiceUnavailable_WhenNoManager(t *testing.T) {
+	h := New(memory.New(), nil, nil)
 	admin := &auth.Claims{Email: "a@example.com", Roles: []string{string(auth.RoleAdmin)}}
 	r := gin.New()
 	r.PUT("/environments/:id/secrets/:key", withUser(h.PutSecret, admin))

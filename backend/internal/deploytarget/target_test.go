@@ -13,16 +13,18 @@ import (
 
 type fakeTarget struct{ kind model.DeployTargetKind }
 
-func (f *fakeTarget) Kind() model.DeployTargetKind                         { return f.kind }
-func (*fakeTarget) Deploy(context.Context, deploytarget.Spec) error        { return nil }
+func (f *fakeTarget) Kind() model.DeployTargetKind                              { return f.kind }
+func (*fakeTarget) Deploy(context.Context, deploytarget.Spec) error             { return nil }
 func (*fakeTarget) Status(context.Context, string) (deploytarget.Status, error) { return deploytarget.Status{Healthy: true}, nil }
-func (*fakeTarget) Logs(context.Context, string, io.Writer) error          { return nil }
-func (*fakeTarget) Rollback(context.Context, string) error                 { return nil }
+func (*fakeTarget) Logs(context.Context, string, io.Writer) error               { return nil }
+func (*fakeTarget) Rollback(context.Context, string) error                      { return nil }
 
 func TestRegisterAndLookup(t *testing.T) {
 	deploytarget.ResetForTest()
 	f := &fakeTarget{kind: model.DeployTargetKubernetes}
-	deploytarget.Register(f)
+	if err := deploytarget.Register(f); err != nil {
+		t.Fatalf("register: %v", err)
+	}
 
 	got, err := deploytarget.Lookup(model.DeployTargetKubernetes)
 	if err != nil {
@@ -41,15 +43,26 @@ func TestLookup_UnknownReturnsErrUnavailable(t *testing.T) {
 	}
 }
 
-func TestRegister_DuplicateKindPanics(t *testing.T) {
+func TestRegister_DuplicateKindReturnsError(t *testing.T) {
 	deploytarget.ResetForTest()
-	deploytarget.Register(&fakeTarget{kind: model.DeployTargetDockerHost})
+	if err := deploytarget.Register(&fakeTarget{kind: model.DeployTargetDockerHost}); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+	err := deploytarget.Register(&fakeTarget{kind: model.DeployTargetDockerHost})
+	if !errors.Is(err, deploytarget.ErrDuplicateKind) {
+		t.Errorf("expected ErrDuplicateKind, got %v", err)
+	}
+}
+
+func TestMustRegister_DuplicateKindPanics(t *testing.T) {
+	deploytarget.ResetForTest()
+	deploytarget.MustRegister(&fakeTarget{kind: model.DeployTargetDockerHost})
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("expected panic on duplicate registration")
+			t.Error("expected panic on duplicate MustRegister")
 		}
 	}()
-	deploytarget.Register(&fakeTarget{kind: model.DeployTargetDockerHost})
+	deploytarget.MustRegister(&fakeTarget{kind: model.DeployTargetDockerHost})
 }
 
 func TestCloudRunStub_ReportsErrUnavailable(t *testing.T) {

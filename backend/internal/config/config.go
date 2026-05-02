@@ -25,38 +25,28 @@ func (e Env) IsProduction() bool { return e == EnvProduction }
 
 // Config holds all application configuration.
 type Config struct {
-	// Env identifies the deployment environment. Production gates
-	// strict defaults: empty AllowedOrigins becomes deny-all,
-	// missing SecretKey becomes fatal at boot, etc.
 	Env            Env
 	Port           int
 	DatabaseURL    string
 	RedisURL       string
 	AllowedOrigins []string
-	// SecretKey is a base64-encoded 32-byte key for AES-GCM
-	// encryption of secrets at rest. Empty disables the secret API.
-	SecretKey string
-	// Registry is the default image registry prefix used when an
-	// App doesn't override it (e.g., "registry.example.com/cooker").
-	Registry string
-	// Backends select runtime implementations. Empty defaults to
-	// "noop" so tests and dev boot; UAT sets these to real values.
+	SecretKey      string
+	Registry       string
 	BuilderBackend  string // "noop" | "docker" | "buildkit"
 	PusherBackend   string // "noop" | "docker" | "crane"
 	DeployerBackend string // "noop" | "kubectl" | "clientgo"
-	// RateLimit tunes the per-user limiter on expensive endpoints.
-	// PerMinute<=0 disables the middleware (passthrough). Multi-replica
-	// deployments should disable this and rely on edge rate limiting.
+	// SecretsBackend selects how environment secrets are stored.
+	// "database" (default) keeps the historical AES-GCM + JSONB path;
+	// "keepsave" delegates to a KeepSave server.
+	SecretsBackend  string // "database" | "keepsave"
 	RateLimit       RateLimitConfig
 	OIDC            OIDCConfig
 	Docker          DockerConfig
 	Kubernetes      KubernetesConfig
+	KeepSave        KeepSaveConfig
 }
 
-// RateLimitConfig tunes per-user rate limiting on expensive endpoints
-// (pipeline runs, image builds, app deploys). It is in-memory and
-// per-process; multi-replica deployments should set Enabled=false
-// and use edge-level (ingress / WAF) rate limiting instead.
+// RateLimitConfig tunes per-user rate limiting on expensive endpoints.
 type RateLimitConfig struct {
 	Enabled   bool
 	PerMinute int
@@ -75,7 +65,7 @@ type OIDCConfig struct {
 
 // DockerConfig holds Docker Engine connection settings.
 type DockerConfig struct {
-	Host      string // e.g., "unix:///var/run/docker.sock" or "tcp://host:2376"
+	Host      string
 	TLSVerify bool
 	CertPath  string
 }
@@ -86,12 +76,17 @@ type KubernetesConfig struct {
 	Kubeconfig string
 }
 
+// KeepSaveConfig configures the KeepSave secrets backend. Required
+// when SecretsBackend == "keepsave".
+type KeepSaveConfig struct {
+	URL       string // base URL of the KeepSave server, e.g. http://keepsave:8080
+	ProjectID string // single project that owns all of Cooker's secrets
+	APIKey    string // X-API-Key value; per-environment scoping is fine
+}
+
 // Load reads configuration from environment variables with sensible defaults.
 func Load() *Config {
 	env := Env(getEnv("COOKER_ENV", string(EnvDev)))
-	// In production, AllowedOrigins must be configured explicitly —
-	// no permissive localhost defaults. PR B adds startup validation
-	// that turns this into a fatal error if still empty at boot.
 	originDefault := []string{"http://localhost:5173", "http://localhost:3000"}
 	if env.IsProduction() {
 		originDefault = nil
@@ -107,6 +102,7 @@ func Load() *Config {
 		BuilderBackend:  getEnv("COOKER_BUILDER", "noop"),
 		PusherBackend:   getEnv("COOKER_PUSHER", "noop"),
 		DeployerBackend: getEnv("COOKER_DEPLOYER", "noop"),
+		SecretsBackend:  getEnv("COOKER_SECRETS_BACKEND", "database"),
 		RateLimit: RateLimitConfig{
 			Enabled:   getEnvBool("COOKER_RATE_LIMIT_ENABLED", true),
 			PerMinute: getEnvInt("COOKER_RATE_LIMIT_PER_MINUTE", 10),
@@ -129,38 +125,46 @@ func Load() *Config {
 			InCluster:  getEnvBool("COOKER_K8S_IN_CLUSTER", false),
 			Kubeconfig: getEnv("KUBECONFIG", ""),
 		},
+		KeepSave: KeepSaveConfig{
+			URL:       getEnv("COOKER_SECRETS_KEEPSAVE_URL", ""),
+			ProjectID: getEnv("COOKER_SECRETS_KEEPSAVE_PROJECT_ID", ""),
+			APIKey:    getEnv("COOKER_SECRETS_KEEPSAVE_API_KEY", ""),
+		},
 	}
 }
 
-// Validate enforces production-mode invariants. It is called from
-// main after Load. Errors returned are intended to be fatal.
-//
-// Rules (production only):
-//   - SecretKey must be present and decode to >= 32 bytes (AES-256).
-//   - AllowedOrigins must be set explicitly (the default is empty
-//     in production, so a missing operator config is loud).
-//   - OIDC enabled is recommended but not enforced — running with
-//     OIDC disabled in production logs a warning so operators see
-//     the gap in their logs without blocking deployment.
-//
-// dev and uat skip these checks so contributors and testers can
-// boot without setting any of them.
+// Validate enforces production-mode invariants. Errors are intended
+// to be fatal at startup.
 func (c *Config) Validate() error {
 	if !c.Env.IsProduction() {
 		return nil
 	}
 	var problems []string
-	if c.SecretKey == "" {
-		problems = append(problems, "COOKER_SECRET_KEY is required in production (used to encrypt secrets at rest)")
-	} else {
-		// SecretKey is base64. Decode and check length.
-		decoded, err := base64.StdEncoding.DecodeString(c.SecretKey)
-		switch {
-		case err != nil:
-			problems = append(problems, "COOKER_SECRET_KEY must be a base64-encoded 32-byte key")
-		case len(decoded) < 32:
-			problems = append(problems, fmt.Sprintf("COOKER_SECRET_KEY decodes to %d bytes; need at least 32 (AES-256)", len(decoded)))
+	switch c.SecretsBackend {
+	case "", "database":
+		if c.SecretKey == "" {
+			problems = append(problems, "COOKER_SECRET_KEY is required in production with secrets backend=database")
+		} else {
+			decoded, err := base64.StdEncoding.DecodeString(c.SecretKey)
+			switch {
+			case err != nil:
+				problems = append(problems, "COOKER_SECRET_KEY must be a base64-encoded 32-byte key")
+			case len(decoded) < 32:
+				problems = append(problems, fmt.Sprintf("COOKER_SECRET_KEY decodes to %d bytes; need at least 32 (AES-256)", len(decoded)))
+			}
 		}
+	case "keepsave":
+		if c.KeepSave.URL == "" {
+			problems = append(problems, "COOKER_SECRETS_KEEPSAVE_URL is required when SecretsBackend=keepsave")
+		}
+		if c.KeepSave.ProjectID == "" {
+			problems = append(problems, "COOKER_SECRETS_KEEPSAVE_PROJECT_ID is required when SecretsBackend=keepsave")
+		}
+		if c.KeepSave.APIKey == "" {
+			problems = append(problems, "COOKER_SECRETS_KEEPSAVE_API_KEY is required when SecretsBackend=keepsave")
+		}
+	default:
+		problems = append(problems, fmt.Sprintf("unknown COOKER_SECRETS_BACKEND %q (want \"database\" or \"keepsave\")", c.SecretsBackend))
 	}
 	if len(c.AllowedOrigins) == 0 {
 		problems = append(problems, "COOKER_ALLOWED_ORIGINS is required in production (no permissive default)")
