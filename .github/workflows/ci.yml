@@ -58,7 +58,7 @@ jobs:
         working-directory: backend
         env:
           DATABASE_URL: postgres://cooker:cooker@localhost:5432/cooker_test?sslmode=disable
-        run: go test ./... -v -race
+        run: go test ./... -race -timeout 5m -failfast
 
   frontend:
     runs-on: ubuntu-latest
