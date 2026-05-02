@@ -137,6 +137,15 @@ services:
       COOKER_PUSHER: docker
       COOKER_DEPLOYER: kubectl
       KUBECONFIG: /etc/cooker/kube/kubeconfig.yaml
+      # OIDC is disabled in UAT — the backend injects a dev admin user
+      # so end-to-end pipeline/deploy tests can run without an IdP.
+      # To exercise the real auth flow, add a Keycloak service to this
+      # compose file and set:
+      #   COOKER_OIDC_ENABLED=true
+      #   COOKER_OIDC_ISSUER_URL=http://keycloak:8080/realms/cooker
+      #   COOKER_OIDC_CLIENT_ID=cooker
+      #   COOKER_OIDC_CLIENT_SECRET=<from-keycloak>
+      #   COOKER_OIDC_REDIRECT_URL=http://localhost:8080/callback
       COOKER_OIDC_ENABLED: "false"
       COOKER_ALLOWED_ORIGINS: http://localhost:8080
       # COOKER_SECRET_KEY is injected via .env.uat by `make uat-up`.
