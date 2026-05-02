@@ -1,0 +1,50 @@
+{{/*
+Production-with-OIDC must terminate TLS at the ingress: every common
+IdP (Google, Okta, Keycloak, Azure AD) refuses non-HTTPS redirect URIs.
+Fail-render here so an operator can't ship a misconfigured production
+deployment that silently blocks every sign-in attempt.
+
+Per-shape exemptions:
+  - cookerEnv != "production": dev / uat skip — http://localhost is
+    accepted by most IdPs in test mode.
+  - oidc.enabled = false: no IdP redirect to fail.
+  - ingress.enabled = false: no ingress Cooker controls; operator may
+    be terminating TLS at a service mesh, an external LB, or has
+    pointed the Service at an externally managed gateway.
+*/}}
+{{- if and (eq .Values.cookerEnv "production") .Values.oidc.enabled .Values.ingress.enabled (not .Values.ingress.tls) -}}
+{{- fail "ingress.tls must be set when cookerEnv=production and oidc.enabled=true (OIDC providers reject non-HTTPS redirect URIs). Provision a certificate with cert-manager and reference its Secret in ingress.tls. See SECURITY.md > Production checklist." -}}
+{{- end -}}
+{{- if .Values.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "cooker.fullname" . }}
+  labels:
+    {{- include "cooker.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "cooker.fullname" $ }}
+                port:
+                  number: {{ $.Values.service.port }}
+          {{- end }}
+    {{- end }}
+{{- end }}

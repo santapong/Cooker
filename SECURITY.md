@@ -60,13 +60,15 @@ Roles are mapped from OIDC group claims. The mapping is configurable via environ
 - **External**: Kubeconfig-based access with configurable contexts
 - **RBAC**: Cooker's service account ClusterRole is scoped to required resources only (deployments, pods, services, configmaps, secrets, namespaces)
 
-### Docker Socket Security
+### Image build isolation
 
-When Cooker mounts the Docker socket (`/var/run/docker.sock`):
+Cooker ships three image-build strategies; pick via `COOKER_BUILDER` (chart: `builder.kind`):
 
-- This grants the container root-equivalent access to the Docker daemon
-- **Production recommendation**: Use Kaniko for in-cluster image builds instead of Docker socket mounting
-- **Alternative**: Use a TCP Docker endpoint with TLS mutual authentication (`DOCKER_TLS_VERIFY=true`)
+- **`kaniko`** *(production-recommended)*: each build runs as a one-shot `batch/v1.Job` inside the cluster. No host docker.sock, no node-root path. The Cooker pod and the Kaniko Job share a `PersistentVolumeClaim` (`builder.kaniko.contextPVC`) for the source tree. RBAC scoped to the build namespace ships in `templates/rbac.yaml` — Job + Pod create/get/watch/delete only, never cluster-wide.
+- **`docker`**: shells out to the local Docker daemon via the bind-mounted host socket. Convenient on single-node test clusters; gives the Cooker container root-equivalent access to the host's Docker. An RCE in Cooker → full host control. Only use this on isolated dev hosts.
+- **`buildkit`**: stub; not yet wired (backlog P9.1).
+
+The Helm chart conditionally drops the `docker.sock` volume + mount when `builder.kind != "docker"`, so a `kaniko` install carries no leftover host paths.
 
 ### Data Security
 
@@ -82,6 +84,16 @@ When Cooker mounts the Docker socket (`/var/run/docker.sock`):
 - **WebSocket**: two-layer auth — same-origin policy via `gorilla/websocket` `CheckOrigin` (sharing the CORS allowlist) **and** a single-use ticket. Clients `POST /api/v1/ws-tickets` over the authenticated API to obtain a 60-second ticket and open `/ws/...` with `?ticket=<value>`. Tickets are consumed on first use; replay is rejected.
 - **Ingress**: TLS termination recommended at the ingress controller level.
 - **Internal traffic**: Backend-to-database and backend-to-Redis communication should use encrypted connections in production.
+
+### Audit logging
+
+Cooker emits a structured audit event for every authenticated mutating call (POST, PUT, PATCH, DELETE under `/api/v1`). Defaults: **enabled in production**, off elsewhere. Events are JSON, one per request, written to either stdout (default) or a file.
+
+- Tunable via `COOKER_AUDIT_ENABLED` (default `true` when `COOKER_ENV=production`, else `false`), `COOKER_AUDIT_DESTINATION` (`stdout` or `file`), and `COOKER_AUDIT_FILE_PATH`.
+- Each event records: timestamp, OIDC subject, OIDC email, HTTP method, route template (e.g. `/api/v1/environments/:id/secrets/:key` — never the concrete `:id`), status code, latency, client IP.
+- **Bodies are never captured.** The middleware does not read request or response bodies, so secret-bearing routes (`PUT /environments/:id/secrets/:key`, `PUT /apps/:id/webhook`) are safe by construction. Bearer tokens, OIDC raw JWTs, and secret values cannot appear in the trail.
+- The redacted-route allowlist lives in `internal/audit/audit.go` (`IsRedacted`). Future changes that introduce body capture must consult it.
+- Forward stdout to your SIEM via the cluster's logging stack (Loki, ELK, Datadog) or use the file sink with a sidecar tail-shipper.
 
 ### Rate limiting
 
@@ -130,9 +142,9 @@ Referrer-Policy: strict-origin-when-cross-origin
 - [ ] Restrict CORS origins to your domain
 - [ ] Use Kubernetes Secrets for database passwords and OIDC credentials
 - [ ] Scope Cooker's ClusterRole to required namespaces if possible
-- [ ] Use Kaniko instead of Docker socket for image builds
+- [ ] Use Kaniko instead of Docker socket for image builds *(set `builder.kind=kaniko` and `builder.kaniko.contextPVC=<your PVC>` in the chart, or `COOKER_BUILDER=kaniko` for non-Helm deploys)*
 - [ ] Enable PostgreSQL SSL connections
-- [ ] Set up audit logging
+- [x] Set up audit logging *(on by default when `COOKER_ENV=production`; emits one JSON event per mutating API call. Destination via `COOKER_AUDIT_DESTINATION`. See "Audit logging" above.)*
 - [x] Run the container as non-root *(image runs as UID 65532 by default)*
 - [x] Enable network policies to restrict pod-to-pod traffic *(NetworkPolicy ships with the Helm chart, gated by `networkPolicy.enabled`; raw manifest at `deploy/kubernetes/network-policy.yaml`)*
 - [ ] Regularly update base images and dependencies
