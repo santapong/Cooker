@@ -1,5 +1,24 @@
 replicaCount: 1
 
+# Cooker runtime environment. Production gates strict defaults
+# (deny-all CORS, fatal startup checks for missing SECRET_KEY).
+# Dev / uat skip these. The chart defaults to "production"; flip
+# this for a quick test cluster that hasn't been wired up with
+# secrets yet.
+cookerEnv: production
+
+# AES-256 key for encrypting environment secrets at rest.
+# Required when cookerEnv=production. Either set secretKey.value
+# inline (the chart will create a Secret holding it) OR point
+# secretKey.existingSecret at a pre-created Kubernetes Secret with
+# a "key" data field. Inline is convenient for testing; existing
+# Secret is the production pattern (managed via SealedSecrets,
+# external-secrets, etc.).
+secretKey:
+  existingSecret: ""    # name of a pre-created Secret
+  existingSecretKey: "key"
+  value: ""             # inline value (NOT recommended for production)
+
 image:
   repository: ghcr.io/cooker-ci/cooker
   tag: latest
@@ -28,12 +47,33 @@ kubernetes:
   inCluster: true
 
 # OIDC/SSO Authentication
+#
+# Two ways to provide the client secret in production:
+# 1. Set oidc.clientSecretRef.{name,key} pointing at a pre-existing
+#    Kubernetes Secret. Recommended for production — keeps the secret
+#    out of values.yaml and the chart artifact.
+# 2. Set oidc.clientSecret inline. The chart creates a Secret named
+#    {release}-oidc holding it, and the Deployment references it via
+#    secretKeyRef. Convenient for dev/test; not recommended for prod.
+#
+# scopes / allowedOrigins are exposed because they vary per IdP and
+# per ingress hostname.
 oidc:
   enabled: false
   issuerUrl: ""
   clientId: ""
-  clientSecret: ""
   redirectUrl: ""
+  # Scopes requested from the IdP. groups is required for RBAC.
+  scopes: ["openid", "profile", "email", "groups"]
+  # CORS allowlist for the API. Production must set this; the
+  # backend fails fast on empty allowedOrigins when cookerEnv=production.
+  allowedOrigins: []
+  # Reference to a pre-existing Kubernetes Secret (production path).
+  clientSecretRef:
+    name: ""
+    key: "client-secret"
+  # Inline value (creates a chart-managed Secret). NOT for production.
+  clientSecret: ""
 
 # Database
 postgresql:

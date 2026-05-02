@@ -145,10 +145,25 @@ make docker-build
 kubectl apply -f deploy/kubernetes/
 
 # Helm (recommended for production)
+#
+# Pre-create Kubernetes Secrets for the OIDC client secret and the
+# COOKER_SECRET_KEY (AES-256 encryption key for env secrets at rest),
+# then point the chart at them. Inline values work for testing but
+# should not be used in production.
+kubectl create secret generic cooker-oidc \
+  --from-literal=client-secret=<value-from-idp>
+kubectl create secret generic cooker-secret-key \
+  --from-literal=key=$(head -c 32 /dev/urandom | base64)
+
 helm install cooker deploy/helm/cooker/ \
+  --set cookerEnv=production \
+  --set 'oidc.allowedOrigins={https://cooker.example.com}' \
   --set oidc.enabled=true \
   --set oidc.issuerUrl=https://auth.example.com \
-  --set oidc.clientId=cooker
+  --set oidc.clientId=cooker \
+  --set oidc.clientSecretRef.name=cooker-oidc \
+  --set oidc.redirectUrl=https://cooker.example.com/callback \
+  --set secretKey.existingSecret=cooker-secret-key
 ```
 
 See [SECURITY.md](SECURITY.md) for the production deployment security checklist.
