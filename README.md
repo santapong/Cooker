@@ -166,10 +166,51 @@ helm install cooker deploy/helm/cooker/ \
   --set oidc.clientId=cooker \
   --set oidc.clientSecretRef.name=cooker-oidc \
   --set oidc.redirectUrl=https://cooker.example.com/callback \
-  --set secretKey.existingSecret=cooker-secret-key
+  --set secretKey.existingSecret=cooker-secret-key \
+  --set 'ingress.tls[0].secretName=cooker-tls' \
+  --set 'ingress.tls[0].hosts[0]=cooker.example.com'
 ```
 
 See [SECURITY.md](SECURITY.md) for the production deployment security checklist.
+
+### TLS at ingress
+
+OIDC sign-in **requires HTTPS** — most IdPs reject non-HTTPS redirect URIs. Cooker doesn't terminate TLS itself; the ingress controller (or cloud LB) does. Pattern: provision the certificate with [cert-manager](https://cert-manager.io/) + Let's Encrypt and reference the resulting Secret in `values.yaml`:
+
+```yaml
+# values.yaml
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: cooker.example.com
+      paths: [{ path: /, pathType: Prefix }]
+  tls:
+    - secretName: cooker-tls
+      hosts: [cooker.example.com]
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+```
+
+The `--set` flags in the `helm install` snippet above set the same values from the command line.
+
+### PostgreSQL SSL
+
+Production should not connect to PostgreSQL over plaintext. Two paths, depending on how Postgres is provisioned:
+
+1. **External PostgreSQL** (managed RDS / Cloud SQL / on-prem) — set the full `DATABASE_URL` with `?sslmode=require` (or `verify-full` if you mount a CA bundle into the pod):
+
+   ```bash
+   helm install cooker deploy/helm/cooker/ \
+     --set 'env[0].name=DATABASE_URL' \
+     --set 'env[0].value=postgres://user:pass@db.internal:5432/cooker?sslmode=require'
+   ```
+
+2. **Bundled `bitnami/postgresql` subchart** — set `postgresql.sslMode` (already documented in `values.yaml`) and the bitnami subchart's `tls.enabled=true` to provision a CA-signed server cert.
+
+Valid `sslmode` values, in increasing strictness: `disable | allow | prefer | require | verify-ca | verify-full`. Use **`require`** as the floor for production and **`verify-full`** when you have a CA bundle.
+
+> **Note:** chart-side rendering of `postgresql.sslMode` into the constructed `DATABASE_URL` is a follow-up. Today operators set the full URL via `env` overrides as shown above. Tracked in backlog `P1.4`.
 
 ## Secrets backends
 
