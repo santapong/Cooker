@@ -39,10 +39,11 @@ FROM alpine:3.19
 # docker-cli: Cooker shells `docker build/push` via a bind-mounted sock
 # kubectl:    pinned static binary; internal/deployer/kubectl.go shells to it
 #
-# UAT runs the container as root so the bind-mounted docker.sock
-# (host-owned GID) and the read-only kubeconfig mount Just Work on
-# Linux, macOS, and WSL. Production Helm/K8s deploys override the
-# user — see deploy/helm/cooker.
+# Runs as a non-root system user (UID/GID 65532 — the standard
+# "nonroot" UID that aligns with distroless and K8s securityContext
+# defaults). UAT compose passes the host's docker group GID via
+# group_add so this user can still access the bind-mounted
+# /var/run/docker.sock; see docker-compose.uat.yml and Makefile.
 ARG KUBECTL_VERSION=v1.29.4
 # Fetch kubectl and verify against the upstream-published SHA256 so a
 # compromised mirror or in-flight tampering cannot inject a malicious
@@ -54,9 +55,11 @@ RUN apk add --no-cache ca-certificates git docker-cli \
       https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256 \
  && echo "$(cat /tmp/kubectl.sha256)  /usr/local/bin/kubectl" | sha256sum -c - \
  && rm /tmp/kubectl.sha256 \
- && chmod +x /usr/local/bin/kubectl
-COPY --from=backend-build /cooker /usr/local/bin/cooker
-COPY --from=frontend-build /app/frontend/dist /usr/share/cooker/static
+ && chmod +x /usr/local/bin/kubectl \
+ && addgroup -g 65532 -S cooker \
+ && adduser -u 65532 -S -G cooker -H -h /nonexistent cooker
+COPY --from=backend-build --chown=65532:65532 /cooker /usr/local/bin/cooker
+COPY --from=frontend-build --chown=65532:65532 /app/frontend/dist /usr/share/cooker/static
 
 EXPOSE 8080
 
@@ -70,4 +73,5 @@ LABEL org.opencontainers.image.title="Cooker"
 LABEL org.opencontainers.image.description="CI/CD Management Tool for Docker & Kubernetes"
 LABEL org.opencontainers.image.source="https://github.com/cooker-ci/cooker"
 
+USER 65532:65532
 ENTRYPOINT ["cooker"]

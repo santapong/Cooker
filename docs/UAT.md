@@ -234,8 +234,12 @@ issue with the commit SHA.
   `COOKER_REGISTRY_PUSH` and `COOKER_REGISTRY` in the Go code so
   pushes can go to `localhost:5001/cooker` while manifests
   reference `registry:5000/cooker`.
-- The Cooker container runs as **root** — acceptable for UAT,
-  not for production.
+- The Cooker container runs as **non-root** UID 65532. `make uat-up`
+  resolves the host's docker group GID and writes it as `DOCKER_GID`
+  in `.env.uat` so the container can access the bind-mounted
+  `/var/run/docker.sock`. If auto-detection picks the wrong GID
+  for your host (rare; fallback is 999), edit `DOCKER_GID` in
+  `.env.uat` and `make uat-reset`.
 - k3s runs **privileged** with host cgroups — UAT-only.
 - Single-node k3s with traefik + servicelb disabled. No Ingress,
   no LoadBalancer. Services are `ClusterIP`; reach deployed apps

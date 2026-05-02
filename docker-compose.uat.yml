@@ -165,6 +165,14 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Kubeconfig written by k3s, rewritten by kubeconfig-fixer.
       - kubeconfig:/etc/cooker/kube:ro
+    # The container runs as UID/GID 65532 (cooker, non-root). The
+    # bind-mounted docker.sock is owned by the host's docker group;
+    # adding that GID as a supplementary group inside the container
+    # lets the cooker user talk to the daemon without root. The
+    # Makefile resolves DOCKER_GID from the host before running
+    # `docker compose up`. Default 999 matches Debian/Ubuntu hosts.
+    group_add:
+      - "${DOCKER_GID:-999}"
     ports:
       - "8080:8080"
     depends_on:
