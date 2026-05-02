@@ -71,11 +71,22 @@ helm-uninstall:
 # Teardown removes all volumes so state never survives across runs.
 UAT_COMPOSE=docker compose -f docker-compose.uat.yml --env-file .env.uat
 
+# Resolve the host's docker group GID so the non-root container
+# user can access the bind-mounted /var/run/docker.sock. Tries
+# `getent group docker` first (Linux), then the socket's GID via
+# stat (works on macOS Docker Desktop's gRPC FUSE mount), then
+# falls back to 999 (Debian/Ubuntu default).
+DOCKER_GID := $(shell getent group docker 2>/dev/null | cut -d: -f3 \
+                  || stat -c '%g' /var/run/docker.sock 2>/dev/null \
+                  || echo 999)
+
 uat-up:
 	@if [ ! -f .env.uat ]; then \
 	  cp .env.uat.example .env.uat; \
 	  echo "COOKER_SECRET_KEY=$$(head -c 32 /dev/urandom | base64)" >> .env.uat; \
-	  echo "Created .env.uat from .env.uat.example. Edit it to enable OIDC."; \
+	  echo "DOCKER_GID=$(DOCKER_GID)" >> .env.uat; \
+	  echo "Created .env.uat from .env.uat.example (DOCKER_GID=$(DOCKER_GID))."; \
+	  echo "Edit .env.uat to enable OIDC."; \
 	fi
 	$(UAT_COMPOSE) up -d --build
 	@echo

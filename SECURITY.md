@@ -107,7 +107,7 @@ Cooker's own Docker image follows these practices:
 
 - **Multi-stage build**: Build dependencies not included in the final image
 - **Minimal base**: Alpine Linux base image with only `ca-certificates`
-- **Non-root**: Production deployments should use a non-root user (configurable in Helm values)
+- **Non-root**: image runs as UID/GID 65532 (`cooker`), the standard "nonroot" UID aligned with distroless and K8s `runAsNonRoot: true`. UAT compose adds the host's docker group GID via `group_add` so the container can access the bind-mounted `docker.sock` without root.
 - **OCI labels**: Image includes standard OCI annotations for traceability
 
 ### Security Headers
@@ -133,6 +133,6 @@ Referrer-Policy: strict-origin-when-cross-origin
 - [ ] Use Kaniko instead of Docker socket for image builds
 - [ ] Enable PostgreSQL SSL connections
 - [ ] Set up audit logging
-- [ ] Run the container as non-root
+- [x] Run the container as non-root *(image runs as UID 65532 by default)*
 - [ ] Enable network policies to restrict pod-to-pod traffic
 - [ ] Regularly update base images and dependencies
