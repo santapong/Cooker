@@ -6,8 +6,25 @@ import (
 	"strings"
 )
 
+// Env represents the deployment environment. Affects defaults and
+// strictness of startup validation. Values: "dev", "uat", "production".
+type Env string
+
+const (
+	EnvDev        Env = "dev"
+	EnvUAT        Env = "uat"
+	EnvProduction Env = "production"
+)
+
+// IsProduction reports whether the environment is production.
+func (e Env) IsProduction() bool { return e == EnvProduction }
+
 // Config holds all application configuration.
 type Config struct {
+	// Env identifies the deployment environment. Production gates
+	// strict defaults: empty AllowedOrigins becomes deny-all,
+	// missing SecretKey becomes fatal at boot, etc.
+	Env            Env
 	Port           int
 	DatabaseURL    string
 	RedisURL       string
@@ -53,11 +70,20 @@ type KubernetesConfig struct {
 
 // Load reads configuration from environment variables with sensible defaults.
 func Load() *Config {
+	env := Env(getEnv("COOKER_ENV", string(EnvDev)))
+	// In production, AllowedOrigins must be configured explicitly —
+	// no permissive localhost defaults. PR B adds startup validation
+	// that turns this into a fatal error if still empty at boot.
+	originDefault := []string{"http://localhost:5173", "http://localhost:3000"}
+	if env.IsProduction() {
+		originDefault = nil
+	}
 	return &Config{
+		Env:            env,
 		Port:           getEnvInt("COOKER_PORT", 8080),
 		DatabaseURL:    getEnv("DATABASE_URL", "postgres://cooker:cooker@localhost:5432/cooker?sslmode=disable"),
 		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
-		AllowedOrigins: getEnvCSV("COOKER_ALLOWED_ORIGINS", []string{"http://localhost:5173", "http://localhost:3000"}),
+		AllowedOrigins: getEnvCSV("COOKER_ALLOWED_ORIGINS", originDefault),
 		SecretKey:       getEnv("COOKER_SECRET_KEY", ""),
 		Registry:        getEnv("COOKER_REGISTRY", "localhost:5000/cooker"),
 		BuilderBackend:  getEnv("COOKER_BUILDER", "noop"),
