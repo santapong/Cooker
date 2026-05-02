@@ -89,6 +89,21 @@ func (m *Manager) Delete(ctx context.Context, envID, key string) error {
 	return nil
 }
 
+// Promote satisfies secrets.Promoter. Resolves both Cooker
+// environment IDs to KeepSave environment names and delegates to
+// the server-side /promote endpoint.
+func (m *Manager) Promote(ctx context.Context, fromEnvID, toEnvID string, keys []string) error {
+	from, err := m.envName(ctx, fromEnvID)
+	if err != nil {
+		return err
+	}
+	to, err := m.envName(ctx, toEnvID)
+	if err != nil {
+		return err
+	}
+	return m.client.PromoteSecrets(ctx, m.projectID, from, to, keys)
+}
+
 func (m *Manager) List(ctx context.Context, envID string) ([]string, error) {
 	name, err := m.envName(ctx, envID)
 	if err != nil {

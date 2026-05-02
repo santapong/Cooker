@@ -8,14 +8,26 @@ import (
 	"github.com/cooker-ci/cooker/internal/model"
 )
 
-// Network handlers are placeholders: the real implementation talks
-// to the Docker Engine API through the transport chosen by the
-// host's Reachability (see internal/transport/tsnet). Until that
-// lands they return empty lists / accepted stubs so the UI can
-// exercise the routes.
+// Network handlers route to the configured Docker host (selected via
+// /api/v1/hosts and reached via the tsnet/local transport). The
+// transport plumbing is not yet wired through Handler — until it is,
+// these endpoints return 501 with a consistent shape so clients can
+// detect the feature gap rather than silently consuming fake IDs.
+//
+// Tracked in backlog P6 (handler placeholders) + P9.4 (tsnet transport
+// build-tag). Listing endpoints return an empty list with HTTP 200 so
+// UI pages can render their empty state without surfacing an error.
+
+func notImplementedDockerHost(c *gin.Context, op string) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":     "docker host transport not configured",
+		"operation": op,
+		"hint":      "configure a host via POST /api/v1/hosts and ensure COOKER_DOCKER_HOST is reachable",
+	})
+}
 
 func (h *Handler) ListDockerNetworks(c *gin.Context) {
-	_ = c.Query("hostId") // will filter once the Docker client is wired
+	_ = c.Query("hostId")
 	c.JSON(http.StatusOK, []model.DockerNetwork{})
 }
 
@@ -25,24 +37,15 @@ func (h *Handler) CreateDockerNetwork(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// TODO: call (docker client).NetworkCreate(ctx, n.Name, types.NetworkCreate{...})
-	c.JSON(http.StatusAccepted, gin.H{
-		"status":  "pending",
-		"network": n,
-	})
+	notImplementedDockerHost(c, "network.create")
 }
 
 func (h *Handler) GetDockerNetwork(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"id":      c.Param("id"),
-		"hostId":  c.Query("hostId"),
-		"message": "docker network inspect via configured host",
-	})
+	notImplementedDockerHost(c, "network.inspect")
 }
 
 func (h *Handler) DeleteDockerNetwork(c *gin.Context) {
-	// TODO: call (docker client).NetworkRemove(ctx, id)
-	c.JSON(http.StatusOK, gin.H{"id": c.Param("id"), "status": "pending"})
+	notImplementedDockerHost(c, "network.remove")
 }
 
 func (h *Handler) ConnectContainerToNetwork(c *gin.Context) {
@@ -53,10 +56,5 @@ func (h *Handler) ConnectContainerToNetwork(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// TODO: call (docker client).NetworkConnect(ctx, networkID, containerID, nil)
-	c.JSON(http.StatusAccepted, gin.H{
-		"network":   c.Param("id"),
-		"container": req.ContainerID,
-		"status":    "pending",
-	})
+	notImplementedDockerHost(c, "network.connect")
 }

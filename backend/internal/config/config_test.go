@@ -320,6 +320,45 @@ func TestValidate_ProductionHappyPath(t *testing.T) {
 	}
 }
 
+func TestParseGroupRoleMap(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want map[string]string
+	}{
+		{"empty", "", nil},
+		{"whitespace only", "   ", nil},
+		{"single pair", "platform-admins:admin", map[string]string{"platform-admins": "admin"}},
+		{"multi pair", "g1:admin,g2:operator", map[string]string{"g1": "admin", "g2": "operator"}},
+		{"trims spaces", "  g1 : admin , g2 : operator ", map[string]string{"g1": "admin", "g2": "operator"}},
+		{"skips malformed", "g1:admin,oops,g2:operator", map[string]string{"g1": "admin", "g2": "operator"}},
+		{"skips empty halves", "g1:admin,:operator,g2:", map[string]string{"g1": "admin"}},
+		{"all malformed yields nil", "oops,nope", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseGroupRoleMap(tc.raw)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("parseGroupRoleMap(%q) = %v, want %v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoad_OIDCGroupMap(t *testing.T) {
+	os.Setenv("COOKER_OIDC_GROUP_MAP", "platform-admins:admin,platform-eng:operator")
+	defer os.Unsetenv("COOKER_OIDC_GROUP_MAP")
+
+	cfg := Load()
+	want := map[string]string{
+		"platform-admins": "admin",
+		"platform-eng":    "operator",
+	}
+	if !reflect.DeepEqual(cfg.OIDC.GroupRoleMap, want) {
+		t.Errorf("GroupRoleMap = %v, want %v", cfg.OIDC.GroupRoleMap, want)
+	}
+}
+
 func TestValidate_ProductionAccumulatesProblems(t *testing.T) {
 	cfg := &Config{Env: EnvProduction}
 	err := cfg.Validate()

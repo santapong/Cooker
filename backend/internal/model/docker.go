@@ -23,10 +23,10 @@ type PortBinding struct {
 
 // ImageInfo represents a Docker/OCI image.
 type ImageInfo struct {
-	ID          string   `json:"id"`
-	RepoTags    []string `json:"repoTags"`
-	RepoDigests []string `json:"repoDigests"`
-	Size        int64    `json:"size"`
+	ID          string    `json:"id"`
+	RepoTags    []string  `json:"repoTags"`
+	RepoDigests []string  `json:"repoDigests"`
+	Size        int64     `json:"size"`
 	Created     time.Time `json:"created"`
-	Layers      int      `json:"layers"`
+	Layers      int       `json:"layers"`
 }

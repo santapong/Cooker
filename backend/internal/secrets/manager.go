@@ -25,3 +25,17 @@ type Manager interface {
 	Delete(ctx context.Context, envID, key string) error
 	List(ctx context.Context, envID string) ([]string, error)
 }
+
+// ErrPromotionUnsupported is returned by adapters that do not
+// implement Promoter. The handler maps this to HTTP 501.
+var ErrPromotionUnsupported = errors.New("secrets: promotion not supported by this backend")
+
+// Promoter is an optional interface adapters may implement to
+// support copying secrets from one environment to another in a
+// single backend round-trip. Today only the KeepSave adapter
+// implements it; the database adapter falls back to ErrPromotionUnsupported.
+//
+// keys may be empty to mean "all keys in fromEnvID".
+type Promoter interface {
+	Promote(ctx context.Context, fromEnvID, toEnvID string, keys []string) error
+}

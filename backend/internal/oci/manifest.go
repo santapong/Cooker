@@ -8,7 +8,7 @@ package oci
 // https://github.com/opencontainers/image-spec/blob/main/descriptor.md
 type Descriptor struct {
 	MediaType   string            `json:"mediaType"`
-	Digest      string            `json:"digest"`    // e.g., "sha256:abc123..."
+	Digest      string            `json:"digest"` // e.g., "sha256:abc123..."
 	Size        int64             `json:"size"`
 	URLs        []string          `json:"urls,omitempty"`
 	Annotations map[string]string `json:"annotations,omitempty"`

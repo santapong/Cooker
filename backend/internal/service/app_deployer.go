@@ -237,4 +237,3 @@ func (m *mwWriter) Write(p []byte) (int, error) {
 	_, _ = m.b.Write(p)
 	return len(p), nil
 }
-

@@ -17,7 +17,7 @@ import (
 
 // Handler owns the dependencies shared by request handlers.
 type Handler struct {
-	Store       *store.Store
+	Store *store.Store
 	// Codec is retained for backward compatibility with handlers that
 	// still reach for AES-GCM directly; new code should go through
 	// Secrets instead. Secret endpoints (Put/Reveal/Delete) delegate

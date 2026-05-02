@@ -16,12 +16,12 @@ type fakeFileInfo struct {
 	dir  bool
 }
 
-func (f fakeFileInfo) Name() string       { return f.name }
-func (fakeFileInfo) Size() int64          { return 0 }
-func (fakeFileInfo) Mode() os.FileMode    { return 0 }
-func (fakeFileInfo) ModTime() time.Time   { return time.Time{} }
-func (f fakeFileInfo) IsDir() bool        { return f.dir }
-func (fakeFileInfo) Sys() interface{}     { return nil }
+func (f fakeFileInfo) Name() string     { return f.name }
+func (fakeFileInfo) Size() int64        { return 0 }
+func (fakeFileInfo) Mode() os.FileMode  { return 0 }
+func (fakeFileInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeFileInfo) IsDir() bool      { return f.dir }
+func (fakeFileInfo) Sys() interface{}   { return nil }
 
 type mapFS map[string]bool
 

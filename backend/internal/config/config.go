@@ -25,26 +25,26 @@ func (e Env) IsProduction() bool { return e == EnvProduction }
 
 // Config holds all application configuration.
 type Config struct {
-	Env            Env
-	Port           int
-	DatabaseURL    string
-	RedisURL       string
-	AllowedOrigins []string
-	SecretKey      string
-	Registry       string
+	Env             Env
+	Port            int
+	DatabaseURL     string
+	RedisURL        string
+	AllowedOrigins  []string
+	SecretKey       string
+	Registry        string
 	BuilderBackend  string // "noop" | "docker" | "buildkit" | "kaniko"
 	PusherBackend   string // "noop" | "docker" | "crane"
 	DeployerBackend string // "noop" | "kubectl" | "clientgo"
 	// SecretsBackend selects how environment secrets are stored.
 	// "database" (default) keeps the historical AES-GCM + JSONB path;
 	// "keepsave" delegates to a KeepSave server.
-	SecretsBackend  string // "database" | "keepsave"
-	RateLimit       RateLimitConfig
-	OIDC            OIDCConfig
-	Docker          DockerConfig
-	Kubernetes      KubernetesConfig
-	KeepSave        KeepSaveConfig
-	Audit           AuditConfig
+	SecretsBackend string // "database" | "keepsave"
+	RateLimit      RateLimitConfig
+	OIDC           OIDCConfig
+	Docker         DockerConfig
+	Kubernetes     KubernetesConfig
+	KeepSave       KeepSaveConfig
+	Audit          AuditConfig
 }
 
 // RateLimitConfig tunes per-user rate limiting on expensive endpoints.
@@ -62,6 +62,18 @@ type OIDCConfig struct {
 	ClientSecret string
 	RedirectURL  string
 	Scopes       []string
+	// GroupRoleMap maps OIDC group names to Cooker role strings
+	// ("admin"|"operator"|"approver"|"viewer"). Empty falls back to the
+	// auth.DefaultGroupRoleMap. Loaded from COOKER_OIDC_GROUP_MAP as a
+	// CSV of "group:role" pairs, e.g.
+	//   "platform-admins:admin,platform-eng:operator,security-team:approver"
+	GroupRoleMap map[string]string
+	// MFAACRValues lists ACR values that satisfy the step-up MFA gate
+	// applied to destructive admin routes. A token's `acr` claim must
+	// be one of these (or its `amr` must contain a matching method) to
+	// pass auth.RequireMFA. Empty disables the gate. Loaded from
+	// COOKER_OIDC_MFA_ACR_VALUES (CSV).
+	MFAACRValues []string
 }
 
 // DockerConfig holds Docker Engine connection settings.
@@ -115,11 +127,11 @@ func Load() *Config {
 		originDefault = nil
 	}
 	return &Config{
-		Env:            env,
-		Port:           getEnvInt("COOKER_PORT", 8080),
-		DatabaseURL:    getEnv("DATABASE_URL", "postgres://cooker:cooker@localhost:5432/cooker?sslmode=disable"),
-		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
-		AllowedOrigins: getEnvCSV("COOKER_ALLOWED_ORIGINS", originDefault),
+		Env:             env,
+		Port:            getEnvInt("COOKER_PORT", 8080),
+		DatabaseURL:     getEnv("DATABASE_URL", "postgres://cooker:cooker@localhost:5432/cooker?sslmode=disable"),
+		RedisURL:        getEnv("REDIS_URL", "redis://localhost:6379"),
+		AllowedOrigins:  getEnvCSV("COOKER_ALLOWED_ORIGINS", originDefault),
 		SecretKey:       getEnv("COOKER_SECRET_KEY", ""),
 		Registry:        getEnv("COOKER_REGISTRY", "localhost:5000/cooker"),
 		BuilderBackend:  getEnv("COOKER_BUILDER", "noop"),
@@ -138,6 +150,8 @@ func Load() *Config {
 			ClientSecret: getEnv("COOKER_OIDC_CLIENT_SECRET", ""),
 			RedirectURL:  getEnv("COOKER_OIDC_REDIRECT_URL", ""),
 			Scopes:       []string{"openid", "profile", "email", "groups"},
+			GroupRoleMap: parseGroupRoleMap(getEnv("COOKER_OIDC_GROUP_MAP", "")),
+			MFAACRValues: getEnvCSV("COOKER_OIDC_MFA_ACR_VALUES", nil),
 		},
 		Docker: DockerConfig{
 			Host:      getEnv("DOCKER_HOST", "unix:///var/run/docker.sock"),
@@ -245,6 +259,35 @@ func getEnvBool(key string, fallback bool) bool {
 		}
 	}
 	return fallback
+}
+
+// parseGroupRoleMap parses a CSV of "group:role" pairs into a map.
+// Empty or malformed input yields nil so callers fall back to defaults.
+// Whitespace around tokens is tolerated; pairs missing either side are
+// skipped silently — operator typos surface as users defaulting to
+// viewer rather than as a startup crash.
+func parseGroupRoleMap(raw string) map[string]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, pair := range strings.Split(raw, ",") {
+		parts := strings.SplitN(pair, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		group := strings.TrimSpace(parts[0])
+		role := strings.TrimSpace(parts[1])
+		if group == "" || role == "" {
+			continue
+		}
+		out[group] = role
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func getEnvCSV(key string, fallback []string) []string {

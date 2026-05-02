@@ -45,7 +45,18 @@ Role-based access control with three tiers:
 | **operator** | Run pipelines, approve environment promotions, manage environments, view all resources |
 | **viewer** | Read-only access to all resources, view pipeline runs and logs |
 
-Roles are mapped from OIDC group claims. The mapping is configurable via environment variables or Helm values.
+Roles are mapped from OIDC group claims. The mapping is configurable via `COOKER_OIDC_GROUP_MAP` (CSV of `group:role` pairs) or the Helm chart value `oidc.groupRoleMap`. Empty falls back to the built-in `cooker-admins → admin`, `cooker-operators → operator`, etc.
+
+#### Step-up MFA on destructive admin routes
+
+Operators can require a second factor on the most dangerous endpoints (DELETE pipelines/envs/apps/hosts, secret reveal/put/delete/promote, app webhook rotation) by setting `COOKER_OIDC_MFA_ACR_VALUES` (CSV — chart: `oidc.mfaAcrValues`). The middleware accepts a request only when the token's `acr` claim, or any value in the `amr` array, is in the configured set. Otherwise the route returns:
+
+```
+HTTP/1.1 403 Forbidden
+{ "error": "mfa_required", "acr_values": ["mfa", ...] }
+```
+
+The frontend API client recognises this response and re-issues the OIDC sign-in redirect with `acr_values=<configured>` so the IdP runs the second factor and the user retries the action with a fresh, MFA-bearing token. Empty config disables the gate (current default).
 
 ### OCI Registry Security
 

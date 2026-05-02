@@ -15,15 +15,15 @@ const (
 
 // PipelineRun is a concrete execution of a pipeline definition.
 type PipelineRun struct {
-	ID                 string              `json:"id" db:"id"`
-	PipelineID         string              `json:"pipelineId" db:"pipeline_id"`
-	Status             RunStatus           `json:"status" db:"status"`
-	StageRuns          []StageRun          `json:"stageRuns"`
+	ID                  string              `json:"id" db:"id"`
+	PipelineID          string              `json:"pipelineId" db:"pipeline_id"`
+	Status              RunStatus           `json:"status" db:"status"`
+	StageRuns           []StageRun          `json:"stageRuns"`
 	EnvironmentStatuses []EnvironmentStatus `json:"environmentStatuses"`
-	Variables          map[string]string   `json:"variables"`
-	StartedAt          *time.Time          `json:"startedAt" db:"started_at"`
-	FinishedAt         *time.Time          `json:"finishedAt" db:"finished_at"`
-	Error              string              `json:"error,omitempty" db:"error"`
+	Variables           map[string]string   `json:"variables"`
+	StartedAt           *time.Time          `json:"startedAt" db:"started_at"`
+	FinishedAt          *time.Time          `json:"finishedAt" db:"finished_at"`
+	Error               string              `json:"error,omitempty" db:"error"`
 }
 
 // StageRun tracks the execution of a single stage within a pipeline run.

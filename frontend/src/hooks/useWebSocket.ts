@@ -5,6 +5,14 @@ interface UseWebSocketOptions {
   url: string;
   onMessage?: (data: unknown) => void;
   autoConnect?: boolean;
+  // reconnect controls the exponential backoff. Set enabled=false to
+  // disable automatic reconnects entirely (e.g. in tests).
+  reconnect?: {
+    enabled?: boolean;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    maxAttempts?: number;
+  };
 }
 
 // fetchWSTicket exchanges the user's bearer token for a single-use
@@ -20,14 +28,45 @@ async function fetchWSTicket(): Promise<string | null> {
   return body.ticket ?? null;
 }
 
-export function useWebSocket({ url, onMessage, autoConnect = true }: UseWebSocketOptions) {
+const DEFAULT_INITIAL_DELAY = 500;
+const DEFAULT_MAX_DELAY = 30_000;
+const DEFAULT_MAX_ATTEMPTS = Infinity;
+
+export function useWebSocket({
+  url,
+  onMessage,
+  autoConnect = true,
+  reconnect,
+}: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
 
+  const reconnectEnabled = reconnect?.enabled ?? true;
+  const initialDelay = reconnect?.initialDelayMs ?? DEFAULT_INITIAL_DELAY;
+  const maxDelay = reconnect?.maxDelayMs ?? DEFAULT_MAX_DELAY;
+  const maxAttempts = reconnect?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+
+  // Mutable refs so the connect callback's identity doesn't churn on
+  // every attempt (which would re-trigger the autoConnect effect).
+  const attemptRef = useRef(0);
+  const timerRef = useRef<number | null>(null);
+  const closedByCallerRef = useRef(false);
+
+  const clearTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
   const connect = useCallback(async () => {
+    closedByCallerRef.current = false;
     const ticket = await fetchWSTicket();
     if (!ticket) {
-      // Auth failed — leave connected=false; caller can retry.
+      // Auth failed — schedule a retry with backoff so an expired
+      // token that gets refreshed in the background eventually
+      // recovers without a page reload.
+      scheduleReconnect();
       return;
     }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -36,8 +75,19 @@ export function useWebSocket({ url, onMessage, autoConnect = true }: UseWebSocke
 
     const ws = new WebSocket(wsUrl);
 
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
+    ws.onopen = () => {
+      attemptRef.current = 0;
+      setConnected(true);
+    };
+    ws.onclose = () => {
+      setConnected(false);
+      if (!closedByCallerRef.current) {
+        scheduleReconnect();
+      }
+    };
+    ws.onerror = () => {
+      // onclose fires after onerror; the close handler triggers reconnect.
+    };
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -48,9 +98,28 @@ export function useWebSocket({ url, onMessage, autoConnect = true }: UseWebSocke
     };
 
     wsRef.current = ws;
+    // The connect call below depends on scheduleReconnect, which itself
+    // depends on connect — declared via refs to avoid the cycle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, onMessage]);
 
+  const scheduleReconnect = useCallback(() => {
+    if (!reconnectEnabled) return;
+    if (closedByCallerRef.current) return;
+    if (attemptRef.current >= maxAttempts) return;
+    const attempt = attemptRef.current;
+    attemptRef.current = attempt + 1;
+    const delay = Math.min(initialDelay * 2 ** attempt, maxDelay);
+    clearTimer();
+    timerRef.current = window.setTimeout(() => {
+      void connect();
+    }, delay);
+  }, [reconnectEnabled, maxAttempts, initialDelay, maxDelay, connect]);
+
   const disconnect = useCallback(() => {
+    closedByCallerRef.current = true;
+    clearTimer();
+    attemptRef.current = 0;
     wsRef.current?.close();
     wsRef.current = null;
     setConnected(false);

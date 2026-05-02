@@ -21,6 +21,13 @@ type Claims struct {
 	Name    string   `json:"name"`
 	Groups  []string `json:"groups"`
 	Roles   []string `json:"roles"`
+	// ACR is the Authentication Context Class Reference. RequireMFA
+	// matches against this to decide if step-up auth has happened.
+	ACR string `json:"acr"`
+	// AMR is the Authentication Methods References (e.g. ["pwd","otp"]).
+	// RequireMFA accepts a token whose AMR contains a configured value
+	// even when ACR is empty.
+	AMR []string `json:"amr"`
 }
 
 // Middleware validates OIDC bearer tokens on incoming requests.
@@ -79,6 +86,8 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 			Email   string   `json:"email"`
 			Name    string   `json:"name"`
 			Groups  []string `json:"groups"`
+			ACR     string   `json:"acr"`
+			AMR     []string `json:"amr"`
 		}
 		if err := idToken.Claims(&raw); err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
@@ -91,7 +100,9 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 			Email:   raw.Email,
 			Name:    raw.Name,
 			Groups:  raw.Groups,
-			Roles:   MapGroupsToRoles(raw.Groups),
+			Roles:   MapGroupsToRolesWith(raw.Groups, m.cfg.GroupRoleMap),
+			ACR:     raw.ACR,
+			AMR:     raw.AMR,
 		}
 		c.Set("user", claims)
 		c.Next()

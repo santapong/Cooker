@@ -41,8 +41,8 @@ func (s *Server) wsTicketGate() gin.HandlerFunc {
 // /api/v1/ws-tickets with its bearer token to obtain a ticket and
 // then opens the WS with ?ticket=<value>.
 type wsTicket struct {
-	subject  string
-	expires  time.Time
+	subject string
+	expires time.Time
 }
 
 // wsTicketStore is an in-memory, TTL-bound, single-use ticket store.

@@ -80,6 +80,19 @@ spec:
             - name: COOKER_ALLOWED_ORIGINS
               value: {{ join "," .Values.oidc.allowedOrigins | quote }}
             {{- end }}
+            - name: COOKER_SECRETS_BACKEND
+              value: {{ .Values.secrets.backend | quote }}
+            {{- if eq .Values.secrets.backend "keepsave" }}
+            - name: COOKER_SECRETS_KEEPSAVE_URL
+              value: {{ .Values.secrets.keepsave.url | quote }}
+            - name: COOKER_SECRETS_KEEPSAVE_PROJECT_ID
+              value: {{ .Values.secrets.keepsave.projectId | quote }}
+            - name: COOKER_SECRETS_KEEPSAVE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "secrets.keepsave.apiKey.existingSecret is required when secrets.backend=keepsave" .Values.secrets.keepsave.apiKey.existingSecret | quote }}
+                  key: {{ .Values.secrets.keepsave.apiKey.existingSecretKey | quote }}
+            {{- end }}
             - name: COOKER_SECRET_KEY
               valueFrom:
                 secretKeyRef:
@@ -103,6 +116,14 @@ spec:
             {{- if .Values.oidc.scopes }}
             - name: COOKER_OIDC_SCOPES
               value: {{ join "," .Values.oidc.scopes | quote }}
+            {{- end }}
+            {{- if .Values.oidc.groupRoleMap }}
+            - name: COOKER_OIDC_GROUP_MAP
+              value: {{ .Values.oidc.groupRoleMap | quote }}
+            {{- end }}
+            {{- if .Values.oidc.mfaAcrValues }}
+            - name: COOKER_OIDC_MFA_ACR_VALUES
+              value: {{ .Values.oidc.mfaAcrValues | quote }}
             {{- end }}
             {{- if or .Values.oidc.clientSecretRef.name .Values.oidc.clientSecret }}
             - name: COOKER_OIDC_CLIENT_SECRET

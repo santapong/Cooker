@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 import { UserManager, WebStorageStateStore, type User as OidcUser } from 'oidc-client-ts';
+import { pushToast } from '../stores/toastStore';
 
 interface User {
   sub: string;
@@ -86,11 +87,14 @@ export function getAccessToken(): string | null {
   return currentAccessToken;
 }
 
-export function triggerSignIn(): void {
+export function triggerSignIn(opts?: { acrValues?: string }): void {
   const manager = getUserManager();
-  if (manager) {
-    void manager.signinRedirect();
+  if (!manager) return;
+  if (opts?.acrValues) {
+    void manager.signinRedirect({ acr_values: opts.acrValues });
+    return;
   }
+  void manager.signinRedirect();
 }
 
 function toUser(oidcUser: OidcUser): User {
@@ -166,15 +170,27 @@ export function OIDCProvider({ children }: { children: ReactNode }) {
       setUser(null);
     };
 
+    // Silent-renew failure: oidc-client-ts kicks the user out on the
+    // next 401 by default. Surface a toast so the redirect doesn't
+    // happen silently — operators have asked for this in the field.
+    const onSilentRenewError = (err: Error) => {
+      pushToast(
+        'warning',
+        `Session refresh failed (${err.message}). You may be redirected to sign in again.`,
+      );
+    };
+
     manager.events.addUserLoaded(onLoaded);
     manager.events.addUserUnloaded(onUnloaded);
     manager.events.addAccessTokenExpired(onExpired);
+    manager.events.addSilentRenewError(onSilentRenewError);
 
     return () => {
       cancelled = true;
       manager.events.removeUserLoaded(onLoaded);
       manager.events.removeUserUnloaded(onUnloaded);
       manager.events.removeAccessTokenExpired(onExpired);
+      manager.events.removeSilentRenewError(onSilentRenewError);
     };
   }, [manager]);
 

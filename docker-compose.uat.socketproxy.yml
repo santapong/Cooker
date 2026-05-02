@@ -1,0 +1,91 @@
+# Cooker UAT overlay: route the cooker container at a hardened
+# tecnativa/docker-socket-proxy instead of bind-mounting the host
+# docker.sock directly.
+#
+# Why use this:
+#   The default UAT compose mounts /var/run/docker.sock straight into
+#   the cooker container so `docker build` and `docker push` work.
+#   That gives the container effective root on the host: an RCE in
+#   cooker can take over the host's Docker daemon and any other
+#   container it runs.
+#   docker-socket-proxy is an haproxy-fronted Docker API filter — it
+#   exposes only the verbs we whitelist (containers, images, build,
+#   networks, volumes) and refuses everything else. cooker connects
+#   over TCP via DOCKER_HOST instead of the bind mount.
+#
+# Trade-offs:
+#   - Filter coverage is best-effort; Cooker's `docker build` works
+#     because /build POST is allowed. /exec, /system, /swarm, etc are
+#     denied. Audit the toggles below if you add new Docker calls to
+#     Cooker.
+#   - Adds one container to the stack and a small per-call latency.
+#   - The proxy itself runs as root and bind-mounts the host socket;
+#     this concentrates the risk on a small, hardened service rather
+#     than spreading it across the application container.
+#
+# How to use:
+#   $ docker compose \
+#       -f docker-compose.uat.yml \
+#       -f docker-compose.uat.socketproxy.yml \
+#       --profile socketproxy --env-file .env.uat \
+#       up -d --build
+#
+#   Or via the Makefile target: `make uat-up-socketproxy`.
+
+name: cooker-uat
+
+services:
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.2
+    profiles: ["socketproxy"]
+    restart: unless-stopped
+    environment:
+      # Whitelist: read endpoints
+      CONTAINERS: "1"
+      IMAGES: "1"
+      INFO: "1"
+      NETWORKS: "1"
+      PING: "1"
+      SERVICES: "0"
+      SWARM: "0"
+      SYSTEM: "0"
+      TASKS: "0"
+      VOLUMES: "1"
+      # Whitelist: write endpoints needed by `docker build` / `push`
+      POST: "1"
+      BUILD: "1"
+      EXEC: "0"
+      AUTH: "1"
+      SECRETS: "0"
+      # Hard-deny everything else by default.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - cooker-uat
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2375/_ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  cooker:
+    profiles: ["socketproxy"]
+    # Drop the bind-mounted host socket; cooker now talks Docker API
+    # over TCP via the proxy. Note: the base file's volumes list still
+    # applies; this overlay overrides it entirely with the new list.
+    volumes:
+      - kubeconfig:/etc/cooker/kube:ro
+    environment:
+      DOCKER_HOST: tcp://socket-proxy:2375
+    depends_on:
+      postgres:
+        condition: service_healthy
+      registry:
+        condition: service_healthy
+      kubeconfig-fixer:
+        condition: service_healthy
+      socket-proxy:
+        condition: service_healthy
+    # group_add is no longer needed — the container doesn't talk to
+    # the host socket directly.
+    group_add: !reset []

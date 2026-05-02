@@ -100,11 +100,11 @@ func ListContainers(c *gin.Context) {
 
 func CreateContainer(c *gin.Context) {
 	var req struct {
-		Image   string            `json:"image" binding:"required"`
-		Name    string            `json:"name"`
+		Image   string              `json:"image" binding:"required"`
+		Name    string              `json:"name"`
 		Ports   []model.PortBinding `json:"ports"`
-		Env     map[string]string `json:"env"`
-		Command []string          `json:"command"`
+		Env     map[string]string   `json:"env"`
+		Command []string            `json:"command"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

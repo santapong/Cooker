@@ -13,11 +13,13 @@ import (
 
 type fakeTarget struct{ kind model.DeployTargetKind }
 
-func (f *fakeTarget) Kind() model.DeployTargetKind                              { return f.kind }
-func (*fakeTarget) Deploy(context.Context, deploytarget.Spec) error             { return nil }
-func (*fakeTarget) Status(context.Context, string) (deploytarget.Status, error) { return deploytarget.Status{Healthy: true}, nil }
-func (*fakeTarget) Logs(context.Context, string, io.Writer) error               { return nil }
-func (*fakeTarget) Rollback(context.Context, string) error                      { return nil }
+func (f *fakeTarget) Kind() model.DeployTargetKind                  { return f.kind }
+func (*fakeTarget) Deploy(context.Context, deploytarget.Spec) error { return nil }
+func (*fakeTarget) Status(context.Context, string) (deploytarget.Status, error) {
+	return deploytarget.Status{Healthy: true}, nil
+}
+func (*fakeTarget) Logs(context.Context, string, io.Writer) error { return nil }
+func (*fakeTarget) Rollback(context.Context, string) error        { return nil }
 
 func TestRegisterAndLookup(t *testing.T) {
 	deploytarget.ResetForTest()
