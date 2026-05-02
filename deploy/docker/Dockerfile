@@ -44,14 +44,27 @@ FROM alpine:3.19
 # Linux, macOS, and WSL. Production Helm/K8s deploys override the
 # user — see deploy/helm/cooker.
 ARG KUBECTL_VERSION=v1.29.4
+# Fetch kubectl and verify against the upstream-published SHA256 so a
+# compromised mirror or in-flight tampering cannot inject a malicious
+# binary that would run with docker.sock and kubeconfig access.
 RUN apk add --no-cache ca-certificates git docker-cli \
  && wget -qO /usr/local/bin/kubectl \
       https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl \
+ && wget -qO /tmp/kubectl.sha256 \
+      https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256 \
+ && echo "$(cat /tmp/kubectl.sha256)  /usr/local/bin/kubectl" | sha256sum -c - \
+ && rm /tmp/kubectl.sha256 \
  && chmod +x /usr/local/bin/kubectl
 COPY --from=backend-build /cooker /usr/local/bin/cooker
 COPY --from=frontend-build /app/frontend/dist /usr/share/cooker/static
 
 EXPOSE 8080
+
+# Liveness signal for runtimes that don't define their own probe
+# (Compose has its own healthcheck on the service; K8s uses probes
+# from the Deployment manifest). The /health endpoint is unauthenticated.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:8080/health > /dev/null || exit 1
 
 LABEL org.opencontainers.image.title="Cooker"
 LABEL org.opencontainers.image.description="CI/CD Management Tool for Docker & Kubernetes"

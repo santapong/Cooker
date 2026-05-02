@@ -29,7 +29,7 @@ A web-based CI/CD management tool with a **graph-based UI** for visually buildin
 - **Frontend**: React + TypeScript + React Flow (visual DAG editor) + Zustand
 - **Backend**: Go + Gin + Docker SDK + client-go + go-containerregistry
 - **Database**: PostgreSQL + Redis
-- **Auth**: OIDC/OAuth 2.0 with PKCE (Keycloak, Okta, Azure AD, Google, GitHub)
+- **Auth**: OIDC/OAuth 2.0 with PKCE (Keycloak, Okta, Azure AD, Google, GitHub) — disabled by default in local/UAT (the backend injects a dev admin user); see [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) to enable.
 
 See [docs/architecture.md](docs/architecture.md) for the full architecture document.
 
