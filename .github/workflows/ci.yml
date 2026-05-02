@@ -51,7 +51,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: v2.0.2
+          version: v2.5.0
           working-directory: backend
           args: --timeout=5m
       - name: Test

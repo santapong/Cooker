@@ -90,8 +90,15 @@ Cooker is a three-tier web application for CI/CD pipeline management with visual
 | **Services** | `internal/service/` | Business logic. Pipeline CRUD + DAG validation, executor (orchestrates pipeline runs), promoter (environment promotion logic). |
 | **Models** | `internal/model/` | Domain types: Pipeline, Stage, StageConfig, Edge, PipelineRun, StageRun, Artifact, Environment, EnvironmentTarget, PromotionPolicy, ContainerInfo, ImageInfo, KubeWorkload. |
 | **OCI Package** | `internal/oci/` | OCI image-spec types (Manifest, Index, Descriptor, Platform), media type constants, validation functions, digest computation. |
-| **Auth** | `internal/auth/` | OIDC middleware (token extraction + validation), RBAC middleware (role checking), group-to-role mapping. |
+| **Auth** | `internal/auth/` | OIDC middleware (token extraction + validation), RBAC middleware (role checking), configurable group-to-role mapping (`COOKER_OIDC_GROUP_MAP`), and `RequireMFA` step-up gate (`COOKER_OIDC_MFA_ACR_VALUES`). |
 | **Store** | `internal/store/` | Data access interfaces (PipelineStore, RunStore, EnvironmentStore) with PostgreSQL implementation. |
+| **Secrets** | `internal/secrets/` | `secrets.Manager` interface + adapters: `database` (default, AES-GCM), `keepsave`, `vault` (KV v2), `awsm` (AWS Secrets Manager), `gcpsm` (GCP Secret Manager). Optional `secrets.Promoter` interface for backends that support cross-environment promotion. |
+| **Builders** | `internal/builder/` | `Builder` interface + adapters: `docker` (host-socket; dev only), `kaniko` (in-cluster Job), `buildah` (in-cluster Job, full Dockerfile parity), `buildkit` (gRPC against external buildkitd). |
+| **Pusher** | `internal/pusher/` | `Pusher` interface + adapters: `crane` (`go-containerregistry`), `docker` (CLI shell-out), `noop`. |
+| **Deployer** | `internal/deployer/` | `Deployer` interface + adapters: `kubectl` (CLI shell-out), `clientgo` (dynamic client + server-side apply), `noop`. |
+| **DeployTarget** | `internal/deploytarget/` | App-deploy adapters per cloud runtime: `kubernetes`, `cloudrun`, `ecs` (Fargate), `flyio`, `render`. Self-register on non-empty config. |
+| **GitOps** | `internal/gitops/` | `Writer` interface + `gogit` adapter (`go-git/v5`). Used by GitOpsCommit pipeline node. |
+| **Observability** | `internal/observability/` | Prometheus `/metrics` (Gin middleware) + OpenTelemetry tracing (otelgin + OTLP/gRPC exporter). Both opt-in. |
 | **DAG Runner** | `pkg/dagrunner/` | Reusable, standalone DAG execution engine. Topological sort into parallel levels, concurrent execution, status updates via channel. |
 | **OCI Utilities** | `pkg/ociutil/` | Higher-level helpers: manifest parsing, index parsing, layer size calculation. |
 | **Config** | `internal/config/` | Environment-variable-based configuration loading with defaults. |
@@ -211,8 +218,17 @@ Design decision: Stages and edges are stored as JSONB rather than normalized tab
 | `github.com/lib/pq` | PostgreSQL driver |
 | `github.com/coreos/go-oidc/v3` | OIDC token validation |
 | `github.com/docker/docker/client` | Docker Engine SDK (planned) |
-| `k8s.io/client-go` | Kubernetes client (planned) |
-| `github.com/google/go-containerregistry` | OCI registry client (planned) |
+| `k8s.io/client-go` | Kubernetes dynamic client (server-side apply in `internal/deployer/clientgo.go`) |
+| `github.com/google/go-containerregistry` | OCI image push/pull (`internal/pusher/crane.go`) |
+| `github.com/moby/buildkit/client` | gRPC BuildKit driver (`internal/builder/buildkit.go`) |
+| `github.com/go-git/go-git/v5` | GitOps commits (`internal/gitops/gogit.go`) |
+| `github.com/redis/go-redis/v9` + `github.com/go-redis/redis_rate/v10` | Multi-replica rate limiter + WS ticket store |
+| `github.com/prometheus/client_golang` | `/metrics` endpoint |
+| `go.opentelemetry.io/otel` + `otelgin` + OTLP/gRPC exporter | Distributed tracing |
+| `github.com/hashicorp/vault-client-go` | Vault KV v2 secrets backend |
+| `github.com/aws/aws-sdk-go-v2` (config + secretsmanager + ecs) | AWS Secrets Manager + ECS deploy target |
+| `cloud.google.com/go/secretmanager` + `cloud.google.com/go/run/apiv2` | GCP Secret Manager + Cloud Run deploy target |
+| `github.com/swaggo/swag` | Generated OpenAPI from doc-comments |
 | `@xyflow/react` | React Flow graph visualization |
 | `zustand` | Frontend state management |
 | `oidc-client-ts` | Browser OIDC client |

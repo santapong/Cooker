@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/cooker-ci/cooker/internal/deploytarget"
 	"github.com/cooker-ci/cooker/internal/deploytarget/cloudrun"
@@ -68,14 +69,16 @@ func TestMustRegister_DuplicateKindPanics(t *testing.T) {
 }
 
 func TestCloudRun_DeployRequiresAuth(t *testing.T) {
-	// With Project + Region set, the adapter now reaches for the
-	// google-cloud-go SDK client. Without ADC creds in CI it errors
-	// — the contract is that we surface *some* error, not a
-	// specific sentinel.
+	// With Project + Region set, the adapter reaches for the
+	// google-cloud-go SDK client. ADC discovery probes a metadata
+	// server which can hang for tens of seconds on hosts without
+	// GCE metadata, so cap the call with a short deadline.
 	deploytarget.ResetForTest()
 	tt := cloudrun.New("proj", "us-central1")
-	if err := tt.Deploy(context.Background(), deploytarget.Spec{AppID: "x", Image: "gcr.io/proj/app:v1"}); err == nil {
-		t.Error("expected an error in CI without ADC credentials")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := tt.Deploy(ctx, deploytarget.Spec{AppID: "x", Image: "gcr.io/proj/app:v1"}); err == nil {
+		t.Error("expected an error without ADC credentials")
 	}
 }
 
