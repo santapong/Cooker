@@ -26,6 +26,16 @@ func (s *Server) registerRoutes() {
 	writeRole := auth.RequireRole(auth.RoleOperator, auth.RoleAdmin)
 	adminRole := auth.RequireRole(auth.RoleAdmin)
 
+	// Per-user rate limit applied to expensive endpoints below.
+	// Disabled when COOKER_RATE_LIMIT_ENABLED=false (multi-replica
+	// deployments rely on edge limiting; see SECURITY.md).
+	var expensive gin.HandlerFunc
+	if s.config.RateLimit.Enabled {
+		expensive = newRateLimiter(s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
+	} else {
+		expensive = func(c *gin.Context) { c.Next() }
+	}
+
 	// Pipeline routes
 	pipelines := api.Group("/pipelines")
 	{
@@ -35,7 +45,7 @@ func (s *Server) registerRoutes() {
 		pipelines.PUT("/:id", writeRole, h.UpdatePipeline)
 		pipelines.DELETE("/:id", adminRole, h.DeletePipeline)
 		pipelines.POST("/:id/validate", h.ValidatePipeline)
-		pipelines.POST("/:id/run", writeRole, h.RunPipeline)
+		pipelines.POST("/:id/run", writeRole, expensive, h.RunPipeline)
 		pipelines.GET("/:id/runs", h.ListPipelineRuns)
 		pipelines.GET("/:id/runs/:runId", h.GetPipelineRun)
 		pipelines.POST("/:id/runs/:runId/cancel", writeRole, h.CancelPipelineRun)
@@ -47,7 +57,7 @@ func (s *Server) registerRoutes() {
 	{
 		docker.GET("/images", handler.ListDockerImages)
 		docker.GET("/images/:id", handler.GetDockerImage)
-		docker.POST("/images/build", writeRole, handler.BuildDockerImage)
+		docker.POST("/images/build", writeRole, expensive, handler.BuildDockerImage)
 		docker.DELETE("/images/:id", adminRole, handler.DeleteDockerImage)
 		docker.GET("/containers", handler.ListContainers)
 		docker.POST("/containers", writeRole, handler.CreateContainer)
@@ -127,7 +137,7 @@ func (s *Server) registerRoutes() {
 		apps.GET("/:id", h.GetApp)
 		apps.PUT("/:id", writeRole, h.UpdateApp)
 		apps.DELETE("/:id", adminRole, h.DeleteApp)
-		apps.POST("/:id/deploy", writeRole, h.DeployApp)
+		apps.POST("/:id/deploy", writeRole, expensive, h.DeployApp)
 		// Webhook rotation re-checks admin in the handler; keeping the
 		// gate here means a viewer can't even reach it to probe codec
 		// behaviour.

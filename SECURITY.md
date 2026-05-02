@@ -83,6 +83,14 @@ When Cooker mounts the Docker socket (`/var/run/docker.sock`):
 - **Ingress**: TLS termination recommended at the ingress controller level.
 - **Internal traffic**: Backend-to-database and backend-to-Redis communication should use encrypted connections in production.
 
+### Rate limiting
+
+Cooker applies a **per-user, in-memory rate limit** to the most expensive endpoints (pipeline runs, Docker image builds, App deploys) so a single user cannot accidentally fork-bomb builds. Defaults: 10 requests/minute, burst 3, keyed on the OIDC subject claim.
+
+- Tunable via `COOKER_RATE_LIMIT_ENABLED` (default `true`), `COOKER_RATE_LIMIT_PER_MINUTE` (default `10`), `COOKER_RATE_LIMIT_BURST` (default `3`).
+- **Multi-replica deployments must disable** this (`COOKER_RATE_LIMIT_ENABLED=false`) — the limiter is per-process and won't share state across replicas. Use ingress / WAF rate limiting instead.
+- This middleware is **defense in depth**, not a substitute for edge limiting. Operators are still expected to configure IP-based rate limiting at the ingress controller (nginx-ingress, Traefik) or the cloud edge (Cloudflare, AWS WAF, GCP Cloud Armor) for unauthenticated paths and overall traffic shaping.
+
 ### CSRF
 
 Cooker is **not vulnerable to classic CSRF** because the API is authenticated by the `Authorization` header, not by cookies:
