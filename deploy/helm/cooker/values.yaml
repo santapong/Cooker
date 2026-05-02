@@ -8,16 +8,35 @@ replicaCount: 1
 cookerEnv: production
 
 # AES-256 key for encrypting environment secrets at rest.
-# Required when cookerEnv=production. Either set secretKey.value
-# inline (the chart will create a Secret holding it) OR point
-# secretKey.existingSecret at a pre-created Kubernetes Secret with
-# a "key" data field. Inline is convenient for testing; existing
-# Secret is the production pattern (managed via SealedSecrets,
-# external-secrets, etc.).
+# Required when cookerEnv=production AND secrets backend is
+# "database". When the keepsave backend is selected (see
+# secrets.backend below), KeepSave manages encryption and this is
+# unused. Either set secretKey.value inline (the chart will create
+# a Secret holding it) OR point secretKey.existingSecret at a
+# pre-created Kubernetes Secret with a "key" data field.
 secretKey:
   existingSecret: ""    # name of a pre-created Secret
   existingSecretKey: "key"
   value: ""             # inline value (NOT recommended for production)
+
+# Secrets backend selection. "database" keeps the historical
+# AES-GCM + JSONB path; "keepsave" delegates storage to a
+# KeepSave server (system of record). Switching does NOT
+# auto-migrate existing secrets; plan a one-shot copy before
+# flipping. See README §Secrets backends.
+#
+# Note: for backend=keepsave the Helm template wiring (env-var
+# rendering + secretKeyRef for the API key) is a follow-up; today
+# operators set the env vars directly via extraEnv or pod-spec
+# overrides. Tracked in backlog P2.1 follow-ups.
+secrets:
+  backend: database     # database | keepsave
+  keepsave:
+    url: ""             # http(s)://<keepsave-host>:<port>
+    projectId: ""
+    apiKey:
+      existingSecret: ""    # name of a pre-created Secret
+      existingSecretKey: "api-key"
 
 image:
   repository: ghcr.io/cooker-ci/cooker
@@ -36,8 +55,20 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+  # TLS at ingress is REQUIRED for OIDC: most IdPs reject non-HTTPS
+  # redirect URIs. Provision the certificate with cert-manager (or
+  # equivalent) and reference the resulting Secret here. Example:
+  #   tls:
+  #     - secretName: cooker-tls
+  #       hosts:
+  #         - cooker.example.com
+  # See README §Deployment → TLS at ingress.
+  tls: []
+  annotations: {}
 
-# Docker socket access (for local Docker management)
+# Docker socket access (for local Docker management). Production
+# should switch to Kaniko (in-cluster, rootless) — tracked in
+# backlog P1.1.
 docker:
   enabled: true
   socketPath: /var/run/docker.sock
@@ -82,6 +113,19 @@ postgresql:
     database: cooker
     username: cooker
     password: cooker
+  # SSL/TLS to PostgreSQL. Cooker appends ?sslmode=<value> to the
+  # DATABASE_URL it builds. Production should use "require" at
+  # minimum; "verify-full" when a CA bundle is mounted into the
+  # Cooker pod and the operator has provisioned a CA-signed
+  # PostgreSQL cert.
+  #
+  # Possible values: disable | allow | prefer | require | verify-ca | verify-full
+  #
+  # Note: chart-side rendering of this value into the constructed
+  # DATABASE_URL is a follow-up; today operators set sslmode via the
+  # full DATABASE_URL override or via the bitnami/postgresql
+  # subchart's tls block. Tracked in backlog P1.4.
+  sslMode: require
 
 # Cache
 redis:
