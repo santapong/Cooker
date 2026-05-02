@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react';
 import { useAuth } from './OIDCProvider';
+import { SkeletonStack } from '../components/Skeleton';
 
 interface Props {
   children: ReactNode;
@@ -10,9 +11,24 @@ export default function ProtectedRoute({ children, requiredRoles }: Props) {
   const { user, isAuthenticated, isLoading, login } = useAuth();
 
   if (isLoading) {
+    // Skeleton placeholder while auth state restores. Avoids the
+    // jarring "Loading..." flash on every refresh. Closes the
+    // loading-skeletons portion of backlog item P5.
     return (
-      <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>
-        Loading…
+      <div
+        style={{
+          padding: 40,
+          maxWidth: 640,
+          margin: '0 auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+        }}
+        aria-busy="true"
+        aria-live="polite"
+      >
+        <SkeletonStack rows={1} height={28} />
+        <SkeletonStack rows={4} height={14} />
       </div>
     );
   }
