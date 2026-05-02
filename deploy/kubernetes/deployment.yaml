@@ -16,9 +16,21 @@ spec:
         app.kubernetes.io/name: cooker
     spec:
       serviceAccountName: cooker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: cooker
           image: ghcr.io/cooker-ci/cooker:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 8080
               name: http
@@ -37,6 +49,10 @@ spec:
           volumeMounts:
             - name: docker-socket
               mountPath: /var/run/docker.sock
+            # Writable scratch for git clones / temp files since
+            # readOnlyRootFilesystem makes everything else read-only.
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: /health
@@ -61,3 +77,5 @@ spec:
           hostPath:
             path: /var/run/docker.sock
             type: Socket
+        - name: tmp
+          emptyDir: {}

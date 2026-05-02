@@ -62,3 +62,30 @@ resources:
   limits:
     cpu: 500m
     memory: 512Mi
+
+# Pod-level + container-level security hardening. Defaults to the
+# strict profile that satisfies Kubernetes Pod Security Admission
+# "restricted" (runAsNonRoot, drop all caps, no privilege escalation,
+# read-only root filesystem). Disable with securityContext.enabled=false
+# for clusters that haven't been configured for this yet.
+securityContext:
+  enabled: true
+  # Standard "nonroot" UID/GID — matches the user baked into the
+  # Dockerfile (deploy/docker/Dockerfile).
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
+# NetworkPolicy that restricts ingress to port 8080 from any pod in
+# the same namespace and (optionally) ingress controllers, plus egress
+# to DNS / Postgres / Redis / OCI registries / Kubernetes API. Disable
+# for clusters that don't run a CNI with NetworkPolicy enforcement.
+networkPolicy:
+  enabled: true
+  # Optional: namespace label on the ingress controller. When set, the
+  # NetworkPolicy allows traffic from that namespace specifically;
+  # otherwise it allows from any pod.
+  ingressNamespaceLabel: ""
+  # Egress targets — Postgres + Redis chart names, registry CIDRs.
+  postgresPort: 5432
+  redisPort: 6379

@@ -17,10 +17,26 @@ spec:
       {{- if .Values.serviceAccount.create }}
       serviceAccountName: {{ .Values.serviceAccount.name | default (include "cooker.fullname" .) }}
       {{- end }}
+      {{- if .Values.securityContext.enabled }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.securityContext.fsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
       containers:
         - name: cooker
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- end }}
           ports:
             - containerPort: {{ .Values.service.port }}
               name: http
@@ -37,11 +53,18 @@ spec:
             - name: COOKER_OIDC_CLIENT_ID
               value: {{ .Values.oidc.clientId | quote }}
             {{- end }}
-          {{- if .Values.docker.enabled }}
           volumeMounts:
+            {{- if .Values.docker.enabled }}
             - name: docker-socket
               mountPath: {{ .Values.docker.socketPath }}
-          {{- end }}
+            {{- end }}
+            {{- if .Values.securityContext.enabled }}
+            # readOnlyRootFilesystem requires writable scratch space.
+            # /tmp is used by internal/source/github (os.MkdirTemp) for
+            # repo clones; emptyDir keeps it ephemeral and pod-local.
+            - name: tmp
+              mountPath: /tmp
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health
@@ -54,10 +77,14 @@ spec:
             initialDelaySeconds: 5
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if .Values.docker.enabled }}
       volumes:
+        {{- if .Values.docker.enabled }}
         - name: docker-socket
           hostPath:
             path: {{ .Values.docker.socketPath }}
             type: Socket
-      {{- end }}
+        {{- end }}
+        {{- if .Values.securityContext.enabled }}
+        - name: tmp
+          emptyDir: {}
+        {{- end }}
