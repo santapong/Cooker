@@ -1,6 +1,10 @@
 package config
 
 import (
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -107,6 +111,48 @@ func Load() *Config {
 			Kubeconfig: getEnv("KUBECONFIG", ""),
 		},
 	}
+}
+
+// Validate enforces production-mode invariants. It is called from
+// main after Load. Errors returned are intended to be fatal.
+//
+// Rules (production only):
+//   - SecretKey must be present and decode to >= 32 bytes (AES-256).
+//   - AllowedOrigins must be set explicitly (the default is empty
+//     in production, so a missing operator config is loud).
+//   - OIDC enabled is recommended but not enforced — running with
+//     OIDC disabled in production logs a warning so operators see
+//     the gap in their logs without blocking deployment.
+//
+// dev and uat skip these checks so contributors and testers can
+// boot without setting any of them.
+func (c *Config) Validate() error {
+	if !c.Env.IsProduction() {
+		return nil
+	}
+	var problems []string
+	if c.SecretKey == "" {
+		problems = append(problems, "COOKER_SECRET_KEY is required in production (used to encrypt secrets at rest)")
+	} else {
+		// SecretKey is base64. Decode and check length.
+		decoded, err := base64.StdEncoding.DecodeString(c.SecretKey)
+		switch {
+		case err != nil:
+			problems = append(problems, "COOKER_SECRET_KEY must be a base64-encoded 32-byte key")
+		case len(decoded) < 32:
+			problems = append(problems, fmt.Sprintf("COOKER_SECRET_KEY decodes to %d bytes; need at least 32 (AES-256)", len(decoded)))
+		}
+	}
+	if len(c.AllowedOrigins) == 0 {
+		problems = append(problems, "COOKER_ALLOWED_ORIGINS is required in production (no permissive default)")
+	}
+	if !c.OIDC.Enabled {
+		log.Printf("warning: COOKER_OIDC_ENABLED=false in production; the backend will inject a dev admin user on every request")
+	}
+	if len(problems) > 0 {
+		return errors.New("config: " + strings.Join(problems, "; "))
+	}
+	return nil
 }
 
 func getEnv(key, fallback string) string {

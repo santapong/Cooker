@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/base64"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -228,5 +230,103 @@ func TestEnv_IsProduction(t *testing.T) {
 		if got := c.env.IsProduction(); got != c.want {
 			t.Errorf("Env(%q).IsProduction() = %v, want %v", c.env, got, c.want)
 		}
+	}
+}
+
+// 32 random bytes base64-encoded — pre-computed so tests don't need crypto/rand.
+const validSecretKey = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+
+func TestValidate_DevPermissive(t *testing.T) {
+	cfg := &Config{Env: EnvDev}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("dev should be permissive, got error: %v", err)
+	}
+}
+
+func TestValidate_UATPermissive(t *testing.T) {
+	cfg := &Config{Env: EnvUAT}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("uat should be permissive, got error: %v", err)
+	}
+}
+
+func TestValidate_ProductionRequiresSecretKey(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error when SecretKey missing in production")
+	}
+	if !strings.Contains(err.Error(), "COOKER_SECRET_KEY") {
+		t.Errorf("error should mention COOKER_SECRET_KEY, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionShortSecretKey(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		SecretKey:      base64.StdEncoding.EncodeToString([]byte("short")),
+		AllowedOrigins: []string{"https://cooker.example.com"},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for too-short SecretKey")
+	}
+	if !strings.Contains(err.Error(), "32") {
+		t.Errorf("error should mention 32-byte requirement, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionInvalidBase64SecretKey(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		SecretKey:      "not!!base64!!at!!all",
+		AllowedOrigins: []string{"https://cooker.example.com"},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for non-base64 SecretKey")
+	}
+	if !strings.Contains(err.Error(), "base64") {
+		t.Errorf("error should mention base64, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionRequiresAllowedOrigins(t *testing.T) {
+	cfg := &Config{
+		Env:       EnvProduction,
+		SecretKey: validSecretKey,
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error when AllowedOrigins empty in production")
+	}
+	if !strings.Contains(err.Error(), "COOKER_ALLOWED_ORIGINS") {
+		t.Errorf("error should mention COOKER_ALLOWED_ORIGINS, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionHappyPath(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("production happy path should validate, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionAccumulatesProblems(t *testing.T) {
+	cfg := &Config{Env: EnvProduction}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "COOKER_SECRET_KEY") || !strings.Contains(err.Error(), "COOKER_ALLOWED_ORIGINS") {
+		t.Errorf("expected both problems in error, got: %v", err)
 	}
 }
