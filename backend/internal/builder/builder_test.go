@@ -38,14 +38,13 @@ func TestBuildKit_UnconfiguredReturnsUnavailable(t *testing.T) {
 	}
 }
 
-func TestBuildKit_ConfiguredButNotWired(t *testing.T) {
+func TestBuildKit_RejectsMissingContext(t *testing.T) {
 	_, err := NewBuildKit("tcp://buildkit:1234").Build(context.Background(), Request{
-		ContextDir: "/tmp/x",
+		ContextDir: "/tmp/this-path-cannot-exist-cooker-test",
 		Tags:       []string{"app:v1"},
 	})
-	// Not yet wired: should still surface ErrUnavailable.
-	if !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("expected ErrUnavailable until BuildKit gRPC client lands, got %v", err)
+	if err == nil {
+		t.Fatal("expected validation error for missing ContextDir")
 	}
 }
 

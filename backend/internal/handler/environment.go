@@ -15,6 +15,14 @@ import (
 
 // ListEnvironments returns all environments with secrets redacted so
 // any authenticated user can safely inspect structure.
+//
+// @Summary      List environments
+// @Tags         environments
+// @Produce      json
+// @Success      200  {array}   model.Environment
+// @Failure      401  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /environments [get]
 func (h *Handler) ListEnvironments(c *gin.Context) {
 	envs, err := h.Store.Environments.List(c.Request.Context())
 	if abortStoreErr(c, err, "environments not found") {
@@ -91,6 +99,20 @@ func (h *Handler) DeleteEnvironment(c *gin.Context) {
 // PutSecret upserts a single secret for an environment. Admin only.
 // Storage is delegated to the configured secrets.Manager (database
 // or KeepSave); this handler only authorizes and routes.
+//
+// @Summary      Upsert a secret value
+// @Tags         secrets
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                 true  "Environment ID"
+// @Param        key   path      string                 true  "Secret key"
+// @Param        body  body      object{value=string}   true  "New secret value"
+// @Success      200   {object}  map[string]string
+// @Failure      400   {object}  map[string]string
+// @Failure      403   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /environments/{id}/secrets/{key} [put]
 func (h *Handler) PutSecret(c *gin.Context) {
 	if !h.requireSecrets(c) {
 		return
@@ -146,6 +168,19 @@ func (h *Handler) RevealSecret(c *gin.Context) {
 // environment named in the request body. Admin only. Backend support
 // is optional; backends that do not implement secrets.Promoter
 // produce 501.
+//
+// @Summary      Promote secrets between environments
+// @Tags         secrets
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string  true  "Source environment ID"
+// @Param        body  body      object{toEnvironmentId=string,keys=[]string}  true  "Promotion target"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  map[string]string
+// @Failure      403   {object}  map[string]string
+// @Failure      501   {object}  map[string]string  "Backend does not support promotion"
+// @Security     BearerAuth
+// @Router       /environments/{id}/secrets/promote [post]
 func (h *Handler) PromoteSecrets(c *gin.Context) {
 	if !h.requireSecrets(c) {
 		return

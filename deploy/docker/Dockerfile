@@ -26,7 +26,7 @@ ENV VITE_OIDC_ENABLED=$VITE_OIDC_ENABLED \
 RUN npm run build
 
 # --- Backend build ---
-FROM golang:1.22-alpine AS backend-build
+FROM golang:1.25-alpine AS backend-build
 WORKDIR /app/backend
 COPY backend/go.mod backend/go.sum* ./
 RUN go mod download

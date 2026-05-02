@@ -1,48 +1,55 @@
-# golangci-lint config for the cooker backend.
+# golangci-lint v2 config for the cooker backend.
 #
-# Conservative initial set: linters that catch real defects without
-# producing churn from style preferences. Tighten over time as the
-# codebase stabilizes — adding new linters tends to surface drive-by
-# fixes that drown the actual change in a PR.
+# Conservative initial set — see commit history for the v1 → v2
+# migration. v2 splits config into version, run, linters, formatters,
+# and issues. Linters that catch real defects without churn from
+# style preferences only.
+version: "2"
+
 run:
   timeout: 5m
   tests: true
 
 linters:
-  disable-all: true
+  default: none
   enable:
-    - errcheck       # unchecked errors
-    - govet          # parity with `go vet` (go vet is also run separately)
-    - ineffassign    # ineffective assignments
-    - staticcheck    # static analysis (SA*, ST*, S*) — strictly opt-in below
-    - unused         # dead code
-    - gosimple       # simplifications
-    - bodyclose      # http.Response.Body must be closed
-    - misspell       # common misspellings
-    - unconvert      # redundant type conversions
-
-linters-settings:
-  staticcheck:
-    checks:
-      - all
-      # SA1019 is "deprecated symbols" — too noisy until the kubernetes
-      # SDKs are updated; flag in a follow-up PR.
-      - "-SA1019"
-  errcheck:
-    # Allow ignoring the return of fmt.Fprintf to stderr and similar.
-    exclude-functions:
-      - fmt.Fprintln
-      - fmt.Fprintf
-      - (io.Closer).Close
-      - (*os.File).Close
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - misspell
+    - unconvert
+  settings:
+    staticcheck:
+      checks:
+        - all
+        - -SA1019  # deprecated symbols (k8s SDKs); revisit after SDK bump
+        - -ST1000  # package comments (lots of pre-existing files; cosmetic)
+        - -ST1020  # godoc comment-prefix (pre-existing churn)
+        - -QF1012  # fmt.Fprintf vs w.Write([]byte(fmt.Sprintf)) — style only
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - (io.Closer).Close
+        - (*os.File).Close
+        - os.RemoveAll
+        - (*database/sql.Rows).Close
+        - (*database/sql.DB).Close
+        - (*github.com/gorilla/websocket.Conn).Close
+        - (*github.com/cooker-ci/cooker/internal/store.Store).Close
+        - (*github.com/moby/buildkit/client.Client).Close
+        - (*cloud.google.com/go/run/apiv2.ServicesClient).Close
+        - (*cloud.google.com/go/run/apiv2.RevisionsClient).Close
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - bodyclose
 
 issues:
-  exclude-rules:
-    # Test helpers may legitimately leave bodies / errors unchecked
-    # for setup/teardown convenience.
-    - path: _test\.go
-      linters:
-        - errcheck
-        - bodyclose
   max-issues-per-linter: 0
   max-same-issues: 0

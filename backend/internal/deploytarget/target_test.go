@@ -67,12 +67,15 @@ func TestMustRegister_DuplicateKindPanics(t *testing.T) {
 	deploytarget.MustRegister(&fakeTarget{kind: model.DeployTargetDockerHost})
 }
 
-func TestCloudRunStub_ReportsErrUnavailable(t *testing.T) {
+func TestCloudRun_DeployRequiresAuth(t *testing.T) {
+	// With Project + Region set, the adapter now reaches for the
+	// google-cloud-go SDK client. Without ADC creds in CI it errors
+	// — the contract is that we surface *some* error, not a
+	// specific sentinel.
 	deploytarget.ResetForTest()
 	tt := cloudrun.New("proj", "us-central1")
-	err := tt.Deploy(context.Background(), deploytarget.Spec{AppID: "x"})
-	if !errors.Is(err, deploytarget.ErrUnavailable) {
-		t.Errorf("expected ErrUnavailable, got %v", err)
+	if err := tt.Deploy(context.Background(), deploytarget.Spec{AppID: "x", Image: "gcr.io/proj/app:v1"}); err == nil {
+		t.Error("expected an error in CI without ADC credentials")
 	}
 }
 

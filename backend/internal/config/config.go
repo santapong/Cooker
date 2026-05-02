@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -40,11 +40,29 @@ type Config struct {
 	// "keepsave" delegates to a KeepSave server.
 	SecretsBackend string // "database" | "keepsave"
 	RateLimit      RateLimitConfig
+	WSTicket       WSTicketConfig
 	OIDC           OIDCConfig
 	Docker         DockerConfig
 	Kubernetes     KubernetesConfig
 	KeepSave       KeepSaveConfig
+	Vault          VaultConfig
+	AWSSecrets     AWSSecretsConfig
+	GCPSecrets     GCPSecretsConfig
+	DeployTargets  DeployTargetsConfig
 	Audit          AuditConfig
+	Observability  ObservabilityConfig
+}
+
+// ObservabilityConfig configures Prometheus /metrics and OpenTelemetry
+// tracing. Both are opt-in (off by default) and add no runtime cost
+// when disabled.
+type ObservabilityConfig struct {
+	MetricsEnabled bool
+	TracingEnabled bool
+	OTLPEndpoint   string // host:port for OTLP/gRPC trace exporter
+	OTLPInsecure   bool
+	ServiceName    string
+	ServiceVersion string
 }
 
 // RateLimitConfig tunes per-user rate limiting on expensive endpoints.
@@ -52,6 +70,17 @@ type RateLimitConfig struct {
 	Enabled   bool
 	PerMinute int
 	Burst     int
+	// Backend selects the storage layer. "memory" (default) is
+	// per-process and per-replica; "redis" backs onto the URL in
+	// RedisURL via go-redis/redis_rate (multi-replica safe).
+	Backend string
+}
+
+// WSTicketConfig configures the WebSocket single-use ticket store.
+// "memory" (default) is per-process; "redis" shares state across
+// cooker replicas via Redis GETDEL.
+type WSTicketConfig struct {
+	Backend string // "memory" | "redis"
 }
 
 // OIDCConfig holds SSO/OIDC authentication configuration.
@@ -100,6 +129,13 @@ type KubernetesConfig struct {
 	// stage source there before invoking the builder. Empty is
 	// development-only (emptyDir fallback won't see Cooker's source).
 	KanikoContextPVC string
+
+	// Buildah builder knobs (see builder.BuildahConfig). Active when
+	// COOKER_BUILDER=buildah.
+	BuildahImage          string
+	BuildahServiceAccount string
+	BuildahContextPVC     string
+	BuildahStorageDriver  string // "overlay" | "vfs"; default "vfs"
 }
 
 // KeepSaveConfig configures the KeepSave secrets backend. Required
@@ -108,6 +144,47 @@ type KeepSaveConfig struct {
 	URL       string // base URL of the KeepSave server, e.g. http://keepsave:8080
 	ProjectID string // single project that owns all of Cooker's secrets
 	APIKey    string // X-API-Key value; per-environment scoping is fine
+}
+
+// VaultConfig configures the HashiCorp Vault KV v2 backend.
+type VaultConfig struct {
+	Addr   string // VAULT_ADDR equivalent
+	Token  string // VAULT_TOKEN equivalent (can be empty when Vault Agent injects it)
+	Mount  string // KV v2 mount path; default "secret"
+	Prefix string // path prefix appended under <mount>; default ""
+}
+
+// AWSSecretsConfig configures the AWS Secrets Manager backend.
+type AWSSecretsConfig struct {
+	Region string
+	Prefix string // default "cooker"
+}
+
+// GCPSecretsConfig configures the GCP Secret Manager backend.
+type GCPSecretsConfig struct {
+	ProjectID string
+	Prefix    string // default "cooker"
+}
+
+// DeployTargetsConfig bundles the credentials operators provide for
+// each cloud deploy target. Empty fields skip registration of that
+// target — callers don't have to wire every backend they don't use.
+type DeployTargetsConfig struct {
+	CloudRunProject string
+	CloudRunRegion  string
+
+	ECSRegion         string
+	ECSCluster        string
+	ECSExecutionRole  string
+	ECSTaskRole       string
+	ECSSubnets        []string
+	ECSSecurityGroups []string
+
+	FlyToken  string
+	FlyRegion string
+
+	RenderToken   string
+	RenderOwnerID string
 }
 
 // AuditConfig configures the audit-log middleware. When Enabled,
@@ -142,6 +219,10 @@ func Load() *Config {
 			Enabled:   getEnvBool("COOKER_RATE_LIMIT_ENABLED", true),
 			PerMinute: getEnvInt("COOKER_RATE_LIMIT_PER_MINUTE", 10),
 			Burst:     getEnvInt("COOKER_RATE_LIMIT_BURST", 3),
+			Backend:   getEnv("COOKER_RATE_LIMIT_BACKEND", "memory"),
+		},
+		WSTicket: WSTicketConfig{
+			Backend: getEnv("COOKER_WS_TICKET_BACKEND", "memory"),
 		},
 		OIDC: OIDCConfig{
 			Enabled:      getEnvBool("COOKER_OIDC_ENABLED", false),
@@ -159,22 +240,62 @@ func Load() *Config {
 			CertPath:  getEnv("DOCKER_CERT_PATH", ""),
 		},
 		Kubernetes: KubernetesConfig{
-			InCluster:            getEnvBool("COOKER_K8S_IN_CLUSTER", false),
-			Kubeconfig:           getEnv("KUBECONFIG", ""),
-			Namespace:            getEnv("COOKER_K8S_NAMESPACE", "cooker"),
-			KanikoImage:          getEnv("COOKER_KANIKO_IMAGE", "gcr.io/kaniko-project/executor:latest"),
-			KanikoServiceAccount: getEnv("COOKER_KANIKO_SERVICE_ACCOUNT", ""),
-			KanikoContextPVC:     getEnv("COOKER_KANIKO_CONTEXT_PVC", ""),
+			InCluster:             getEnvBool("COOKER_K8S_IN_CLUSTER", false),
+			Kubeconfig:            getEnv("KUBECONFIG", ""),
+			Namespace:             getEnv("COOKER_K8S_NAMESPACE", "cooker"),
+			KanikoImage:           getEnv("COOKER_KANIKO_IMAGE", "gcr.io/kaniko-project/executor:latest"),
+			KanikoServiceAccount:  getEnv("COOKER_KANIKO_SERVICE_ACCOUNT", ""),
+			KanikoContextPVC:      getEnv("COOKER_KANIKO_CONTEXT_PVC", ""),
+			BuildahImage:          getEnv("COOKER_BUILDAH_IMAGE", "quay.io/buildah/stable:latest"),
+			BuildahServiceAccount: getEnv("COOKER_BUILDAH_SERVICE_ACCOUNT", ""),
+			BuildahContextPVC:     getEnv("COOKER_BUILDAH_CONTEXT_PVC", ""),
+			BuildahStorageDriver:  getEnv("COOKER_BUILDAH_STORAGE_DRIVER", "vfs"),
 		},
 		KeepSave: KeepSaveConfig{
 			URL:       getEnv("COOKER_SECRETS_KEEPSAVE_URL", ""),
 			ProjectID: getEnv("COOKER_SECRETS_KEEPSAVE_PROJECT_ID", ""),
 			APIKey:    getEnv("COOKER_SECRETS_KEEPSAVE_API_KEY", ""),
 		},
+		Vault: VaultConfig{
+			Addr:   getEnv("COOKER_SECRETS_VAULT_ADDR", ""),
+			Token:  getEnv("COOKER_SECRETS_VAULT_TOKEN", ""),
+			Mount:  getEnv("COOKER_SECRETS_VAULT_MOUNT", "secret"),
+			Prefix: getEnv("COOKER_SECRETS_VAULT_PREFIX", "cooker"),
+		},
+		AWSSecrets: AWSSecretsConfig{
+			Region: getEnv("COOKER_SECRETS_AWS_REGION", ""),
+			Prefix: getEnv("COOKER_SECRETS_AWS_PREFIX", "cooker"),
+		},
+		GCPSecrets: GCPSecretsConfig{
+			ProjectID: getEnv("COOKER_SECRETS_GCP_PROJECT_ID", ""),
+			Prefix:    getEnv("COOKER_SECRETS_GCP_PREFIX", "cooker"),
+		},
+		DeployTargets: DeployTargetsConfig{
+			CloudRunProject:   getEnv("COOKER_DEPLOY_CLOUDRUN_PROJECT", ""),
+			CloudRunRegion:    getEnv("COOKER_DEPLOY_CLOUDRUN_REGION", ""),
+			ECSRegion:         getEnv("COOKER_DEPLOY_ECS_REGION", ""),
+			ECSCluster:        getEnv("COOKER_DEPLOY_ECS_CLUSTER", ""),
+			ECSExecutionRole:  getEnv("COOKER_DEPLOY_ECS_EXECUTION_ROLE", ""),
+			ECSTaskRole:       getEnv("COOKER_DEPLOY_ECS_TASK_ROLE", ""),
+			ECSSubnets:        getEnvCSV("COOKER_DEPLOY_ECS_SUBNETS", nil),
+			ECSSecurityGroups: getEnvCSV("COOKER_DEPLOY_ECS_SECURITY_GROUPS", nil),
+			FlyToken:          getEnv("COOKER_DEPLOY_FLY_TOKEN", ""),
+			FlyRegion:         getEnv("COOKER_DEPLOY_FLY_REGION", ""),
+			RenderToken:       getEnv("COOKER_DEPLOY_RENDER_TOKEN", ""),
+			RenderOwnerID:     getEnv("COOKER_DEPLOY_RENDER_OWNER_ID", ""),
+		},
 		Audit: AuditConfig{
 			Enabled:     getEnvBool("COOKER_AUDIT_ENABLED", env.IsProduction()),
 			Destination: getEnv("COOKER_AUDIT_DESTINATION", "stdout"),
 			FilePath:    getEnv("COOKER_AUDIT_FILE_PATH", ""),
+		},
+		Observability: ObservabilityConfig{
+			MetricsEnabled: getEnvBool("COOKER_METRICS_ENABLED", false),
+			TracingEnabled: getEnvBool("COOKER_TRACING_ENABLED", false),
+			OTLPEndpoint:   getEnv("COOKER_OTLP_ENDPOINT", ""),
+			OTLPInsecure:   getEnvBool("COOKER_OTLP_INSECURE", false),
+			ServiceName:    getEnv("COOKER_SERVICE_NAME", "cooker"),
+			ServiceVersion: getEnv("COOKER_SERVICE_VERSION", "dev"),
 		},
 	}
 }
@@ -209,14 +330,25 @@ func (c *Config) Validate() error {
 		if c.KeepSave.APIKey == "" {
 			problems = append(problems, "COOKER_SECRETS_KEEPSAVE_API_KEY is required when SecretsBackend=keepsave")
 		}
+	case "vault":
+		if c.Vault.Addr == "" {
+			problems = append(problems, "COOKER_SECRETS_VAULT_ADDR is required when SecretsBackend=vault")
+		}
+	case "aws":
+		// Region can be auto-discovered from instance metadata; no
+		// hard requirement here.
+	case "gcp":
+		if c.GCPSecrets.ProjectID == "" {
+			problems = append(problems, "COOKER_SECRETS_GCP_PROJECT_ID is required when SecretsBackend=gcp")
+		}
 	default:
-		problems = append(problems, fmt.Sprintf("unknown COOKER_SECRETS_BACKEND %q (want \"database\" or \"keepsave\")", c.SecretsBackend))
+		problems = append(problems, fmt.Sprintf("unknown COOKER_SECRETS_BACKEND %q (want database|keepsave|vault|aws|gcp)", c.SecretsBackend))
 	}
 	if len(c.AllowedOrigins) == 0 {
 		problems = append(problems, "COOKER_ALLOWED_ORIGINS is required in production (no permissive default)")
 	}
 	if !c.OIDC.Enabled {
-		log.Printf("warning: COOKER_OIDC_ENABLED=false in production; the backend will inject a dev admin user on every request")
+		slog.Warn("OIDC disabled in production; backend will inject dev admin user on every request")
 	}
 	if c.Audit.Enabled {
 		switch c.Audit.Destination {

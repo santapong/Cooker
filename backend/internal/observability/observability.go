@@ -1,0 +1,115 @@
+// Package observability wires Prometheus metrics and OpenTelemetry
+// traces into the Gin HTTP layer. Both are opt-in via config; the
+// zero-value configuration is a no-op so dev workflows aren't forced
+// to run a collector.
+package observability
+
+import (
+	"context"
+	"strconv"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+)
+
+// Config bundles the env-var-driven knobs that observability.Setup
+// reads. Mirrors fields on config.Config; passed through unchanged so
+// the observability package doesn't import the config package.
+type Config struct {
+	MetricsEnabled bool
+	TracingEnabled bool
+	OTLPEndpoint   string // host:port
+	OTLPInsecure   bool
+	ServiceName    string
+	ServiceVersion string
+}
+
+var (
+	httpRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cooker_http_requests_total",
+		Help: "Total HTTP requests handled by the Cooker API, labelled by method, route template, and status class.",
+	}, []string{"method", "route", "status"})
+
+	httpDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "cooker_http_request_duration_seconds",
+		Help:    "Latency of HTTP requests handled by the Cooker API.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"method", "route"})
+)
+
+// MetricsHandler returns the Prometheus /metrics handler.
+func MetricsHandler() gin.HandlerFunc {
+	h := promhttp.Handler()
+	return func(c *gin.Context) { h.ServeHTTP(c.Writer, c.Request) }
+}
+
+// MetricsMiddleware records request count + duration. Routes are
+// labelled by Gin's matched template (e.g. "/api/v1/pipelines/:id"),
+// not the concrete URL — keeps cardinality bounded.
+func MetricsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		route := c.FullPath()
+		if route == "" {
+			route = "unmatched"
+		}
+		status := strconv.Itoa(c.Writer.Status())
+		httpRequests.WithLabelValues(c.Request.Method, route, status).Inc()
+		httpDuration.WithLabelValues(c.Request.Method, route).Observe(time.Since(start).Seconds())
+	}
+}
+
+// TracingMiddleware returns the otelgin middleware bound to the
+// global TracerProvider. Setup must have been called for spans to
+// propagate to the configured collector; otherwise this still runs
+// as a passthrough that records into the no-op tracer.
+func TracingMiddleware(serviceName string) gin.HandlerFunc {
+	return otelgin.Middleware(serviceName)
+}
+
+// Setup configures the global OTel TracerProvider when tracing is
+// enabled. Returns a shutdown function callers must invoke at process
+// exit (no-op when tracing is disabled). Errors initializing the
+// exporter are returned so the server can fail fast in production.
+func Setup(ctx context.Context, cfg Config) (func(context.Context) error, error) {
+	if !cfg.TracingEnabled {
+		return func(context.Context) error { return nil }, nil
+	}
+	dial := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(cfg.OTLPEndpoint)}
+	if cfg.OTLPInsecure {
+		dial = append(dial, otlptracegrpc.WithInsecure())
+	}
+	exporter, err := otlptrace.New(ctx, otlptracegrpc.NewClient(dial...))
+	if err != nil {
+		return nil, err
+	}
+	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceName(cfg.ServiceName),
+		semconv.ServiceVersion(cfg.ServiceVersion),
+	))
+	if err != nil {
+		return nil, err
+	}
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+	)
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{}, propagation.Baggage{},
+	))
+	return tp.Shutdown, nil
+}

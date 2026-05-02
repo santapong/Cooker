@@ -35,12 +35,28 @@ func TestNoop_SubstitutesImage(t *testing.T) {
 	}
 }
 
-func TestGoGit_Unwired(t *testing.T) {
+func TestGoGit_RejectsMissingPath(t *testing.T) {
+	// Path is required even when Repo is set; the error wraps
+	// ErrUnavailable so callers can react uniformly.
 	_, err := NewGoGit().Commit(context.Background(), Request{Repo: "git@example.com:x/y.git"})
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("expected ErrUnavailable, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "go-git") {
-		t.Errorf("error should mention go-git: %v", err)
+	if !strings.Contains(err.Error(), "Path") {
+		t.Errorf("error should mention Path requirement: %v", err)
+	}
+}
+
+func TestSplitAuthor(t *testing.T) {
+	cases := []struct{ in, name, email string }{
+		{"Alice <a@example.com>", "Alice", "a@example.com"},
+		{"  Bob <b@x.io> ", "Bob", "b@x.io"},
+		{"NoAngles", "NoAngles", ""},
+	}
+	for _, tc := range cases {
+		n, e := splitAuthor(tc.in)
+		if n != tc.name || e != tc.email {
+			t.Errorf("splitAuthor(%q) = %q,%q want %q,%q", tc.in, n, e, tc.name, tc.email)
+		}
 	}
 }

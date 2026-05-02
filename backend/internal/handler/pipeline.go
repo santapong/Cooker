@@ -10,6 +10,15 @@ import (
 	"github.com/cooker-ci/cooker/internal/model"
 )
 
+// ListPipelines returns all pipelines visible to the caller.
+//
+// @Summary      List pipelines
+// @Tags         pipelines
+// @Produce      json
+// @Success      200  {array}   model.Pipeline
+// @Failure      401  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /pipelines [get]
 func (h *Handler) ListPipelines(c *gin.Context) {
 	pipelines, err := h.Store.Pipelines.List(c.Request.Context())
 	if abortStoreErr(c, err, "pipelines not found") {
@@ -106,6 +115,18 @@ func (h *Handler) ValidatePipeline(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"valid": true, "errors": []string{}})
 }
 
+// RunPipeline kicks off a new run for the pipeline. Rate-limited.
+//
+// @Summary      Run a pipeline
+// @Tags         pipelines
+// @Param        id    path      string  true  "Pipeline ID"
+// @Produce      json
+// @Success      202   {object}  model.PipelineRun
+// @Failure      400   {object}  map[string]string
+// @Failure      403   {object}  map[string]string
+// @Failure      429   {object}  map[string]string  "Rate limit exceeded"
+// @Security     BearerAuth
+// @Router       /pipelines/{id}/run [post]
 func (h *Handler) RunPipeline(c *gin.Context) {
 	p, err := h.Store.Pipelines.Get(c.Request.Context(), c.Param("id"))
 	if abortStoreErr(c, err, "pipeline not found") {

@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -14,27 +14,34 @@ import (
 	"github.com/cooker-ci/cooker/internal/crypto"
 	"github.com/cooker-ci/cooker/internal/deployer"
 	"github.com/cooker-ci/cooker/internal/handler"
+	"github.com/cooker-ci/cooker/internal/observability"
 	"github.com/cooker-ci/cooker/internal/pusher"
 	"github.com/cooker-ci/cooker/internal/secrets"
+	"github.com/cooker-ci/cooker/internal/secrets/awsm"
 	"github.com/cooker-ci/cooker/internal/secrets/database"
+	"github.com/cooker-ci/cooker/internal/secrets/gcpsm"
 	"github.com/cooker-ci/cooker/internal/secrets/keepsave"
+	"github.com/cooker-ci/cooker/internal/secrets/vault"
 	"github.com/cooker-ci/cooker/internal/service"
 	"github.com/cooker-ci/cooker/internal/store"
 	"github.com/cooker-ci/cooker/internal/store/memory"
 	"github.com/cooker-ci/cooker/internal/store/postgres"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
 // Server holds the HTTP server and all dependencies.
 type Server struct {
-	router    *gin.Engine
-	config    *config.Config
-	wsHub     *WebSocketHub
-	oidcMW    *auth.Middleware
-	handler   *handler.Handler
-	store     *store.Store
-	wsTickets *wsTicketStore
-	audit     audit.Sink
+	router        *gin.Engine
+	config        *config.Config
+	wsHub         *WebSocketHub
+	oidcMW        *auth.Middleware
+	handler       *handler.Handler
+	store         *store.Store
+	wsTickets     ticketStore
+	redisClient   *redis.Client
+	audit         audit.Sink
+	traceShutdown func(context.Context) error
 }
 
 // New creates a new Server instance with all routes and middleware.
@@ -65,7 +72,37 @@ func New(cfg *config.Config) (*Server, error) {
 
 	router := gin.Default()
 	wsHub := NewWebSocketHub(cfg.AllowedOrigins)
-	wsTickets := newWSTicketStore(60 * time.Second)
+
+	var redisClient *redis.Client
+	if cfg.WSTicket.Backend == "redis" || cfg.RateLimit.Backend == "redis" {
+		opts, err := redis.ParseURL(cfg.RedisURL)
+		if err != nil {
+			st.Close()
+			return nil, fmt.Errorf("redis: parse url: %w", err)
+		}
+		redisClient = redis.NewClient(opts)
+	}
+
+	var wsTickets ticketStore
+	switch cfg.WSTicket.Backend {
+	case "redis":
+		wsTickets = newRedisTicketStore(redisClient, 60*time.Second)
+	default:
+		wsTickets = newWSTicketStore(60 * time.Second)
+	}
+
+	traceShutdown, err := observability.Setup(ctx, observability.Config{
+		MetricsEnabled: cfg.Observability.MetricsEnabled,
+		TracingEnabled: cfg.Observability.TracingEnabled,
+		OTLPEndpoint:   cfg.Observability.OTLPEndpoint,
+		OTLPInsecure:   cfg.Observability.OTLPInsecure,
+		ServiceName:    cfg.Observability.ServiceName,
+		ServiceVersion: cfg.Observability.ServiceVersion,
+	})
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("observability: %w", err)
+	}
 
 	auditSink, err := newAuditSink(cfg.Audit)
 	if err != nil {
@@ -90,21 +127,31 @@ func New(cfg *config.Config) (*Server, error) {
 	h.WSBroadcast = wsHub.Broadcast
 
 	s := &Server{
-		router:    router,
-		config:    cfg,
-		wsHub:     wsHub,
-		oidcMW:    oidcMW,
-		handler:   h,
-		store:     st,
-		wsTickets: wsTickets,
-		audit:     auditSink,
+		router:        router,
+		config:        cfg,
+		wsHub:         wsHub,
+		oidcMW:        oidcMW,
+		handler:       h,
+		store:         st,
+		wsTickets:     wsTickets,
+		audit:         auditSink,
+		traceShutdown: traceShutdown,
+		redisClient:   redisClient,
 	}
 
 	router.Use(corsMiddleware(cfg.AllowedOrigins))
+	if cfg.Observability.MetricsEnabled {
+		router.Use(observability.MetricsMiddleware())
+		router.GET("/metrics", observability.MetricsHandler())
+	}
+	if cfg.Observability.TracingEnabled {
+		router.Use(observability.TracingMiddleware(cfg.Observability.ServiceName))
+	}
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "cooker"})
 	})
 
+	registerDeployTargets(cfg.DeployTargets)
 	s.registerRoutes()
 	go wsHub.Run()
 	return s, nil
@@ -115,6 +162,11 @@ func (s *Server) Run(addr string) error { return s.router.Run(addr) }
 func (s *Server) Close() error {
 	if s == nil {
 		return nil
+	}
+	if s.traceShutdown != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = s.traceShutdown(shutdownCtx)
+		cancel()
 	}
 	if s.audit != nil {
 		_ = s.audit.Close()
@@ -188,6 +240,15 @@ func selectBuilder(kind string, k8s config.KubernetesConfig) (builder.Builder, e
 			ServiceAccount: k8s.KanikoServiceAccount,
 			ContextPVC:     k8s.KanikoContextPVC,
 		})
+	case "buildah":
+		return builder.NewBuildah(builder.BuildahConfig{
+			Kubeconfig:     k8s.Kubeconfig,
+			Namespace:      k8s.Namespace,
+			Image:          k8s.BuildahImage,
+			ServiceAccount: k8s.BuildahServiceAccount,
+			ContextPVC:     k8s.BuildahContextPVC,
+			StorageDriver:  k8s.BuildahStorageDriver,
+		})
 	default:
 		return builder.Noop{}, nil
 	}
@@ -223,20 +284,47 @@ func selectDeployer(kind, kubeconfig string) deployer.Deployer {
 // by Handler.requireSecrets returning 503 — same observable behavior
 // as pre-Manager Cooker.
 func selectSecretsManager(cfg *config.Config, st *store.Store, codec *crypto.Codec) (secrets.Manager, error) {
+	ctx := context.Background()
 	switch cfg.SecretsBackend {
 	case "keepsave":
 		if cfg.KeepSave.URL == "" || cfg.KeepSave.ProjectID == "" || cfg.KeepSave.APIKey == "" {
 			return nil, fmt.Errorf("keepsave backend requires COOKER_SECRETS_KEEPSAVE_URL, _PROJECT_ID, _API_KEY")
 		}
 		client := keepsave.NewClient(cfg.KeepSave.URL, cfg.KeepSave.APIKey)
-		log.Printf("secrets: backend=keepsave url=%s project=%s", cfg.KeepSave.URL, cfg.KeepSave.ProjectID)
+		slog.Info("secrets backend selected", "backend", "keepsave", "url", cfg.KeepSave.URL, "project", cfg.KeepSave.ProjectID)
 		return keepsave.New(client, st.Environments, cfg.KeepSave.ProjectID), nil
+	case "vault":
+		if cfg.Vault.Addr == "" {
+			return nil, fmt.Errorf("vault backend requires COOKER_SECRETS_VAULT_ADDR")
+		}
+		slog.Info("secrets backend selected", "backend", "vault", "addr", cfg.Vault.Addr, "mount", cfg.Vault.Mount)
+		return vault.New(vault.Config{
+			Address: cfg.Vault.Addr,
+			Token:   cfg.Vault.Token,
+			Mount:   cfg.Vault.Mount,
+			Prefix:  cfg.Vault.Prefix,
+		})
+	case "aws":
+		slog.Info("secrets backend selected", "backend", "aws-secrets-manager", "region", cfg.AWSSecrets.Region, "prefix", cfg.AWSSecrets.Prefix)
+		return awsm.New(ctx, awsm.Config{
+			Region: cfg.AWSSecrets.Region,
+			Prefix: cfg.AWSSecrets.Prefix,
+		})
+	case "gcp":
+		if cfg.GCPSecrets.ProjectID == "" {
+			return nil, fmt.Errorf("gcp backend requires COOKER_SECRETS_GCP_PROJECT_ID")
+		}
+		slog.Info("secrets backend selected", "backend", "gcp-secret-manager", "project", cfg.GCPSecrets.ProjectID)
+		return gcpsm.New(ctx, gcpsm.Config{
+			ProjectID: cfg.GCPSecrets.ProjectID,
+			Prefix:    cfg.GCPSecrets.Prefix,
+		})
 	case "database", "":
 		if codec == nil || !codec.Active() {
-			log.Printf("secrets: backend=database (codec inactive — secret endpoints will return 503 until COOKER_SECRET_KEY is set)")
+			slog.Warn("secrets backend selected", "backend", "database", "codec", "inactive", "note", "secret endpoints will return 503 until COOKER_SECRET_KEY is set")
 			return nil, nil
 		}
-		log.Printf("secrets: backend=database (AES-GCM)")
+		slog.Info("secrets backend selected", "backend", "database", "codec", "AES-GCM")
 		return database.New(st.Environments, codec), nil
 	default:
 		return nil, fmt.Errorf("unknown secrets backend %q", cfg.SecretsBackend)

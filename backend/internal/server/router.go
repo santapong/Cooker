@@ -40,10 +40,13 @@ func (s *Server) registerRoutes() {
 	// Disabled when COOKER_RATE_LIMIT_ENABLED=false (multi-replica
 	// deployments rely on edge limiting; see SECURITY.md).
 	var expensive gin.HandlerFunc
-	if s.config.RateLimit.Enabled {
-		expensive = newRateLimiter(s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
-	} else {
+	switch {
+	case !s.config.RateLimit.Enabled:
 		expensive = func(c *gin.Context) { c.Next() }
+	case s.config.RateLimit.Backend == "redis" && s.redisClient != nil:
+		expensive = newRedisRateLimiter(s.redisClient, s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
+	default:
+		expensive = newRateLimiter(s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
 	}
 
 	// Pipeline routes

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -258,7 +258,7 @@ func (h *Handler) GitHubWebhook(c *gin.Context) {
 	}
 	secret, err := h.Codec.Open(app.WebhookSecret)
 	if err != nil {
-		log.Printf("github-webhook: open secret for app %s: %v", app.ID, err)
+		slog.Warn("github webhook: failed to open secret", "app", app.ID, "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal"})
 		return
 	}

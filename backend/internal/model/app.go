@@ -19,6 +19,9 @@ const (
 	DeployTargetDockerHost DeployTargetKind = "docker-host"
 	DeployTargetKubernetes DeployTargetKind = "kubernetes"
 	DeployTargetCloudRun   DeployTargetKind = "cloud-run"
+	DeployTargetECS        DeployTargetKind = "ecs"
+	DeployTargetFly        DeployTargetKind = "fly"
+	DeployTargetRender     DeployTargetKind = "render"
 )
 
 // BuildPlan is a resolved build strategy for an App's repository.

@@ -10,6 +10,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ticketStore abstracts ticket issuance + consumption so the server
+// can swap between the in-memory store and the Redis-backed store
+// based on COOKER_WS_TICKET_BACKEND.
+type ticketStore interface {
+	Issue(subject string) (string, time.Time, error)
+	Consume(tok string) (subject string, ok bool)
+}
+
 // wsTicketGate returns a Gin middleware that requires a valid
 // single-use ticket on the WebSocket upgrade request. The ticket
 // is read from the ?ticket= query string. On success the ticket's

@@ -69,15 +69,16 @@ remaining bullet is operator-side only:
   - [x] Render KeepSave env-vars + `secretKeyRef` in the Helm `deployment.yaml` (with CI matrix asserting both happy-path and apiKey-missing-fail).
   - [ ] Swap the internal HTTP client for the published Go SDK (currently lacks a `go.mod`).
   - [x] Surface KeepSave's `/promote` endpoint as `POST /api/v1/environments/:id/secrets/promote` via the new `secrets.Promoter` interface.
-- [ ] **HashiCorp Vault adapter.** Same `secrets.Manager` interface, third adapter. Pulls via Vault Agent injector pattern. ~half day once the interface is in place.
-- [ ] **AWS Secrets Manager / GCP Secret Manager adapters.** Cloud-native deployments. ~half day each.
+- [x] **HashiCorp Vault adapter** — `internal/secrets/vault` against KV v2; selectable via `COOKER_SECRETS_BACKEND=vault`.
+- [x] **AWS Secrets Manager adapter** — `internal/secrets/awsm` using `aws-sdk-go-v2`; one AWS secret per `<prefix>/<envID>/<key>`.
+- [x] **GCP Secret Manager adapter** — `internal/secrets/gcpsm` using `cloud.google.com/go/secretmanager`; secrets named `<prefix>__<envID>__<key>`.
 
 ---
 
 ### P3 — Auth and authorization extensions
 
 - [x] **Sticky-session docs** — `docs/MULTI_REPLICA.md` covers NGINX/ALB/Traefik/HAProxy/Envoy.
-- [ ] **Redis-backed rate limiter + WS ticket store.** **Why not in PR #17:** new Go dep (`github.com/go-redis/redis_rate/v10` + `redis/go-redis`); adding deps requires a `go.sum` regen step that needs a local Go toolchain. Sticky sessions are the supported multi-replica path until then.
+- [x] **Redis-backed rate limiter + WS ticket store** — `internal/server/ratelimit_redis.go` (GCRA via `go-redis/redis_rate/v10`) and `wsticket_redis.go` (atomic GETDEL on Redis 6.2+). Toggle via `COOKER_RATE_LIMIT_BACKEND=redis` and `COOKER_WS_TICKET_BACKEND=redis`.
 - [x] **MFA / step-up auth at the IdP.** `auth.RequireMFA` middleware checks the token's `acr` (or `amr`) against `COOKER_OIDC_MFA_ACR_VALUES`; applied to admin destructive routes (DELETE pipelines/envs/apps/hosts, secret reveal/put/delete/promote, app webhook rotation). Frontend re-issues `signinRedirect({ acr_values })` on the 403 mfa_required response.
 - [x] **OIDC group-to-role mapping configurable.** `COOKER_OIDC_GROUP_MAP` (CSV of `group:role` pairs) overrides the default `cooker-admins → admin` mapping; empty falls back to defaults. Surfaced in the Helm chart as `oidc.groupRoleMap`.
 
@@ -85,11 +86,9 @@ remaining bullet is operator-side only:
 
 ### P4 — Observability
 
-All three items below add Go module deps; they share a single follow-up PR that also handles the `go.sum` regen.
-
-- [ ] **Prometheus `/metrics`.** `prometheus/client_golang`, Gin middleware. ~half day.
-- [ ] **OpenTelemetry traces.** `go.opentelemetry.io/otel`, `otelgin`. Trace pipeline runs end-to-end. ~1 day.
-- [ ] **`log/slog` migration.** Replace remaining `log` calls with structured slog handlers. Lands on top of P1.2 audit logger.
+- [x] **Prometheus `/metrics`** — `internal/observability` exposes `cooker_http_requests_total` + `cooker_http_request_duration_seconds`; opt in via `COOKER_METRICS_ENABLED=true`.
+- [x] **OpenTelemetry traces** — same package configures an OTLP/gRPC exporter via `COOKER_OTLP_ENDPOINT` and wires `otelgin` middleware when `COOKER_TRACING_ENABLED=true`.
+- [x] **`log/slog` migration** — `cmd/cooker/main.go` installs a JSON handler as the default; all `log.Print*`/`log.Fatal*` callers across `internal/server/`, `internal/handler/`, `internal/service/`, `internal/config/`, `internal/server/websocket.go` rewritten as structured `slog.Info|Warn|Error` calls.
 
 ---
 
@@ -109,7 +108,7 @@ All three items below add Go module deps; they share a single follow-up PR that 
 - [x] **`deploytarget.Register` returns error; `MustRegister` for init() callers.**
 - [x] **`gofmt -l` check in CI** + repo-wide gofmt sweep that normalised pre-existing drift.
 - [x] **`golangci-lint` in CI** with a tuned `backend/.golangci.yml` (errcheck, govet, ineffassign, staticcheck, unused, gosimple, bodyclose, misspell, unconvert).
-- [ ] **Go version bump to 1.24+.** `golang.org/x/time@v0.5.0` is pinned because newer versions need 1.25. Update `go.mod`, `Dockerfile`, and `.github/workflows/ci.yml` together; unpin `x/time`.
+- [x] **Go version bump to 1.25** — `go.mod`, `deploy/docker/Dockerfile`, and `.github/workflows/ci.yml` all moved together. `golang.org/x/time` unpinned to `v0.15.0`. `golangci-lint` config migrated from v1.59 to v2.0 with a v2-format `.golangci.yml`.
 - [x] **Replace `internal/handler/network.go` and `internal/handler/volume.go` placeholders.** Write endpoints now return HTTP 501 with a structured `{error,operation,hint}` payload instead of fake "pending" mock IDs; list endpoints return `[]` so empty-state UIs render. Tracked-forward note: full SDK wiring still needs the host transport (P9.4) before write paths can do real work.
 
 ---
@@ -125,7 +124,7 @@ All three items below add Go module deps; they share a single follow-up PR that 
 ### P8 — Documentation
 
 - [x] **OpenAPI sketch** at `docs/openapi.yaml` covering pipelines, runs, environments + secrets, apps + webhook, and the GitHub webhook entry point.
-- [ ] **Generated OpenAPI** via `swaggo/swag` from Go source comments. ~half day to annotate handlers + wire `swag init` into the build.
+- [x] **Generated OpenAPI** via `swaggo/swag` — `make swagger` regenerates `backend/docs/api/swagger.{json,yaml,go}` from doc-comments. Flagship endpoints (pipeline list / run, env list, secret put / promote) are annotated; the rest can be filled in incrementally as a low-friction follow-up.
 - [x] **Incident runbook** at `docs/RUNBOOK.md`.
 - [x] **ADRs 0001-0003** at `docs/adr/`.
 - [ ] **Run the OCI distribution-spec conformance suite** against Cooker's `/registry` proxy endpoints and publish the result. ~half day.
@@ -138,32 +137,34 @@ All three items below add Go module deps; they share a single follow-up PR that 
 
 #### P9.1 — Replace CLI shell-outs with native Go SDKs
 
-| File | Today | Replace with |
+| File | Today | Status |
 |---|---|---|
-| `backend/internal/builder/buildkit.go` | Stub; CLI fallback shells `docker build` | `github.com/moby/buildkit/client` (gRPC) |
-| `backend/internal/pusher/crane.go` | Stub; CLI fallback shells `docker push` | `github.com/google/go-containerregistry/pkg/crane` |
-| `backend/internal/deployer/clientgo.go` | Stub; CLI fallback shells `kubectl apply` | `k8s.io/client-go` dynamic client |
+| `backend/internal/builder/buildkit.go` | `github.com/moby/buildkit/client` v0.18.2 | ✅ wired |
+| `backend/internal/pusher/crane.go` | `github.com/google/go-containerregistry` (`remote.Image`/`remote.Write`/`crane.Digest`) | ✅ wired |
+| `backend/internal/deployer/clientgo.go` | `k8s.io/client-go` dynamic client + server-side apply | ✅ wired |
 
-**Why not in PR #17:** each adds a heavy Go dep; needs a `go.sum` regen and binary-size verification. ~1 day per adapter.
+All three use lazy initialisation so a process without registry / cluster reach still boots; errors surface at first call.
 
 #### P9.2 — Additional deploy targets
 
 | Adapter | Status | Underlying SDK |
 |---|---|---|
-| Cloud Run | stubbed (`internal/deploytarget/cloudrun/`) | `cloud.google.com/go/run/apiv2` |
-| AWS ECS / Fargate | not stubbed | `github.com/aws/aws-sdk-go-v2/service/ecs` |
-| Fly.io | not stubbed | REST API `https://api.machines.dev` |
-| Render | not stubbed | REST API `https://api.render.com/v1/` |
+| Cloud Run | ✅ wired (`internal/deploytarget/cloudrun/`) | `cloud.google.com/go/run/apiv2` |
+| AWS ECS / Fargate | ✅ wired (`internal/deploytarget/ecs/`) | `github.com/aws/aws-sdk-go-v2/service/ecs` |
+| Fly.io | ✅ wired (`internal/deploytarget/flyio/`) | REST API `https://api.machines.dev` |
+| Render | ✅ wired (`internal/deploytarget/render/`) | REST API `https://api.render.com/v1/` |
 
-**Why not in PR #17:** each adapter is a new SDK dep + ~1 day of contract tests + e2e against a real account. Independent of each other.
+Adapters self-register at boot only when their config block is non-empty. Operators don't need to wire backends they don't use.
+
+**Caveats:** none of these have been exercised against real cloud accounts in CI — the unit tests assert the SDK calls fire correctly but expect transport errors when credentials are absent. End-to-end against a real GCP/AWS/Fly/Render project is a follow-up.
 
 #### P9.3 — GitOpsCommit node
 
-`backend/internal/gitops/gogit.go` — `go-git` writer is **stubbed**. Implementing it is ~half day (SSH key auth, signed commits, conflict-retry).
+`backend/internal/gitops/gogit.go` — ✅ implemented via `github.com/go-git/go-git/v5`. Auth resolution: `SSHKeyPath` → ssh-agent → HTTPS basic. Each `Commit` clones to a temp dir, writes the file, commits, and pushes; conflict-retry is intentionally minimal (one fast-forward retry — anything more belongs in a controller layer).
 
 #### P9.4 — Tailscale `tsnet` transport
 
-`backend/internal/transport/tsnet/` is build-tagged. Removing the build tag is ~2 hours; provisioning own auth keys via OAuth is ~half day. Adds a sizeable dep — default-off is the right call until there's a user need.
+`backend/internal/transport/tsnet/` is still build-tagged (`-tags tsnet`). **Blocker:** `tailscale.com` v1.96.x requires Go ≥ 1.26 which isn't released yet stably; the cooker build pins to Go 1.25 to keep the runner image (`golang:1.25-alpine`) and Go module tooling in step. Re-evaluate when Go 1.26 is GA, then either pin tailscale to a version compatible with Go 1.25 or do the bump in lockstep.
 
 #### P9.5 — Buildah builder adapter (alternative to Kaniko)
 
@@ -190,8 +191,11 @@ runs `quay.io/buildah/stable` instead of `gcr.io/kaniko-project/executor`.
 - Storage driver choice: needs `overlay` (with fuse-overlayfs on the
   nodes) or `vfs` (slower, no kernel module). Kaniko bundles its own.
 
-**Files to add:** `backend/internal/builder/buildah.go`,
-`backend/internal/builder/buildah_test.go`.
+**Status:** ✅ shipped. `backend/internal/builder/buildah.go` mirrors the Kaniko Job pattern, adds CAP_SETUID/CAP_SETGID and the storage-driver knob (`COOKER_BUILDAH_STORAGE_DRIVER`, default `vfs`). Selectable via `COOKER_BUILDER=buildah`. Helm chart wiring (RBAC + values) is the next focused PR — RBAC is reused from Kaniko's Role/RoleBinding because the resource list is identical.
+
+**Original notes (kept for reference):**
+
+**Files added:** `backend/internal/builder/buildah.go`.
 
 **Files to modify:**
 - `backend/internal/server/server.go` — `selectBuilder` add
@@ -228,7 +232,18 @@ the `--cache-to` registry wiring); ~half day for the CLI shell-out.
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, and the `claude/finish-backlog-priority-psf4D` PR (this one):
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, and the `claude/finish-backlog-priority-psf4D` PR (this one — closes the entire P2/P3/P4/P5/P6/P7/P8/P9 batch except P9.4):
+
+- ✅ **Go 1.25 toolchain bump** — `go.mod`, `Dockerfile`, CI matrix all moved together; `golang.org/x/time` unpinned to v0.15.0; `golangci-lint` migrated v1.59 → v2.0 with a v2-format `.golangci.yml`. — P6
+- ✅ **`log/slog` migration** — JSON handler installed in `cmd/cooker/main.go`; all `log` callers across the codebase rewritten as structured slog calls. — P4
+- ✅ **Prometheus + OpenTelemetry** — `internal/observability` exposes `/metrics` (Gin middleware + counter/histogram) and an OTLP/gRPC TracerProvider via `otelgin`. Both opt-in via `COOKER_METRICS_ENABLED` / `COOKER_TRACING_ENABLED`. — P4
+- ✅ **Redis-backed rate limiter + WS ticket store** — `redis_rate/v10` GCRA limiter and atomic GETDEL ticket store, selected via `COOKER_RATE_LIMIT_BACKEND=redis` / `COOKER_WS_TICKET_BACKEND=redis`. — P3
+- ✅ **HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager adapters** — `internal/secrets/{vault,awsm,gcpsm}` all implementing `secrets.Manager`; selectable via `COOKER_SECRETS_BACKEND={vault,aws,gcp}`. — P2
+- ✅ **Native BuildKit / crane / client-go adapters** — replace the CLI shell-out stubs in `internal/builder/buildkit.go`, `internal/pusher/crane.go`, `internal/deployer/clientgo.go`. — P9.1
+- ✅ **Cloud Run, ECS/Fargate, Fly.io, Render deploy targets** — `internal/deploytarget/{cloudrun,ecs,flyio,render}` with self-registration on non-empty config. — P9.2
+- ✅ **go-git GitOpsCommit** — full SSH/HTTPS auth in `internal/gitops/gogit.go`. — P9.3
+- ✅ **Buildah builder adapter** — third in-cluster builder Job pattern; storage-driver and SETUID/SETGID caps are configurable. — P9.5
+- ✅ **swaggo/swag OpenAPI generation** — `make swagger` regenerates `backend/docs/api/swagger.{json,yaml,go}` from doc-comments; flagship endpoints annotated. — P8
 
 - ✅ **KeepSave Helm wiring** — `secrets.backend=keepsave` renders `COOKER_SECRETS_KEEPSAVE_{URL,PROJECT_ID,API_KEY}` (the API key via `secretKeyRef` into an operator-managed Secret); CI matrix asserts both happy-path and apiKey-missing-fail. — P2.1 follow-up
 - ✅ **KeepSave secret promotion handler** — `POST /api/v1/environments/:id/secrets/promote` via the new `secrets.Promoter` interface; admin+MFA gated; database backend returns 501. — P2.1 follow-up

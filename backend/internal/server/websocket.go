@@ -1,7 +1,7 @@
 package server
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 
@@ -120,7 +120,7 @@ func (h *WebSocketHub) HandleKubeWatch(w http.ResponseWriter, r *http.Request, n
 func (h *WebSocketHub) handleConnection(w http.ResponseWriter, r *http.Request, channel string) {
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket upgrade error: %v", err)
+		slog.Warn("websocket upgrade failed", "err", err)
 		return
 	}
 

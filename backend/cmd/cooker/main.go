@@ -1,32 +1,54 @@
+// Cooker — CI/CD management tool for OCI images and Kubernetes.
+//
+// @title           Cooker API
+// @version         0.1
+// @description     REST API for Cooker pipelines, environments, secrets, and apps.
+// @contact.name    Cooker maintainers
+// @contact.url     https://github.com/cooker-ci/cooker
+// @license.name    Apache-2.0
+// @license.url     https://www.apache.org/licenses/LICENSE-2.0
+// @host            localhost:8080
+// @BasePath        /api/v1
+// @schemes         http https
+// @securityDefinitions.apikey  BearerAuth
+// @in              header
+// @name            Authorization
+// @description     OIDC-issued JWT bearer token. Obtain via the SPA's PKCE flow.
 package main
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 
 	"github.com/cooker-ci/cooker/internal/config"
 	"github.com/cooker-ci/cooker/internal/server"
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
-		log.Fatalf("invalid configuration: %v", err)
+		slog.Error("invalid configuration", "err", err)
+		os.Exit(1)
 	}
 
 	srv, err := server.New(cfg)
 	if err != nil {
-		log.Fatalf("failed to create server: %v", err)
+		slog.Error("failed to create server", "err", err)
+		os.Exit(1)
 	}
 	defer func() {
 		if err := srv.Close(); err != nil {
-			log.Printf("shutdown: store close: %v", err)
+			slog.Warn("shutdown: store close failed", "err", err)
 		}
 	}()
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
-	log.Printf("Cooker starting on %s", addr)
+	slog.Info("cooker starting", "addr", addr, "env", cfg.Env)
 	if err := srv.Run(addr); err != nil {
-		log.Fatalf("server error: %v", err)
+		slog.Error("server error", "err", err)
+		os.Exit(1)
 	}
 }

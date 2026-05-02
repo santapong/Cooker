@@ -55,6 +55,13 @@ migrate-up:
 migrate-down:
 	cd $(BACKEND_DIR) && go run ./cmd/cooker/ migrate down
 
+# --- OpenAPI / Swagger ---
+# `make swagger` regenerates docs/api/swagger.{json,yaml,go} from
+# the swag annotations on cmd/cooker/main.go and the handlers.
+# Requires `swag` on PATH (go install github.com/swaggo/swag/cmd/swag@latest).
+swagger:
+	cd $(BACKEND_DIR) && swag init -d ./cmd/cooker,./internal/handler -g main.go -o docs/api --parseInternal --parseDependency
+
 # --- Helm ---
 helm-install:
 	helm install cooker $(DEPLOY_DIR)/helm/cooker/

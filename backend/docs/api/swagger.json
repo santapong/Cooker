@@ -1,0 +1,778 @@
+{
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "REST API for Cooker pipelines, environments, secrets, and apps.",
+        "title": "Cooker API",
+        "contact": {
+            "name": "Cooker maintainers",
+            "url": "https://github.com/cooker-ci/cooker"
+        },
+        "license": {
+            "name": "Apache-2.0",
+            "url": "https://www.apache.org/licenses/LICENSE-2.0"
+        },
+        "version": "0.1"
+    },
+    "host": "localhost:8080",
+    "basePath": "/api/v1",
+    "paths": {
+        "/environments": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "environments"
+                ],
+                "summary": "List environments",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.Environment"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/environments/{id}/secrets/promote": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "secrets"
+                ],
+                "summary": "Promote secrets between environments",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Source environment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Promotion target",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "keys": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "toEnvironmentId": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "501": {
+                        "description": "Backend does not support promotion",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/environments/{id}/secrets/{key}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "secrets"
+                ],
+                "summary": "Upsert a secret value",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Environment ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Secret key",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New secret value",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "value": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pipelines": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "List pipelines",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.Pipeline"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/pipelines/{id}/run": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipelines"
+                ],
+                "summary": "Run a pipeline",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pipeline ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/model.PipelineRun"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "model.Artifact": {
+            "type": "object",
+            "properties": {
+                "digest": {
+                    "description": "OCI content-addressable digest",
+                    "type": "string"
+                },
+                "ref": {
+                    "description": "e.g., \"registry.example.com/app@sha256:abc...\"",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "\"oci-image\", \"test-report\", \"log\"",
+                    "type": "string"
+                }
+            }
+        },
+        "model.Edge": {
+            "type": "object",
+            "properties": {
+                "condition": {
+                    "description": "\"success\", \"failure\", \"always\"",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.EnvStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "deploying",
+                "deployed",
+                "failed",
+                "awaiting_approval"
+            ],
+            "x-enum-varnames": [
+                "EnvStatusPending",
+                "EnvStatusDeploying",
+                "EnvStatusDeployed",
+                "EnvStatusFailed",
+                "EnvStatusAwaitingApproval"
+            ]
+        },
+        "model.Environment": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "order": {
+                    "description": "Promotion order: 1=Dev, 2=Staging, 3=Prod",
+                    "type": "integer"
+                },
+                "plainVars": {
+                    "description": "PlainVars are non-sensitive key/value pairs stored as-is. Safe to\ninclude in list/get responses for any authenticated user.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "promotion": {
+                    "$ref": "#/definitions/model.PromotionPolicy"
+                },
+                "secretKeys": {
+                    "description": "SecretKeys is the sorted list of secret names available on this\nenvironment. Populated by Redact() for client responses; ignored\non inbound payloads (see CreateEnvironment/UpdateEnvironment).",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "target": {
+                    "$ref": "#/definitions/model.EnvironmentTarget"
+                },
+                "variables": {
+                    "description": "Variables is a deprecated alias for PlainVars. Kept populated on\nmarshal for backwards-compatible clients until Phase 3 ships.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "model.EnvironmentStatus": {
+            "type": "object",
+            "properties": {
+                "approvedBy": {
+                    "type": "string"
+                },
+                "environmentId": {
+                    "type": "string"
+                },
+                "promotedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/model.EnvStatus"
+                }
+            }
+        },
+        "model.EnvironmentTarget": {
+            "type": "object",
+            "properties": {
+                "clusterId": {
+                    "description": "References a configured K8s cluster",
+                    "type": "string"
+                },
+                "kubeContext": {
+                    "description": "kubeconfig context name",
+                    "type": "string"
+                },
+                "namespace": {
+                    "description": "Target namespace",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "\"cluster\" or \"namespace\"",
+                    "type": "string"
+                }
+            }
+        },
+        "model.Pipeline": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Edge"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "stages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Stage"
+                    }
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "variables": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "model.PipelineRun": {
+            "type": "object",
+            "properties": {
+                "environmentStatuses": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.EnvironmentStatus"
+                    }
+                },
+                "error": {
+                    "type": "string"
+                },
+                "finishedAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "pipelineId": {
+                    "type": "string"
+                },
+                "stageRuns": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.StageRun"
+                    }
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/model.RunStatus"
+                },
+                "variables": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "model.Position": {
+            "type": "object",
+            "properties": {
+                "x": {
+                    "type": "number"
+                },
+                "y": {
+                    "type": "number"
+                }
+            }
+        },
+        "model.PromotionPolicy": {
+            "type": "object",
+            "properties": {
+                "autoPromoteOn": {
+                    "description": "Conditions: [\"tests_pass\", \"health_check\"]",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "requiredApprovers": {
+                    "description": "For manual approval",
+                    "type": "integer"
+                },
+                "strategy": {
+                    "description": "\"auto\" or \"manual\"",
+                    "type": "string"
+                }
+            }
+        },
+        "model.RunStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "running",
+                "success",
+                "failed",
+                "cancelled"
+            ],
+            "x-enum-varnames": [
+                "RunStatusPending",
+                "RunStatusRunning",
+                "RunStatusSuccess",
+                "RunStatusFailed",
+                "RunStatusCancelled"
+            ]
+        },
+        "model.Stage": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/model.StageConfig"
+                },
+                "environmentId": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "position": {
+                    "$ref": "#/definitions/model.Position"
+                },
+                "type": {
+                    "$ref": "#/definitions/model.StageType"
+                }
+            }
+        },
+        "model.StageConfig": {
+            "type": "object",
+            "properties": {
+                "buildArgs": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "command": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "context": {
+                    "type": "string"
+                },
+                "dockerfile": {
+                    "description": "Build",
+                    "type": "string"
+                },
+                "env": {
+                    "description": "Env overrides the stage's environment variables. Values here win\nover anything inherited from the Pipeline.Variables or the\nresolved Environment.PlainVars.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "gitopsBranch": {
+                    "description": "defaults to \"main\"",
+                    "type": "string"
+                },
+                "gitopsContent": {
+                    "description": "GitOpsContent is the manifest (or values.yaml) body Cooker\nshould commit at GitOpsPath. Templating (${IMAGE}, etc.)\nhappens at run time.",
+                    "type": "string"
+                },
+                "gitopsMessage": {
+                    "description": "commit message template",
+                    "type": "string"
+                },
+                "gitopsPath": {
+                    "description": "path within the repo to update",
+                    "type": "string"
+                },
+                "gitopsRepo": {
+                    "description": "GitOps (StageTypeGitOpsCommit)",
+                    "type": "string"
+                },
+                "helmChart": {
+                    "type": "string"
+                },
+                "helmValues": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "image": {
+                    "description": "Test",
+                    "type": "string"
+                },
+                "manifestPath": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "description": "Deploy (K8s)",
+                    "type": "string"
+                },
+                "platforms": {
+                    "description": "Multi-arch OCI Image Index",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "registry": {
+                    "description": "Push",
+                    "type": "string"
+                },
+                "repository": {
+                    "type": "string"
+                },
+                "retries": {
+                    "type": "integer"
+                },
+                "script": {
+                    "description": "Custom",
+                    "type": "string"
+                },
+                "secretRefs": {
+                    "description": "SecretRefs names Environment.Secrets entries the executor must\ndecrypt and inject into this stage's runtime. The stage never\nsees ciphertext; resolution happens just before execution.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "timeout": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.StageRun": {
+            "type": "object",
+            "properties": {
+                "artifacts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Artifact"
+                    }
+                },
+                "error": {
+                    "type": "string"
+                },
+                "finishedAt": {
+                    "type": "string"
+                },
+                "logs": {
+                    "type": "string"
+                },
+                "stageId": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/model.RunStatus"
+                }
+            }
+        },
+        "model.StageType": {
+            "type": "string",
+            "enum": [
+                "build",
+                "test",
+                "deploy",
+                "push",
+                "approval",
+                "custom",
+                "gitops-commit"
+            ],
+            "x-enum-varnames": [
+                "StageTypeBuild",
+                "StageTypeTest",
+                "StageTypeDeploy",
+                "StageTypePush",
+                "StageTypeApproval",
+                "StageTypeCustom",
+                "StageTypeGitOpsCommit"
+            ]
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "OIDC-issued JWT bearer token. Obtain via the SPA's PKCE flow.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}
