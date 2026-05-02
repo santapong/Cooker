@@ -157,7 +157,9 @@ See [SECURITY.md](SECURITY.md) for the production deployment security checklist.
 
 | Document | Description |
 |----------|-------------|
-| [docs/architecture.md](docs/architecture.md) | System architecture, component details, data flow, OCI integration, design decisions |
+| [docs/architecture.md](docs/architecture.md) | System architecture, component map, data flow, OCI integration |
+| [docs/design.md](docs/design.md) | Design patterns, conventions, auth flow, testing strategy, contributor checklist |
+| [docs/UAT.md](docs/UAT.md) | UAT runbook and how to enable OIDC sign-in for testers |
 | [CHANGELOG.md](CHANGELOG.md) | Version history following Keep a Changelog format |
 | [SECURITY.md](SECURITY.md) | Security policy, auth architecture, production hardening checklist |
 
