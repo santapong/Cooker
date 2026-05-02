@@ -77,10 +77,21 @@ When Cooker mounts the Docker socket (`/var/run/docker.sock`):
 
 ### Network Security
 
-- **CORS**: Configurable allowed origins (defaults to permissive in dev, should be restricted in production)
-- **WebSocket**: Same-origin policy enforced in production (upgrade check)
-- **Ingress**: TLS termination recommended at the ingress controller level
-- **Internal traffic**: Backend-to-database and backend-to-Redis communication should use encrypted connections in production
+- **CORS**: Configurable allowed origins via `COOKER_ALLOWED_ORIGINS`. Defaults to `localhost:5173,localhost:3000` for `COOKER_ENV=dev|uat`; defaults to **deny-all** for `COOKER_ENV=production` so missing config is loud, not silent.
+- **`Allow-Credentials`**: explicitly **off**. Cooker authenticates via `Authorization: Bearer <jwt>` headers, not cookies — credentials mode adds no value and would block wildcard reflection.
+- **WebSocket**: same-origin policy enforced via the `gorilla/websocket` upgrader's `CheckOrigin`, sharing the CORS allowlist.
+- **Ingress**: TLS termination recommended at the ingress controller level.
+- **Internal traffic**: Backend-to-database and backend-to-Redis communication should use encrypted connections in production.
+
+### CSRF
+
+Cooker is **not vulnerable to classic CSRF** because the API is authenticated by the `Authorization` header, not by cookies:
+
+- The browser does **not** auto-attach `Authorization` headers on cross-origin requests, so a malicious site cannot trigger an authenticated state-changing call.
+- The OIDC sign-in redirect carries a `state` parameter validated by `oidc-client-ts` (RFC 6749 §10.12) — this guards the auth code exchange step.
+- WebSocket upgrades are gated by the same origin allowlist as HTTP CORS.
+
+**Why no CSRF tokens (synchronizer / double-submit-cookie):** they protect cookie-authenticated apps. Adding them to a Bearer-token API would be ceremony with no extra security and would not stop the attacks they're designed for. If session-cookie auth is ever added, CSRF tokens become required at the same time.
 
 ### Container Image Security
 

@@ -257,6 +257,21 @@ issue with the commit SHA.
   Pipelines list. Intentional for the current phase; a proper
   "App runs" view is a follow-up.
 
+## `COOKER_ENV`
+
+The compose stack sets `COOKER_ENV=uat`, which keeps the lenient
+defaults (localhost CORS allowlist, no fatal startup checks) so
+testers don't need to configure secrets and origins explicitly.
+
+Production (Helm chart) sets `COOKER_ENV=production`, which:
+- Defaults `COOKER_ALLOWED_ORIGINS` to **deny-all** (must be set explicitly).
+- Adds startup validation that fails fast on missing `COOKER_SECRET_KEY`
+  (added in PR B).
+
+If you want UAT to behave like production for a one-off test, set
+`COOKER_ENV=production` in `.env.uat` and provide
+`COOKER_ALLOWED_ORIGINS=http://localhost:8080`.
+
 ## Enabling OIDC sign-in for UAT
 
 UAT defaults to auth-off because most testers don't want to wire

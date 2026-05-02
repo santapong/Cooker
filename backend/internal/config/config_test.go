@@ -8,6 +8,7 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might interfere
+	os.Unsetenv("COOKER_ENV")
 	os.Unsetenv("COOKER_PORT")
 	os.Unsetenv("DATABASE_URL")
 	os.Unsetenv("REDIS_URL")
@@ -16,6 +17,9 @@ func TestLoad_Defaults(t *testing.T) {
 
 	cfg := Load()
 
+	if cfg.Env != EnvDev {
+		t.Errorf("expected default Env=dev, got %q", cfg.Env)
+	}
 	if cfg.Port != 8080 {
 		t.Errorf("expected default port 8080, got %d", cfg.Port)
 	}
@@ -162,5 +166,67 @@ func TestLoad_AllowedOriginsWildcard(t *testing.T) {
 	cfg := Load()
 	if !reflect.DeepEqual(cfg.AllowedOrigins, []string{"*"}) {
 		t.Errorf("AllowedOrigins = %v, want [\"*\"]", cfg.AllowedOrigins)
+	}
+}
+
+func TestLoad_AllowedOriginsDefaultsByEnv(t *testing.T) {
+	os.Unsetenv("COOKER_ALLOWED_ORIGINS")
+
+	t.Run("dev defaults to localhost", func(t *testing.T) {
+		os.Setenv("COOKER_ENV", "dev")
+		defer os.Unsetenv("COOKER_ENV")
+		cfg := Load()
+		want := []string{"http://localhost:5173", "http://localhost:3000"}
+		if !reflect.DeepEqual(cfg.AllowedOrigins, want) {
+			t.Errorf("dev AllowedOrigins = %v, want %v", cfg.AllowedOrigins, want)
+		}
+	})
+
+	t.Run("uat defaults to localhost", func(t *testing.T) {
+		os.Setenv("COOKER_ENV", "uat")
+		defer os.Unsetenv("COOKER_ENV")
+		cfg := Load()
+		if len(cfg.AllowedOrigins) == 0 {
+			t.Error("uat should have non-empty AllowedOrigins default")
+		}
+	})
+
+	t.Run("production has empty default", func(t *testing.T) {
+		os.Setenv("COOKER_ENV", "production")
+		defer os.Unsetenv("COOKER_ENV")
+		cfg := Load()
+		if len(cfg.AllowedOrigins) != 0 {
+			t.Errorf("production AllowedOrigins should be empty by default, got %v", cfg.AllowedOrigins)
+		}
+	})
+
+	t.Run("production with explicit origins keeps them", func(t *testing.T) {
+		os.Setenv("COOKER_ENV", "production")
+		os.Setenv("COOKER_ALLOWED_ORIGINS", "https://cooker.example.com")
+		defer os.Unsetenv("COOKER_ENV")
+		defer os.Unsetenv("COOKER_ALLOWED_ORIGINS")
+		cfg := Load()
+		want := []string{"https://cooker.example.com"}
+		if !reflect.DeepEqual(cfg.AllowedOrigins, want) {
+			t.Errorf("production AllowedOrigins = %v, want %v", cfg.AllowedOrigins, want)
+		}
+	})
+}
+
+func TestEnv_IsProduction(t *testing.T) {
+	cases := []struct {
+		env  Env
+		want bool
+	}{
+		{EnvDev, false},
+		{EnvUAT, false},
+		{EnvProduction, true},
+		{Env(""), false},
+		{Env("staging"), false},
+	}
+	for _, c := range cases {
+		if got := c.env.IsProduction(); got != c.want {
+			t.Errorf("Env(%q).IsProduction() = %v, want %v", c.env, got, c.want)
+		}
 	}
 }

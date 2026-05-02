@@ -138,7 +138,10 @@ func corsMiddleware(allowed []string) gin.HandlerFunc {
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
-		c.Header("Access-Control-Allow-Credentials", "true")
+		// Cooker authenticates via Authorization: Bearer <jwt>, not
+		// cookies. Allow-Credentials would also forbid the wildcard
+		// origin reflection above, so it adds nothing and removes
+		// flexibility — leave it off.
 
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
