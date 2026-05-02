@@ -44,9 +44,23 @@ type Config struct {
 	BuilderBackend  string // "noop" | "docker" | "buildkit"
 	PusherBackend   string // "noop" | "docker" | "crane"
 	DeployerBackend string // "noop" | "kubectl" | "clientgo"
+	// RateLimit tunes the per-user limiter on expensive endpoints.
+	// PerMinute<=0 disables the middleware (passthrough). Multi-replica
+	// deployments should disable this and rely on edge rate limiting.
+	RateLimit       RateLimitConfig
 	OIDC            OIDCConfig
 	Docker          DockerConfig
 	Kubernetes      KubernetesConfig
+}
+
+// RateLimitConfig tunes per-user rate limiting on expensive endpoints
+// (pipeline runs, image builds, app deploys). It is in-memory and
+// per-process; multi-replica deployments should set Enabled=false
+// and use edge-level (ingress / WAF) rate limiting instead.
+type RateLimitConfig struct {
+	Enabled   bool
+	PerMinute int
+	Burst     int
 }
 
 // OIDCConfig holds SSO/OIDC authentication configuration.
@@ -93,6 +107,11 @@ func Load() *Config {
 		BuilderBackend:  getEnv("COOKER_BUILDER", "noop"),
 		PusherBackend:   getEnv("COOKER_PUSHER", "noop"),
 		DeployerBackend: getEnv("COOKER_DEPLOYER", "noop"),
+		RateLimit: RateLimitConfig{
+			Enabled:   getEnvBool("COOKER_RATE_LIMIT_ENABLED", true),
+			PerMinute: getEnvInt("COOKER_RATE_LIMIT_PER_MINUTE", 10),
+			Burst:     getEnvInt("COOKER_RATE_LIMIT_BURST", 3),
+		},
 		OIDC: OIDCConfig{
 			Enabled:      getEnvBool("COOKER_OIDC_ENABLED", false),
 			IssuerURL:    getEnv("COOKER_OIDC_ISSUER_URL", ""),
