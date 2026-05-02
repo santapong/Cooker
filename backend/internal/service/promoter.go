@@ -2,7 +2,7 @@ package service
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -53,7 +53,7 @@ func (p *Promoter) Promote(run *model.PipelineRun, currentEnvID string, approved
 			Status:        model.EnvStatusAwaitingApproval,
 		}
 		run.EnvironmentStatuses = append(run.EnvironmentStatuses, *status)
-		log.Printf("[promoter] run %s awaiting approval for env %s", run.ID, nextEnv.Name)
+		slog.Info("promoter awaiting approval", "run", run.ID, "env", nextEnv.Name)
 		return status, nil
 	}
 
@@ -67,7 +67,7 @@ func (p *Promoter) Promote(run *model.PipelineRun, currentEnvID string, approved
 	}
 	run.EnvironmentStatuses = append(run.EnvironmentStatuses, *status)
 
-	log.Printf("[promoter] run %s promoted to env %s (approved by: %s)", run.ID, nextEnv.Name, approvedBy)
+	slog.Info("promoter promoted run", "run", run.ID, "env", nextEnv.Name, "approvedBy", approvedBy)
 	return status, nil
 }
 
@@ -80,7 +80,7 @@ func (p *Promoter) ApprovePromotion(run *model.PipelineRun, envID string, approv
 			es.Status = model.EnvStatusDeploying
 			es.PromotedAt = &now
 			es.ApprovedBy = approvedBy
-			log.Printf("[promoter] promotion approved for env %s by %s", envID, approvedBy)
+			slog.Info("promotion approved", "env", envID, "approvedBy", approvedBy)
 			return nil
 		}
 	}

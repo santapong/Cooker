@@ -1,0 +1,541 @@
+basePath: /api/v1
+definitions:
+  model.Artifact:
+    properties:
+      digest:
+        description: OCI content-addressable digest
+        type: string
+      ref:
+        description: e.g., "registry.example.com/app@sha256:abc..."
+        type: string
+      type:
+        description: '"oci-image", "test-report", "log"'
+        type: string
+    type: object
+  model.Edge:
+    properties:
+      condition:
+        description: '"success", "failure", "always"'
+        type: string
+      id:
+        type: string
+      source:
+        type: string
+      target:
+        type: string
+    type: object
+  model.EnvStatus:
+    enum:
+    - pending
+    - deploying
+    - deployed
+    - failed
+    - awaiting_approval
+    type: string
+    x-enum-varnames:
+    - EnvStatusPending
+    - EnvStatusDeploying
+    - EnvStatusDeployed
+    - EnvStatusFailed
+    - EnvStatusAwaitingApproval
+  model.Environment:
+    properties:
+      createdAt:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      order:
+        description: 'Promotion order: 1=Dev, 2=Staging, 3=Prod'
+        type: integer
+      plainVars:
+        additionalProperties:
+          type: string
+        description: |-
+          PlainVars are non-sensitive key/value pairs stored as-is. Safe to
+          include in list/get responses for any authenticated user.
+        type: object
+      promotion:
+        $ref: '#/definitions/model.PromotionPolicy'
+      secretKeys:
+        description: |-
+          SecretKeys is the sorted list of secret names available on this
+          environment. Populated by Redact() for client responses; ignored
+          on inbound payloads (see CreateEnvironment/UpdateEnvironment).
+        items:
+          type: string
+        type: array
+      target:
+        $ref: '#/definitions/model.EnvironmentTarget'
+      variables:
+        additionalProperties:
+          type: string
+        description: |-
+          Variables is a deprecated alias for PlainVars. Kept populated on
+          marshal for backwards-compatible clients until Phase 3 ships.
+        type: object
+    type: object
+  model.EnvironmentStatus:
+    properties:
+      approvedBy:
+        type: string
+      environmentId:
+        type: string
+      promotedAt:
+        type: string
+      status:
+        $ref: '#/definitions/model.EnvStatus'
+    type: object
+  model.EnvironmentTarget:
+    properties:
+      clusterId:
+        description: References a configured K8s cluster
+        type: string
+      kubeContext:
+        description: kubeconfig context name
+        type: string
+      namespace:
+        description: Target namespace
+        type: string
+      type:
+        description: '"cluster" or "namespace"'
+        type: string
+    type: object
+  model.Pipeline:
+    properties:
+      createdAt:
+        type: string
+      description:
+        type: string
+      edges:
+        items:
+          $ref: '#/definitions/model.Edge'
+        type: array
+      id:
+        type: string
+      name:
+        type: string
+      stages:
+        items:
+          $ref: '#/definitions/model.Stage'
+        type: array
+      updatedAt:
+        type: string
+      variables:
+        additionalProperties:
+          type: string
+        type: object
+    type: object
+  model.PipelineRun:
+    properties:
+      environmentStatuses:
+        items:
+          $ref: '#/definitions/model.EnvironmentStatus'
+        type: array
+      error:
+        type: string
+      finishedAt:
+        type: string
+      id:
+        type: string
+      pipelineId:
+        type: string
+      stageRuns:
+        items:
+          $ref: '#/definitions/model.StageRun'
+        type: array
+      startedAt:
+        type: string
+      status:
+        $ref: '#/definitions/model.RunStatus'
+      variables:
+        additionalProperties:
+          type: string
+        type: object
+    type: object
+  model.Position:
+    properties:
+      x:
+        type: number
+      "y":
+        type: number
+    type: object
+  model.PromotionPolicy:
+    properties:
+      autoPromoteOn:
+        description: 'Conditions: ["tests_pass", "health_check"]'
+        items:
+          type: string
+        type: array
+      requiredApprovers:
+        description: For manual approval
+        type: integer
+      strategy:
+        description: '"auto" or "manual"'
+        type: string
+    type: object
+  model.RunStatus:
+    enum:
+    - pending
+    - running
+    - success
+    - failed
+    - cancelled
+    type: string
+    x-enum-varnames:
+    - RunStatusPending
+    - RunStatusRunning
+    - RunStatusSuccess
+    - RunStatusFailed
+    - RunStatusCancelled
+  model.Stage:
+    properties:
+      config:
+        $ref: '#/definitions/model.StageConfig'
+      environmentId:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      position:
+        $ref: '#/definitions/model.Position'
+      type:
+        $ref: '#/definitions/model.StageType'
+    type: object
+  model.StageConfig:
+    properties:
+      buildArgs:
+        additionalProperties:
+          type: string
+        type: object
+      command:
+        items:
+          type: string
+        type: array
+      context:
+        type: string
+      dockerfile:
+        description: Build
+        type: string
+      env:
+        additionalProperties:
+          type: string
+        description: |-
+          Env overrides the stage's environment variables. Values here win
+          over anything inherited from the Pipeline.Variables or the
+          resolved Environment.PlainVars.
+        type: object
+      gitopsBranch:
+        description: defaults to "main"
+        type: string
+      gitopsContent:
+        description: |-
+          GitOpsContent is the manifest (or values.yaml) body Cooker
+          should commit at GitOpsPath. Templating (${IMAGE}, etc.)
+          happens at run time.
+        type: string
+      gitopsMessage:
+        description: commit message template
+        type: string
+      gitopsPath:
+        description: path within the repo to update
+        type: string
+      gitopsRepo:
+        description: GitOps (StageTypeGitOpsCommit)
+        type: string
+      helmChart:
+        type: string
+      helmValues:
+        additionalProperties: true
+        type: object
+      image:
+        description: Test
+        type: string
+      manifestPath:
+        type: string
+      namespace:
+        description: Deploy (K8s)
+        type: string
+      platforms:
+        description: Multi-arch OCI Image Index
+        items:
+          type: string
+        type: array
+      registry:
+        description: Push
+        type: string
+      repository:
+        type: string
+      retries:
+        type: integer
+      script:
+        description: Custom
+        type: string
+      secretRefs:
+        description: |-
+          SecretRefs names Environment.Secrets entries the executor must
+          decrypt and inject into this stage's runtime. The stage never
+          sees ciphertext; resolution happens just before execution.
+        items:
+          type: string
+        type: array
+      tags:
+        items:
+          type: string
+        type: array
+      timeout:
+        type: string
+    type: object
+  model.StageRun:
+    properties:
+      artifacts:
+        items:
+          $ref: '#/definitions/model.Artifact'
+        type: array
+      error:
+        type: string
+      finishedAt:
+        type: string
+      logs:
+        type: string
+      stageId:
+        type: string
+      startedAt:
+        type: string
+      status:
+        $ref: '#/definitions/model.RunStatus'
+    type: object
+  model.StageType:
+    enum:
+    - build
+    - test
+    - deploy
+    - push
+    - approval
+    - custom
+    - gitops-commit
+    type: string
+    x-enum-varnames:
+    - StageTypeBuild
+    - StageTypeTest
+    - StageTypeDeploy
+    - StageTypePush
+    - StageTypeApproval
+    - StageTypeCustom
+    - StageTypeGitOpsCommit
+host: localhost:8080
+info:
+  contact:
+    name: Cooker maintainers
+    url: https://github.com/cooker-ci/cooker
+  description: REST API for Cooker pipelines, environments, secrets, and apps.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  title: Cooker API
+  version: "0.1"
+paths:
+  /environments:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.Environment'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List environments
+      tags:
+      - environments
+  /environments/{id}/secrets/{key}:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Environment ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Secret key
+        in: path
+        name: key
+        required: true
+        type: string
+      - description: New secret value
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            value:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Upsert a secret value
+      tags:
+      - secrets
+  /environments/{id}/secrets/promote:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Source environment ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Promotion target
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            keys:
+              items:
+                type: string
+              type: array
+            toEnvironmentId:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "501":
+          description: Backend does not support promotion
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Promote secrets between environments
+      tags:
+      - secrets
+  /pipelines:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.Pipeline'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List pipelines
+      tags:
+      - pipelines
+  /pipelines/{id}/run:
+    post:
+      parameters:
+      - description: Pipeline ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/model.PipelineRun'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "429":
+          description: Rate limit exceeded
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Run a pipeline
+      tags:
+      - pipelines
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: OIDC-issued JWT bearer token. Obtain via the SPA's PKCE flow.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

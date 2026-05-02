@@ -208,9 +208,9 @@ func (k *Kaniko) buildJob(req Request) *batchv1.Job {
 					RestartPolicy:      corev1.RestartPolicyNever,
 					ServiceAccountName: k.cfg.ServiceAccount,
 					Containers: []corev1.Container{{
-						Name:    "kaniko",
-						Image:   k.cfg.Image,
-						Args:    args,
+						Name:  "kaniko",
+						Image: k.cfg.Image,
+						Args:  args,
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
 								corev1.ResourceCPU:    resource.MustParse("500m"),

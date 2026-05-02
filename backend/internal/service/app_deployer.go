@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -62,7 +62,7 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, logW io.Writer
 	}
 	defer func() {
 		if err := os.RemoveAll(workdir); err != nil {
-			log.Printf("app-deploy: rm workdir %s: %v", workdir, err)
+			slog.Warn("app-deploy: rm workdir failed", "workdir", workdir, "err", err)
 		}
 	}()
 
@@ -237,4 +237,3 @@ func (m *mwWriter) Write(p []byte) (int, error) {
 	_, _ = m.b.Write(p)
 	return len(p), nil
 }
-

@@ -44,7 +44,7 @@ func VerifySignature(secret, body []byte, sig string) error {
 // PushEvent is the subset of GitHub's push-event JSON that Cooker
 // acts on. Full payload is much larger; we decode only what matters.
 type PushEvent struct {
-	Ref        string `json:"ref"`     // e.g. "refs/heads/main"
+	Ref        string `json:"ref"` // e.g. "refs/heads/main"
 	Repository struct {
 		FullName string `json:"full_name"` // "owner/name"
 	} `json:"repository"`

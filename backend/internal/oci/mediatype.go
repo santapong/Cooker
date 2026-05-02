@@ -18,10 +18,10 @@ const (
 	MediaTypeImageLayerNonDistGzip = "application/vnd.oci.image.layer.nondistributable.v1.tar+gzip"
 
 	// Docker compatibility media types
-	MediaTypeDockerManifestV2 = "application/vnd.docker.distribution.manifest.v2+json"
+	MediaTypeDockerManifestV2   = "application/vnd.docker.distribution.manifest.v2+json"
 	MediaTypeDockerManifestList = "application/vnd.docker.distribution.manifest.list.v2+json"
-	MediaTypeDockerImageConfig = "application/vnd.docker.container.image.v1+json"
-	MediaTypeDockerLayerGzip   = "application/vnd.docker.image.rootfs.diff.tar.gzip"
+	MediaTypeDockerImageConfig  = "application/vnd.docker.container.image.v1+json"
+	MediaTypeDockerLayerGzip    = "application/vnd.docker.image.rootfs.diff.tar.gzip"
 
 	// OCI artifact types (distribution-spec v1.1 referrers API)
 	MediaTypeEmptyJSON = "application/vnd.oci.empty.v1+json"

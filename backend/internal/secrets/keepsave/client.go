@@ -101,6 +101,22 @@ func (c *Client) UpdateSecret(ctx context.Context, projectID, secretID, value st
 	return err
 }
 
+// PromoteSecrets copies secrets from one environment to another
+// inside the same project. Empty keys promotes the entire source
+// environment. Mirrors KeepSave's POST /api/v1/projects/:id/promote.
+func (c *Client) PromoteSecrets(ctx context.Context, projectID, fromEnv, toEnv string, keys []string) error {
+	path := fmt.Sprintf("/api/v1/projects/%s/promote", projectID)
+	body := map[string]any{
+		"from_environment": fromEnv,
+		"to_environment":   toEnv,
+	}
+	if len(keys) > 0 {
+		body["keys"] = keys
+	}
+	_, err := c.do(ctx, http.MethodPost, path, body)
+	return err
+}
+
 // DeleteSecret removes a secret by ID. 404 is treated as success
 // because the caller's intent (key should not exist) is met.
 func (c *Client) DeleteSecret(ctx context.Context, projectID, secretID string) error {

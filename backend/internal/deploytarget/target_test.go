@@ -13,11 +13,13 @@ import (
 
 type fakeTarget struct{ kind model.DeployTargetKind }
 
-func (f *fakeTarget) Kind() model.DeployTargetKind                              { return f.kind }
-func (*fakeTarget) Deploy(context.Context, deploytarget.Spec) error             { return nil }
-func (*fakeTarget) Status(context.Context, string) (deploytarget.Status, error) { return deploytarget.Status{Healthy: true}, nil }
-func (*fakeTarget) Logs(context.Context, string, io.Writer) error               { return nil }
-func (*fakeTarget) Rollback(context.Context, string) error                      { return nil }
+func (f *fakeTarget) Kind() model.DeployTargetKind                  { return f.kind }
+func (*fakeTarget) Deploy(context.Context, deploytarget.Spec) error { return nil }
+func (*fakeTarget) Status(context.Context, string) (deploytarget.Status, error) {
+	return deploytarget.Status{Healthy: true}, nil
+}
+func (*fakeTarget) Logs(context.Context, string, io.Writer) error { return nil }
+func (*fakeTarget) Rollback(context.Context, string) error        { return nil }
 
 func TestRegisterAndLookup(t *testing.T) {
 	deploytarget.ResetForTest()
@@ -65,12 +67,16 @@ func TestMustRegister_DuplicateKindPanics(t *testing.T) {
 	deploytarget.MustRegister(&fakeTarget{kind: model.DeployTargetDockerHost})
 }
 
-func TestCloudRunStub_ReportsErrUnavailable(t *testing.T) {
+func TestCloudRun_KindAndConstructor(t *testing.T) {
+	// Smoke test: constructor returns a Target whose Kind is
+	// cloud-run. Real Deploy/Status calls hit Google's gRPC API and
+	// ADC discovery, which is not safe to exercise in unit tests on
+	// hosts without metadata servers — covered by integration tests
+	// against a real GCP project (follow-up).
 	deploytarget.ResetForTest()
 	tt := cloudrun.New("proj", "us-central1")
-	err := tt.Deploy(context.Background(), deploytarget.Spec{AppID: "x"})
-	if !errors.Is(err, deploytarget.ErrUnavailable) {
-		t.Errorf("expected ErrUnavailable, got %v", err)
+	if tt.Kind() != model.DeployTargetCloudRun {
+		t.Errorf("Kind() = %q, want cloud-run", tt.Kind())
 	}
 }
 

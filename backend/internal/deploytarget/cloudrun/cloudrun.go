@@ -1,18 +1,14 @@
-// Package cloudrun adapts Cooker's Target interface to Google
-// Cloud Run. The real adapter would call cloud.google.com/go/run
-// to create or update a Service, wait for the revision to become
-// Ready, and stream logs via the Cloud Logging API.
-//
-// Staying intentionally unwired: adding the google-cloud-go
-// modules would pull several hundred MB into every Cooker build
-// and the meaningful tests all need a GCP project. Defined now so
-// the rest of the codebase can program against a stable Kind.
+// Package cloudrun adapts Cooker's deploytarget.Target to Google
+// Cloud Run via cloud.google.com/go/run/apiv2.
 package cloudrun
 
 import (
 	"context"
 	"fmt"
 	"io"
+
+	run "cloud.google.com/go/run/apiv2"
+	"cloud.google.com/go/run/apiv2/runpb"
 
 	"github.com/cooker-ci/cooker/internal/deploytarget"
 	"github.com/cooker-ci/cooker/internal/model"
@@ -31,27 +27,134 @@ func New(project, region string) *Target {
 
 func (*Target) Kind() model.DeployTargetKind { return model.DeployTargetCloudRun }
 
-func (t *Target) Deploy(_ context.Context, _ deploytarget.Spec) error {
-	return t.unavailable("Deploy")
+func (t *Target) parent() string {
+	return fmt.Sprintf("projects/%s/locations/%s", t.Project, t.Region)
 }
 
-func (t *Target) Status(_ context.Context, _ string) (deploytarget.Status, error) {
-	return deploytarget.Status{}, t.unavailable("Status")
+func (t *Target) serviceName(appID string) string {
+	return fmt.Sprintf("%s/services/%s", t.parent(), appID)
+}
+
+func (t *Target) requireConfig() error {
+	if t == nil || t.Project == "" || t.Region == "" {
+		return fmt.Errorf("%w: cloud-run: Project + Region required", deploytarget.ErrUnavailable)
+	}
+	return nil
+}
+
+// Deploy creates or updates a Cloud Run Service for spec.AppID and
+// waits for the resulting long-running operation to complete.
+func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
+	if err := t.requireConfig(); err != nil {
+		return err
+	}
+	c, err := run.NewServicesClient(ctx)
+	if err != nil {
+		return fmt.Errorf("cloud-run: services client: %w", err)
+	}
+	defer c.Close()
+	envVars := make([]*runpb.EnvVar, 0, len(spec.Env))
+	for k, v := range spec.Env {
+		envVars = append(envVars, &runpb.EnvVar{Name: k, Values: &runpb.EnvVar_Value{Value: v}})
+	}
+	template := &runpb.RevisionTemplate{
+		Containers: []*runpb.Container{{
+			Image: spec.Image,
+			Env:   envVars,
+		}},
+	}
+	if spec.Replicas > 0 {
+		template.Scaling = &runpb.RevisionScaling{MinInstanceCount: int32(spec.Replicas)}
+	}
+
+	if _, gerr := c.GetService(ctx, &runpb.GetServiceRequest{Name: t.serviceName(spec.AppID)}); gerr == nil {
+		op, uerr := c.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: &runpb.Service{
+			Name:     t.serviceName(spec.AppID),
+			Template: template,
+		}})
+		if uerr != nil {
+			return fmt.Errorf("cloud-run: update %s: %w", spec.AppID, uerr)
+		}
+		if _, err := op.Wait(ctx); err != nil {
+			return fmt.Errorf("cloud-run: wait update %s: %w", spec.AppID, err)
+		}
+		return nil
+	}
+	op, cerr := c.CreateService(ctx, &runpb.CreateServiceRequest{
+		Parent:    t.parent(),
+		ServiceId: spec.AppID,
+		Service:   &runpb.Service{Template: template},
+	})
+	if cerr != nil {
+		return fmt.Errorf("cloud-run: create %s: %w", spec.AppID, cerr)
+	}
+	if _, err := op.Wait(ctx); err != nil {
+		return fmt.Errorf("cloud-run: wait create %s: %w", spec.AppID, err)
+	}
+	return nil
+}
+
+func (t *Target) Status(ctx context.Context, appID string) (deploytarget.Status, error) {
+	if err := t.requireConfig(); err != nil {
+		return deploytarget.Status{}, err
+	}
+	c, err := run.NewServicesClient(ctx)
+	if err != nil {
+		return deploytarget.Status{}, err
+	}
+	defer c.Close()
+	svc, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: t.serviceName(appID)})
+	if err != nil {
+		return deploytarget.Status{}, err
+	}
+	healthy := svc.GetTerminalCondition().GetState() == runpb.Condition_CONDITION_SUCCEEDED
+	return deploytarget.Status{
+		Healthy: healthy,
+		URL:     svc.GetUri(),
+	}, nil
 }
 
 func (t *Target) Logs(_ context.Context, _ string, _ io.Writer) error {
-	return t.unavailable("Logs")
+	// Cloud Logging streaming is a separate SDK; deferred.
+	return fmt.Errorf("%w: cloud-run logs: streaming via Cloud Logging not yet wired", deploytarget.ErrUnavailable)
 }
 
-func (t *Target) Rollback(_ context.Context, _ string) error {
-	return t.unavailable("Rollback")
-}
-
-func (t *Target) unavailable(op string) error {
-	if t == nil || t.Project == "" || t.Region == "" {
-		return fmt.Errorf("%w: cloud-run %s: Project + Region required", deploytarget.ErrUnavailable, op)
+// Rollback retargets 100% of traffic to the previous ready revision.
+func (t *Target) Rollback(ctx context.Context, appID string) error {
+	if err := t.requireConfig(); err != nil {
+		return err
 	}
-	return fmt.Errorf("%w: cloud-run %s: google-cloud-go run client not yet wired (roadmap Phase 7)", deploytarget.ErrUnavailable, op)
+	sc, err := run.NewServicesClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer sc.Close()
+	rc, err := run.NewRevisionsClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	it := rc.ListRevisions(ctx, &runpb.ListRevisionsRequest{Parent: t.serviceName(appID)})
+	var prev string
+	for i := 0; i < 2; i++ {
+		r, err := it.Next()
+		if err != nil {
+			break
+		}
+		prev = r.GetName()
+	}
+	if prev == "" {
+		return fmt.Errorf("cloud-run: no previous revision to roll back to")
+	}
+	_, err = sc.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: &runpb.Service{
+		Name: t.serviceName(appID),
+		Traffic: []*runpb.TrafficTarget{{
+			Type:     runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION,
+			Revision: prev,
+			Percent:  100,
+		}},
+	}})
+	return err
 }
 
 var _ deploytarget.Target = (*Target)(nil)

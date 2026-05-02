@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -156,13 +156,13 @@ func (h *Handler) DeployApp(c *gin.Context) {
 	go h.runAppDeploy(a, runID, channel)
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"appId":    a.ID,
-		"runId":    runID,
-		"channel":  channel,
-		"status":   "running",
-		"stream":   "/ws/app-run/" + runID,
-		"repo":     a.GitHubRepo,
-		"branch":   a.Branch,
+		"appId":   a.ID,
+		"runId":   runID,
+		"channel": channel,
+		"status":  "running",
+		"stream":  "/ws/app-run/" + runID,
+		"repo":    a.GitHubRepo,
+		"branch":  a.Branch,
 	})
 }
 
@@ -258,7 +258,7 @@ func (h *Handler) GitHubWebhook(c *gin.Context) {
 	}
 	secret, err := h.Codec.Open(app.WebhookSecret)
 	if err != nil {
-		log.Printf("github-webhook: open secret for app %s: %v", app.ID, err)
+		slog.Warn("github webhook: failed to open secret", "app", app.ID, "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal"})
 		return
 	}
@@ -275,9 +275,9 @@ func (h *Handler) GitHubWebhook(c *gin.Context) {
 
 	// TODO: enqueue a real deploy (synthesise a Clone→Build→Push→Deploy run).
 	c.JSON(http.StatusAccepted, gin.H{
-		"appId":    app.ID,
-		"commit":   ev.After,
-		"branch":   branch,
-		"status":   "deploy queued",
+		"appId":  app.ID,
+		"commit": ev.After,
+		"branch": branch,
+		"status": "deploy queued",
 	})
 }

@@ -15,6 +15,14 @@ import (
 
 // ListEnvironments returns all environments with secrets redacted so
 // any authenticated user can safely inspect structure.
+//
+// @Summary      List environments
+// @Tags         environments
+// @Produce      json
+// @Success      200  {array}   model.Environment
+// @Failure      401  {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /environments [get]
 func (h *Handler) ListEnvironments(c *gin.Context) {
 	envs, err := h.Store.Environments.List(c.Request.Context())
 	if abortStoreErr(c, err, "environments not found") {
@@ -91,6 +99,20 @@ func (h *Handler) DeleteEnvironment(c *gin.Context) {
 // PutSecret upserts a single secret for an environment. Admin only.
 // Storage is delegated to the configured secrets.Manager (database
 // or KeepSave); this handler only authorizes and routes.
+//
+// @Summary      Upsert a secret value
+// @Tags         secrets
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string                 true  "Environment ID"
+// @Param        key   path      string                 true  "Secret key"
+// @Param        body  body      object{value=string}   true  "New secret value"
+// @Success      200   {object}  map[string]string
+// @Failure      400   {object}  map[string]string
+// @Failure      403   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Security     BearerAuth
+// @Router       /environments/{id}/secrets/{key} [put]
 func (h *Handler) PutSecret(c *gin.Context) {
 	if !h.requireSecrets(c) {
 		return
@@ -140,6 +162,72 @@ func (h *Handler) RevealSecret(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "value": string(value)})
+}
+
+// PromoteSecrets copies secrets from the URL-path environment to the
+// environment named in the request body. Admin only. Backend support
+// is optional; backends that do not implement secrets.Promoter
+// produce 501.
+//
+// @Summary      Promote secrets between environments
+// @Tags         secrets
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string  true  "Source environment ID"
+// @Param        body  body      object{toEnvironmentId=string,keys=[]string}  true  "Promotion target"
+// @Success      200   {object}  map[string]any
+// @Failure      400   {object}  map[string]string
+// @Failure      403   {object}  map[string]string
+// @Failure      501   {object}  map[string]string  "Backend does not support promotion"
+// @Security     BearerAuth
+// @Router       /environments/{id}/secrets/promote [post]
+func (h *Handler) PromoteSecrets(c *gin.Context) {
+	if !h.requireSecrets(c) {
+		return
+	}
+	claims := auth.GetUser(c)
+	if !auth.CanRevealSecret(claims) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
+		return
+	}
+	var req struct {
+		ToEnvironmentID string   `json:"toEnvironmentId" binding:"required"`
+		Keys            []string `json:"keys"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	from := c.Param("id")
+	if from == req.ToEnvironmentID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source and target environments must differ"})
+		return
+	}
+	if _, err := h.Store.Environments.Get(c.Request.Context(), from); abortStoreErr(c, err, "source environment not found") {
+		return
+	}
+	if _, err := h.Store.Environments.Get(c.Request.Context(), req.ToEnvironmentID); abortStoreErr(c, err, "target environment not found") {
+		return
+	}
+	promoter, ok := h.Secrets.(secrets.Promoter)
+	if !ok {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": secrets.ErrPromotionUnsupported.Error()})
+		return
+	}
+	if err := promoter.Promote(c.Request.Context(), from, req.ToEnvironmentID, req.Keys); err != nil {
+		if errors.Is(err, secrets.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"from":   from,
+		"to":     req.ToEnvironmentID,
+		"keys":   req.Keys,
+		"status": "promoted",
+	})
 }
 
 // DeleteSecret removes a secret key from the environment. Admin only.

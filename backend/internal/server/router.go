@@ -31,15 +31,22 @@ func (s *Server) registerRoutes() {
 	h := s.handler
 	writeRole := auth.RequireRole(auth.RoleOperator, auth.RoleAdmin)
 	adminRole := auth.RequireRole(auth.RoleAdmin)
+	// Step-up MFA gate. Empty COOKER_OIDC_MFA_ACR_VALUES yields a
+	// passthrough; configured values require the token's `acr` (or
+	// `amr`) to match. Applied to admin-only destructive operations.
+	mfa := auth.RequireMFA(s.config.OIDC.MFAACRValues...)
 
 	// Per-user rate limit applied to expensive endpoints below.
 	// Disabled when COOKER_RATE_LIMIT_ENABLED=false (multi-replica
 	// deployments rely on edge limiting; see SECURITY.md).
 	var expensive gin.HandlerFunc
-	if s.config.RateLimit.Enabled {
-		expensive = newRateLimiter(s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
-	} else {
+	switch {
+	case !s.config.RateLimit.Enabled:
 		expensive = func(c *gin.Context) { c.Next() }
+	case s.config.RateLimit.Backend == "redis" && s.redisClient != nil:
+		expensive = newRedisRateLimiter(s.redisClient, s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
+	default:
+		expensive = newRateLimiter(s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
 	}
 
 	// Pipeline routes
@@ -49,7 +56,7 @@ func (s *Server) registerRoutes() {
 		pipelines.POST("", writeRole, h.CreatePipeline)
 		pipelines.GET("/:id", h.GetPipeline)
 		pipelines.PUT("/:id", writeRole, h.UpdatePipeline)
-		pipelines.DELETE("/:id", adminRole, h.DeletePipeline)
+		pipelines.DELETE("/:id", adminRole, mfa, h.DeletePipeline)
 		pipelines.POST("/:id/validate", h.ValidatePipeline)
 		pipelines.POST("/:id/run", writeRole, expensive, h.RunPipeline)
 		pipelines.GET("/:id/runs", h.ListPipelineRuns)
@@ -117,15 +124,19 @@ func (s *Server) registerRoutes() {
 		environments.GET("", h.ListEnvironments)
 		environments.POST("", writeRole, h.CreateEnvironment)
 		environments.PUT("/:id", writeRole, h.UpdateEnvironment)
-		environments.DELETE("/:id", adminRole, h.DeleteEnvironment)
+		environments.DELETE("/:id", adminRole, mfa, h.DeleteEnvironment)
 		// Per-environment secret management. Each handler additionally
 		// enforces admin-only via CanRevealSecret; the adminRole
 		// middleware here is belt-and-braces so unauthenticated probing
 		// of the route table gets a uniform 403 before touching the
 		// handler body.
-		environments.GET("/:id/secrets/:key", adminRole, h.RevealSecret)
-		environments.PUT("/:id/secrets/:key", adminRole, h.PutSecret)
-		environments.DELETE("/:id/secrets/:key", adminRole, h.DeleteSecret)
+		environments.GET("/:id/secrets/:key", adminRole, mfa, h.RevealSecret)
+		environments.PUT("/:id/secrets/:key", adminRole, mfa, h.PutSecret)
+		environments.DELETE("/:id/secrets/:key", adminRole, mfa, h.DeleteSecret)
+		// Promote secrets to another environment in a single backend
+		// round-trip. Returns 501 when the configured secrets backend
+		// does not implement secrets.Promoter (today: database).
+		environments.POST("/:id/secrets/promote", adminRole, mfa, h.PromoteSecrets)
 	}
 
 	// Promotion routes (nested under pipeline runs)
@@ -142,12 +153,12 @@ func (s *Server) registerRoutes() {
 		apps.POST("", writeRole, h.CreateApp)
 		apps.GET("/:id", h.GetApp)
 		apps.PUT("/:id", writeRole, h.UpdateApp)
-		apps.DELETE("/:id", adminRole, h.DeleteApp)
+		apps.DELETE("/:id", adminRole, mfa, h.DeleteApp)
 		apps.POST("/:id/deploy", writeRole, expensive, h.DeployApp)
 		// Webhook rotation re-checks admin in the handler; keeping the
 		// gate here means a viewer can't even reach it to probe codec
 		// behaviour.
-		apps.PUT("/:id/webhook", adminRole, h.SetAppWebhookSecret)
+		apps.PUT("/:id/webhook", adminRole, mfa, h.SetAppWebhookSecret)
 	}
 
 	// Managed hosts (Phase 4).
@@ -157,7 +168,7 @@ func (s *Server) registerRoutes() {
 		hosts.POST("", writeRole, h.CreateHost)
 		hosts.GET("/:id", h.GetHost)
 		hosts.PUT("/:id", writeRole, h.UpdateHost)
-		hosts.DELETE("/:id", adminRole, h.DeleteHost)
+		hosts.DELETE("/:id", adminRole, mfa, h.DeleteHost)
 	}
 
 	// GitHub webhook receiver (unauthenticated — HMAC is the auth).

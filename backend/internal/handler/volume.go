@@ -8,9 +8,10 @@ import (
 	"github.com/cooker-ci/cooker/internal/model"
 )
 
-// Volume handlers are placeholders alongside the network handlers;
-// the real impl dials the Docker Engine API through the host's
-// transport.
+// Volume handlers, like network handlers, depend on the host
+// transport that is not yet plumbed through Handler. They return 501
+// for write operations and an empty list for reads, with the same
+// shape as network.go so the UI can detect the gap consistently.
 
 func (h *Handler) ListDockerVolumes(c *gin.Context) {
 	_ = c.Query("hostId")
@@ -23,22 +24,13 @@ func (h *Handler) CreateDockerVolume(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	// TODO: call (docker client).VolumeCreate(ctx, types.VolumeCreateBody{...})
-	c.JSON(http.StatusAccepted, gin.H{
-		"status": "pending",
-		"volume": v,
-	})
+	notImplementedDockerHost(c, "volume.create")
 }
 
 func (h *Handler) GetDockerVolume(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"name":    c.Param("name"),
-		"hostId":  c.Query("hostId"),
-		"message": "docker volume inspect via configured host",
-	})
+	notImplementedDockerHost(c, "volume.inspect")
 }
 
 func (h *Handler) DeleteDockerVolume(c *gin.Context) {
-	// TODO: call (docker client).VolumeRemove(ctx, name, false)
-	c.JSON(http.StatusOK, gin.H{"name": c.Param("name"), "status": "pending"})
+	notImplementedDockerHost(c, "volume.remove")
 }

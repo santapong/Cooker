@@ -2,7 +2,6 @@ package pusher
 
 import (
 	"context"
-	"errors"
 	"testing"
 )
 
@@ -16,10 +15,17 @@ func TestNoop(t *testing.T) {
 	}
 }
 
-func TestCrane_Unwired(t *testing.T) {
-	_, err := NewCrane().Push(context.Background(), Request{Target: "r/app:v1"})
-	if !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("expected ErrUnavailable, got %v", err)
+func TestCrane_RejectsUnreachableSource(t *testing.T) {
+	// Crane Push now uses go-containerregistry to resolve Source as a
+	// remote ref. A reference to a non-routable host should fail —
+	// the exact error wraps ErrUnavailable (parse) or a transport
+	// error, depending on whether DNS resolution races vs ParseRef.
+	_, err := NewCrane().Push(context.Background(), Request{
+		Source: "127.0.0.1:1/missing/source:v1",
+		Target: "127.0.0.1:1/missing/target:v1",
+	})
+	if err == nil {
+		t.Fatal("expected error for unreachable refs")
 	}
 }
 

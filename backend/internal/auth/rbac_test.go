@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -126,6 +127,36 @@ func TestMapGroupsToRoles_MixedGroups(t *testing.T) {
 	}
 }
 
+func TestMapGroupsToRolesWith_CustomMap(t *testing.T) {
+	custom := map[string]string{
+		"platform-admins": string(RoleAdmin),
+		"platform-eng":    string(RoleOperator),
+	}
+	roles := MapGroupsToRolesWith([]string{"platform-admins"}, custom)
+	if len(roles) != 1 || roles[0] != string(RoleAdmin) {
+		t.Errorf("expected [admin], got %v", roles)
+	}
+	// Default groups should NOT match when a custom map is supplied.
+	roles = MapGroupsToRolesWith([]string{"cooker-admins"}, custom)
+	if len(roles) != 1 || roles[0] != string(RoleViewer) {
+		t.Errorf("expected default [viewer] for unmapped group, got %v", roles)
+	}
+}
+
+func TestMapGroupsToRolesWith_NilFallsBackToDefault(t *testing.T) {
+	roles := MapGroupsToRolesWith([]string{"cooker-admins"}, nil)
+	if len(roles) != 1 || roles[0] != string(RoleAdmin) {
+		t.Errorf("expected [admin] from default map, got %v", roles)
+	}
+}
+
+func TestMapGroupsToRolesWith_EmptyFallsBackToDefault(t *testing.T) {
+	roles := MapGroupsToRolesWith([]string{"cooker-operators"}, map[string]string{})
+	if len(roles) != 1 || roles[0] != string(RoleOperator) {
+		t.Errorf("expected [operator] from default map, got %v", roles)
+	}
+}
+
 // serveWithClaims builds a Gin engine with the given claims injected
 // into every request, then registers a route guarded by the given
 // RequireRole middleware. Used by the middleware integration tests
@@ -194,6 +225,74 @@ func TestRequireRole_Admin_200_OnAdminOnly(t *testing.T) {
 	)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 for admin on admin-only gate, got %d", w.Code)
+	}
+}
+
+// serveWithClaimsMFA is the RequireMFA equivalent of serveWithClaims.
+func serveWithClaimsMFA(claims *Claims, acrValues ...string) *gin.Engine {
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		if claims != nil {
+			c.Set("user", claims)
+		}
+		c.Next()
+	})
+	r.GET("/protected", RequireMFA(acrValues...), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+	return r
+}
+
+func TestRequireMFA_DisabledWhenNoACR(t *testing.T) {
+	w := httptest.NewRecorder()
+	serveWithClaimsMFA(&Claims{Roles: []string{string(RoleAdmin)}}).ServeHTTP(
+		w, httptest.NewRequest(http.MethodGet, "/protected", nil),
+	)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 when no ACR values configured, got %d", w.Code)
+	}
+}
+
+func TestRequireMFA_Allows_MatchingACR(t *testing.T) {
+	w := httptest.NewRecorder()
+	serveWithClaimsMFA(&Claims{ACR: "mfa"}, "mfa").ServeHTTP(
+		w, httptest.NewRequest(http.MethodGet, "/protected", nil),
+	)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for matching ACR, got %d", w.Code)
+	}
+}
+
+func TestRequireMFA_Allows_MatchingAMR(t *testing.T) {
+	w := httptest.NewRecorder()
+	serveWithClaimsMFA(&Claims{AMR: []string{"pwd", "otp"}}, "otp").ServeHTTP(
+		w, httptest.NewRequest(http.MethodGet, "/protected", nil),
+	)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for matching AMR, got %d", w.Code)
+	}
+}
+
+func TestRequireMFA_Rejects_MissingACR(t *testing.T) {
+	w := httptest.NewRecorder()
+	serveWithClaimsMFA(&Claims{ACR: "loa1"}, "mfa").ServeHTTP(
+		w, httptest.NewRequest(http.MethodGet, "/protected", nil),
+	)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for non-matching ACR, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "mfa_required") {
+		t.Errorf("response should include mfa_required, got: %s", w.Body.String())
+	}
+}
+
+func TestRequireMFA_Unauthenticated_401(t *testing.T) {
+	w := httptest.NewRecorder()
+	serveWithClaimsMFA(nil, "mfa").ServeHTTP(
+		w, httptest.NewRequest(http.MethodGet, "/protected", nil),
+	)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 when no user, got %d", w.Code)
 	}
 }
 

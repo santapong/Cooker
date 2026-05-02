@@ -1,4 +1,4 @@
-.PHONY: all build clean dev test lint uat-up uat-down uat-logs uat-shell uat-reset
+.PHONY: all build clean dev test lint uat-up uat-up-socketproxy uat-down uat-logs uat-shell uat-reset
 
 # Variables
 BINARY_NAME=cooker
@@ -55,6 +55,13 @@ migrate-up:
 migrate-down:
 	cd $(BACKEND_DIR) && go run ./cmd/cooker/ migrate down
 
+# --- OpenAPI / Swagger ---
+# `make swagger` regenerates docs/api/swagger.{json,yaml,go} from
+# the swag annotations on cmd/cooker/main.go and the handlers.
+# Requires `swag` on PATH (go install github.com/swaggo/swag/cmd/swag@latest).
+swagger:
+	cd $(BACKEND_DIR) && swag init -d ./cmd/cooker,./internal/handler -g main.go -o docs/api --parseInternal --parseDependency
+
 # --- Helm ---
 helm-install:
 	helm install cooker $(DEPLOY_DIR)/helm/cooker/
@@ -94,6 +101,22 @@ uat-up:
 	@echo "  logs:  make uat-logs"
 	@echo "  shell: make uat-shell"
 	@echo "  down:  make uat-down"
+
+# Variant of uat-up that routes the cooker container through
+# tecnativa/docker-socket-proxy instead of bind-mounting the host
+# docker.sock. See docker-compose.uat.socketproxy.yml for the
+# trade-offs.
+uat-up-socketproxy:
+	@if [ ! -f .env.uat ]; then \
+	  cp .env.uat.example .env.uat; \
+	  echo "COOKER_SECRET_KEY=$$(head -c 32 /dev/urandom | base64)" >> .env.uat; \
+	  echo "Created .env.uat from .env.uat.example."; \
+	  echo "Edit .env.uat to enable OIDC."; \
+	fi
+	docker compose -f docker-compose.uat.yml -f docker-compose.uat.socketproxy.yml \
+	  --profile socketproxy --env-file .env.uat up -d --build
+	@echo
+	@echo "Cooker UAT (socket-proxy) ready at http://localhost:8080"
 
 uat-down:
 	-$(UAT_COMPOSE) down -v --remove-orphans

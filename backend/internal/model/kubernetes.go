@@ -13,8 +13,8 @@ type KubeWorkload struct {
 
 // KubeNamespace represents a Kubernetes namespace.
 type KubeNamespace struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
+	Name   string            `json:"name"`
+	Status string            `json:"status"`
 	Labels map[string]string `json:"labels"`
 }
 

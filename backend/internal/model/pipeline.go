@@ -18,13 +18,13 @@ type Pipeline struct {
 type StageType string
 
 const (
-	StageTypeBuild         StageType = "build"
-	StageTypeTest          StageType = "test"
-	StageTypeDeploy        StageType = "deploy"
-	StageTypePush          StageType = "push"
-	StageTypeApproval      StageType = "approval"
-	StageTypeCustom        StageType = "custom"
-	StageTypeGitOpsCommit  StageType = "gitops-commit"
+	StageTypeBuild        StageType = "build"
+	StageTypeTest         StageType = "test"
+	StageTypeDeploy       StageType = "deploy"
+	StageTypePush         StageType = "push"
+	StageTypeApproval     StageType = "approval"
+	StageTypeCustom       StageType = "custom"
+	StageTypeGitOpsCommit StageType = "gitops-commit"
 )
 
 // Stage is a single step in a pipeline, rendered as a node in the graph UI.
@@ -33,7 +33,7 @@ type Stage struct {
 	Name          string      `json:"name"`
 	Type          StageType   `json:"type"`
 	Config        StageConfig `json:"config"`
-	EnvironmentID string     `json:"environmentId,omitempty"`
+	EnvironmentID string      `json:"environmentId,omitempty"`
 	Position      Position    `json:"position"`
 }
 

@@ -45,9 +45,12 @@ The pipeline executor doesn't know how to build, push, or deploy — it delegate
 
 | Interface | File | Implementations |
 |---|---|---|
-| `builder.Builder` | `internal/builder/builder.go:49` | `DockerSock`, `BuildKit`, `Noop` |
-| `pusher.Pusher` | `internal/pusher/pusher.go:37` | `DockerSock`, `Crane`, `Noop` |
-| `deployer.Deployer` | `internal/deployer/deployer.go:54` | `Kubectl`, `ClientGo`, `Noop` |
+| `builder.Builder` | `internal/builder/builder.go:49` | `DockerSock`, `Kaniko` (in-cluster Job), `Buildah` (in-cluster Job, full Dockerfile parity), `BuildKit` (gRPC), `Noop` |
+| `pusher.Pusher` | `internal/pusher/pusher.go:37` | `DockerSock`, `Crane` (`go-containerregistry`), `Noop` |
+| `deployer.Deployer` | `internal/deployer/deployer.go:54` | `Kubectl`, `ClientGo` (dynamic client + server-side apply), `Noop` |
+| `secrets.Manager` | `internal/secrets/manager.go` | `database` (AES-GCM), `keepsave`, `vault`, `awsm` (AWS Secrets Manager), `gcpsm` (GCP Secret Manager) |
+| `deploytarget.Target` | `internal/deploytarget/target.go` | `kubernetes`, `cloudrun`, `ecs` (Fargate), `flyio`, `render`. Self-register on non-empty config. |
+| `gitops.Writer` | `internal/gitops/writer.go` | `gogit` (`go-git/v5`), `noop` |
 
 **Why:** lets us run UAT end-to-end against `docker` + `kubectl` (operationally simple) and ship a production deploy with `buildkit` + `client-go` (no shell-out, no docker-cli dependency) without changing handler or service code. Unknown values fall back to `Noop` with a log line so a typo'd env var doesn't crash boot.
 
@@ -224,11 +227,18 @@ All runtime config comes from environment variables, loaded once into `config.Co
 | HTTP port | `COOKER_PORT` | `8080` |
 | Postgres | `DATABASE_URL` | empty → in-memory store |
 | OIDC | `COOKER_OIDC_ENABLED` + 4 more | `false` (dev admin user) |
+| OIDC group→role mapping | `COOKER_OIDC_GROUP_MAP` | empty → built-in `cooker-{admins,operators,approvers,viewers}` |
+| OIDC step-up MFA | `COOKER_OIDC_MFA_ACR_VALUES` | empty → MFA gate disabled |
 | CORS | `COOKER_ALLOWED_ORIGINS` | localhost dev defaults |
-| Builder backend | `COOKER_BUILDER` | `noop` |
-| Pusher backend | `COOKER_PUSHER` | `noop` |
-| Deployer backend | `COOKER_DEPLOYER` | `noop` |
+| Builder backend | `COOKER_BUILDER` | `noop` (also: `docker`, `kaniko`, `buildah`, `buildkit`) |
+| Pusher backend | `COOKER_PUSHER` | `noop` (also: `docker`, `crane`) |
+| Deployer backend | `COOKER_DEPLOYER` | `noop` (also: `kubectl`, `clientgo`) |
+| Secrets backend | `COOKER_SECRETS_BACKEND` | `database` (also: `keepsave`, `vault`, `aws`, `gcp`) |
 | Secret encryption key | `COOKER_SECRET_KEY` | empty → secrets API disabled |
+| Rate-limit backend | `COOKER_RATE_LIMIT_BACKEND` | `memory` (also: `redis`) |
+| WS-ticket backend | `COOKER_WS_TICKET_BACKEND` | `memory` (also: `redis`) |
+| Prometheus `/metrics` | `COOKER_METRICS_ENABLED` | `false` |
+| OpenTelemetry traces | `COOKER_TRACING_ENABLED` + `COOKER_OTLP_ENDPOINT` | `false` / empty |
 | Registry prefix | `COOKER_REGISTRY` | empty |
 
 UAT injects values via `.env.uat` (template at `.env.uat.example`). Helm values map 1:1 onto the same env vars in `deploy/helm/cooker/templates/deployment.yaml`.

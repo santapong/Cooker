@@ -23,6 +23,21 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error('Unauthorized');
   }
 
+  if (res.status === 403) {
+    // Step-up MFA challenge: backend returns
+    //   {"error":"mfa_required","acr_values":["mfa", ...]}
+    // Re-issue the sign-in redirect with acr_values so the IdP runs
+    // the second factor.
+    const body = await res
+      .clone()
+      .json()
+      .catch(() => null);
+    if (body?.error === 'mfa_required' && Array.isArray(body.acr_values) && body.acr_values.length > 0) {
+      triggerSignIn({ acrValues: body.acr_values.join(' ') });
+      throw new Error('MFA required');
+    }
+  }
+
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(error.error || `Request failed: ${res.status}`);

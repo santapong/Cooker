@@ -1,0 +1,55 @@
+# golangci-lint v2 config for the cooker backend.
+#
+# Conservative initial set — see commit history for the v1 → v2
+# migration. v2 splits config into version, run, linters, formatters,
+# and issues. Linters that catch real defects without churn from
+# style preferences only.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - misspell
+    - unconvert
+  settings:
+    staticcheck:
+      checks:
+        - all
+        - -SA1019  # deprecated symbols (k8s SDKs); revisit after SDK bump
+        - -ST1000  # package comments (lots of pre-existing files; cosmetic)
+        - -ST1020  # godoc comment-prefix (pre-existing churn)
+        - -QF1012  # fmt.Fprintf vs w.Write([]byte(fmt.Sprintf)) — style only
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - (io.Closer).Close
+        - (*os.File).Close
+        - os.RemoveAll
+        - (*database/sql.Rows).Close
+        - (*database/sql.DB).Close
+        - (*github.com/gorilla/websocket.Conn).Close
+        - (*github.com/cooker-ci/cooker/internal/store.Store).Close
+        - (*github.com/moby/buildkit/client.Client).Close
+        - (*cloud.google.com/go/run/apiv2.ServicesClient).Close
+        - (*cloud.google.com/go/run/apiv2.RevisionsClient).Close
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - bodyclose
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

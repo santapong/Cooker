@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/cooker-ci/cooker/internal/builder"
@@ -108,7 +108,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		stageRun.StartedAt = &startTime
 		stageRun.Status = model.RunStatusRunning
 
-		log.Printf("[pipeline:%s] executing stage %s (%s)", p.ID, stage.Name, stage.Type)
+		slog.Info("pipeline executing stage", "pipeline", p.ID, "stage", stage.Name, "type", stage.Type)
 
 		var stageErr error
 		switch stage.Type {
@@ -146,7 +146,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 	// Drain status updates (in production, these go to WebSocket)
 	go func() {
 		for update := range runner.Updates() {
-			log.Printf("[pipeline:%s] stage %s -> %s", p.ID, update.NodeID, update.Status)
+			slog.Info("pipeline stage transition", "pipeline", p.ID, "stage", update.NodeID, "status", update.Status)
 		}
 	}()
 
@@ -189,7 +189,7 @@ func (e *Executor) executeBuild(ctx context.Context, stage *model.Stage, sr *mod
 
 func (e *Executor) executeTest(ctx context.Context, stage *model.Stage) error {
 	// TODO: Run test container with specified image and command
-	log.Printf("  Test: image=%s command=%v", stage.Config.Image, stage.Config.Command)
+	slog.Info("stage test", "image", stage.Config.Image, "command", stage.Config.Command)
 	return nil
 }
 
@@ -272,13 +272,13 @@ func hasRegistryHost(ref string) bool {
 
 func (e *Executor) executeApproval(ctx context.Context, stage *model.Stage) error {
 	// TODO: Wait for manual approval via WebSocket/API
-	log.Printf("  Approval gate: waiting for approval")
+	slog.Info("approval gate waiting")
 	return nil
 }
 
 func (e *Executor) executeCustom(ctx context.Context, stage *model.Stage) error {
 	// TODO: Execute custom script
-	log.Printf("  Custom: script=%s timeout=%s", stage.Config.Script, stage.Config.Timeout)
+	slog.Info("stage custom", "script", stage.Config.Script, "timeout", stage.Config.Timeout)
 	return nil
 }
 

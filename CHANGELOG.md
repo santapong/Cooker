@@ -7,7 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Added — `claude/finish-backlog-priority-psf4D` (PR #19)
+
+#### Toolchain (P6)
+
+- **Go 1.22 → 1.25.** `backend/go.mod`, `deploy/docker/Dockerfile`, `.github/workflows/ci.yml` all moved together. `golang.org/x/time` unpinned to `v0.15.0`.
+- **golangci-lint v1.59 → v2.0.** New v2-format `backend/.golangci.yml`. CI installs `golangci/golangci-lint-action@v6` with `version: v2.0.2`.
+- **`gofmt -l` drift check** is now a CI step.
+
+#### Observability (P4)
+
+- **`log/slog` migration.** `cmd/cooker/main.go` installs a JSON `slog` handler as the default. Every `log.Print*` / `log.Fatal*` callsite across `backend/internal/server/`, `backend/internal/handler/`, `backend/internal/service/`, `backend/internal/config/`, `backend/internal/server/websocket.go` rewritten as structured `slog.Info|Warn|Error` calls.
+- **Prometheus `/metrics`** via `internal/observability/observability.go` — exports `cooker_http_requests_total{method,route,status}` and `cooker_http_request_duration_seconds{method,route}`. Routes are labelled by Gin's matched template (e.g. `/api/v1/pipelines/:id`), not the concrete URL, to keep cardinality bounded. Opt in with `COOKER_METRICS_ENABLED=true`.
+- **OpenTelemetry traces** via `otelgin` + OTLP/gRPC. Opt in with `COOKER_TRACING_ENABLED=true` + `COOKER_OTLP_ENDPOINT=host:port`. `Setup` returns a shutdown func that's invoked on `Server.Close`. Service-name and version are configurable via `COOKER_SERVICE_NAME` / `COOKER_SERVICE_VERSION`.
+
+#### Multi-replica state (P3)
+
+- **Redis-backed rate limiter** (`internal/server/ratelimit_redis.go`). GCRA via `github.com/go-redis/redis_rate/v10`; fail-open on Redis errors so a transient blip doesn't lock users out. Selectable via `COOKER_RATE_LIMIT_BACKEND=redis`.
+- **Redis-backed WS ticket store** (`internal/server/wsticket_redis.go`). Atomic `GETDEL` (Redis 6.2+) so a single ticket can never be redeemed twice across cooker replicas. Selectable via `COOKER_WS_TICKET_BACKEND=redis`.
+
+#### Secret backends (P2)
+
+- **HashiCorp Vault** (`internal/secrets/vault/`). KV v2 mount + per-environment path. Auth via `VAULT_TOKEN` (works with Vault Agent injector). New env: `COOKER_SECRETS_VAULT_{ADDR,TOKEN,MOUNT,PREFIX}`.
+- **AWS Secrets Manager** (`internal/secrets/awsm/`). One AWS secret per `<prefix>/<envID>/<key>`. Auth via the standard AWS chain (IRSA, instance profile, env vars). New env: `COOKER_SECRETS_AWS_{REGION,PREFIX}`.
+- **GCP Secret Manager** (`internal/secrets/gcpsm/`). One GCP secret per `<prefix>__<envID>__<key>`. Auth via Application Default Credentials. New env: `COOKER_SECRETS_GCP_{PROJECT_ID,PREFIX}`.
+- All three implement the `secrets.Manager` interface and slot into the existing `selectSecretsManager` via `COOKER_SECRETS_BACKEND={vault,aws,gcp}`. Production-mode `Validate()` enforces the required env per backend.
+
+#### Native SDK adapters (P9.1)
+
+- **BuildKit builder** (`internal/builder/buildkit.go`) — `github.com/moby/buildkit/client` v0.18.2 over gRPC. Drives `frontend=dockerfile.v0` solves; supports `BuildArgs`, `Platforms`, and progress streaming to `LogWriter`.
+- **crane pusher** (`internal/pusher/crane.go`) — `go-containerregistry` `remote.Image` / `remote.Write` / `crane.Digest`. Auth keychain pulls from the request's `Auth` callback or falls back to `~/.docker/config.json` + cred helpers.
+- **client-go deployer** (`internal/deployer/clientgo.go`) — k8s.io/client-go dynamic client + REST mapper + server-side apply with `FieldManager: cooker`. Handles multi-doc YAML.
+
+#### Cloud deploy targets (P9.2)
+
+- **Cloud Run** (`internal/deploytarget/cloudrun/`) — `cloud.google.com/go/run/apiv2` create/update + traffic-split rollback.
+- **AWS ECS / Fargate** (`internal/deploytarget/ecs/`) — `aws-sdk-go-v2/service/ecs` register-task-def + create/update service + revision-based rollback.
+- **Fly.io** (`internal/deploytarget/flyio/`) — REST against `api.machines.dev`. Auto-creates the fly app on first deploy.
+- **Render** (`internal/deploytarget/render/`) — REST against `api.render.com/v1`. Triggers a deploy on an operator-created Render service.
+- **Self-registration** in `internal/server/deploytargets.go` — each target only registers when its config block is non-empty so operators don't have to wire backends they don't use. New env vars: `COOKER_DEPLOY_CLOUDRUN_*`, `COOKER_DEPLOY_ECS_*`, `COOKER_DEPLOY_FLY_*`, `COOKER_DEPLOY_RENDER_*`.
+- New `model.DeployTargetKind` values: `ecs`, `fly`, `render`.
+
+#### GitOps + Buildah + OpenAPI
+
+- **go-git GitOpsCommit** (`internal/gitops/gogit.go`) — full `github.com/go-git/go-git/v5` implementation. Auth resolution: SSH key path → ssh-agent → HTTPS basic. Each `Commit` clones to a temp dir, writes the file, commits with the configured author, and pushes.
+- **Buildah builder** (`internal/builder/buildah.go`) — third in-cluster builder option alongside Kaniko and the docker.sock fallback. Submits a `batch/v1.Job` running `quay.io/buildah/stable`. Adds `CAP_SETUID` / `CAP_SETGID` for rootless user-namespace setup. Configurable storage driver (`vfs` | `overlay`). Selectable via `COOKER_BUILDER=buildah`.
+- **swaggo/swag OpenAPI generation.** `make swagger` regenerates `backend/docs/api/swagger.{json,yaml,go}` from doc-comments. Flagship endpoints annotated; the full sweep is a low-friction follow-up.
+
+### Notes for operators
+
+- The new secret + deploy backends do **not** validate credentials at boot — they fail at first call. Watch for connection-error logs after switching backends.
+- Cloud deploy targets (Cloud Run, ECS, Fly.io, Render) and secret backends (Vault, AWS, GCP) are unit-tested but have not been exercised against real cloud accounts in CI. End-to-end against a real provider is a follow-up.
+- Tailscale `tsnet` transport (P9.4) remains build-tagged. `tailscale.com` v1.96+ requires Go ≥1.26 which isn't released stably; we pin to Go 1.25 to keep the runner image and module tooling in step. Revisit when Go 1.26 GAs.
+
+### Added — `claude/finish-backlog-priority-psf4D` (PR #19, earlier commits)
+
+**KeepSave follow-ups, OIDC, frontend UX, CI hygiene (P2/P3/P5/P6/P7).**
+
+- **KeepSave Helm wiring** — `secrets.backend=keepsave` renders `COOKER_SECRETS_KEEPSAVE_{URL,PROJECT_ID,API_KEY}` (the API key via `secretKeyRef` into an operator-managed Secret); CI matrix asserts both happy-path and `apiKey-missing-fail`. Closes **P2.1** follow-up.
+- **KeepSave secret promotion handler** — `POST /api/v1/environments/:id/secrets/promote` via the new `secrets.Promoter` interface; admin + MFA gated. Database backend returns 501 `ErrPromotionUnsupported`. Closes **P2.1** follow-up.
+- **OIDC group-to-role mapping configurable** — `COOKER_OIDC_GROUP_MAP` (CSV `group:role,...`) overrides the default `cooker-{admins,operators,approvers,viewers}` mapping; surfaced as `oidc.groupRoleMap` in `values.yaml`. Closes **P3**.
+- **Step-up MFA on destructive admin routes** — `auth.RequireMFA` middleware enforces a configured `acr`/`amr` claim on DELETE pipelines/envs/apps/hosts, secret reveal/put/delete/promote, and app webhook rotation. Empty `COOKER_OIDC_MFA_ACR_VALUES` disables the gate. Returns 403 `mfa_required` with `acr_values`; the frontend API client re-issues `signinRedirect({acr_values})` on the response. Closes **P3**.
+- **Toast primitive + OIDC silent-renew toast** — Zustand-backed `toastStore` + `ToastViewport` mounted in `App.tsx`. `OIDCProvider` pushes a warning toast on `addSilentRenewError`. Closes **P5**.
+- **WebSocket auto-reconnect with backoff** — `useWebSocket` exponential backoff (500ms → 30s) with fresh ticket fetch on each reconnect; opt-out via `reconnect.enabled=false`. Closes **P5**.
+- **`gofmt -l` check + `golangci-lint` in CI** — repo-wide gofmt sweep + tuned `backend/.golangci.yml`. Closes **P6**.
+- **`handler/network.go` and `handler/volume.go` cleanup** — write endpoints return HTTP 501 `{error,operation,hint}` instead of fake "pending" mock IDs; list endpoints return `[]` for empty-state UIs. Closes **P6**.
+- **`docker-compose.uat.socketproxy.yml`** + `make uat-up-socketproxy` — opt-in `socketproxy` profile drops the host docker.sock bind mount and routes the cooker container at a hardened `tecnativa/docker-socket-proxy`. Closes **P7**.
+
+### Added — earlier in `Unreleased`
 
 - **Pluggable secrets backend** (`backend/internal/secrets/`). New `secrets.Manager` interface mirrors the existing builder/pusher/deployer strategy pattern; selectable at boot via `COOKER_SECRETS_BACKEND`. Closes backlog **P2.1**.
   - `database` adapter (default) wraps the historical AES-GCM + JSONB path; behavior is unchanged when this backend is selected.

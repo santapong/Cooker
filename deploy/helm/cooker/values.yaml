@@ -25,10 +25,10 @@ secretKey:
 # auto-migrate existing secrets; plan a one-shot copy before
 # flipping. See README §Secrets backends.
 #
-# Note: for backend=keepsave the Helm template wiring (env-var
-# rendering + secretKeyRef for the API key) is a follow-up; today
-# operators set the env vars directly via extraEnv or pod-spec
-# overrides. Tracked in backlog P2.1 follow-ups.
+# When backend=keepsave the chart renders COOKER_SECRETS_KEEPSAVE_URL,
+# _PROJECT_ID, and _API_KEY (the latter via secretKeyRef into a
+# pre-created Secret). The Secret is operator-managed; the chart
+# does not create it.
 secrets:
   backend: database     # database | keepsave
   keepsave:
@@ -137,6 +137,17 @@ oidc:
     key: "client-secret"
   # Inline value (creates a chart-managed Secret). NOT for production.
   clientSecret: ""
+  # Optional CSV of "group:role" pairs overriding the default mapping.
+  # Empty falls back to cooker-admins/cooker-operators/cooker-approvers/
+  # cooker-viewers. Example:
+  #   "platform-admins:admin,platform-eng:operator,security-team:approver"
+  groupRoleMap: ""
+  # Optional CSV of ACR values that satisfy the step-up MFA gate
+  # applied to admin destructive routes (DELETE pipelines/envs/apps,
+  # secret reveal/put/delete/promote, app webhook rotation). Empty
+  # disables the gate. Example:
+  #   "mfa,urn:mace:incommon:iap:silver"
+  mfaAcrValues: ""
 
 # Database
 #

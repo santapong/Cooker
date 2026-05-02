@@ -32,18 +32,51 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.25"
       - name: Build
         working-directory: backend
         run: go build ./...
+      - name: gofmt
+        working-directory: backend
+        run: |
+          drift=$(gofmt -l .)
+          if [ -n "$drift" ]; then
+            echo "::error::gofmt drift detected in:" >&2
+            echo "$drift" >&2
+            exit 1
+          fi
       - name: Vet
         working-directory: backend
         run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        # Keep going to the test step even on lint failure so a single
+        # CI cycle surfaces both signals at once. The job still fails
+        # overall — golangci-lint-action records it as a failed step.
+        continue-on-error: true
+        with:
+          version: v2.5.0
+          working-directory: backend
+          args: --timeout=5m
       - name: Test
         working-directory: backend
         env:
           DATABASE_URL: postgres://cooker:cooker@localhost:5432/cooker_test?sslmode=disable
-        run: go test ./... -v -race
+        run: |
+          # Run packages one at a time so a failure surfaces the
+          # offending package clearly in the action log without
+          # having to download the full archive.
+          set -e
+          fail=0
+          for pkg in $(go list ./...); do
+            echo "::group::$pkg"
+            if ! go test -race -timeout 90s "$pkg"; then
+              fail=1
+              echo "::error::test failure in $pkg"
+            fi
+            echo "::endgroup::"
+          done
+          exit $fail
 
   frontend:
     runs-on: ubuntu-latest
@@ -142,11 +175,40 @@ jobs:
             echo "ERROR: Kaniko Role not rendered" >&2; exit 1; }
           grep -q 'kind: RoleBinding' /tmp/kaniko.yaml || {
             echo "ERROR: Kaniko RoleBinding not rendered" >&2; exit 1; }
+      - name: helm template (keepsave secrets backend)
+        run: |
+          helm template cooker deploy/helm/cooker \
+            --set secrets.backend=keepsave \
+            --set secrets.keepsave.url=http://keepsave.cooker.svc.cluster.local:8080 \
+            --set secrets.keepsave.projectId=cooker-prod \
+            --set secrets.keepsave.apiKey.existingSecret=cooker-keepsave \
+            > /tmp/keepsave.yaml
+          grep -q 'COOKER_SECRETS_BACKEND' /tmp/keepsave.yaml || {
+            echo "ERROR: COOKER_SECRETS_BACKEND not rendered" >&2; exit 1; }
+          grep -q 'COOKER_SECRETS_KEEPSAVE_URL' /tmp/keepsave.yaml || {
+            echo "ERROR: COOKER_SECRETS_KEEPSAVE_URL not rendered" >&2; exit 1; }
+          grep -q 'cooker-keepsave' /tmp/keepsave.yaml || {
+            echo "ERROR: keepsave api-key secretKeyRef not rendered" >&2; exit 1; }
+      - name: helm template (keepsave without secret must fail)
+        run: |
+          if helm template cooker deploy/helm/cooker \
+            --set secrets.backend=keepsave \
+            --set secrets.keepsave.url=http://keepsave:8080 \
+            --set secrets.keepsave.projectId=p \
+            > /tmp/keepsave-fail.yaml 2>/tmp/keepsave-stderr; then
+            echo "ERROR: keepsave without apiKey.existingSecret should fail" >&2
+            exit 1
+          fi
+          grep -q 'apiKey.existingSecret is required' /tmp/keepsave-stderr || {
+            echo "ERROR: helm failed but not with expected message" >&2
+            cat /tmp/keepsave-stderr >&2
+            exit 1
+          }
       - name: kubeconform
         run: |
           curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz -o /tmp/kc.tar.gz
           tar -xzf /tmp/kc.tar.gz -C /tmp
-          /tmp/kubeconform -strict -summary -ignore-missing-schemas /tmp/default.yaml /tmp/prod.yaml /tmp/kaniko.yaml
+          /tmp/kubeconform -strict -summary -ignore-missing-schemas /tmp/default.yaml /tmp/prod.yaml /tmp/kaniko.yaml /tmp/keepsave.yaml
 
   docker:
     runs-on: ubuntu-latest

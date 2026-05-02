@@ -24,7 +24,7 @@ type ComposeBuild struct {
 type ComposeConnection struct {
 	Source string `json:"source"`
 	Target string `json:"target"`
-	Type   string `json:"type"`  // "depends_on", "env_reference", "network"
+	Type   string `json:"type"` // "depends_on", "env_reference", "network"
 	Label  string `json:"label"`
 }
 

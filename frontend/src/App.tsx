@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom'
 import MainLayout from './components/layout/MainLayout'
 import ErrorBoundary from './components/ErrorBoundary'
+import { ToastViewport } from './components/Toast'
 import AppsPage from './pages/AppsPage'
 import AppDetailPage from './pages/AppDetailPage'
 import PipelinesPage from './pages/PipelinesPage'
@@ -15,6 +16,7 @@ import ProtectedRoute from './auth/ProtectedRoute'
 export default function App() {
   return (
     <ErrorBoundary>
+      <ToastViewport />
       <Routes>
         <Route path="/callback" element={<Callback />} />
         <Route

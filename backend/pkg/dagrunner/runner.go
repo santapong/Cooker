@@ -18,11 +18,11 @@ type StatusUpdate struct {
 
 // Runner executes a DAG with parallel execution of independent nodes.
 type Runner struct {
-	dag       *DAG
-	taskFunc  TaskFunc
-	updates   chan StatusUpdate
-	mu        sync.Mutex
-	statuses  map[string]string
+	dag      *DAG
+	taskFunc TaskFunc
+	updates  chan StatusUpdate
+	mu       sync.Mutex
+	statuses map[string]string
 }
 
 // NewRunner creates a new DAG runner.

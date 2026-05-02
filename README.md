@@ -29,8 +29,12 @@ A web-based CI/CD management tool with a **graph-based UI** for visually buildin
 - **Frontend**: React + TypeScript + React Flow (visual DAG editor) + Zustand
 - **Backend**: Go + Gin + Docker SDK + client-go + go-containerregistry
 - **Database**: PostgreSQL + Redis
-- **Auth**: OIDC/OAuth 2.0 with PKCE (Keycloak, Okta, Azure AD, Google, GitHub) — disabled by default in local/UAT (the backend injects a dev admin user); see [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) to enable.
-- **Secrets**: pluggable backends — AES-GCM at rest in Postgres (default) or delegated to a [KeepSave](https://github.com/santapong/keepsave) server. See [Secrets backends](#secrets-backends).
+- **Auth**: OIDC/OAuth 2.0 with PKCE (Keycloak, Okta, Azure AD, Google, GitHub) — disabled by default in local/UAT (the backend injects a dev admin user); see [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) to enable. Group-to-role mapping is operator-configurable via `COOKER_OIDC_GROUP_MAP`; step-up MFA on destructive admin routes is opt-in via `COOKER_OIDC_MFA_ACR_VALUES`.
+- **Secrets**: pluggable backends — AES-GCM at rest in Postgres (default), delegated to a [KeepSave](https://github.com/santapong/keepsave) server, HashiCorp Vault, AWS Secrets Manager, or GCP Secret Manager. See [Secrets backends](#secrets-backends).
+- **Observability**: optional Prometheus `/metrics` and OpenTelemetry/OTLP traces. Off by default; opt in via `COOKER_METRICS_ENABLED` / `COOKER_TRACING_ENABLED`. Structured `log/slog` JSON logs throughout.
+- **Multi-replica state**: rate limiter and WebSocket ticket store back onto Redis when `COOKER_RATE_LIMIT_BACKEND=redis` / `COOKER_WS_TICKET_BACKEND=redis`. See [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md).
+- **Builders**: `docker` (host socket — dev only), `kaniko` (in-cluster Job), `buildah` (in-cluster Job, full Dockerfile parity), or `buildkit` (gRPC against an external buildkitd). Selectable via `COOKER_BUILDER`.
+- **Deploy targets**: Kubernetes, Cloud Run, AWS ECS / Fargate, Fly.io, Render. See [Cloud deploy targets](#cloud-deploy-targets).
 
 See [docs/architecture.md](docs/architecture.md) for the full architecture document and [docs/adr/](docs/adr/) for the structural decisions and their rationale.
 
@@ -226,12 +230,15 @@ Two pieces of Cooker state are per-process today: the rate limiter and the WebSo
 
 ## Secrets backends
 
-Cooker supports two backends for environment-scoped secrets, selected at boot via `COOKER_SECRETS_BACKEND`. The `Manager` interface lives at `backend/internal/secrets/manager.go`; adapters are independent packages. Switching is purely a config change — handler logic and the on-the-wire API are identical between backends.
+Cooker supports five backends for environment-scoped secrets, selected at boot via `COOKER_SECRETS_BACKEND`. The `Manager` interface lives at `backend/internal/secrets/manager.go`; adapters are independent packages. Switching is purely a config change — handler logic and the on-the-wire API are identical between backends.
 
 | Backend | When to use | Storage | Encryption |
 |---|---|---|---|
 | `database` *(default)* | Single-Cooker installs; no separate secrets infra | `environments.secrets` JSONB column | AES-GCM (`COOKER_SECRET_KEY`, base64-encoded 32 bytes) |
 | `keepsave` | Multi-tenant or audit-heavy environments; dedicated secrets infra | [KeepSave](https://github.com/santapong/keepsave) server (system of record) | AES-256-GCM at rest, managed by KeepSave; per-project DEKs |
+| `vault` | Existing HashiCorp Vault deployment; want PKI / dynamic secrets path | Vault KV v2 mount | Managed by Vault |
+| `aws` | AWS-native deployment (EKS / ECS / Lambda) | AWS Secrets Manager (one secret per `<prefix>/<envID>/<key>`) | KMS (managed by AWS) |
+| `gcp` | GCP-native deployment (GKE / Cloud Run) | GCP Secret Manager (one secret per `<prefix>__<envID>__<key>`) | Managed by GCP |
 
 ### `database` (default)
 
@@ -255,18 +262,93 @@ COOKER_SECRETS_KEEPSAVE_API_KEY=ks_xxxx
 
 With this backend, `COOKER_SECRET_KEY` is no longer required — KeepSave handles encryption. Production startup validation rejects partial config: any one of the three KeepSave variables missing is fatal.
 
+### `vault` (HashiCorp Vault, KV v2)
+
+```bash
+COOKER_SECRETS_BACKEND=vault
+COOKER_SECRETS_VAULT_ADDR=https://vault.example.com:8200
+COOKER_SECRETS_VAULT_MOUNT=secret           # KV v2 mount path
+COOKER_SECRETS_VAULT_PREFIX=cooker          # path under <mount>
+# Token via env (works with Vault Agent injector that mounts the token):
+COOKER_SECRETS_VAULT_TOKEN=$(cat /vault/secrets/token)
+```
+
+Each Cooker environment maps to one Vault secret at `<mount>/data/<prefix>/<envID>` with one field per Cooker key. Vault handles encryption and audit. Empty `_TOKEN` is allowed when Vault Agent provides the token at boot via the SDK's chain.
+
+### `aws` (AWS Secrets Manager)
+
+```bash
+COOKER_SECRETS_BACKEND=aws
+COOKER_SECRETS_AWS_REGION=us-east-1         # auto-discovered from instance metadata
+COOKER_SECRETS_AWS_PREFIX=cooker            # AWS secret IDs become "<prefix>/<envID>/<key>"
+```
+
+Auth via the standard AWS chain: IRSA on EKS, instance profile on EC2, env vars locally. One AWS secret per Cooker key — keeps per-key versioning and IAM scoping clean.
+
+### `gcp` (Google Cloud Secret Manager)
+
+```bash
+COOKER_SECRETS_BACKEND=gcp
+COOKER_SECRETS_GCP_PROJECT_ID=my-gcp-project
+COOKER_SECRETS_GCP_PREFIX=cooker            # secrets named "<prefix>__<envID>__<key>"
+```
+
+Auth via Application Default Credentials (Workload Identity on GKE / `GOOGLE_APPLICATION_CREDENTIALS` elsewhere). The double-underscore separator works around GCP Secret Manager's `[A-Za-z0-9_-]` naming rule.
+
 **Switching backends:** secrets do not auto-migrate. Plan a one-shot copy step (read from old, write to new) before flipping the env var. Both reads and writes go to a single backend at runtime — there is no live dual-write.
 
 See [ADR-0002](docs/adr/0002-secrets-manager.md) for the full rationale (tenancy, system-of-record, alternatives rejected).
+
+## Cloud deploy targets
+
+In addition to Kubernetes (the original target), Cooker can deploy Apps to managed cloud runtimes. Each target is opt-in: set the relevant config block and the adapter self-registers at boot.
+
+| Target | Implementation | Required config |
+|---|---|---|
+| `cloud-run` | `cloud.google.com/go/run/apiv2` create/update + traffic-split rollback | `COOKER_DEPLOY_CLOUDRUN_PROJECT`, `COOKER_DEPLOY_CLOUDRUN_REGION` (ADC for auth) |
+| `ecs` | `aws-sdk-go-v2/service/ecs` register-task-def + create/update service + revision-based rollback | `COOKER_DEPLOY_ECS_REGION`, `COOKER_DEPLOY_ECS_CLUSTER` (+ optional `_EXECUTION_ROLE`, `_TASK_ROLE`, `_SUBNETS`, `_SECURITY_GROUPS`) |
+| `fly` | REST against `api.machines.dev`; auto-creates the fly app on first deploy | `COOKER_DEPLOY_FLY_TOKEN`, optional `COOKER_DEPLOY_FLY_REGION` |
+| `render` | REST against `api.render.com/v1`; triggers a deploy on an operator-created Render service | `COOKER_DEPLOY_RENDER_TOKEN`, optional `COOKER_DEPLOY_RENDER_OWNER_ID` |
+
+Targets without their config are not registered — operators don't have to wire backends they don't use.
+
+## Observability (opt-in)
+
+Both off by default. Turn them on in production via env / Helm.
+
+```bash
+# Prometheus /metrics endpoint exposed on the same port as the API.
+COOKER_METRICS_ENABLED=true
+
+# OpenTelemetry traces over OTLP/gRPC.
+COOKER_TRACING_ENABLED=true
+COOKER_OTLP_ENDPOINT=otel-collector.observability.svc.cluster.local:4317
+COOKER_OTLP_INSECURE=true                   # in-cluster OTLP rarely uses TLS
+COOKER_SERVICE_NAME=cooker
+COOKER_SERVICE_VERSION=v0.1.0
+```
+
+Metrics: `cooker_http_requests_total{method,route,status}` (counter) and `cooker_http_request_duration_seconds{method,route}` (histogram). Routes are labelled by Gin's matched template (e.g. `/api/v1/pipelines/:id`), not the concrete URL, to keep cardinality bounded.
+
+Logs: structured JSON via `log/slog` — every line carries `time`, `level`, `msg`, plus structured fields (e.g. `pipeline=<id>`, `stage=<name>`).
+
+## Multi-replica deployments
+
+Two cooker-internal pieces of state are per-process by default and need shared state to survive replica scaling: the rate limiter and the WebSocket ticket store. Either:
+
+- **Sticky sessions at ingress** (simpler — works for typical workloads). See [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md) for NGINX / ALB / Traefik / HAProxy / Envoy snippets.
+- **Redis-backed state** (proper HA). Set `COOKER_RATE_LIMIT_BACKEND=redis` and `COOKER_WS_TICKET_BACKEND=redis`; both consume the existing `REDIS_URL`. Rate limiting uses GCRA via `go-redis/redis_rate/v10`; WS tickets use atomic `GETDEL` so a single ticket can never be redeemed twice across replicas.
 
 ## Operations
 
 | What you need | Where to look |
 |---|---|
 | TLS / cert-manager / production install | This README — *Deployment → TLS at ingress* |
-| Multi-replica + sticky sessions | [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md) |
+| Multi-replica (sticky sessions or Redis) | This README — *Multi-replica deployments* + [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md) |
+| Prometheus + OpenTelemetry setup | This README — *Observability (opt-in)* |
 | Incident response (build hung, DB down, OIDC unreachable, KeepSave outage, OOMKilled) | [docs/RUNBOOK.md](docs/RUNBOOK.md) |
 | Secrets backend selection + switching | This README — *Secrets backends* |
+| Cloud deploy targets (Cloud Run / ECS / Fly / Render) | This README — *Cloud deploy targets* |
 | Production hardening checklist | [SECURITY.md](SECURITY.md) |
 | Open work, sequencing, effort estimates | [backlog.md](backlog.md) |
 
@@ -280,6 +362,8 @@ See [ADR-0002](docs/adr/0002-secrets-manager.md) for the full rationale (tenancy
 | [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md) | Sticky-session + Redis-shared-state guidance for multi-replica deploys |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | Incident response: symptom → checks → cause → mitigation |
 | [docs/adr/](docs/adr/) | Architecture decision records (strategy interfaces, secrets manager, JSONB) |
+| [docs/openapi.yaml](docs/openapi.yaml) | Hand-curated OpenAPI 3.1 sketch |
+| `backend/docs/api/swagger.yaml` | Generated OpenAPI from `swag` annotations — regenerate with `make swagger` |
 | [CHANGELOG.md](CHANGELOG.md) | Version history following Keep a Changelog format |
 | [SECURITY.md](SECURITY.md) | Security policy, auth architecture, production hardening checklist |
 | [backlog.md](backlog.md) | Open work, sequencing, effort estimates |
