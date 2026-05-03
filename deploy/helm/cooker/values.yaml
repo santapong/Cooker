@@ -86,7 +86,10 @@ ingress:
 #   buildkit — stub; not yet wired. See backlog P9.1.
 #   noop    — accept builds without doing anything (test only).
 builder:
-  kind: docker
+  # Production default is kaniko (in-cluster Job — no host docker.sock).
+  # Switch to "docker" only on isolated single-node test hosts;
+  # Config.Validate refuses production boot with kind=docker.
+  kind: kaniko
   kaniko:
     # Kaniko executor image. Pin to a known version for reproducible
     # builds; "latest" is documented but not recommended in production.
@@ -109,6 +112,33 @@ builder:
 docker:
   enabled: true
   socketPath: /var/run/docker.sock
+
+# WebSocket broadcast fan-out. "redis" lets multiple Cooker replicas
+# share a pub/sub topic so a broadcast on replica A reaches a client
+# on replica B. "memory" is per-process — fine for replicaCount=1.
+wsHub:
+  backend: redis
+
+# WebSocket single-use ticket store. Mirrors wsHub semantics: redis
+# for multi-replica, memory for single-replica.
+wsTicket:
+  backend: redis
+
+# Per-user rate limit storage. redis is multi-replica safe via the
+# go-redis/redis_rate GCRA limiter.
+rateLimit:
+  backend: redis
+
+# Sticky sessions at ingress. Set true if your ingress is configured
+# to pin a client to one replica; lets Validate accept memory backends
+# above with replicaCount > 1 (not recommended in prod — Redis is the
+# better answer).
+stickySessions: false
+
+# Redis connection. Required when any of {wsHub, wsTicket, rateLimit}
+# is set to "redis". Override when using an external Redis.
+redis:
+  url: "redis://cooker-redis:6379"
 
 # Kubernetes access
 kubernetes:

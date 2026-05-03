@@ -91,16 +91,32 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	router := gin.Default()
-	wsHub := NewWebSocketHub(cfg.AllowedOrigins)
 
 	var redisClient *redis.Client
-	if cfg.WSTicket.Backend == "redis" || cfg.RateLimit.Backend == "redis" {
+	if cfg.WSTicket.Backend == "redis" || cfg.RateLimit.Backend == "redis" || cfg.WSHub.Backend == "redis" {
 		opts, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {
 			st.Close()
 			return nil, fmt.Errorf("redis: parse url: %w", err)
 		}
 		redisClient = redis.NewClient(opts)
+	}
+
+	var wsHub *WebSocketHub
+	switch cfg.WSHub.Backend {
+	case "redis":
+		if redisClient == nil {
+			st.Close()
+			return nil, fmt.Errorf("ws hub backend=redis requires REDIS_URL")
+		}
+		backend, err := newRedisHubBackend(ctx, redisClient)
+		if err != nil {
+			st.Close()
+			return nil, fmt.Errorf("ws hub redis backend: %w", err)
+		}
+		wsHub = NewWebSocketHubWithBackend(cfg.AllowedOrigins, backend)
+	default:
+		wsHub = NewWebSocketHub(cfg.AllowedOrigins)
 	}
 
 	var wsTickets ticketStore

@@ -40,8 +40,19 @@ type Config struct {
 	// "database" (default) keeps the historical AES-GCM + JSONB path;
 	// "keepsave" delegates to a KeepSave server.
 	SecretsBackend string // "database" | "keepsave"
+	// ReplicaCount is the number of Cooker replicas the chart spins
+	// up (set as COOKER_REPLICA_COUNT). Used by Validate to refuse
+	// boot when shared state is per-process and sticky sessions are
+	// off. Default 1.
+	ReplicaCount int
+	// StickySessions signals that the operator has configured
+	// session-affinity at ingress (NGINX, ALB, Traefik). Lets
+	// Validate accept memory-backed rate limiter / WS ticket store
+	// at >1 replicas. Default false.
+	StickySessions bool
 	RateLimit      RateLimitConfig
 	WSTicket       WSTicketConfig
+	WSHub          WSHubConfig
 	OIDC           OIDCConfig
 	LocalAuth      LocalAuthConfig
 	Docker         DockerConfig
@@ -53,6 +64,14 @@ type Config struct {
 	DeployTargets  DeployTargetsConfig
 	Audit          AuditConfig
 	Observability  ObservabilityConfig
+}
+
+// WSHubConfig configures the WebSocket broadcast fan-out backend.
+// "memory" (default) keeps the existing in-process channel hub;
+// "redis" uses pub/sub on the shared Redis client so any replica can
+// deliver broadcasts to its connected clients.
+type WSHubConfig struct {
+	Backend string // "memory" | "redis"
 }
 
 // ObservabilityConfig configures Prometheus /metrics and OpenTelemetry
@@ -233,6 +252,8 @@ func Load() *Config {
 		PusherBackend:   getEnv("COOKER_PUSHER", "noop"),
 		DeployerBackend: getEnv("COOKER_DEPLOYER", "noop"),
 		SecretsBackend:  getEnv("COOKER_SECRETS_BACKEND", "database"),
+		ReplicaCount:    getEnvInt("COOKER_REPLICA_COUNT", 1),
+		StickySessions:  getEnvBool("COOKER_STICKY_SESSIONS", false),
 		RateLimit: RateLimitConfig{
 			Enabled:   getEnvBool("COOKER_RATE_LIMIT_ENABLED", true),
 			PerMinute: getEnvInt("COOKER_RATE_LIMIT_PER_MINUTE", 10),
@@ -241,6 +262,9 @@ func Load() *Config {
 		},
 		WSTicket: WSTicketConfig{
 			Backend: getEnv("COOKER_WS_TICKET_BACKEND", "memory"),
+		},
+		WSHub: WSHubConfig{
+			Backend: getEnv("COOKER_WS_HUB_BACKEND", "memory"),
 		},
 		OIDC: OIDCConfig{
 			Enabled:      getEnvBool("COOKER_OIDC_ENABLED", false),
@@ -393,6 +417,33 @@ func (c *Config) Validate() error {
 			}
 		default:
 			problems = append(problems, fmt.Sprintf("unknown COOKER_AUDIT_DESTINATION %q (want \"stdout\" or \"file\")", c.Audit.Destination))
+		}
+	}
+	// Builder safety: docker-socket builder is convenient on dev hosts
+	// but gives the Cooker container root-equivalent access to the host
+	// docker daemon. RCE in Cooker -> host takeover. Refuse in prod.
+	if c.BuilderBackend == "docker" {
+		problems = append(problems, "COOKER_BUILDER=docker is unsafe in production (host docker.sock RCE-to-host); use kaniko, buildah, or buildkit")
+	}
+	// Multi-replica safety: per-process state must be either shared via
+	// Redis or pinned via sticky sessions. Otherwise a request lands on
+	// a different replica than the one that issued the WS ticket / saw
+	// the rate-limit token, and behaviour becomes unpredictable.
+	if c.ReplicaCount > 1 && !c.StickySessions {
+		var perProcess []string
+		if c.RateLimit.Enabled && c.RateLimit.Backend != "redis" {
+			perProcess = append(perProcess, "COOKER_RATE_LIMIT_BACKEND")
+		}
+		if c.WSTicket.Backend != "redis" {
+			perProcess = append(perProcess, "COOKER_WS_TICKET_BACKEND")
+		}
+		if c.WSHub.Backend != "redis" {
+			perProcess = append(perProcess, "COOKER_WS_HUB_BACKEND")
+		}
+		if len(perProcess) > 0 {
+			problems = append(problems, fmt.Sprintf(
+				"COOKER_REPLICA_COUNT=%d requires COOKER_STICKY_SESSIONS=true or redis backend for: %s",
+				c.ReplicaCount, strings.Join(perProcess, ", ")))
 		}
 	}
 	if len(problems) > 0 {
