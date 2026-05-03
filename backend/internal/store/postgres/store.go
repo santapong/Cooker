@@ -94,9 +94,11 @@ func pingWithBackoff(ctx context.Context, db *sql.DB) error {
 		}
 		jittered := delay + time.Duration(rand.Int63n(int64(delay/2+1)))
 		slog.Warn("postgres: ping failed, retrying", "attempt", attempt, "delay", jittered.String(), "err", err)
+		t := time.NewTimer(jittered)
 		select {
-		case <-time.After(jittered):
+		case <-t.C:
 		case <-ctx.Done():
+			t.Stop()
 			return ctx.Err()
 		}
 		if delay < pingMaxDelay {
