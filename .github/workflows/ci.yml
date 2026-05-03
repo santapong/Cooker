@@ -175,6 +175,47 @@ jobs:
             echo "ERROR: Kaniko Role not rendered" >&2; exit 1; }
           grep -q 'kind: RoleBinding' /tmp/kaniko.yaml || {
             echo "ERROR: Kaniko RoleBinding not rendered" >&2; exit 1; }
+          # Buildah env-vars must NOT be present under kaniko.
+          if grep -q 'COOKER_BUILDAH_' /tmp/kaniko.yaml; then
+            echo "ERROR: COOKER_BUILDAH_* leaked into kaniko render" >&2
+            grep -n COOKER_BUILDAH_ /tmp/kaniko.yaml >&2
+            exit 1
+          fi
+      - name: helm template (buildah builder)
+        run: |
+          helm template cooker deploy/helm/cooker \
+            --set builder.kind=buildah \
+            --set builder.buildah.contextPVC=cooker-build-context \
+            > /tmp/buildah.yaml
+          # docker.sock volume must be absent under buildah.
+          if grep -q 'docker-socket' /tmp/buildah.yaml; then
+            echo "ERROR: docker-socket volume rendered with builder.kind=buildah" >&2
+            grep -n docker-socket /tmp/buildah.yaml >&2
+            exit 1
+          fi
+          # Buildah-specific Role + RoleBinding must be present.
+          grep -q 'cooker-buildah-builder' /tmp/buildah.yaml || {
+            echo "ERROR: Buildah Role/RoleBinding not rendered" >&2; exit 1; }
+          # Buildah env-vars must be set.
+          grep -q 'COOKER_BUILDER' /tmp/buildah.yaml || {
+            echo "ERROR: COOKER_BUILDER env not rendered" >&2; exit 1; }
+          grep -q 'COOKER_BUILDAH_IMAGE' /tmp/buildah.yaml || {
+            echo "ERROR: COOKER_BUILDAH_IMAGE env not rendered" >&2; exit 1; }
+          grep -q 'COOKER_BUILDAH_STORAGE_DRIVER' /tmp/buildah.yaml || {
+            echo "ERROR: COOKER_BUILDAH_STORAGE_DRIVER env not rendered" >&2; exit 1; }
+          grep -q 'COOKER_BUILDAH_CONTEXT_PVC' /tmp/buildah.yaml || {
+            echo "ERROR: COOKER_BUILDAH_CONTEXT_PVC env not rendered" >&2; exit 1; }
+          # Kaniko env-vars must NOT leak.
+          if grep -q 'COOKER_KANIKO_' /tmp/buildah.yaml; then
+            echo "ERROR: COOKER_KANIKO_* leaked into buildah render" >&2
+            grep -n COOKER_KANIKO_ /tmp/buildah.yaml >&2
+            exit 1
+          fi
+          # Kaniko-named RBAC must NOT be present.
+          if grep -q 'cooker-kaniko-builder' /tmp/buildah.yaml; then
+            echo "ERROR: cooker-kaniko-builder RBAC leaked into buildah render" >&2
+            exit 1
+          fi
       - name: helm template (keepsave secrets backend)
         run: |
           helm template cooker deploy/helm/cooker \
@@ -208,7 +249,7 @@ jobs:
         run: |
           curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz -o /tmp/kc.tar.gz
           tar -xzf /tmp/kc.tar.gz -C /tmp
-          /tmp/kubeconform -strict -summary -ignore-missing-schemas /tmp/default.yaml /tmp/prod.yaml /tmp/kaniko.yaml /tmp/keepsave.yaml
+          /tmp/kubeconform -strict -summary -ignore-missing-schemas /tmp/default.yaml /tmp/prod.yaml /tmp/kaniko.yaml /tmp/buildah.yaml /tmp/keepsave.yaml
 
   docker:
     runs-on: ubuntu-latest

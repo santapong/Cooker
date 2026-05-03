@@ -98,13 +98,14 @@ The frontend API client recognises this response and re-issues the OIDC sign-in 
 
 ### Image build isolation
 
-Cooker ships three image-build strategies; pick via `COOKER_BUILDER` (chart: `builder.kind`):
+Cooker ships four image-build strategies; pick via `COOKER_BUILDER` (chart: `builder.kind`):
 
 - **`kaniko`** *(production-recommended)*: each build runs as a one-shot `batch/v1.Job` inside the cluster. No host docker.sock, no node-root path. The Cooker pod and the Kaniko Job share a `PersistentVolumeClaim` (`builder.kaniko.contextPVC`) for the source tree. RBAC scoped to the build namespace ships in `templates/rbac.yaml` — Job + Pod create/get/watch/delete only, never cluster-wide.
+- **`buildah`**: same shape as Kaniko (one `batch/v1.Job` per build, namespace-scoped RBAC, no host docker.sock) but with full Dockerfile feature parity — `RUN --mount=type=cache`, heredocs, etc. that Kaniko silently ignores. **PSA caveat**: rootless Buildah needs `CAP_SETUID` + `CAP_SETGID` for its user-namespace setup, so the build namespace must be PSA `baseline` or a custom profile permitting both — `restricted` drops them and the rootless setup fails. Storage driver is configurable via `builder.buildah.storageDriver` (`vfs` works without kernel modules; `overlay` is faster but needs fuse-overlayfs on the nodes).
 - **`docker`**: shells out to the local Docker daemon via the bind-mounted host socket. Convenient on single-node test clusters; gives the Cooker container root-equivalent access to the host's Docker. An RCE in Cooker → full host control. Only use this on isolated dev hosts.
 - **`buildkit`**: stub; not yet wired (backlog P9.1).
 
-The Helm chart conditionally drops the `docker.sock` volume + mount when `builder.kind != "docker"`, so a `kaniko` install carries no leftover host paths.
+The Helm chart conditionally drops the `docker.sock` volume + mount when `builder.kind != "docker"`, so any of `kaniko` / `buildah` / `buildkit` carries no leftover host paths.
 
 ### Data Security
 

@@ -1,7 +1,7 @@
 {{/*
-RBAC required by the Kaniko builder. Cooker submits one batch/v1.Job
-per image build, watches it, streams pod logs, then deletes it. The
-ServiceAccount needs:
+RBAC required by the in-cluster builders (Kaniko or Buildah). Cooker
+submits one batch/v1.Job per image build, watches it, streams pod
+logs, then deletes it. The ServiceAccount needs:
   - jobs:        create + get + watch + delete  (build lifecycle)
   - pods:        list + get + watch              (find the pod the
                                                   Job spawned)
@@ -10,8 +10,12 @@ ServiceAccount needs:
 Scoped to the namespace the build Job runs in (defaults to the release
 namespace) — explicitly NOT cluster-wide.
 
-Only rendered when builder.kind=kaniko, so the docker / noop / buildkit
-shapes don't carry permissions they never use.
+Only rendered when builder.kind=kaniko or builder.kind=buildah, so the
+docker / noop / buildkit shapes don't carry permissions they never use.
+The resource list is identical for both — they're both "submit a Job
+that runs a builder image" — but each builder gets its own Role +
+RoleBinding so the names stay descriptive and helm upgrade between
+kaniko and buildah is clean (the unused Role is GC'd by helm).
 */}}
 {{- if eq .Values.builder.kind "kaniko" -}}
 {{- $ns := .Values.builder.kaniko.namespace | default .Release.Namespace -}}
@@ -44,6 +48,42 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ include "cooker.fullname" . }}-kaniko-builder
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name | default (include "cooker.fullname" .) }}
+    namespace: {{ .Release.Namespace | quote }}
+{{- end }}
+{{- if eq .Values.builder.kind "buildah" -}}
+{{- $ns := .Values.builder.buildah.namespace | default .Release.Namespace -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "cooker.fullname" . }}-buildah-builder
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "cooker.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "watch", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "cooker.fullname" . }}-buildah-builder
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "cooker.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "cooker.fullname" . }}-buildah-builder
 subjects:
   - kind: ServiceAccount
     name: {{ .Values.serviceAccount.name | default (include "cooker.fullname" .) }}

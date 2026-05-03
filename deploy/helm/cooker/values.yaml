@@ -83,6 +83,14 @@ ingress:
 #             PVC for the build context (set via builder.kaniko.contextPVC).
 #             RBAC objects (Role + RoleBinding) ship in
 #             templates/rbac.yaml when this kind is selected.
+#   buildah — submits a Kubernetes Job that runs Buildah (`buildah bud`)
+#             in-cluster. Same shape as Kaniko but with full Dockerfile
+#             feature parity (RUN --mount=type=cache, heredocs, etc).
+#             Trade-off: rootless Buildah needs CAP_SETUID + CAP_SETGID,
+#             so the build namespace must be PSA "baseline" or a custom
+#             profile — "restricted" drops both. RBAC ships in
+#             templates/rbac.yaml when this kind is selected.
+#             See backend/internal/builder/buildah.go for the Job spec.
 #   buildkit — stub; not yet wired. See backlog P9.1.
 #   noop    — accept builds without doing anything (test only).
 builder:
@@ -106,6 +114,25 @@ builder:
     # builder. Empty falls back to emptyDir which won't see Cooker's
     # source — only useful for chart smoke tests.
     contextPVC: ""
+  buildah:
+    # Buildah image. Pin to a known version in production. Quay's
+    # `stable` tag is the project's tested release line.
+    image: quay.io/buildah/stable:latest
+    # Namespace the Job is created in. Defaults to the release
+    # namespace. Must be PSA "baseline" (or a custom profile that
+    # permits CAP_SETUID + CAP_SETGID); "restricted" drops both and
+    # the rootless user-namespace setup will fail.
+    namespace: ""
+    # ServiceAccount the Buildah Job's pod runs as. Empty uses the
+    # namespace default.
+    serviceAccount: ""
+    # PVC mounted at the build-context path on both Cooker and the
+    # Buildah Job. Same semantics as builder.kaniko.contextPVC.
+    contextPVC: ""
+    # Storage driver. "vfs" works without kernel modules; "overlay"
+    # is faster but needs fuse-overlayfs on the nodes. Default vfs
+    # for portability.
+    storageDriver: vfs
 
 # Host-Docker access. Used only when builder.kind=docker; the
 # templates skip rendering the volume + mount otherwise.

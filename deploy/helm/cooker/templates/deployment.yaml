@@ -78,6 +78,22 @@ spec:
               value: {{ .Values.builder.kaniko.contextPVC | quote }}
             {{- end }}
             {{- end }}
+            {{- if eq .Values.builder.kind "buildah" }}
+            - name: COOKER_K8S_NAMESPACE
+              value: {{ .Values.builder.buildah.namespace | default .Release.Namespace | quote }}
+            - name: COOKER_BUILDAH_IMAGE
+              value: {{ .Values.builder.buildah.image | quote }}
+            {{- if .Values.builder.buildah.serviceAccount }}
+            - name: COOKER_BUILDAH_SERVICE_ACCOUNT
+              value: {{ .Values.builder.buildah.serviceAccount | quote }}
+            {{- end }}
+            {{- if .Values.builder.buildah.contextPVC }}
+            - name: COOKER_BUILDAH_CONTEXT_PVC
+              value: {{ .Values.builder.buildah.contextPVC | quote }}
+            {{- end }}
+            - name: COOKER_BUILDAH_STORAGE_DRIVER
+              value: {{ .Values.builder.buildah.storageDriver | default "vfs" | quote }}
+            {{- end }}
             {{- if .Values.database.host }}
             # DB_PASSWORD must be declared before DATABASE_URL so
             # Kubernetes' $(VAR) interpolation resolves it. The chart
@@ -162,6 +178,10 @@ spec:
             - name: build-context
               mountPath: /workspace/context
             {{- end }}
+            {{- if and (eq .Values.builder.kind "buildah") .Values.builder.buildah.contextPVC }}
+            - name: build-context
+              mountPath: /workspace/context
+            {{- end }}
             {{- if .Values.securityContext.enabled }}
             # readOnlyRootFilesystem requires writable scratch space.
             # /tmp is used by internal/source/github (os.MkdirTemp) for
@@ -192,6 +212,11 @@ spec:
         - name: build-context
           persistentVolumeClaim:
             claimName: {{ .Values.builder.kaniko.contextPVC | quote }}
+        {{- end }}
+        {{- if and (eq .Values.builder.kind "buildah") .Values.builder.buildah.contextPVC }}
+        - name: build-context
+          persistentVolumeClaim:
+            claimName: {{ .Values.builder.buildah.contextPVC | quote }}
         {{- end }}
         {{- if .Values.securityContext.enabled }}
         - name: tmp
