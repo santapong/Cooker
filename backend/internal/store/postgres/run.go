@@ -25,7 +25,7 @@ func NewRunStore(db *sql.DB) *RunStore {
 func (s *RunStore) List(ctx context.Context, pipelineID string) ([]*model.PipelineRun, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, pipeline_id, status, stage_runs, env_statuses, variables,
-		        started_at, finished_at, error
+		        started_at, finished_at, error, heartbeat_at
 		   FROM pipeline_runs WHERE pipeline_id = $1 ORDER BY created_at DESC`,
 		pipelineID)
 	if err != nil {
@@ -47,7 +47,7 @@ func (s *RunStore) List(ctx context.Context, pipelineID string) ([]*model.Pipeli
 func (s *RunStore) Get(ctx context.Context, id string) (*model.PipelineRun, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, pipeline_id, status, stage_runs, env_statuses, variables,
-		        started_at, finished_at, error
+		        started_at, finished_at, error, heartbeat_at
 		   FROM pipeline_runs WHERE id = $1`, id)
 	r, err := scanRun(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -98,10 +98,10 @@ func (s *RunStore) Update(ctx context.Context, r *model.PipelineRun) error {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE pipeline_runs
 		    SET status=$2, stage_runs=$3, env_statuses=$4, variables=$5,
-		        started_at=$6, finished_at=$7, error=$8
+		        started_at=$6, finished_at=$7, error=$8, heartbeat_at=$9
 		  WHERE id=$1`,
 		r.ID, string(r.Status), stageJSON, envJSON, varsJSON,
-		nullTime(r.StartedAt), nullTime(r.FinishedAt), r.Error)
+		nullTime(r.StartedAt), nullTime(r.FinishedAt), r.Error, nullTime(r.HeartbeatAt))
 	if err != nil {
 		return fmt.Errorf("updating run: %w", err)
 	}
@@ -112,14 +112,50 @@ func (s *RunStore) Update(ctx context.Context, r *model.PipelineRun) error {
 	return nil
 }
 
+// UpdateHeartbeat writes only the heartbeat_at column. Cheap and safe
+// to call from the run coordinator's 30-second ticker without
+// thrashing JSONB encoders.
+func (s *RunStore) UpdateHeartbeat(ctx context.Context, id string, ts time.Time) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE pipeline_runs SET heartbeat_at=$2 WHERE id=$1`, id, ts)
+	if err != nil {
+		return fmt.Errorf("heartbeat run %s: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+	}
+	return nil
+}
+
+// SweepOrphans marks rows that were status='running' but whose
+// heartbeat is stale (or missing) as failed. Returns rows affected.
+// Threshold is the maximum acceptable staleness; rows whose heartbeat
+// was last written more than threshold ago are orphans.
+func (s *RunStore) SweepOrphans(ctx context.Context, threshold time.Duration) (int, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE pipeline_runs
+		    SET status='failed',
+		        error='orphaned: heartbeat stale at boot',
+		        finished_at=NOW()
+		  WHERE status='running'
+		    AND (heartbeat_at IS NULL OR heartbeat_at < NOW() - $1::interval)`,
+		fmt.Sprintf("%d milliseconds", threshold.Milliseconds()))
+	if err != nil {
+		return 0, fmt.Errorf("sweep orphans: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func scanRun(row scannable) (*model.PipelineRun, error) {
 	r := &model.PipelineRun{}
 	var status string
 	var stageJSON, envJSON, varsJSON []byte
-	var started, finished sql.NullTime
+	var started, finished, heartbeat sql.NullTime
 	var errStr sql.NullString
 	if err := row.Scan(&r.ID, &r.PipelineID, &status, &stageJSON, &envJSON, &varsJSON,
-		&started, &finished, &errStr); err != nil {
+		&started, &finished, &errStr, &heartbeat); err != nil {
 		return nil, err
 	}
 	r.Status = model.RunStatus(status)
@@ -139,6 +175,10 @@ func scanRun(row scannable) (*model.PipelineRun, error) {
 	if finished.Valid {
 		t := finished.Time
 		r.FinishedAt = &t
+	}
+	if heartbeat.Valid {
+		t := heartbeat.Time
+		r.HeartbeatAt = &t
 	}
 	if errStr.Valid {
 		r.Error = errStr.String

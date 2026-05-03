@@ -4,6 +4,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -14,6 +15,13 @@ import (
 	"github.com/cooker-ci/cooker/internal/service"
 	"github.com/cooker-ci/cooker/internal/store"
 )
+
+// RunSpawner is a narrow interface implemented by server.RunCoordinator.
+// Defining it here avoids a server→handler import cycle while letting
+// tests inject a fake.
+type RunSpawner interface {
+	Spawn(ctx context.Context, runID string, work func(context.Context) error)
+}
 
 // Handler owns the dependencies shared by request handlers.
 type Handler struct {
@@ -26,6 +34,13 @@ type Handler struct {
 	Secrets     secrets.Manager
 	AppDeployer *service.AppDeployer
 	WSBroadcast func(channel string, data []byte)
+	// Executor runs pipeline-run goroutines invoked by RunPipeline. nil
+	// is allowed in tests that do not exercise execution.
+	Executor *service.Executor
+	// Runs spawns tracked goroutines. nil is allowed in tests; when
+	// nil, RunPipeline runs the executor synchronously inside the
+	// request goroutine.
+	Runs RunSpawner
 }
 
 // New constructs a Handler bound to the given store. secs may be nil

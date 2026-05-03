@@ -6,6 +6,23 @@ What to do when Cooker is broken. Each section answers: **symptom → first chec
 
 ---
 
+## Recovery after restart
+
+**Symptom:** Several `pipeline_runs` rows show `status='failed'` with `error='orphaned: heartbeat stale at boot'` after a Cooker pod has restarted.
+
+**Cause:** The pod was killed (OOM, SIGKILL past terminationGracePeriodSeconds, node failure) while runs were in flight. On every boot Cooker sweeps `pipeline_runs WHERE status='running' AND (heartbeat_at IS NULL OR heartbeat_at < NOW() - 90s)` and marks them failed so the UI no longer shows them as running forever.
+
+**No action required** unless the count is high — a sustained orphan rate means pods are crashing under load. Check `cooker_pipeline_runs_orphaned_total` (Prometheus) and the pod's previous logs.
+
+**Manual sweep**, if you want to force it without a restart:
+```sql
+UPDATE pipeline_runs
+   SET status='failed', error='orphaned: manual sweep', finished_at=NOW()
+ WHERE status='running' AND (heartbeat_at IS NULL OR heartbeat_at < NOW() - interval '90 seconds');
+```
+
+---
+
 ## Build runs forever
 
 **Symptom:** A pipeline run shows `running` long past the configured stage timeout. WebSocket log stream is silent or repeats the last line.
@@ -14,7 +31,12 @@ What to do when Cooker is broken. Each section answers: **symptom → first chec
 1. `kubectl get pods -n cooker` — is the Cooker pod healthy? OOMKilled?
 2. `kubectl logs -n cooker deploy/cooker --tail 200` — any panic, deadlock, or stuck spawn?
 3. If `COOKER_BUILDER=docker`: `docker ps -a` on the host running Cooker. Is a build container hung?
-4. The DB: `SELECT id, status, started_at FROM pipeline_runs WHERE status='running' ORDER BY started_at LIMIT 20;` Any rows older than the longest reasonable build?
+4. The DB: heartbeat freshness is the most useful signal:
+   ```sql
+   SELECT id, status, started_at, NOW() - heartbeat_at AS staleness
+     FROM pipeline_runs WHERE status='running' ORDER BY started_at LIMIT 20;
+   ```
+   Staleness > 90s = orphan; the next boot's sweep will mark it failed automatically.
 
 **Most-likely causes:**
 - Build process exited but Cooker missed the SIGCHLD (rare; restart Cooker).

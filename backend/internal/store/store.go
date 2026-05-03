@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/cooker-ci/cooker/internal/model"
 )
@@ -27,6 +28,14 @@ type RunStore interface {
 	Get(ctx context.Context, id string) (*model.PipelineRun, error)
 	Create(ctx context.Context, run *model.PipelineRun) error
 	Update(ctx context.Context, run *model.PipelineRun) error
+	// UpdateHeartbeat is a cheap UPDATE-one-column write used by the
+	// run coordinator's ticker. Implementations should not re-marshal
+	// the JSONB columns.
+	UpdateHeartbeat(ctx context.Context, id string, ts time.Time) error
+	// SweepOrphans marks runs that were status='running' at boot time
+	// without a recent heartbeat as failed (they were orphaned by a
+	// previous crash). Returns the number of rows updated.
+	SweepOrphans(ctx context.Context, threshold time.Duration) (int, error)
 }
 
 // EnvironmentStore manages environment persistence.

@@ -44,6 +44,7 @@ type Server struct {
 	redisClient   *redis.Client
 	audit         audit.Sink
 	traceShutdown func(context.Context) error
+	runs          *RunCoordinator
 }
 
 // New creates a new Server instance with all routes and middleware.
@@ -141,9 +142,24 @@ func New(cfg *config.Config) (*Server, error) {
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 
+	runs := NewRunCoordinator(st)
+
 	h := handler.New(st, codec, secMgr)
 	h.AppDeployer = appDeployer
 	h.WSBroadcast = wsHub.Broadcast
+	h.Executor = exec
+	h.Runs = runs
+
+	// Sweep runs that were orphaned by a previous crash. Safe to run
+	// before any new runs spawn — the threshold protects in-flight
+	// rows from being reaped by a fast restart.
+	sweepCtx, sweepCancel := context.WithTimeout(ctx, 5*time.Second)
+	if n, err := st.Runs.SweepOrphans(sweepCtx, orphanThreshold); err != nil {
+		slog.Warn("orphan sweep failed", "err", err)
+	} else if n > 0 {
+		slog.Info("orphan sweep: marked stale runs failed", "count", n)
+	}
+	sweepCancel()
 
 	s := &Server{
 		router:        router,
@@ -157,6 +173,7 @@ func New(cfg *config.Config) (*Server, error) {
 		audit:         auditSink,
 		traceShutdown: traceShutdown,
 		redisClient:   redisClient,
+		runs:          runs,
 	}
 
 	router.Use(corsMiddleware(cfg.AllowedOrigins))
@@ -210,6 +227,11 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 		defer cancel()
 		if err := httpSrv.Shutdown(drainCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
+		}
+		if s.runs != nil {
+			runDrainCtx, runCancel := context.WithTimeout(context.Background(), runDrainTimeout)
+			s.runs.Wait(runDrainCtx)
+			runCancel()
 		}
 		return <-errCh
 	}
