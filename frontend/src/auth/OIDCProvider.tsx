@@ -4,10 +4,12 @@ import {
   useState,
   useEffect,
   useMemo,
+  useCallback,
   type ReactNode,
 } from 'react';
 import { UserManager, WebStorageStateStore, type User as OidcUser } from 'oidc-client-ts';
 import { pushToast } from '../stores/toastStore';
+import { authApi, type AuthUser } from '../api/auth';
 
 interface User {
   sub: string;
@@ -21,7 +23,12 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  /** Trigger an OIDC sign-in redirect. No-op if OIDC is disabled. */
   login: () => void;
+  /** Sign in with email + password against the local backend. Throws on failure. */
+  signinLocal: (email: string, password: string) => Promise<void>;
+  /** Sign up with email + password against the local backend. Throws on failure. */
+  signupLocal: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -30,6 +37,8 @@ const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   isLoading: true,
   login: () => {},
+  signinLocal: async () => {},
+  signupLocal: async () => {},
   logout: () => {},
 });
 
@@ -46,6 +55,8 @@ const DEV_USER: User = {
   groups: ['cooker-admins'],
   roles: ['admin'],
 };
+
+const LOCAL_TOKEN_KEY = 'cooker.local.token';
 
 let cachedManager: UserManager | null = null;
 
@@ -81,6 +92,10 @@ export function getUserManager(): UserManager | null {
   return cachedManager;
 }
 
+// currentAccessToken holds whichever token the API client should
+// attach to outgoing requests. Local-auth tokens are stored alongside
+// OIDC tokens; whichever is set most recently wins. This keeps the
+// API client agnostic of which auth path produced the session.
 let currentAccessToken: string | null = null;
 
 export function getAccessToken(): string | null {
@@ -89,7 +104,13 @@ export function getAccessToken(): string | null {
 
 export function triggerSignIn(opts?: { acrValues?: string }): void {
   const manager = getUserManager();
-  if (!manager) return;
+  if (!manager) {
+    // No OIDC configured — bounce to the local sign-in page.
+    if (window.location.pathname !== '/signin') {
+      window.location.assign('/signin');
+    }
+    return;
+  }
   if (opts?.acrValues) {
     void manager.signinRedirect({ acr_values: opts.acrValues });
     return;
@@ -116,6 +137,16 @@ function toUser(oidcUser: OidcUser): User {
   };
 }
 
+function fromAuthUser(u: AuthUser): User {
+  return {
+    sub: u.id,
+    email: u.email,
+    name: u.name,
+    groups: [],
+    roles: u.roles?.length ? u.roles : [u.role],
+  };
+}
+
 function mapGroupsToRoles(groups: string[]): string[] {
   const map: Record<string, string> = {
     'cooker-admins': 'admin',
@@ -131,15 +162,69 @@ function mapGroupsToRoles(groups: string[]): string[] {
   return Array.from(roles);
 }
 
+function loadStoredLocalToken(): string | null {
+  try {
+    return window.localStorage.getItem(LOCAL_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistLocalToken(token: string | null): void {
+  try {
+    if (token) {
+      window.localStorage.setItem(LOCAL_TOKEN_KEY, token);
+    } else {
+      window.localStorage.removeItem(LOCAL_TOKEN_KEY);
+    }
+  } catch {
+    // localStorage unavailable (private mode, etc.) — session is in-memory only.
+  }
+}
+
 export function OIDCProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(oidcEnabled ? null : DEV_USER);
-  const [isLoading, setIsLoading] = useState<boolean>(oidcEnabled);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const manager = useMemo(() => (oidcEnabled ? getUserManager() : null), []);
 
+  // Restore a local-auth session on mount. Runs in parallel with the
+  // OIDC restore below; whichever resolves with a user wins.
+  useEffect(() => {
+    const stored = loadStoredLocalToken();
+    if (!stored) {
+      if (!oidcEnabled) {
+        // Dev mode: no OIDC, no local token — keep DEV_USER and stop loading.
+        setIsLoading(false);
+      }
+      return;
+    }
+    let cancelled = false;
+    currentAccessToken = stored;
+    authApi
+      .me(stored)
+      .then((me) => {
+        if (cancelled) return;
+        setUser(fromAuthUser(me));
+        setIsLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Token expired / invalid — drop it.
+        persistLocalToken(null);
+        currentAccessToken = null;
+        if (!oidcEnabled) {
+          setUser(null);
+          setIsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (!manager) {
-      currentAccessToken = null;
       return;
     }
 
@@ -150,11 +235,13 @@ export function OIDCProvider({ children }: { children: ReactNode }) {
       if (u && !u.expired) {
         currentAccessToken = u.access_token;
         setUser(toUser(u));
-      } else {
+        setIsLoading(false);
+      } else if (!loadStoredLocalToken()) {
+        // No OIDC user AND no stored local token — we can stop loading.
         currentAccessToken = null;
         setUser(null);
+        setIsLoading(false);
       }
-      setIsLoading(false);
     });
 
     const onLoaded = (u: OidcUser) => {
@@ -170,9 +257,6 @@ export function OIDCProvider({ children }: { children: ReactNode }) {
       setUser(null);
     };
 
-    // Silent-renew failure: oidc-client-ts kicks the user out on the
-    // next 401 by default. Surface a toast so the redirect doesn't
-    // happen silently — operators have asked for this in the field.
     const onSilentRenewError = (err: Error) => {
       pushToast(
         'warning',
@@ -194,23 +278,51 @@ export function OIDCProvider({ children }: { children: ReactNode }) {
     };
   }, [manager]);
 
-  const login = () => {
+  const login = useCallback(() => {
     if (manager) {
       void manager.signinRedirect();
+    } else {
+      // OIDC disabled — bounce to local sign-in.
+      window.location.assign('/signin');
     }
-  };
+  }, [manager]);
 
-  const logout = () => {
+  const signinLocal = useCallback(async (email: string, password: string) => {
+    const res = await authApi.signin(email, password);
+    persistLocalToken(res.token);
+    currentAccessToken = res.token;
+    setUser(fromAuthUser(res.user));
+  }, []);
+
+  const signupLocal = useCallback(async (email: string, password: string, name?: string) => {
+    const res = await authApi.signup(email, password, name);
+    persistLocalToken(res.token);
+    currentAccessToken = res.token;
+    setUser(fromAuthUser(res.user));
+  }, []);
+
+  const logout = useCallback(() => {
+    persistLocalToken(null);
+    currentAccessToken = null;
     if (manager) {
       void manager.signoutRedirect();
     } else {
       setUser(null);
+      window.location.assign('/signin');
     }
-  };
+  }, [manager]);
 
   return (
     <AuthContext.Provider
-      value={{ user, isAuthenticated: !!user, isLoading, login, logout }}
+      value={{
+        user,
+        isAuthenticated: !!user,
+        isLoading,
+        login,
+        signinLocal,
+        signupLocal,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

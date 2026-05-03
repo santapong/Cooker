@@ -10,14 +10,6 @@ interface State {
   error: Error | null
 }
 
-/**
- * App-root error boundary. Catches uncaught render errors so the
- * whole React tree doesn't crash to a blank page. Production errors
- * are sent to console.error; future revisions should wire to an
- * error-reporting service (Sentry, Bugsnag, etc.).
- *
- * Closes backlog item P5 "Error boundary at the app root".
- */
 export default class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null }
 
@@ -26,7 +18,6 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    // eslint-disable-next-line no-console
     console.error('ErrorBoundary caught:', error, info.componentStack)
   }
 
@@ -51,41 +42,57 @@ export default class ErrorBoundary extends Component<Props, State> {
           alignItems: 'center',
           justifyContent: 'center',
           padding: '2rem',
-          background: 'var(--color-bg, #0f172a)',
-          color: 'var(--color-text, #f1f5f9)',
-          fontFamily: 'system-ui, sans-serif',
+          background: '#16130F',
+          color: '#F2EBDD',
+          fontFamily: '"Inter Tight", "Inter", system-ui, sans-serif',
         }}
       >
         <div style={{ maxWidth: 560 }}>
-          <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Something broke</h1>
-          <p style={{ opacity: 0.8, marginBottom: '1rem' }}>
-            Cooker hit an unexpected error and couldn't render this page. The
-            error has been logged. You can try reloading or going back to the
-            home page.
+          <h1
+            style={{
+              fontFamily: '"Fraunces", "Source Serif 4", Georgia, serif',
+              fontSize: 32,
+              fontWeight: 500,
+              margin: '0 0 12px',
+              letterSpacing: -0.6,
+              lineHeight: 1.05,
+            }}
+          >
+            Something broke in the kitchen.
+          </h1>
+          <p style={{ opacity: 0.75, marginBottom: 16, lineHeight: 1.5 }}>
+            Cooker hit an unexpected error and couldn't render this page. The error has been
+            logged. Try reloading or go back home.
           </p>
           <pre
             style={{
-              background: 'rgba(0,0,0,0.3)',
-              padding: '0.75rem',
-              borderRadius: 6,
+              background: 'rgba(0,0,0,0.35)',
+              padding: 12,
+              borderRadius: 8,
+              border: '1px solid #3A332A',
               overflowX: 'auto',
-              fontSize: '0.8rem',
-              marginBottom: '1rem',
+              fontSize: 12,
+              fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+              color: '#D87060',
+              marginBottom: 16,
             }}
           >
             {error.message}
           </pre>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: 8 }}>
             <button
               type="button"
               onClick={this.reset}
               style={{
-                padding: '0.5rem 1rem',
-                background: 'var(--color-accent, #6366f1)',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 6,
+                padding: '10px 16px',
+                background: '#C2410C',
+                color: '#FFF8EE',
+                border: '1px solid #9A2F08',
+                borderRadius: 8,
                 cursor: 'pointer',
+                fontFamily: 'inherit',
+                fontSize: 13,
+                fontWeight: 500,
               }}
             >
               Try again
@@ -96,12 +103,15 @@ export default class ErrorBoundary extends Component<Props, State> {
                 window.location.assign('/')
               }}
               style={{
-                padding: '0.5rem 1rem',
+                padding: '10px 16px',
                 background: 'transparent',
                 color: 'inherit',
-                border: '1px solid currentColor',
-                borderRadius: 6,
+                border: '1px solid #3A332A',
+                borderRadius: 8,
                 cursor: 'pointer',
+                fontFamily: 'inherit',
+                fontSize: 13,
+                fontWeight: 500,
               }}
             >
               Go home

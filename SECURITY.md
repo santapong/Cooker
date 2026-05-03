@@ -26,14 +26,38 @@ We will acknowledge receipt within 48 hours and aim to provide a fix or mitigati
 
 ### Authentication
 
-Cooker uses **OpenID Connect (OIDC)** with **OAuth 2.0 PKCE** flow for authentication:
+Cooker offers two authentication paths. Operators can enable either or both:
+
+#### Path 1: OpenID Connect (recommended for teams and production)
 
 - **Protocol**: OIDC Discovery + Authorization Code with PKCE (no client secrets in browser)
 - **Token validation**: JWT access tokens validated server-side using the OIDC provider's JWKS endpoint
 - **Session management**: Short-lived access tokens with refresh token rotation
 - **Supported providers**: Keycloak, Okta, Azure AD, Google, GitHub
 
-> **Default in local & UAT:** OIDC is **disabled** (`COOKER_OIDC_ENABLED=false`) and the backend injects a dev admin user so contributors and testers can exercise the API without an IdP. Production deployments **must** enable OIDC — see the checklist below and [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) for how to wire Google or another provider.
+> **Default in local & UAT:** OIDC is **disabled** (`COOKER_OIDC_ENABLED=false`) and the backend injects a dev admin user so contributors and testers can exercise the API without an IdP. Production deployments should enable OIDC — see the checklist below and [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) for how to wire Google or another provider.
+
+#### Path 2: Local email + password (homelab / single-user / fallback)
+
+When `COOKER_LOCAL_AUTH_ENABLED=true`, Cooker exposes:
+
+- `POST /api/v1/auth/local/signup` — bcrypt-hashes the password (`DefaultCost`) and creates a row in the `users` table. The very first signup is granted `admin` (bootstrap pattern); subsequent signups default to `viewer` and must be promoted by an admin.
+- `POST /api/v1/auth/local/signin` — verifies the bcrypt hash and issues an HS256-signed JWT (`iss=cooker-local`, `exp=COOKER_LOCAL_AUTH_TOKEN_TTL`, default 12h).
+- `GET /api/v1/auth/local/me` — returns the authenticated user's profile (works for both local and OIDC sessions).
+- `GET /api/v1/auth/methods` — public capability probe so the frontend knows which auth methods to render.
+
+The same auth middleware accepts both kinds of bearer token: it inspects the JWT's `iss` claim and dispatches to the local issuer or the OIDC IDTokenVerifier as appropriate.
+
+**Trade-offs and limits of the local path:**
+
+- **MFA gating does not apply.** `COOKER_OIDC_MFA_ACR_VALUES` is checked against the OIDC token's `acr`/`amr` claims; local-auth tokens carry neither. If your environment requires MFA on destructive admin routes, those users must come in through the OIDC path.
+- **Brute-force defence is rate-limit-only.** There's no account lockout, no CAPTCHA, no email verification, no password reset. The per-user rate limiter on `/api/v1` applies once a user is authenticated, but unauthenticated `/auth/local/signin` calls are not rate-limited at the application layer — operators should enforce that at the edge (NGINX `limit_req`, Traefik rate-limit middleware, etc.).
+- **Signup can be closed.** Set `COOKER_LOCAL_AUTH_ALLOW_SIGNUP=false` to disable `/signup`; the UI hides the form and direct calls return 403. Use this when you want admin-created accounts only.
+- **Signing key requirement.** `COOKER_LOCAL_AUTH_JWT_SIGNING_KEY` must decode to ≥ 32 bytes (base64-decoded; raw bytes also accepted). `Config.Validate()` refuses to start in production with a shorter key.
+- **No revocation list.** A leaked JWT remains valid until its `exp` claim. Lower `COOKER_LOCAL_AUTH_TOKEN_TTL` (default `12h`) if that's a concern.
+- **Token storage.** The frontend stores the JWT in `localStorage` under `cooker.local.token` — same XSS exposure as the OIDC path's `oidc-client-ts` storage. Both paths benefit from a strict CSP at the ingress.
+
+This path is intentionally minimal — it's the homelab / single-user / OIDC-isn't-available-yet escape hatch, not a full IAM. For team or production use, OIDC is the recommended path.
 
 ### Authorization (RBAC)
 

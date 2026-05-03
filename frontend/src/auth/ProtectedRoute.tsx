@@ -1,6 +1,8 @@
 import { type ReactNode } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './OIDCProvider';
 import { SkeletonStack } from '../components/Skeleton';
+import { useTheme } from '../theme/ThemeProvider';
 
 interface Props {
   children: ReactNode;
@@ -8,12 +10,11 @@ interface Props {
 }
 
 export default function ProtectedRoute({ children, requiredRoles }: Props) {
-  const { user, isAuthenticated, isLoading, login } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
+  const t = useTheme();
+  const location = useLocation();
 
   if (isLoading) {
-    // Skeleton placeholder while auth state restores. Avoids the
-    // jarring "Loading..." flash on every refresh. Closes the
-    // loading-skeletons portion of backlog item P5.
     return (
       <div
         style={{
@@ -23,6 +24,8 @@ export default function ProtectedRoute({ children, requiredRoles }: Props) {
           display: 'flex',
           flexDirection: 'column',
           gap: 16,
+          background: t.bg,
+          minHeight: '100vh',
         }}
         aria-busy="true"
         aria-live="polite"
@@ -34,26 +37,34 @@ export default function ProtectedRoute({ children, requiredRoles }: Props) {
   }
 
   if (!isAuthenticated) {
-    return (
-      <div style={{ padding: 40, textAlign: 'center', color: '#f1f5f9' }}>
-        <h2>Authentication Required</h2>
-        <p style={{ color: '#94a3b8' }}>Please sign in to access Cooker.</p>
-        <button className="btn-primary" onClick={login} style={{ marginTop: 12 }}>
-          Sign In with SSO
-        </button>
-      </div>
-    );
+    // Pass the current location through so SignInPage can return us
+    // here after successful login.
+    return <Navigate to="/signin" state={{ from: location.pathname + location.search }} replace />;
   }
 
   if (requiredRoles && user) {
     const hasRole = requiredRoles.some((role) => user.roles.includes(role));
     if (!hasRole) {
       return (
-        <div style={{ padding: 40, textAlign: 'center', color: '#f1f5f9' }}>
-          <h2>Access Denied</h2>
-          <p style={{ color: '#94a3b8' }}>
-            You need one of these roles: {requiredRoles.join(', ')}
-          </p>
+        <div
+          style={{
+            minHeight: '100vh',
+            background: t.bg,
+            color: t.text,
+            display: 'grid',
+            placeItems: 'center',
+            padding: 40,
+            textAlign: 'center',
+          }}
+        >
+          <div>
+            <h2 style={{ fontFamily: t.serif, fontSize: 28, fontWeight: 500, color: t.text, margin: 0 }}>
+              Access denied
+            </h2>
+            <p style={{ color: t.textSoft, marginTop: 12 }}>
+              You need one of these roles: {requiredRoles.join(', ')}
+            </p>
+          </div>
         </div>
       );
     }

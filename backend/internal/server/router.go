@@ -22,6 +22,19 @@ import (
 // RBAC is enforced both at the router and at the point of sensitive
 // action, which is what a reader auditing the handler expects to see.
 func (s *Server) registerRoutes() {
+	// Local-auth signup + signin live OUTSIDE the /api/v1 auth group:
+	// they're how an unauthenticated client gets a token in the first
+	// place. /me is inside the group because it requires a valid session.
+	if s.localAuth != nil {
+		s.router.POST("/api/v1/auth/local/signup", s.localAuth.Signup)
+		s.router.POST("/api/v1/auth/local/signin", s.localAuth.Signin)
+	}
+	// Public capability probe so the frontend knows which auth methods
+	// to render. No auth required — every unauthenticated client needs
+	// to know whether to show the SSO button, the local-auth form, or
+	// both.
+	s.router.GET("/api/v1/auth/methods", s.authMethods)
+
 	api := s.router.Group("/api/v1", s.oidcMW.Handler())
 	// Audit middleware sits immediately after auth so claims are in
 	// context. It self-filters to mutating verbs; GETs pass through
@@ -173,6 +186,13 @@ func (s *Server) registerRoutes() {
 
 	// GitHub webhook receiver (unauthenticated — HMAC is the auth).
 	s.router.POST("/webhooks/github", h.GitHubWebhook)
+
+	// Local-auth /me lives inside the auth group because it needs a
+	// session. It works for both local and OIDC sessions because the
+	// underlying middleware populates the same auth.Claims either way.
+	if s.localAuth != nil {
+		api.GET("/auth/local/me", s.localAuth.Me)
+	}
 
 	// Settings routes — treating as admin-only because they change
 	// how Cooker talks to external systems (registries, clusters).

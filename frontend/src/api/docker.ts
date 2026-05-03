@@ -1,6 +1,7 @@
 import { get, post, put, del } from './client';
 import type { ImageInfo, ContainerInfo } from '../types/docker';
 import type { ComposeGraph, ComposeService } from '../types/compose';
+import type { DockerNetwork, DockerVolume } from '../types/infra';
 
 export const dockerApi = {
   listImages: () => get<ImageInfo[]>('/docker/images'),
@@ -19,4 +20,19 @@ export const dockerApi = {
     post<ComposeGraph>('/docker/compose/parse', composePath ? { composePath } : {}),
   updateComposeService: (name: string, config: Partial<ComposeService>) =>
     put<void>(`/docker/compose/services/${name}`, config),
+
+  listNetworks: (hostId?: string) =>
+    get<DockerNetwork[]>(`/docker/networks${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`),
+  createNetwork: (data: Partial<DockerNetwork>) =>
+    post<{ id: string }>('/docker/networks', data),
+  deleteNetwork: (id: string) => del(`/docker/networks/${id}`),
+  connectContainerToNetwork: (id: string, containerId: string) =>
+    post(`/docker/networks/${id}/connect`, { containerId }),
+
+  listVolumes: (hostId?: string) =>
+    get<DockerVolume[]>(`/docker/volumes${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`),
+  createVolume: (data: Partial<DockerVolume>) =>
+    post<{ name: string }>('/docker/volumes', data),
+  deleteVolume: (name: string) => del(`/docker/volumes/${encodeURIComponent(name)}`),
 };
+

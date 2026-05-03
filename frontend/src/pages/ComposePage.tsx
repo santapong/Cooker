@@ -3,31 +3,73 @@ import { ReactFlowProvider } from '@xyflow/react';
 import ComposeCanvas from '../components/compose/ComposeCanvas';
 import ServiceConfigPanel from '../components/compose/panels/ServiceConfigPanel';
 import { useComposeStore } from '../stores/composeStore';
+import { useTheme } from '../theme/ThemeProvider';
+import { Btn, Pill } from '../components/ui/atoms';
 
 export default function ComposePage() {
-  const { fetchComposeGraph, selectedServiceName, loading, error } = useComposeStore();
+  const t = useTheme();
+  const { fetchComposeGraph, selectedServiceName, loading, error, graph } = useComposeStore();
 
   useEffect(() => {
     fetchComposeGraph();
   }, [fetchComposeGraph]);
 
   if (loading) {
-    return <div style={{ color: '#94a3b8', padding: 40, textAlign: 'center' }}>Loading compose graph...</div>;
+    return (
+      <div
+        style={{
+          height: '100%',
+          display: 'grid',
+          placeItems: 'center',
+          color: t.textMute,
+          fontFamily: t.serif,
+          fontSize: 18,
+        }}
+      >
+        Loading compose graph…
+      </div>
+    );
   }
 
   if (error) {
-    return <div style={{ color: '#ef4444', padding: 40, textAlign: 'center' }}>Error: {error}</div>;
+    return (
+      <div
+        style={{
+          height: '100%',
+          display: 'grid',
+          placeItems: 'center',
+          color: t.bad,
+          fontFamily: t.mono,
+          fontSize: 13,
+        }}
+      >
+        {error}
+      </div>
+    );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 72px)', margin: -20 }}>
-      <div style={styles.toolbar}>
-        <h2 style={styles.title}>Docker Compose</h2>
-        <button className="btn-primary" onClick={() => fetchComposeGraph()}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div
+        style={{
+          padding: '12px 18px',
+          borderBottom: `1px solid ${t.line}`,
+          background: t.surface,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        <span style={{ fontFamily: t.serif, fontSize: 18, fontWeight: 500, color: t.text }}>
+          docker-compose graph
+        </span>
+        <Pill>{graph?.services.length ?? 0} services</Pill>
+        <div style={{ flex: 1 }} />
+        <Btn kind="secondary" icon="cog" onClick={() => fetchComposeGraph()}>
           Refresh
-        </button>
+        </Btn>
       </div>
-      <div style={{ display: 'flex', flex: 1 }}>
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <ReactFlowProvider>
           <ComposeCanvas />
         </ReactFlowProvider>
@@ -36,15 +78,3 @@ export default function ComposePage() {
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '8px 16px',
-    backgroundColor: '#1e293b',
-    borderBottom: '1px solid #334155',
-  },
-  title: { fontSize: 16, fontWeight: 600, color: '#f1f5f9', margin: 0 },
-};

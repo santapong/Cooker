@@ -22,6 +22,8 @@ import ApprovalNode from './nodes/ApprovalNode';
 import CustomNode from './nodes/CustomNode';
 import ConditionalEdge from './edges/ConditionalEdge';
 import { usePipelineStore } from '../../stores/pipelineStore';
+import { useTheme } from '../../theme/ThemeProvider';
+import { hexA } from '../../theme/tokens';
 import type { StageType } from '../../types/pipeline';
 
 const nodeTypes: NodeTypes = {
@@ -38,6 +40,7 @@ const edgeTypes: EdgeTypes = {
 };
 
 export default function PipelineCanvas() {
+  const t = useTheme();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const store = usePipelineStore();
 
@@ -46,12 +49,21 @@ export default function PipelineCanvas() {
 
   const onConnect = useCallback(
     (params: Connection) => {
-      setEdges((eds) => addEdge({ ...params, type: 'conditional' }, eds));
+      setEdges((eds) =>
+        addEdge(
+          {
+            ...params,
+            type: 'conditional',
+            style: { stroke: t.textMute, strokeWidth: 1.6 },
+          },
+          eds,
+        ),
+      );
       if (params.source && params.target) {
         store.connectStages(params.source, params.target);
       }
     },
-    [setEdges, store],
+    [setEdges, store, t.textMute],
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -69,8 +81,8 @@ export default function PipelineCanvas() {
       if (!bounds) return;
 
       const position = {
-        x: event.clientX - bounds.left - 90,
-        y: event.clientY - bounds.top - 25,
+        x: event.clientX - bounds.left - 100,
+        y: event.clientY - bounds.top - 30,
       };
 
       store.addStage(type, position);
@@ -99,17 +111,32 @@ export default function PipelineCanvas() {
         onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        defaultEdgeOptions={{ type: 'conditional' }}
+        defaultEdgeOptions={{
+          type: 'conditional',
+          style: { stroke: t.textMute, strokeWidth: 1.6 },
+        }}
         fitView
-        style={{ backgroundColor: '#0f172a' }}
+        proOptions={{ hideAttribution: true }}
+        style={{ background: t.bg }}
       >
-        <Controls />
-
-        <MiniMap
-          nodeColor={() => '#3b82f6'}
-          style={{ backgroundColor: '#1e293b' }}
+        <Controls
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.line}`,
+            borderRadius: 8,
+            color: t.textSoft,
+          }}
         />
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#334155" />
+        <MiniMap
+          nodeColor={() => t.accent}
+          maskColor={hexA(t.bg, 0.7)}
+          style={{
+            background: t.surface,
+            border: `1px solid ${t.line}`,
+            borderRadius: 8,
+          }}
+        />
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1} color={hexA(t.text, 0.08)} />
       </ReactFlow>
     </div>
   );

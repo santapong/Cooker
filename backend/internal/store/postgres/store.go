@@ -51,6 +51,7 @@ func NewStore(ctx context.Context, databaseURL string) (*store.Store, error) {
 		NewEnvironmentStore(db),
 		NewAppStore(db),
 		NewHostStore(db),
+		NewUserStore(db),
 		db.Close,
 	), nil
 }

@@ -2,14 +2,22 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { pipelineApi } from '../api/pipelines';
 import type { Pipeline } from '../types/pipeline';
+import { useTheme } from '../theme/ThemeProvider';
+import { Btn, Card, EmptyState, PageHeader, Pill } from '../components/ui/atoms';
+import { SkeletonStack } from '../components/Skeleton';
 
 export default function PipelinesPage() {
+  const t = useTheme();
+  const navigate = useNavigate();
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
 
   useEffect(() => {
-    pipelineApi.list().then(setPipelines).catch(console.error).finally(() => setLoading(false));
+    pipelineApi
+      .list()
+      .then(setPipelines)
+      .catch(() => setPipelines([]))
+      .finally(() => setLoading(false));
   }, []);
 
   const createPipeline = async () => {
@@ -21,60 +29,82 @@ export default function PipelinesPage() {
   };
 
   return (
-    <div>
-      <div style={styles.header}>
-        <h2 style={styles.title}>Pipelines</h2>
-        <button className="btn-primary" onClick={createPipeline}>New Pipeline</button>
-      </div>
+    <div style={{ padding: '26px 28px 60px' }}>
+      <PageHeader
+        eyebrow={`${pipelines.length} pipelines`}
+        title="Pipelines"
+        subtitle="Visual graph editor for build · ship · run. Drag nodes onto the canvas, wire them up, watch each step run live."
+        actions={
+          <>
+            <Btn kind="ghost">Templates</Btn>
+            <Btn kind="primary" icon="plus" onClick={createPipeline}>
+              New pipeline
+            </Btn>
+          </>
+        }
+      />
 
       {loading ? (
-        <div style={styles.loading}>Loading...</div>
+        <Card>
+          <SkeletonStack rows={4} />
+        </Card>
       ) : pipelines.length === 0 ? (
-        <div style={styles.empty}>
-          <p>No pipelines yet.</p>
-          <p style={{ color: '#94a3b8', fontSize: 14 }}>
-            Create your first CI/CD pipeline with the visual graph editor.
-          </p>
-          <button className="btn-primary" onClick={createPipeline} style={{ marginTop: 12 }}>
-            Create Pipeline
-          </button>
-        </div>
+        <EmptyState
+          title="No pipelines yet."
+          body="Create your first CI/CD pipeline with the visual graph editor."
+          action={
+            <Btn kind="primary" icon="plus" onClick={createPipeline}>
+              Create pipeline
+            </Btn>
+          }
+        />
       ) : (
-        <div style={styles.grid}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+            gap: 16,
+          }}
+        >
           {pipelines.map((p) => (
-            <div
+            <Card
               key={p.id}
-              style={styles.card}
+              pad={20}
+              style={{ cursor: 'pointer', transition: 'border-color .15s' }}
               onClick={() => navigate(`/pipelines/${p.id}/edit`)}
             >
-              <h3 style={styles.cardTitle}>{p.name}</h3>
-              <p style={styles.cardDesc}>{p.description}</p>
-              <div style={styles.cardMeta}>
-                {p.stages.length} stages - Updated {new Date(p.updatedAt).toLocaleDateString()}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  justifyContent: 'space-between',
+                  marginBottom: 6,
+                }}
+              >
+                <h3
+                  style={{
+                    fontFamily: t.serif,
+                    fontSize: 18,
+                    fontWeight: 500,
+                    color: t.text,
+                    margin: 0,
+                    letterSpacing: -0.3,
+                  }}
+                >
+                  {p.name}
+                </h3>
+                <Pill>{p.stages.length} steps</Pill>
               </div>
-            </div>
+              <p style={{ fontSize: 13, color: t.textSoft, margin: '4px 0 14px', lineHeight: 1.5 }}>
+                {p.description || 'No description.'}
+              </p>
+              <div style={{ fontFamily: t.mono, fontSize: 11, color: t.textMute }}>
+                updated {new Date(p.updatedAt).toLocaleDateString()}
+              </div>
+            </Card>
           ))}
         </div>
       )}
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  title: { fontSize: 22, fontWeight: 700, color: '#f1f5f9', margin: 0 },
-  loading: { color: '#94a3b8', textAlign: 'center', padding: 40 },
-  empty: { textAlign: 'center', padding: 60, color: '#f1f5f9' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 },
-  card: {
-    padding: 20,
-    backgroundColor: '#1e293b',
-    borderRadius: 8,
-    border: '1px solid #334155',
-    cursor: 'pointer',
-    transition: 'border-color 0.15s',
-  },
-  cardTitle: { fontSize: 16, fontWeight: 600, color: '#f1f5f9', margin: '0 0 8px' },
-  cardDesc: { fontSize: 13, color: '#94a3b8', margin: '0 0 12px' },
-  cardMeta: { fontSize: 12, color: '#475569' },
-};

@@ -57,6 +57,16 @@ type HostStore interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// UserStore manages local-auth account persistence. Only used when
+// COOKER_LOCAL_AUTH_ENABLED=true; the OIDC path produces no rows here.
+type UserStore interface {
+	GetByEmail(ctx context.Context, email string) (*model.User, error)
+	GetByID(ctx context.Context, id string) (*model.User, error)
+	Create(ctx context.Context, u *model.User) error
+	Update(ctx context.Context, u *model.User) error
+	Count(ctx context.Context) (int, error)
+}
+
 // Store aggregates all data-access interfaces and a cleanup hook.
 // Construct with New and pass to the server and handler layers.
 type Store struct {
@@ -65,18 +75,20 @@ type Store struct {
 	Environments EnvironmentStore
 	Apps         AppStore
 	Hosts        HostStore
+	Users        UserStore
 	close        func() error
 }
 
 // New builds a Store. closeFn may be nil when no cleanup is required
 // (e.g., in-memory stores).
-func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, h HostStore, closeFn func() error) *Store {
+func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, h HostStore, u UserStore, closeFn func() error) *Store {
 	return &Store{
 		Pipelines:    p,
 		Runs:         r,
 		Environments: e,
 		Apps:         a,
 		Hosts:        h,
+		Users:        u,
 		close:        closeFn,
 	}
 }
