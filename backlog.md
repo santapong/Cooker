@@ -45,33 +45,11 @@ What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-
 
 ### P0 — SPOF closeout follow-ups (PR #21 spillover)
 
-These are the items the SPOF closeout audit (PR #21) flagged but didn't ship inside that PR. All small; sequence them after PR #21 merges.
-
-#### P0.1 — OIDC middleware lock-free fast path
-
-`backend/internal/auth/oidc.go` — `ensureProvider` and `recordJWKSRefresh` both take `m.mu.Lock()` on every authenticated request. At low QPS this is invisible; above ~100 QPS it shows up in latency tail. Fix: store `verifier` in `atomic.Pointer[oidc.IDTokenVerifier]` and `lastJWKSRefresh` in `atomic.Int64` (UnixNano). Mutex only protects slow-path init. ~30 LOC, no behaviour change. **Ship before any deploy expected to handle > 100 concurrent users.**
-
-#### P0.2 — Redis WS hub subscriber restart on disconnect
-
-`backend/internal/server/wshub_backend.go` — `redisHubBackend.consume()` exits when the upstream `*redis.Message` channel closes (Redis flap, network blip). The hub then reads a closed inbox and `Run()` returns; **the hub never restarts**. Fix: wrap `consume()` in a backoff-and-resubscribe loop. Hub stays alive across Redis blips; broadcasts resume automatically. ~20 LOC.
-
-#### P0.3 — `time.NewTimer` in DB backoff
-
-`backend/internal/store/postgres/store.go` `pingWithBackoff` uses `time.After()` per iteration — leaks one channel per retry until the timer fires (max 30s, bounded). Replace with `time.NewTimer` + `defer t.Stop()`. Pure hygiene; ~5 LOC.
-
-#### P0.4 — Parallel readiness checks
-
-`backend/internal/server/health.go` — DB ping then Redis ping run sequentially with 1s timeout each. Worst-case 2s per probe. Parallelise via `errgroup` to halve worst-case. ~15 LOC. Only matters if probe timeouts are observed in practice.
+These are the items the SPOF closeout audit (PR #21) flagged but didn't ship inside that PR. P0.1–P0.4 and P0.6 are now closed (see "Closed (recent)" below); P0.5 and P0.7 remain.
 
 #### P0.5 — Binary WS broadcast encoding
 
 `backend/internal/server/wshub_backend.go` `Publish` does `json.Marshal(msg)` per broadcast. For chatty pipeline log streams (hundreds of msgs/sec) this is real GC pressure. Switch to a length-prefixed binary encoding with a single-byte channel-tag prefix. ~50 LOC. **Defer until profiling confirms it's hot.**
-
-#### P0.6 — OCI conformance: workflow scope
-
-`.github/workflows/oci-conformance.yml` failed three times during PR #21 with no reachable logs from the AI agent's environment. Two paths:
-- Drop the `pull_request:` trigger; keep `workflow_dispatch` + the weekly `schedule`. Treats conformance as a tracked-but-non-blocking signal. ~4 LOC.
-- Or root-cause it once a human can paste the failing step's log.
 
 #### P0.7 — OCI image-spec schema validation
 
@@ -275,7 +253,15 @@ the `--cache-to` registry wiring); ~half day for the CLI shell-out.
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), and the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout):
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), and the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch):
+
+### `claude/review-production-rollout-MT3YO` — P0 follow-up batch (operator-independent)
+
+- ✅ **P0.1 — OIDC lock-free fast path** — `internal/auth/oidc.go`. `Middleware.verifier` is now `atomic.Pointer[oidc.IDTokenVerifier]` and `lastJWKSRefresh` is `atomic.Int64` (UnixNano). The mutex serialises only slow-path provider discovery; `ensureProvider` uses double-checked init (load → if nil, lock → re-check → store). Hot path is lock-free. New concurrency test under `-race` exercises 32 writer + 32 reader goroutines through `recordJWKSRefresh` / `LastJWKSRefresh`.
+- ✅ **P0.2 — Redis WS hub subscriber resubscribe with backoff** — `internal/server/wshub_backend.go`. `consume()` now owns the `*redis.PubSub` lifecycle and re-subscribes with jittered exponential backoff (500ms → 30s) on disconnect. `b.ch` only closes on context cancel, so the hub `Run()` survives Redis blips. Each iteration closes the previous `*redis.PubSub` before resubscribing to avoid leaked connections; post-resubscribe `Receive` is bounded by a 5s timeout to handle half-open TCP. `IncRedisConnectionError()` increments on every subscribe failure and reconnect, feeding `cooker_redis_connection_errors_total`. New unit tests for `sleepJitter` (timer + ctx-cancel paths) and `nextBackoff` (doubling and cap).
+- ✅ **P0.3 — `time.NewTimer` in DB backoff** — `internal/store/postgres/store.go` `pingWithBackoff` swaps `time.After()` for `time.NewTimer` + `Stop()` on the ctx-cancel branch. No leaked timer channels per retry.
+- ✅ **P0.4 — Parallel readiness checks** — `internal/server/health.go`. DB and Redis pings run concurrently via `errgroup.WithContext` against the shared 1s deadline. Worst-case probe latency is `max(db, redis)` instead of `db + redis`. `golang.org/x/sync` promoted from indirect to direct in `go.mod`.
+- ✅ **P0.6 — OCI conformance workflow scope** — `pull_request:` trigger removed in commit `a8aa68e` (already on `main` ahead of this branch). Workflow now only runs on `workflow_dispatch` and the weekly `schedule`, treating conformance as a tracked-but-non-blocking signal until a human can pull failing logs.
 
 ### `claude/identify-failure-point-Duy02` (PR #21) — SPOF closeout
 
