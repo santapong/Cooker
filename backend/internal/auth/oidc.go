@@ -11,6 +11,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gin-gonic/gin"
 
+	"github.com/cooker-ci/cooker/internal/auth/local"
 	"github.com/cooker-ci/cooker/internal/config"
 )
 
@@ -30,21 +31,23 @@ type Claims struct {
 	AMR []string `json:"amr"`
 }
 
-// Middleware validates OIDC bearer tokens on incoming requests.
+// Middleware validates bearer tokens on incoming requests. It can hold
+// up to two verifiers — one for OIDC IdP-issued tokens and one for
+// JWTs Cooker itself issued via the local-auth path. The local
+// verifier is consulted first when a token's `iss` claim matches
+// cooker-local; otherwise OIDC takes over.
 //
-// When OIDC is disabled (dev mode) it injects a deterministic admin
-// user. When enabled it discovers the provider at construction time so
-// Cooker fails fast on misconfiguration, and uses the resulting
-// IDTokenVerifier to check `iss`, `aud`, `exp`, and signature on every
-// request.
+// When both OIDC and local auth are disabled (dev mode) the
+// middleware injects a deterministic admin user.
 type Middleware struct {
-	cfg      config.OIDCConfig
-	verifier *oidc.IDTokenVerifier
+	cfg         config.OIDCConfig
+	verifier    *oidc.IDTokenVerifier
+	localIssuer *local.Issuer
 }
 
-// NewMiddleware builds an OIDC middleware. Returns an error when
-// OIDC is enabled but the issuer is unreachable or required fields are
-// missing.
+// NewMiddleware builds an auth middleware. Returns an error when
+// OIDC is enabled but the issuer is unreachable, or when local auth
+// is enabled with a missing/short signing key.
 func NewMiddleware(ctx context.Context, cfg config.OIDCConfig) (*Middleware, error) {
 	m := &Middleware{cfg: cfg}
 	if !cfg.Enabled {
@@ -64,14 +67,51 @@ func NewMiddleware(ctx context.Context, cfg config.OIDCConfig) (*Middleware, err
 	return m, nil
 }
 
-// Handler returns a Gin middleware that validates OIDC bearer tokens.
+// EnableLocalAuth attaches the local-auth issuer so the middleware
+// will accept Cooker-issued JWTs. Pass a nil issuer to disable.
+func (m *Middleware) EnableLocalAuth(issuer *local.Issuer) {
+	m.localIssuer = issuer
+}
+
+// Handler returns a Gin middleware that validates bearer tokens.
 func (m *Middleware) Handler() gin.HandlerFunc {
-	if !m.cfg.Enabled {
+	if !m.cfg.Enabled && m.localIssuer == nil {
 		return devHandler()
 	}
 	return func(c *gin.Context) {
 		token, ok := bearerToken(c)
 		if !ok {
+			return
+		}
+		// Local-auth fast path: probe the token's iss before paying
+		// for an OIDC verify. Local tokens never go through the OIDC
+		// IDTokenVerifier (their iss is "cooker-local", not the IdP).
+		if m.localIssuer != nil && local.LooksLikeLocalToken(token) {
+			claims, err := m.localIssuer.Verify(token)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"error": "invalid token: " + err.Error(),
+				})
+				return
+			}
+			c.Set("user", &Claims{
+				Subject: claims.Subject,
+				Email:   claims.Email,
+				Name:    claims.Name,
+				Groups:  []string{},
+				Roles:   []string{claims.Role},
+				// Local auth never satisfies MFA; an operator who
+				// requires MFA on destructive routes will still need
+				// to point those users at OIDC. Documented in
+				// SECURITY.md.
+			})
+			c.Next()
+			return
+		}
+		if !m.cfg.Enabled {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "OIDC disabled and token is not a local-auth token",
+			})
 			return
 		}
 		idToken, err := m.verifier.Verify(c.Request.Context(), token)

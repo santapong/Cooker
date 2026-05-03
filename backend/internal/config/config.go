@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Env represents the deployment environment. Affects defaults and
@@ -42,6 +43,7 @@ type Config struct {
 	RateLimit      RateLimitConfig
 	WSTicket       WSTicketConfig
 	OIDC           OIDCConfig
+	LocalAuth      LocalAuthConfig
 	Docker         DockerConfig
 	Kubernetes     KubernetesConfig
 	KeepSave       KeepSaveConfig
@@ -103,6 +105,22 @@ type OIDCConfig struct {
 	// pass auth.RequireMFA. Empty disables the gate. Loaded from
 	// COOKER_OIDC_MFA_ACR_VALUES (CSV).
 	MFAACRValues []string
+}
+
+// LocalAuthConfig configures the email + password authentication path
+// that runs alongside OIDC. When Enabled is true the server registers
+// /api/v1/auth/local/{signup,signin,me} endpoints and the auth
+// middleware accepts JWTs signed with JWTSigningKey. The first user
+// to sign up is granted admin (bootstrap pattern); subsequent signups
+// default to viewer and must be promoted by an admin via the API.
+type LocalAuthConfig struct {
+	Enabled       bool
+	JWTSigningKey string        // base64 or raw; >=32 bytes after decode
+	TokenTTL      time.Duration // default 12h
+	// AllowSignup gates the /signup endpoint. Operators who only want
+	// to invite specific users via admin-created accounts should set
+	// this to false; the UI then hides the sign-up form.
+	AllowSignup bool
 }
 
 // DockerConfig holds Docker Engine connection settings.
@@ -234,6 +252,12 @@ func Load() *Config {
 			GroupRoleMap: parseGroupRoleMap(getEnv("COOKER_OIDC_GROUP_MAP", "")),
 			MFAACRValues: getEnvCSV("COOKER_OIDC_MFA_ACR_VALUES", nil),
 		},
+		LocalAuth: LocalAuthConfig{
+			Enabled:       getEnvBool("COOKER_LOCAL_AUTH_ENABLED", false),
+			JWTSigningKey: getEnv("COOKER_LOCAL_AUTH_JWT_SIGNING_KEY", ""),
+			TokenTTL:      getEnvDuration("COOKER_LOCAL_AUTH_TOKEN_TTL", 12*time.Hour),
+			AllowSignup:   getEnvBool("COOKER_LOCAL_AUTH_ALLOW_SIGNUP", true),
+		},
 		Docker: DockerConfig{
 			Host:      getEnv("DOCKER_HOST", "unix:///var/run/docker.sock"),
 			TLSVerify: getEnvBool("DOCKER_TLS_VERIFY", false),
@@ -347,8 +371,17 @@ func (c *Config) Validate() error {
 	if len(c.AllowedOrigins) == 0 {
 		problems = append(problems, "COOKER_ALLOWED_ORIGINS is required in production (no permissive default)")
 	}
-	if !c.OIDC.Enabled {
-		slog.Warn("OIDC disabled in production; backend will inject dev admin user on every request")
+	if !c.OIDC.Enabled && !c.LocalAuth.Enabled {
+		slog.Warn("OIDC and local auth both disabled in production; backend will inject dev admin user on every request")
+	}
+	if c.LocalAuth.Enabled {
+		decoded, err := DecodeLocalAuthSigningKey(c.LocalAuth.JWTSigningKey)
+		switch {
+		case err != nil:
+			problems = append(problems, "COOKER_LOCAL_AUTH_JWT_SIGNING_KEY: "+err.Error())
+		case len(decoded) < 32:
+			problems = append(problems, fmt.Sprintf("COOKER_LOCAL_AUTH_JWT_SIGNING_KEY decodes to %d bytes; need at least 32", len(decoded)))
+		}
 	}
 	if c.Audit.Enabled {
 		switch c.Audit.Destination {
@@ -420,6 +453,31 @@ func parseGroupRoleMap(raw string) map[string]string {
 		return nil
 	}
 	return out
+}
+
+// DecodeLocalAuthSigningKey returns the raw bytes for the configured
+// JWT signing key. The configured value can be base64 (preferred,
+// matches COOKER_SECRET_KEY) or a raw secret. We try base64 first
+// and fall back to the raw bytes when decode fails — operators who
+// `openssl rand -hex 32` get the same protection without the b64 step.
+func DecodeLocalAuthSigningKey(s string) ([]byte, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, errors.New("required when COOKER_LOCAL_AUTH_ENABLED=true")
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(s); err == nil && len(decoded) >= 32 {
+		return decoded, nil
+	}
+	return []byte(s), nil
+}
+
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return fallback
 }
 
 func getEnvCSV(key string, fallback []string) []string {

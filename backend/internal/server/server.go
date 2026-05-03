@@ -9,6 +9,7 @@ import (
 
 	"github.com/cooker-ci/cooker/internal/audit"
 	"github.com/cooker-ci/cooker/internal/auth"
+	"github.com/cooker-ci/cooker/internal/auth/local"
 	"github.com/cooker-ci/cooker/internal/builder"
 	"github.com/cooker-ci/cooker/internal/config"
 	"github.com/cooker-ci/cooker/internal/crypto"
@@ -37,6 +38,7 @@ type Server struct {
 	wsHub         *WebSocketHub
 	oidcMW        *auth.Middleware
 	handler       *handler.Handler
+	localAuth     *handler.LocalAuthHandler
 	store         *store.Store
 	wsTickets     ticketStore
 	redisClient   *redis.Client
@@ -56,6 +58,23 @@ func New(cfg *config.Config) (*Server, error) {
 	st, err := newStore(ctx, cfg)
 	if err != nil {
 		return nil, err
+	}
+
+	var localAuthHandler *handler.LocalAuthHandler
+	if cfg.LocalAuth.Enabled {
+		key, err := config.DecodeLocalAuthSigningKey(cfg.LocalAuth.JWTSigningKey)
+		if err != nil {
+			st.Close()
+			return nil, fmt.Errorf("local auth: %w", err)
+		}
+		issuer, err := local.NewIssuer(key, cfg.LocalAuth.TokenTTL)
+		if err != nil {
+			st.Close()
+			return nil, fmt.Errorf("local auth issuer: %w", err)
+		}
+		oidcMW.EnableLocalAuth(issuer)
+		localAuthHandler = handler.NewLocalAuthHandler(st.Users, issuer, cfg.LocalAuth.AllowSignup)
+		slog.Info("local auth enabled", "allow_signup", cfg.LocalAuth.AllowSignup, "token_ttl", cfg.LocalAuth.TokenTTL.String())
 	}
 
 	codec, err := crypto.NewCodec(cfg.SecretKey)
@@ -132,6 +151,7 @@ func New(cfg *config.Config) (*Server, error) {
 		wsHub:         wsHub,
 		oidcMW:        oidcMW,
 		handler:       h,
+		localAuth:     localAuthHandler,
 		store:         st,
 		wsTickets:     wsTickets,
 		audit:         auditSink,

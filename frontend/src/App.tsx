@@ -13,6 +13,8 @@ import DockerPage from './pages/DockerPage'
 import ComposePage from './pages/ComposePage'
 import KubernetesPage from './pages/KubernetesPage'
 import EnvironmentsPage from './pages/EnvironmentsPage'
+import SignInPage from './pages/SignInPage'
+import SignUpPage from './pages/SignUpPage'
 import Callback from './auth/Callback'
 import ProtectedRoute from './auth/ProtectedRoute'
 
@@ -22,6 +24,8 @@ export default function App() {
       <ErrorBoundary>
         <ToastViewport />
         <Routes>
+          <Route path="/signin" element={<SignInPage />} />
+          <Route path="/signup" element={<SignUpPage />} />
           <Route path="/callback" element={<Callback />} />
           <Route
             path="/*"
