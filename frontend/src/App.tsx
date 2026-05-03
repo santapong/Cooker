@@ -13,6 +13,9 @@ import DockerPage from './pages/DockerPage'
 import ComposePage from './pages/ComposePage'
 import KubernetesPage from './pages/KubernetesPage'
 import EnvironmentsPage from './pages/EnvironmentsPage'
+import HostsPage from './pages/HostsPage'
+import SettingsPage from './pages/SettingsPage'
+import RegistryPage from './pages/RegistryPage'
 import SignInPage from './pages/SignInPage'
 import SignUpPage from './pages/SignUpPage'
 import Callback from './auth/Callback'
@@ -43,6 +46,9 @@ export default function App() {
                   <Route path="/docker/compose" element={<MainLayout fullBleed><ComposePage /></MainLayout>} />
                   <Route path="/kubernetes" element={<MainLayout><KubernetesPage /></MainLayout>} />
                   <Route path="/environments" element={<MainLayout><EnvironmentsPage /></MainLayout>} />
+                  <Route path="/hosts" element={<MainLayout><HostsPage /></MainLayout>} />
+                  <Route path="/settings" element={<MainLayout><SettingsPage /></MainLayout>} />
+                  <Route path="/registry" element={<MainLayout><RegistryPage /></MainLayout>} />
                 </Routes>
               </ProtectedRoute>
             }

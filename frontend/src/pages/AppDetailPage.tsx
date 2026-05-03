@@ -4,10 +4,12 @@ import { appsApi } from '../api/apps';
 import type { AppModel, AppDeployResponse } from '../types/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { hexA } from '../theme/tokens';
-import { Btn, Card, Field, PageHeader, Pill } from '../components/ui/atoms';
+import { Btn, Card, Field, Input, Label, PageHeader, Pill, SectionLabel } from '../components/ui/atoms';
+import { useToastStore } from '../stores/toastStore';
 
 export default function AppDetailPage() {
   const t = useTheme();
+  const pushToast = useToastStore((s) => s.push);
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [app, setApp] = useState<AppModel | null>(null);
@@ -19,6 +21,11 @@ export default function AppDetailPage() {
   const [logs, setLogs] = useState<string>('');
   const wsRef = useRef<WebSocket | null>(null);
   const logRef = useRef<HTMLPreElement | null>(null);
+
+  // Webhook rotation panel state.
+  const [showWebhook, setShowWebhook] = useState(false);
+  const [newSecret, setNewSecret] = useState('');
+  const [rotating, setRotating] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -72,6 +79,34 @@ export default function AppDetailPage() {
     navigate('/apps');
   };
 
+  const rotateWebhook = async () => {
+    if (!id || !newSecret) return;
+    setRotating(true);
+    try {
+      await appsApi.setWebhookSecret(id, newSecret);
+      pushToast({ kind: 'success', message: 'Webhook secret rotated.' });
+      setNewSecret('');
+      setShowWebhook(false);
+      // Refetch so the hasWebhook badge reflects the new state.
+      const updated = await appsApi.get(id);
+      setApp(updated);
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setRotating(false);
+    }
+  };
+
+  const generateSecret = () => {
+    const arr = new Uint8Array(24);
+    window.crypto.getRandomValues(arr);
+    setNewSecret(
+      Array.from(arr)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join(''),
+    );
+  };
+
   if (loading) {
     return (
       <div
@@ -117,17 +152,72 @@ export default function AppDetailPage() {
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 22 }}>
-        <Card style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Field label="App ID" mono={app.id} />
-          <Field label="Repo" mono={`github.com/${app.githubRepo}`} />
-          <Field label="Branch" mono={app.branch} />
-          {app.registryRef && <Field label="Registry ref" mono={app.registryRef} />}
-          {app.environmentId && <Field label="Environment" mono={app.environmentId} />}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-            {app.hasWebhook && <Pill tone="cool">webhook</Pill>}
-            {app.autoDeploy && <Pill tone="good">auto-deploy</Pill>}
-          </div>
-        </Card>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Card style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <Field label="App ID" mono={app.id} />
+            <Field label="Repo" mono={`github.com/${app.githubRepo}`} />
+            <Field label="Branch" mono={app.branch} />
+            {app.registryRef && <Field label="Registry ref" mono={app.registryRef} />}
+            {app.environmentId && <Field label="Environment" mono={app.environmentId} />}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+              {app.hasWebhook && <Pill tone="cool">webhook</Pill>}
+              {app.autoDeploy && <Pill tone="good">auto-deploy</Pill>}
+            </div>
+          </Card>
+
+          <Card style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <SectionLabel>GitHub webhook</SectionLabel>
+            <div style={{ fontSize: 12.5, color: t.textSoft, lineHeight: 1.5 }}>
+              {app.hasWebhook
+                ? 'A webhook secret is set. Rotating it will invalidate any cached secret on the GitHub side.'
+                : 'No webhook secret yet. Set one so push events from GitHub trigger deploys.'}
+            </div>
+            {!showWebhook ? (
+              <Btn
+                kind="secondary"
+                icon="cog"
+                onClick={() => setShowWebhook(true)}
+                style={{ justifyContent: 'center' }}
+              >
+                {app.hasWebhook ? 'Rotate webhook secret' : 'Set webhook secret'}
+              </Btn>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <Label>New secret</Label>
+                <Input
+                  type="text"
+                  value={newSecret}
+                  onChange={(e) => setNewSecret(e.target.value)}
+                  placeholder="paste or generate"
+                  style={{ fontFamily: t.mono, fontSize: 11.5 }}
+                />
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <Btn kind="ghost" onClick={generateSecret} disabled={rotating}>
+                    Generate
+                  </Btn>
+                  <div style={{ flex: 1 }} />
+                  <Btn
+                    kind="ghost"
+                    onClick={() => {
+                      setShowWebhook(false);
+                      setNewSecret('');
+                    }}
+                    disabled={rotating}
+                  >
+                    Cancel
+                  </Btn>
+                  <Btn
+                    kind="primary"
+                    onClick={rotateWebhook}
+                    disabled={rotating || newSecret.length < 8}
+                  >
+                    {rotating ? 'Rotating…' : 'Save secret'}
+                  </Btn>
+                </div>
+              </div>
+            )}
+          </Card>
+        </div>
 
         <Card pad={0}>
           <div

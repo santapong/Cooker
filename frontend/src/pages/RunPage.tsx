@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { pipelineApi } from '../api/pipelines';
-import type { PipelineRun, Pipeline, Stage } from '../types/pipeline';
+import { useEnvironmentStore } from '../stores/environmentStore';
+import type { PipelineRun, Pipeline, Stage, EnvironmentStatus } from '../types/pipeline';
 import { useTheme } from '../theme/ThemeProvider';
 import { useUIStore } from '../stores/uiStore';
 import { hexA } from '../theme/tokens';
@@ -15,35 +16,113 @@ import {
   type Tone,
 } from '../components/ui/atoms';
 import { Icon } from '../components/ui/Icon';
-
-interface LogLine {
-  t: string;
-  lvl: 'info' | 'ok' | 'warn' | 'error';
-  ch: string;
-  msg: string;
-}
+import { useToastStore } from '../stores/toastStore';
 
 export default function RunPage() {
   const t = useTheme();
   const mode = useUIStore((s) => s.mode);
+  const pushToast = useToastStore((s) => s.push);
   const { id, runId } = useParams<{ id: string; runId: string }>();
+
   const [run, setRun] = useState<PipelineRun | null>(null);
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
-  const [logs] = useState<LogLine[]>(seedLogs());
+  const [envStatuses, setEnvStatuses] = useState<EnvironmentStatus[]>([]);
+  const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
+  const [stageLogs, setStageLogs] = useState<string>('');
+  const [logsLoading, setLogsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [cancelling, setCancelling] = useState(false);
 
+  // Fetch run + pipeline + env status. Refresh env status every 5s
+  // to pick up promotions/approvals while you're watching.
   useEffect(() => {
     if (!id || !runId) return;
     Promise.all([pipelineApi.get(id), pipelineApi.getRun(id, runId)])
       .then(([p, r]) => {
         setPipeline(p);
         setRun(r);
+        // Default-select the currently running stage, fallback to first.
+        const live = r.stageRuns?.find((s) => s.status === 'running');
+        setSelectedStageId(live?.stageId ?? p.stages[0]?.id ?? null);
       })
       .catch(() => {
-        // pipeline / run not found — fall through to loading state
+        /* falls through to loading state */
       })
       .finally(() => setLoading(false));
   }, [id, runId]);
+
+  useEffect(() => {
+    if (!id || !runId) return;
+    let cancelled = false;
+    const tick = () => {
+      pipelineApi
+        .envStatus(id, runId)
+        .then((s) => {
+          if (!cancelled) setEnvStatuses(s ?? []);
+        })
+        .catch(() => {
+          /* env-status is best-effort */
+        });
+    };
+    tick();
+    const t = window.setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [id, runId]);
+
+  // Fetch logs for the selected stage. Stage selection is the user's
+  // signal for which stage's logs to show; the WebSocket stream is a
+  // future follow-up — for now we re-fetch every 3s while the run is
+  // live.
+  useEffect(() => {
+    if (!id || !runId || !selectedStageId) {
+      setStageLogs('');
+      return;
+    }
+    let cancelled = false;
+    setLogsLoading(true);
+    const fetchLogs = () => {
+      pipelineApi
+        .getStageLogs(id, runId, selectedStageId)
+        .then((r) => {
+          if (!cancelled) setStageLogs(r.logs ?? '');
+        })
+        .catch(() => {
+          if (!cancelled) setStageLogs('');
+        })
+        .finally(() => {
+          if (!cancelled) setLogsLoading(false);
+        });
+    };
+    fetchLogs();
+    const isLive = run?.status === 'running';
+    if (!isLive) return () => {
+      cancelled = true;
+    };
+    const t = window.setInterval(fetchLogs, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [id, runId, selectedStageId, run?.status]);
+
+  const cancel = async () => {
+    if (!id || !runId) return;
+    if (!confirm('Cancel this run?')) return;
+    setCancelling(true);
+    try {
+      await pipelineApi.cancelRun(id, runId);
+      pushToast({ kind: 'success', message: 'Cancel requested.' });
+      const r = await pipelineApi.getRun(id, runId);
+      setRun(r);
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -63,23 +142,64 @@ export default function RunPage() {
   }
 
   const stages = pipeline?.stages ?? [];
+  const isLive = run?.status === 'running';
 
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: mode === 'pro' ? '300px 1fr 280px' : '300px 1fr',
+        gridTemplateColumns: mode === 'pro' ? '300px 1fr 320px' : '300px 1fr',
         height: '100%',
       }}
     >
-      <StepRail run={run} stages={stages} />
-      <LogsPanel logs={logs} />
-      {mode === 'pro' && <TelemetryPanel />}
+      <StepRail
+        run={run}
+        stages={stages}
+        selectedStageId={selectedStageId}
+        onSelect={setSelectedStageId}
+        canCancel={isLive}
+        cancelling={cancelling}
+        onCancel={cancel}
+      />
+      <LogsPanel
+        stage={stages.find((s) => s.id === selectedStageId) ?? null}
+        logs={stageLogs}
+        loading={logsLoading}
+        run={run}
+      />
+      {mode === 'pro' && (
+        <RightRail
+          pipelineId={id ?? ''}
+          runId={runId ?? ''}
+          envStatuses={envStatuses}
+          onRefresh={() => {
+            if (id && runId) {
+              pipelineApi.envStatus(id, runId).then((s) => setEnvStatuses(s ?? [])).catch(() => {});
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function StepRail({ run, stages }: { run: PipelineRun | null; stages: Stage[] }) {
+function StepRail({
+  run,
+  stages,
+  selectedStageId,
+  onSelect,
+  canCancel,
+  cancelling,
+  onCancel,
+}: {
+  run: PipelineRun | null;
+  stages: Stage[];
+  selectedStageId: string | null;
+  onSelect: (id: string) => void;
+  canCancel: boolean;
+  cancelling: boolean;
+  onCancel: () => void;
+}) {
   const t = useTheme();
   const stageRunMap = new Map(run?.stageRuns?.map((s) => [s.stageId, s]) ?? []);
   return (
@@ -89,6 +209,8 @@ function StepRail({ run, stages }: { run: PipelineRun | null; stages: Stage[] })
         background: t.surface,
         overflow: 'auto',
         padding: '16px 0',
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
       <div style={{ padding: '0 18px 14px' }}>
@@ -122,7 +244,7 @@ function StepRail({ run, stages }: { run: PipelineRun | null; stages: Stage[] })
         </div>
       </div>
 
-      <div style={{ position: 'relative', padding: '4px 0' }}>
+      <div style={{ position: 'relative', padding: '4px 0', flex: 1 }}>
         <span
           style={{
             position: 'absolute',
@@ -137,17 +259,23 @@ function StepRail({ run, stages }: { run: PipelineRun | null; stages: Stage[] })
           const sr = stageRunMap.get(s.id);
           const tone = statusTone(sr?.status);
           const isCurrent = tone === 'ember';
+          const isSelected = selectedStageId === s.id;
           return (
             <div
               key={s.id}
+              onClick={() => onSelect(s.id)}
               style={{
                 display: 'grid',
                 gridTemplateColumns: '44px 1fr auto',
                 alignItems: 'center',
                 gap: 8,
                 padding: '10px 18px 10px 14px',
-                background: isCurrent ? hexA(t.ember, 0.06) : 'transparent',
-                borderLeft: `3px solid ${isCurrent ? t.ember : 'transparent'}`,
+                background: isSelected
+                  ? hexA(t.accent, 0.06)
+                  : isCurrent
+                    ? hexA(t.ember, 0.06)
+                    : 'transparent',
+                borderLeft: `3px solid ${isSelected ? t.accent : isCurrent ? t.ember : 'transparent'}`,
                 cursor: 'pointer',
               }}
             >
@@ -182,6 +310,25 @@ function StepRail({ run, stages }: { run: PipelineRun | null; stages: Stage[] })
             This pipeline has no stages yet.
           </div>
         )}
+      </div>
+
+      <div
+        style={{
+          padding: '12px 18px',
+          borderTop: `1px solid ${t.line}`,
+          display: 'flex',
+          gap: 8,
+        }}
+      >
+        <Btn
+          kind="danger"
+          icon="close"
+          onClick={onCancel}
+          disabled={!canCancel || cancelling}
+          style={{ flex: 1, justifyContent: 'center' }}
+        >
+          {cancelling ? 'Cancelling…' : 'Cancel run'}
+        </Btn>
       </div>
     </aside>
   );
@@ -232,14 +379,26 @@ function StepDot({ tone }: { tone: Tone }) {
   );
 }
 
-function LogsPanel({ logs }: { logs: LogLine[] }) {
+function LogsPanel({
+  stage,
+  logs,
+  loading,
+  run,
+}: {
+  stage: Stage | null;
+  logs: string;
+  loading: boolean;
+  run: PipelineRun | null;
+}) {
   const t = useTheme();
   const [filter, setFilter] = useState<'all' | 'info' | 'warn' | 'error'>('all');
-  const filtered = logs.filter((l) => {
-    if (filter === 'all') return true;
-    if (filter === 'info') return l.lvl === 'info' || l.lvl === 'ok';
-    return l.lvl === filter;
-  });
+
+  const lines = useMemo(() => {
+    const all = logs ? logs.split('\n').map((l) => parseLogLine(l)) : [];
+    if (filter === 'all') return all;
+    return all.filter((l) => l.level === filter || (filter === 'info' && (l.level === 'info' || l.level === 'ok')));
+  }, [logs, filter]);
+
   return (
     <section
       style={{
@@ -260,11 +419,13 @@ function LogsPanel({ logs }: { logs: LogLine[] }) {
           background: t.surface,
         }}
       >
-        <KindBadge kind="deploy" />
+        <KindBadge kind={stage?.type ?? 'custom'} />
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>Live logs</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>
+            {stage ? stage.name : 'Select a stage'}
+          </div>
           <div style={{ fontFamily: t.mono, fontSize: 10.5, color: t.textMute }}>
-            {logs.length.toLocaleString()} lines
+            {stage ? `${stage.type} · ${lines.length} lines` : 'no stage selected'}
           </div>
         </div>
         <div
@@ -311,8 +472,15 @@ function LogsPanel({ logs }: { logs: LogLine[] }) {
             background: t.bg,
           }}
         >
-          <span style={{ width: 6, height: 6, background: t.good, borderRadius: 999 }} />
-          tail · live
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              background: run?.status === 'running' ? t.good : t.textMute,
+              borderRadius: 999,
+            }}
+          />
+          {run?.status === 'running' ? 'tail · live' : 'tail · idle'}
         </div>
         <KBD>/</KBD>
       </div>
@@ -326,57 +494,78 @@ function LogsPanel({ logs }: { logs: LogLine[] }) {
           fontSize: 12,
         }}
       >
-        {filtered.map((l, i) => {
-          const lvlColor = ({ info: t.textSoft, ok: t.good, warn: t.warn, error: t.bad } as const)[l.lvl];
-          const chColor = chColorFor(l.ch, t);
-          return (
-            <div
-              key={i}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '70px 60px 60px 1fr',
-                gap: 12,
-                padding: '2px 18px',
-                lineHeight: 1.55,
-              }}
-            >
-              <span style={{ color: t.textMute }}>{l.t}</span>
-              <span
+        {loading && lines.length === 0 ? (
+          <div style={{ padding: 18, color: t.textMute, fontStyle: 'italic' }}>
+            Fetching logs…
+          </div>
+        ) : !stage ? (
+          <div style={{ padding: 18, color: t.textMute, fontStyle: 'italic' }}>
+            Click a stage in the rail to see its logs.
+          </div>
+        ) : lines.length === 0 ? (
+          <div style={{ padding: 18, color: t.textMute, fontStyle: 'italic' }}>
+            No log lines yet for {stage.name}. Logs will appear as the stage runs.
+          </div>
+        ) : (
+          lines.map((l, i) => {
+            const lvlColor =
+              l.level === 'ok'
+                ? t.good
+                : l.level === 'warn'
+                  ? t.warn
+                  : l.level === 'error'
+                    ? t.bad
+                    : t.textSoft;
+            return (
+              <div
+                key={i}
                 style={{
-                  color: lvlColor,
-                  textTransform: 'uppercase',
-                  letterSpacing: 0.6,
-                  fontSize: 10.5,
-                  paddingTop: 1.5,
+                  display: 'grid',
+                  gridTemplateColumns: '70px 60px 1fr',
+                  gap: 12,
+                  padding: '2px 18px',
+                  lineHeight: 1.55,
                 }}
               >
-                {l.lvl}
-              </span>
-              <span style={{ color: chColor, fontWeight: 600 }}>[{l.ch}]</span>
-              <span style={{ color: t.text }}>{l.msg}</span>
-            </div>
-          );
-        })}
-        <div
-          style={{
-            padding: '4px 18px',
-            color: t.ember,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <span
+                <span style={{ color: t.textMute }}>{l.timestamp ?? ''}</span>
+                <span
+                  style={{
+                    color: lvlColor,
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.6,
+                    fontSize: 10.5,
+                    paddingTop: 1.5,
+                  }}
+                >
+                  {l.level ?? ''}
+                </span>
+                <span style={{ color: t.text }}>{l.message}</span>
+              </div>
+            );
+          })
+        )}
+        {run?.status === 'running' && (
+          <div
             style={{
-              width: 6,
-              height: 6,
-              background: t.ember,
-              borderRadius: 999,
-              animation: 'cookerPulse 1.2s infinite',
+              padding: '4px 18px',
+              color: t.ember,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
             }}
-          />
-          <span style={{ animation: 'cookerBlink 1s steps(2) infinite' }}>▌</span>
-        </div>
+          >
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                background: t.ember,
+                borderRadius: 999,
+                animation: 'cookerPulse 1.2s infinite',
+              }}
+            />
+            <span style={{ animation: 'cookerBlink 1s steps(2) infinite' }}>▌</span>
+          </div>
+        )}
       </div>
 
       <div
@@ -392,26 +581,69 @@ function LogsPanel({ logs }: { logs: LogLine[] }) {
           color: t.textMute,
         }}
       >
-        <span>{filtered.length} lines</span>
+        <span>{lines.length} lines</span>
         <span>·</span>
         <span>
-          {filtered.filter((l) => l.lvl === 'error').length} errors ·{' '}
-          {filtered.filter((l) => l.lvl === 'warn').length} warnings
+          {lines.filter((l) => l.level === 'error').length} errors ·{' '}
+          {lines.filter((l) => l.level === 'warn').length} warnings
         </span>
         <span style={{ flex: 1 }} />
-        <Btn kind="secondary" icon="pause">
-          Pause
-        </Btn>
-        <Btn kind="ghost" icon="close">
-          Cancel
-        </Btn>
+        <span>{run?.status ?? 'idle'}</span>
       </div>
     </section>
   );
 }
 
-function TelemetryPanel() {
+function RightRail({
+  pipelineId,
+  runId,
+  envStatuses,
+  onRefresh,
+}: {
+  pipelineId: string;
+  runId: string;
+  envStatuses: EnvironmentStatus[];
+  onRefresh: () => void;
+}) {
   const t = useTheme();
+  const pushToast = useToastStore((s) => s.push);
+  const { environments, fetchEnvironments } = useEnvironmentStore();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (environments.length === 0) fetchEnvironments();
+  }, [environments.length, fetchEnvironments]);
+
+  const envName = (id: string) => environments.find((e) => e.id === id)?.name ?? id.slice(0, 8);
+
+  const promote = async (toEnvId: string) => {
+    setBusy(`promote:${toEnvId}`);
+    try {
+      await pipelineApi.promoteRun(pipelineId, runId, toEnvId);
+      pushToast({ kind: 'success', message: `Promotion to ${envName(toEnvId)} requested.` });
+      onRefresh();
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const approve = async (envId: string) => {
+    setBusy(`approve:${envId}`);
+    try {
+      await pipelineApi.approvePromotion(pipelineId, runId, envId);
+      pushToast({ kind: 'success', message: `Approved ${envName(envId)}.` });
+      onRefresh();
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const orderedEnvs = environments.slice().sort((a, b) => a.order - b.order);
+
   return (
     <aside
       style={{
@@ -421,124 +653,124 @@ function TelemetryPanel() {
         padding: '16px 18px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 16,
+        gap: 18,
       }}
     >
-      <SectionLabel>Live telemetry</SectionLabel>
-      <Spark label="CPU" value="—" tone="cool" data={[]} />
-      <Spark label="Memory" value="—" tone="warn" data={[]} />
-      <Spark label="p95 latency" value="—" tone="good" data={[]} />
-      <Spark label="req/s" value="—" tone="accent" data={[]} />
+      <SectionLabel>Promotion path</SectionLabel>
+      {orderedEnvs.length === 0 ? (
+        <div style={{ color: t.textMute, fontSize: 12, fontFamily: t.mono, fontStyle: 'italic' }}>
+          No environments configured.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {orderedEnvs.map((env) => {
+            const status = envStatuses.find((s) => s.environmentId === env.id);
+            const tone: Tone = status
+              ? status.status === 'deployed'
+                ? 'good'
+                : status.status === 'failed'
+                  ? 'bad'
+                  : status.status === 'awaiting_approval'
+                    ? 'warn'
+                    : status.status === 'deploying'
+                      ? 'ember'
+                      : 'neutral'
+              : 'neutral';
+            const needsApproval = status?.status === 'awaiting_approval';
+            return (
+              <div
+                key={env.id}
+                style={{
+                  padding: '10px 12px',
+                  background: t.bg,
+                  border: `1px solid ${t.line}`,
+                  borderRadius: 8,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontFamily: t.mono, fontSize: 12, fontWeight: 600, color: t.text, flex: 1 }}>
+                    {env.name}
+                  </span>
+                  <Pill tone={tone}>{status?.status ?? 'pending'}</Pill>
+                </div>
+                {status?.promotedAt && (
+                  <div style={{ fontFamily: t.mono, fontSize: 10.5, color: t.textMute }}>
+                    promoted {new Date(status.promotedAt).toLocaleTimeString()}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                  {needsApproval && (
+                    <Btn
+                      kind="primary"
+                      icon="check"
+                      onClick={() => approve(env.id)}
+                      disabled={busy !== null}
+                      style={{ flex: 1, justifyContent: 'center' }}
+                    >
+                      {busy === `approve:${env.id}` ? 'Approving…' : 'Approve'}
+                    </Btn>
+                  )}
+                  {!needsApproval && status?.status !== 'deployed' && (
+                    <Btn
+                      kind="ink"
+                      icon="arrow"
+                      onClick={() => promote(env.id)}
+                      disabled={busy !== null}
+                      style={{ flex: 1, justifyContent: 'center' }}
+                    >
+                      {busy === `promote:${env.id}` ? 'Promoting…' : 'Promote here'}
+                    </Btn>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-      <SectionLabel>Pods</SectionLabel>
+      <SectionLabel>Live telemetry</SectionLabel>
       <div style={{ color: t.textMute, fontSize: 12, fontFamily: t.mono, fontStyle: 'italic' }}>
-        Telemetry stream not wired up yet.
+        Telemetry stream not wired up yet (follow-up: per-run WebSocket).
       </div>
     </aside>
   );
 }
 
-function Spark({
-  label,
-  value,
-  data,
-  tone,
-}: {
-  label: string;
-  value: string;
-  data: number[];
-  tone: Tone;
-}) {
-  const t = useTheme();
-  const palette: Record<Tone, string> = {
-    good: t.good,
-    warn: t.warn,
-    bad: t.bad,
-    cool: t.cool,
-    accent: t.accent,
-    ember: t.ember,
-    neutral: t.textMute,
-  };
-  const c = palette[tone];
-  const W = 240;
-  const H = 36;
-  const pts = data.length
-    ? data
-        .map((d, i) => {
-          const max = Math.max(...data);
-          const min = Math.min(...data);
-          const x = (i / (data.length - 1)) * W;
-          const y = H - ((d - min) / Math.max(1, max - min)) * H;
-          return `${x},${y}`;
-        })
-        .join(' ')
-    : '';
-  return (
-    <div>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'baseline',
-          marginBottom: 4,
-        }}
-      >
-        <span
-          style={{
-            fontFamily: t.mono,
-            fontSize: 10.5,
-            color: t.textMute,
-            letterSpacing: 1,
-            textTransform: 'uppercase',
-          }}
-        >
-          {label}
-        </span>
-        <span style={{ fontFamily: t.serif, fontSize: 18, fontWeight: 500, color: t.text }}>
-          {value}
-        </span>
-      </div>
-      <svg
-        width="100%"
-        height={H}
-        viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio="none"
-        style={{ display: 'block' }}
-      >
-        {pts && (
-          <>
-            <polyline
-              points={pts}
-              fill="none"
-              stroke={c}
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <polyline points={`${pts} ${W},${H} 0,${H}`} fill={hexA(c, 0.1)} stroke="none" />
-          </>
-        )}
-        {!pts && (
-          <line
-            x1="0"
-            y1={H / 2}
-            x2={W}
-            y2={H / 2}
-            stroke={t.line}
-            strokeWidth="1"
-            strokeDasharray="4 4"
-          />
-        )}
-      </svg>
-    </div>
-  );
+interface ParsedLogLine {
+  timestamp?: string;
+  level?: 'info' | 'ok' | 'warn' | 'error';
+  message: string;
 }
 
-function chColorFor(ch: string, t: { cool: string; accent: string; warn: string; textMute: string }): string {
-  if (ch === 'kube') return t.cool;
-  if (ch === 'pod') return t.accent;
-  if (ch === 'app') return t.warn;
-  return t.textMute;
+function parseLogLine(raw: string): ParsedLogLine {
+  // Best-effort: backend hasn't formalised a log line shape yet, so
+  // we try to detect [LEVEL] and HH:MM:SS at the start; otherwise
+  // pass the whole line through as the message.
+  const trimmed = raw.trim();
+  if (!trimmed) return { message: '' };
+
+  // Timestamp HH:MM:SS or HH:MM:SS.mmm at the start.
+  const tsMatch = trimmed.match(/^(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s+(.*)$/);
+  let rest = trimmed;
+  let timestamp: string | undefined;
+  if (tsMatch) {
+    timestamp = tsMatch[1];
+    rest = tsMatch[2];
+  }
+
+  // [LEVEL] or LEVEL: prefix.
+  const lvlMatch = rest.match(/^\[?(INFO|OK|WARN|WARNING|ERROR|ERR)\]?\s*[:\s]\s*(.*)$/i);
+  if (lvlMatch) {
+    const lvl = lvlMatch[1].toUpperCase();
+    const level: ParsedLogLine['level'] =
+      lvl === 'INFO' ? 'info' : lvl === 'OK' ? 'ok' : lvl.startsWith('WARN') ? 'warn' : 'error';
+    return { timestamp, level, message: lvlMatch[2] };
+  }
+
+  return { timestamp, message: rest };
 }
 
 function duration(start?: string, end?: string): string | null {
@@ -551,12 +783,4 @@ function duration(start?: string, end?: string): string | null {
   const m = Math.floor(ms / 60_000);
   const sec = Math.floor((ms % 60_000) / 1000);
   return `${m}m ${sec.toString().padStart(2, '0')}s`;
-}
-
-function seedLogs(): LogLine[] {
-  // Placeholder static log lines — real logs come over the runs WebSocket
-  // once that endpoint is wired in. Using sample lines for visual parity.
-  return [
-    { t: '00:00:01', lvl: 'info', ch: 'app', msg: 'waiting for live log stream…' },
-  ];
 }
