@@ -79,7 +79,7 @@ Distribution-spec conformance (P0.6) tests the *registry*, not the *producer*. T
 
 #### P0.8 — Operator rollout playbook
 
-Capture the UAT → Production rollout plan delivered alongside PR #21 as `docs/ROLLOUT.md`. Today it lives only in conversation. ~1 hour.
+✅ **Shipped** as `docs/ROLLOUT.md` in PR #21. Single source of truth for UAT → production cutover; cross-references RUNBOOK.md, MULTI_REPLICA.md, SECURITY.md.
 
 ---
 
