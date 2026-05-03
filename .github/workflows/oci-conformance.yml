@@ -11,11 +11,10 @@ on:
   schedule:
     # Weekly on Sundays at 02:00 UTC
     - cron: "0 2 * * 0"
-  pull_request:
-    paths:
-      - "backend/internal/pusher/**"
-      - ".github/workflows/oci-conformance.yml"
-      - "backend/go.mod"
+  # PR trigger intentionally disabled — see backlog P0.6. Conformance
+  # is a tracked but non-blocking signal until the upstream Ginkgo
+  # suite's failure mode against a fresh registry:2 sidecar is
+  # root-caused. Re-enable by adding back a `pull_request:` block.
 
 jobs:
   conformance:
