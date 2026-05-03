@@ -2,7 +2,8 @@ package server
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/binary"
+	"errors"
 	"log/slog"
 	"math/rand"
 	"time"
@@ -100,7 +101,7 @@ func newRedisHubBackend(parent context.Context, client *redis.Client) (*redisHub
 }
 
 func (b *redisHubBackend) Publish(msg BroadcastMessage) error {
-	payload, err := json.Marshal(msg)
+	payload, err := encodeBroadcast(msg)
 	if err != nil {
 		return err
 	}
@@ -180,9 +181,9 @@ func (b *redisHubBackend) drain(source <-chan *redis.Message) {
 			if !ok {
 				return
 			}
-			var msg BroadcastMessage
-			if err := json.Unmarshal([]byte(raw.Payload), &msg); err != nil {
-				slog.Warn("ws redis backend: unmarshal", "err", err)
+			msg, err := decodeBroadcast([]byte(raw.Payload))
+			if err != nil {
+				slog.Warn("ws redis backend: decode", "err", err)
 				continue
 			}
 			select {
@@ -216,4 +217,48 @@ func nextBackoff(d, max time.Duration) time.Duration {
 		d = max
 	}
 	return d
+}
+
+// Wire format for cross-replica broadcast messages over Redis pub/sub:
+//
+//	[channel-len: uint16 big-endian][channel: bytes][data: bytes]
+//
+// The format is internal — only the redisHubBackend reads or writes it,
+// and Cooker pushes the same wire format from every replica. A rolling
+// upgrade across replicas with mixed encodings will see decode failures
+// (logged at warn) for the duration of the upgrade window; messages
+// resume cleanly once all replicas are on the same version. Avoid
+// mixing versions over long periods.
+//
+// Switched from json.Marshal in P0.5: typical broadcast carries an
+// app-run channel string (~46 bytes) and a small log-line data
+// payload, where JSON framing previously added ~74 bytes per message.
+// Binary framing is 2 bytes plus the channel and data.
+const broadcastChannelLenBytes = 2
+
+func encodeBroadcast(msg BroadcastMessage) ([]byte, error) {
+	if len(msg.Channel) > int(^uint16(0)) {
+		return nil, errors.New("ws redis backend: channel name exceeds 65535 bytes")
+	}
+	out := make([]byte, broadcastChannelLenBytes+len(msg.Channel)+len(msg.Data))
+	binary.BigEndian.PutUint16(out[:broadcastChannelLenBytes], uint16(len(msg.Channel)))
+	copy(out[broadcastChannelLenBytes:], msg.Channel)
+	copy(out[broadcastChannelLenBytes+len(msg.Channel):], msg.Data)
+	return out, nil
+}
+
+func decodeBroadcast(payload []byte) (BroadcastMessage, error) {
+	if len(payload) < broadcastChannelLenBytes {
+		return BroadcastMessage{}, errors.New("ws redis backend: payload too short for channel length prefix")
+	}
+	chLen := int(binary.BigEndian.Uint16(payload[:broadcastChannelLenBytes]))
+	if len(payload) < broadcastChannelLenBytes+chLen {
+		return BroadcastMessage{}, errors.New("ws redis backend: payload truncated mid-channel")
+	}
+	start := broadcastChannelLenBytes
+	end := start + chLen
+	return BroadcastMessage{
+		Channel: string(payload[start:end]),
+		Data:    append([]byte(nil), payload[end:]...),
+	}, nil
 }
