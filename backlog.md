@@ -45,15 +45,7 @@ What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-
 
 ### P0 — SPOF closeout follow-ups (PR #21 spillover)
 
-These are the items the SPOF closeout audit (PR #21) flagged but didn't ship inside that PR. P0.1–P0.4 and P0.6 are now closed (see "Closed (recent)" below); P0.5 and P0.7 remain.
-
-#### P0.5 — Binary WS broadcast encoding
-
-`backend/internal/server/wshub_backend.go` `Publish` does `json.Marshal(msg)` per broadcast. For chatty pipeline log streams (hundreds of msgs/sec) this is real GC pressure. Switch to a length-prefixed binary encoding with a single-byte channel-tag prefix. ~50 LOC. **Defer until profiling confirms it's hot.**
-
-#### P0.7 — OCI image-spec schema validation
-
-Distribution-spec conformance (P0.6) tests the *registry*, not the *producer*. To actually validate "Cooker-pushed images conform to OCI image-spec", add a step that pulls the manifest Cooker pushed and validates it against the OCI image-spec JSON schema. Different tooling than distribution-spec/conformance. ~half day.
+All P0.1–P0.7 items are now closed (see "Closed (recent)" below). P0.8 (operator rollout playbook) shipped in PR #21.
 
 #### P0.8 — Operator rollout playbook
 
@@ -137,8 +129,8 @@ remaining bullet is operator-side only:
 ### P7 — UAT and dev experience
 
 - [x] **`tecnativa/docker-socket-proxy` overlay** at `docker-compose.uat.socketproxy.yml` + `make uat-up-socketproxy`. Opt-in via the `socketproxy` compose profile so the default `make uat-up` keeps working unchanged.
-- [ ] **`make uat-up-with-keycloak`** target that adds Keycloak as a compose service and pre-seeds a realm. **Why not in PR #17:** realm pre-seed is environment-specific; needs a working Keycloak start-realm JSON checked in. ~half day.
-- [ ] **`make test-e2e`** that boots `make uat-up`, runs a deterministic pipeline through the API, and tears down. ~1 day.
+- [x] **`make uat-up-with-keycloak`** — Keycloak compose overlay (`docker-compose.uat.keycloak.yml`) with pre-seeded realm `cooker` (admins+viewers groups, alice/alice = admin, bob/bob = viewer). Uses `host.docker.internal:8081` so browser and backend share the same issuer URL.
+- [x] **`make test-e2e`** — boots `make uat-up`, drives a deterministic pipeline (one no-op `custom` stage) through the API via curl/jq, asserts terminal status `success`, tears down on exit. Implementation: `scripts/e2e/run.sh`.
 
 ---
 
@@ -261,7 +253,11 @@ Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cook
 - ✅ **P0.2 — Redis WS hub subscriber resubscribe with backoff** — `internal/server/wshub_backend.go`. `consume()` now owns the `*redis.PubSub` lifecycle and re-subscribes with jittered exponential backoff (500ms → 30s) on disconnect. `b.ch` only closes on context cancel, so the hub `Run()` survives Redis blips. Each iteration closes the previous `*redis.PubSub` before resubscribing to avoid leaked connections; post-resubscribe `Receive` is bounded by a 5s timeout to handle half-open TCP. `IncRedisConnectionError()` increments on every subscribe failure and reconnect, feeding `cooker_redis_connection_errors_total`. New unit tests for `sleepJitter` (timer + ctx-cancel paths) and `nextBackoff` (doubling and cap).
 - ✅ **P0.3 — `time.NewTimer` in DB backoff** — `internal/store/postgres/store.go` `pingWithBackoff` swaps `time.After()` for `time.NewTimer` + `Stop()` on the ctx-cancel branch. No leaked timer channels per retry.
 - ✅ **P0.4 — Parallel readiness checks** — `internal/server/health.go`. DB and Redis pings run concurrently via `errgroup.WithContext` against the shared 1s deadline. Worst-case probe latency is `max(db, redis)` instead of `db + redis`. `golang.org/x/sync` promoted from indirect to direct in `go.mod`.
+- ✅ **P0.5 — Binary WS broadcast encoding** — `internal/server/wshub_backend.go`. Replaced `json.Marshal` of `BroadcastMessage` on the Redis pub/sub leg with a length-prefixed binary frame: `[channel-len: uint16 BE][channel][data]`. ~74 bytes of JSON framing per message replaced with 2. Browser-facing wire is unchanged — the hub still writes raw `data` as a `TextMessage`. Round-trip + truncation + oversized-channel tests added; documented in code that the format is internal and that a rolling upgrade across mixed-version replicas will see decode warnings during the upgrade window.
 - ✅ **P0.6 — OCI conformance workflow scope** — `pull_request:` trigger removed in commit `a8aa68e` (already on `main` ahead of this branch). Workflow now only runs on `workflow_dispatch` and the weekly `schedule`, treating conformance as a tracked-but-non-blocking signal until a human can pull failing logs.
+- ✅ **P0.7 — OCI image-spec schema validation** — `internal/pusher/conformance_test.go` adds `TestManifestSpecConformance`, which pulls the image pushed by `TestPushConformance` via `crane.Manifest` and validates structural requirements per OCI image-spec v1.1: `schemaVersion=2`, `mediaType=application/vnd.oci.image.manifest.v1+json`, descriptor digest/size/mediaType for both `config` and every `layer`. CI workflow + Makefile target updated to run both tests in one pass.
+- ✅ **P7 — `make uat-up-with-keycloak`** — `docker-compose.uat.keycloak.yml` overlay + pre-seeded realm at `deploy/uat/keycloak-realm-cooker.json`. Realm contains the `cooker` public PKCE client, the three `cooker-*` groups, and two test users (alice/alice = admin, bob/bob = viewer). Both backend and browser use the same issuer URL `http://host.docker.internal:8081/realms/cooker` so issuer claim verification works without dual-URL configuration. Linux operators without Docker Desktop need a one-time `/etc/hosts` entry; documented in the Makefile output.
+- ✅ **P7 — `make test-e2e`** — `scripts/e2e/run.sh` waits for `/health/ready`, creates a single-stage `custom` (no-op) pipeline via the API, triggers a run, polls until terminal, and asserts `success`. Uses dev-admin auto-injection (UAT default `COOKER_OIDC_ENABLED=false`). The Makefile target boots `make uat-up`, runs the harness, and tears down on exit via trap.
 
 ### `claude/identify-failure-point-Duy02` (PR #21) — SPOF closeout
 
