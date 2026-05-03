@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -51,14 +52,22 @@ type Middleware struct {
 	cfg         config.OIDCConfig
 	localIssuer *local.Issuer
 
-	// mu guards verifier, nextProviderTry, and lastJWKSRefresh.
-	// OIDC provider discovery is deferred to first request so that
-	// boot survives a transient IdP outage. nextProviderTry caps the
-	// retry rate; lastJWKSRefresh feeds the readiness probe.
+	// verifier holds the OIDC ID-token verifier once provider discovery
+	// succeeds. Loaded lock-free on every authenticated request; written
+	// under mu via the slow-path discovery in ensureProvider. A nil load
+	// means discovery hasn't happened yet (or hasn't recovered from
+	// failure) and ensureProvider takes the lock to handle it.
+	verifier atomic.Pointer[oidc.IDTokenVerifier]
+
+	// lastJWKSRefresh is UnixNano of the most recent successful token
+	// verification. 0 means "never" (boot, no traffic). Written
+	// lock-free from the auth hot path; read by the readiness probe.
+	lastJWKSRefresh atomic.Int64
+
+	// mu serialises slow-path provider discovery and protects
+	// nextProviderTry. It is NOT taken on the hot path.
 	mu              sync.Mutex
-	verifier        *oidc.IDTokenVerifier
 	nextProviderTry time.Time
-	lastJWKSRefresh time.Time
 }
 
 // NewMiddleware builds an auth middleware. Returns an error only when
@@ -83,11 +92,15 @@ func NewMiddleware(_ context.Context, cfg config.OIDCConfig) (*Middleware, error
 // ensureProvider lazily discovers the OIDC provider on the first
 // authenticated request. Subsequent failures are rate-limited to one
 // attempt every providerDiscoveryRetry seconds so Cooker doesn't
-// hammer a recovering IdP.
+// hammer a recovering IdP. The fast path is lock-free: once a verifier
+// is published, all callers see it via the atomic.Pointer load.
 func (m *Middleware) ensureProvider(ctx context.Context) error {
+	if m.verifier.Load() != nil {
+		return nil
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.verifier != nil {
+	if m.verifier.Load() != nil {
 		return nil
 	}
 	if !m.nextProviderTry.IsZero() && time.Now().Before(m.nextProviderTry) {
@@ -99,7 +112,8 @@ func (m *Middleware) ensureProvider(ctx context.Context) error {
 		observability.IncJWKSFetchFailure()
 		return fmt.Errorf("discover provider %q: %w", m.cfg.IssuerURL, err)
 	}
-	m.verifier = provider.Verifier(&oidc.Config{ClientID: m.cfg.ClientID})
+	verifier := provider.Verifier(&oidc.Config{ClientID: m.cfg.ClientID})
+	m.verifier.Store(verifier)
 	m.nextProviderTry = time.Time{}
 	return nil
 }
@@ -107,21 +121,18 @@ func (m *Middleware) ensureProvider(ctx context.Context) error {
 // recordJWKSRefresh stamps the time of the most recent successful
 // token verification so the readiness probe can report JWKS freshness.
 func (m *Middleware) recordJWKSRefresh() {
-	m.mu.Lock()
-	m.lastJWKSRefresh = time.Now()
-	m.mu.Unlock()
+	m.lastJWKSRefresh.Store(time.Now().UnixNano())
 }
 
 // LastJWKSRefresh returns how long ago the JWKS was last successfully
 // used to verify a token. The bool is false until the first verify
 // has happened (boot, no traffic). Used by the /health/ready handler.
 func (m *Middleware) LastJWKSRefresh() (time.Duration, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.lastJWKSRefresh.IsZero() {
+	n := m.lastJWKSRefresh.Load()
+	if n == 0 {
 		return 0, false
 	}
-	return time.Since(m.lastJWKSRefresh), true
+	return time.Since(time.Unix(0, n)), true
 }
 
 // EnableLocalAuth attaches the local-auth issuer so the middleware
@@ -178,7 +189,15 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 			})
 			return
 		}
-		idToken, err := m.verifier.Verify(c.Request.Context(), token)
+		verifier := m.verifier.Load()
+		if verifier == nil {
+			c.Header("Retry-After", "30")
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error": "oidc: verifier not ready",
+			})
+			return
+		}
+		idToken, err := verifier.Verify(c.Request.Context(), token)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid token: " + err.Error(),

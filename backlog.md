@@ -45,37 +45,7 @@ What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-
 
 ### P0 — SPOF closeout follow-ups (PR #21 spillover)
 
-These are the items the SPOF closeout audit (PR #21) flagged but didn't ship inside that PR. All small; sequence them after PR #21 merges.
-
-#### P0.1 — OIDC middleware lock-free fast path
-
-`backend/internal/auth/oidc.go` — `ensureProvider` and `recordJWKSRefresh` both take `m.mu.Lock()` on every authenticated request. At low QPS this is invisible; above ~100 QPS it shows up in latency tail. Fix: store `verifier` in `atomic.Pointer[oidc.IDTokenVerifier]` and `lastJWKSRefresh` in `atomic.Int64` (UnixNano). Mutex only protects slow-path init. ~30 LOC, no behaviour change. **Ship before any deploy expected to handle > 100 concurrent users.**
-
-#### P0.2 — Redis WS hub subscriber restart on disconnect
-
-`backend/internal/server/wshub_backend.go` — `redisHubBackend.consume()` exits when the upstream `*redis.Message` channel closes (Redis flap, network blip). The hub then reads a closed inbox and `Run()` returns; **the hub never restarts**. Fix: wrap `consume()` in a backoff-and-resubscribe loop. Hub stays alive across Redis blips; broadcasts resume automatically. ~20 LOC.
-
-#### P0.3 — `time.NewTimer` in DB backoff
-
-`backend/internal/store/postgres/store.go` `pingWithBackoff` uses `time.After()` per iteration — leaks one channel per retry until the timer fires (max 30s, bounded). Replace with `time.NewTimer` + `defer t.Stop()`. Pure hygiene; ~5 LOC.
-
-#### P0.4 — Parallel readiness checks
-
-`backend/internal/server/health.go` — DB ping then Redis ping run sequentially with 1s timeout each. Worst-case 2s per probe. Parallelise via `errgroup` to halve worst-case. ~15 LOC. Only matters if probe timeouts are observed in practice.
-
-#### P0.5 — Binary WS broadcast encoding
-
-`backend/internal/server/wshub_backend.go` `Publish` does `json.Marshal(msg)` per broadcast. For chatty pipeline log streams (hundreds of msgs/sec) this is real GC pressure. Switch to a length-prefixed binary encoding with a single-byte channel-tag prefix. ~50 LOC. **Defer until profiling confirms it's hot.**
-
-#### P0.6 — OCI conformance: workflow scope
-
-`.github/workflows/oci-conformance.yml` failed three times during PR #21 with no reachable logs from the AI agent's environment. Two paths:
-- Drop the `pull_request:` trigger; keep `workflow_dispatch` + the weekly `schedule`. Treats conformance as a tracked-but-non-blocking signal. ~4 LOC.
-- Or root-cause it once a human can paste the failing step's log.
-
-#### P0.7 — OCI image-spec schema validation
-
-Distribution-spec conformance (P0.6) tests the *registry*, not the *producer*. To actually validate "Cooker-pushed images conform to OCI image-spec", add a step that pulls the manifest Cooker pushed and validates it against the OCI image-spec JSON schema. Different tooling than distribution-spec/conformance. ~half day.
+All P0.1–P0.7 items are now closed (see "Closed (recent)" below). P0.8 (operator rollout playbook) shipped in PR #21.
 
 #### P0.8 — Operator rollout playbook
 
@@ -159,8 +129,8 @@ remaining bullet is operator-side only:
 ### P7 — UAT and dev experience
 
 - [x] **`tecnativa/docker-socket-proxy` overlay** at `docker-compose.uat.socketproxy.yml` + `make uat-up-socketproxy`. Opt-in via the `socketproxy` compose profile so the default `make uat-up` keeps working unchanged.
-- [ ] **`make uat-up-with-keycloak`** target that adds Keycloak as a compose service and pre-seeds a realm. **Why not in PR #17:** realm pre-seed is environment-specific; needs a working Keycloak start-realm JSON checked in. ~half day.
-- [ ] **`make test-e2e`** that boots `make uat-up`, runs a deterministic pipeline through the API, and tears down. ~1 day.
+- [x] **`make uat-up-with-keycloak`** — Keycloak compose overlay (`docker-compose.uat.keycloak.yml`) with pre-seeded realm `cooker` (admins+viewers groups, alice/alice = admin, bob/bob = viewer). Uses `host.docker.internal:8081` so browser and backend share the same issuer URL.
+- [x] **`make test-e2e`** — boots `make uat-up`, drives a deterministic pipeline (one no-op `custom` stage) through the API via curl/jq, asserts terminal status `success`, tears down on exit. Implementation: `scripts/e2e/run.sh`.
 
 ---
 
@@ -234,7 +204,7 @@ runs `quay.io/buildah/stable` instead of `gcr.io/kaniko-project/executor`.
 - Storage driver choice: needs `overlay` (with fuse-overlayfs on the
   nodes) or `vfs` (slower, no kernel module). Kaniko bundles its own.
 
-**Status:** ✅ shipped. `backend/internal/builder/buildah.go` mirrors the Kaniko Job pattern, adds CAP_SETUID/CAP_SETGID and the storage-driver knob (`COOKER_BUILDAH_STORAGE_DRIVER`, default `vfs`). Selectable via `COOKER_BUILDER=buildah`. Helm chart wiring (RBAC + values) is the next focused PR — RBAC is reused from Kaniko's Role/RoleBinding because the resource list is identical.
+**Status:** ✅ shipped end-to-end. `backend/internal/builder/buildah.go` mirrors the Kaniko Job pattern, adds CAP_SETUID/CAP_SETGID and the storage-driver knob (`COOKER_BUILDAH_STORAGE_DRIVER`, default `vfs`). Helm chart wiring landed in `claude/review-production-rollout-MT3YO`: `builder.buildah.{image, namespace, serviceAccount, contextPVC, storageDriver}` values, `templates/rbac.yaml` gate extended to render a `cooker-buildah-builder` Role + RoleBinding when `builder.kind=buildah`, deployment template renders the `COOKER_BUILDAH_*` env-vars and the optional context PVC mount. CI matrix asserts (a) docker-socket is absent, (b) buildah RBAC + env-vars render, (c) kaniko env-vars don't leak. SECURITY.md "image build isolation" section updated with the PSA caveat.
 
 **Original notes (kept for reference):**
 
@@ -275,7 +245,20 @@ the `--cache-to` registry wiring); ~half day for the CLI shell-out.
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), and the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout):
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), and the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch):
+
+### `claude/review-production-rollout-MT3YO` — P0 follow-up batch (operator-independent)
+
+- ✅ **P0.1 — OIDC lock-free fast path** — `internal/auth/oidc.go`. `Middleware.verifier` is now `atomic.Pointer[oidc.IDTokenVerifier]` and `lastJWKSRefresh` is `atomic.Int64` (UnixNano). The mutex serialises only slow-path provider discovery; `ensureProvider` uses double-checked init (load → if nil, lock → re-check → store). Hot path is lock-free. New concurrency test under `-race` exercises 32 writer + 32 reader goroutines through `recordJWKSRefresh` / `LastJWKSRefresh`.
+- ✅ **P0.2 — Redis WS hub subscriber resubscribe with backoff** — `internal/server/wshub_backend.go`. `consume()` now owns the `*redis.PubSub` lifecycle and re-subscribes with jittered exponential backoff (500ms → 30s) on disconnect. `b.ch` only closes on context cancel, so the hub `Run()` survives Redis blips. Each iteration closes the previous `*redis.PubSub` before resubscribing to avoid leaked connections; post-resubscribe `Receive` is bounded by a 5s timeout to handle half-open TCP. `IncRedisConnectionError()` increments on every subscribe failure and reconnect, feeding `cooker_redis_connection_errors_total`. New unit tests for `sleepJitter` (timer + ctx-cancel paths) and `nextBackoff` (doubling and cap).
+- ✅ **P0.3 — `time.NewTimer` in DB backoff** — `internal/store/postgres/store.go` `pingWithBackoff` swaps `time.After()` for `time.NewTimer` + `Stop()` on the ctx-cancel branch. No leaked timer channels per retry.
+- ✅ **P0.4 — Parallel readiness checks** — `internal/server/health.go`. DB and Redis pings run concurrently via `errgroup.WithContext` against the shared 1s deadline. Worst-case probe latency is `max(db, redis)` instead of `db + redis`. `golang.org/x/sync` promoted from indirect to direct in `go.mod`.
+- ✅ **P0.5 — Binary WS broadcast encoding** — `internal/server/wshub_backend.go`. Replaced `json.Marshal` of `BroadcastMessage` on the Redis pub/sub leg with a length-prefixed binary frame: `[channel-len: uint16 BE][channel][data]`. ~74 bytes of JSON framing per message replaced with 2. Browser-facing wire is unchanged — the hub still writes raw `data` as a `TextMessage`. Round-trip + truncation + oversized-channel tests added; documented in code that the format is internal and that a rolling upgrade across mixed-version replicas will see decode warnings during the upgrade window.
+- ✅ **P0.6 — OCI conformance workflow scope** — `pull_request:` trigger removed in commit `a8aa68e` (already on `main` ahead of this branch). Workflow now only runs on `workflow_dispatch` and the weekly `schedule`, treating conformance as a tracked-but-non-blocking signal until a human can pull failing logs.
+- ✅ **P0.7 — OCI image-spec schema validation** — `internal/pusher/conformance_test.go` adds `TestManifestSpecConformance`, which pulls the image pushed by `TestPushConformance` via `crane.Manifest` and validates structural requirements per OCI image-spec v1.1: `schemaVersion=2`, `mediaType=application/vnd.oci.image.manifest.v1+json`, descriptor digest/size/mediaType for both `config` and every `layer`. CI workflow + Makefile target updated to run both tests in one pass.
+- ✅ **P7 — `make uat-up-with-keycloak`** — `docker-compose.uat.keycloak.yml` overlay + pre-seeded realm at `deploy/uat/keycloak-realm-cooker.json`. Realm contains the `cooker` public PKCE client, the three `cooker-*` groups, and two test users (alice/alice = admin, bob/bob = viewer). Both backend and browser use the same issuer URL `http://host.docker.internal:8081/realms/cooker` so issuer claim verification works without dual-URL configuration. Linux operators without Docker Desktop need a one-time `/etc/hosts` entry; documented in the Makefile output.
+- ✅ **P7 — `make test-e2e`** — `scripts/e2e/run.sh` waits for `/health/ready`, creates a single-stage `custom` (no-op) pipeline via the API, triggers a run, polls until terminal, and asserts `success`. Uses dev-admin auto-injection (UAT default `COOKER_OIDC_ENABLED=false`). The Makefile target boots `make uat-up`, runs the harness, and tears down on exit via trap.
+- ✅ **P9.5 follow-up — Buildah Helm chart wiring** — `templates/rbac.yaml` extended with a `cooker-buildah-builder` Role + RoleBinding gated on `builder.kind=buildah`. `templates/deployment.yaml` renders `COOKER_BUILDAH_{IMAGE,SERVICE_ACCOUNT,CONTEXT_PVC,STORAGE_DRIVER}` plus the optional context-PVC volume + mount when buildah is selected. `values.yaml` adds the `builder.buildah.{image, namespace, serviceAccount, contextPVC, storageDriver}` block alongside the existing kaniko block. CI matrix grew a `helm template (buildah builder)` job that asserts docker-socket is absent, buildah RBAC + env-vars render, and kaniko-named resources don't leak; the resulting render is also fed to kubeconform. `SECURITY.md` "image build isolation" updated with the PSA caveat.
 
 ### `claude/identify-failure-point-Duy02` (PR #21) — SPOF closeout
 

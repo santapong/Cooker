@@ -63,6 +63,51 @@ func TestEnsureProvider_RetryCooldown(t *testing.T) {
 	}
 }
 
+// TestRecordJWKSRefresh_ConcurrentReadersWriters exercises the
+// lock-free atomic.Int64 fast path. Run under `-race`; failure mode is
+// a detected race rather than a wrong value.
+func TestRecordJWKSRefresh_ConcurrentReadersWriters(t *testing.T) {
+	m, err := NewMiddleware(context.Background(), config.OIDCConfig{
+		Enabled:   true,
+		IssuerURL: "https://example.com",
+		ClientID:  "cooker",
+	})
+	if err != nil {
+		t.Fatalf("NewMiddleware: %v", err)
+	}
+	if _, ok := m.LastJWKSRefresh(); ok {
+		t.Fatal("LastJWKSRefresh should be invalid before any record")
+	}
+	const writers, readers, iters = 32, 32, 200
+	done := make(chan struct{})
+	for i := 0; i < writers; i++ {
+		go func() {
+			for j := 0; j < iters; j++ {
+				m.recordJWKSRefresh()
+			}
+			done <- struct{}{}
+		}()
+	}
+	for i := 0; i < readers; i++ {
+		go func() {
+			for j := 0; j < iters; j++ {
+				_, _ = m.LastJWKSRefresh()
+			}
+			done <- struct{}{}
+		}()
+	}
+	for i := 0; i < writers+readers; i++ {
+		<-done
+	}
+	d, ok := m.LastJWKSRefresh()
+	if !ok {
+		t.Fatal("LastJWKSRefresh should be valid after writers")
+	}
+	if d < 0 || d > time.Second {
+		t.Fatalf("LastJWKSRefresh = %s; want recent", d)
+	}
+}
+
 // TestHandler_503OnUnreachableIdP asserts that an authenticated
 // request with a Bearer token returns 503 with Retry-After when the
 // IdP cannot be reached, instead of crashing the boot path.

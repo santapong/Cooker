@@ -1,0 +1,93 @@
+# Cooker UAT overlay: add Keycloak as the OIDC IdP and pre-seed a
+# realm with two users so reviewers can exercise the full sign-in
+# flow without a third-party IdP.
+#
+# Realm contents (deploy/uat/keycloak-realm-cooker.json):
+#   - realm:   cooker
+#   - client:  cooker (public, PKCE, redirect http://localhost:8080/*)
+#   - groups:  cooker-admins, cooker-operators, cooker-viewers
+#   - users:   alice / alice  (cooker-admins  -> RoleAdmin)
+#              bob   / bob    (cooker-viewers -> RoleViewer)
+#
+# Issuer URL: http://host.docker.internal:8081/realms/cooker
+#   The browser hits Keycloak via the host's :8081 port-forward.
+#   The cooker container reaches the same address through the
+#   `host.docker.internal:host-gateway` extra_hosts entry below.
+#   This single address means the issuer claim, JWKS URL, and
+#   redirect URI all stay consistent across browser and backend.
+#
+# Linux operators without Docker Desktop need a one-time hosts entry
+# so the *browser* can resolve host.docker.internal:
+#
+#   echo "127.0.0.1 host.docker.internal" | sudo tee -a /etc/hosts
+#
+# (Docker Desktop on macOS / Windows resolves host.docker.internal
+# automatically; nothing extra needed.)
+#
+# How to use:
+#   $ make uat-up-with-keycloak
+#
+# Or directly:
+#   $ docker compose \
+#       -f docker-compose.uat.yml \
+#       -f docker-compose.uat.keycloak.yml \
+#       --profile keycloak --env-file .env.uat \
+#       up -d --build
+#
+# The Makefile target seeds .env.uat with the Keycloak OIDC config
+# (both backend COOKER_OIDC_* and frontend VITE_OIDC_* values) before
+# `compose up`, so the cooker image bundles the correct VITE_*
+# build-time vars.
+
+name: cooker-uat
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    profiles: ["keycloak"]
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      # Single hostname used by both browser and backend. host-gateway
+      # resolves to the Docker host on Linux/macOS/Windows; the
+      # browser reaches the same name via the host port-forward.
+      KC_HOSTNAME: host.docker.internal
+      KC_HOSTNAME_PORT: "8081"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_BACKCHANNEL: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY: "edge"
+      KC_HEALTH_ENABLED: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./deploy/uat/keycloak-realm-cooker.json:/opt/keycloak/data/import/realm-cooker.json:ro
+    healthcheck:
+      # /health/ready is exposed on management port 9000 in Keycloak
+      # 25; fall back to the sign-in page on 8080 for a simpler probe.
+      test:
+        - "CMD-SHELL"
+        - "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /realms/cooker/.well-known/openid-configuration HTTP/1.0\\r\\nHost: host.docker.internal:8081\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q '200 OK'"
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 30s
+    networks:
+      - cooker-uat
+
+  cooker:
+    profiles: ["keycloak"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      registry:
+        condition: service_healthy
+      kubeconfig-fixer:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy

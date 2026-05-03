@@ -1,0 +1,74 @@
+{
+  "realm": "cooker",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "accessTokenLifespan": 3600,
+  "groups": [
+    { "name": "cooker-admins" },
+    { "name": "cooker-operators" },
+    { "name": "cooker-viewers" }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@cooker.local",
+      "firstName": "Alice",
+      "lastName": "Admin",
+      "emailVerified": true,
+      "credentials": [
+        { "type": "password", "value": "alice", "temporary": false }
+      ],
+      "groups": ["cooker-admins"]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@cooker.local",
+      "firstName": "Bob",
+      "lastName": "Viewer",
+      "emailVerified": true,
+      "credentials": [
+        { "type": "password", "value": "bob", "temporary": false }
+      ],
+      "groups": ["cooker-viewers"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "cooker",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8080/callback",
+        "http://localhost:8080/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8080"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8080"
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

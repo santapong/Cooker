@@ -1,4 +1,4 @@
-.PHONY: all build clean dev test lint uat-up uat-up-socketproxy uat-down uat-logs uat-shell uat-reset
+.PHONY: all build clean dev test lint uat-up uat-up-socketproxy uat-up-with-keycloak uat-down uat-logs uat-shell uat-reset test-e2e
 
 # Variables
 BINARY_NAME=cooker
@@ -79,8 +79,10 @@ oci-conformance:
 	cd $(BACKEND_DIR) && \
 		OCI_NAMESPACE=cooker-conformance/test \
 		COOKER_OCI_REGISTRY=localhost:5000 \
-		go test -tags oci_conformance -v -run TestPushConformance ./internal/pusher/...
-	@echo "Push OK; building upstream conformance binary..."
+		go test -tags oci_conformance -v \
+			-run 'TestPushConformance|TestManifestSpecConformance' \
+			./internal/pusher/...
+	@echo "Push + image-spec validation OK; building upstream conformance binary..."
 	@tmp=$$(mktemp -d); \
 	 git clone --depth 1 https://github.com/opencontainers/distribution-spec "$$tmp/dist-spec" >/dev/null 2>&1 && \
 	 cd "$$tmp/dist-spec/conformance" && go test -c -o /tmp/cooker-conformance.test
@@ -147,6 +149,48 @@ uat-up-socketproxy:
 	@echo
 	@echo "Cooker UAT (socket-proxy) ready at http://localhost:8080"
 
+# Variant of uat-up that adds Keycloak as an OIDC IdP and pre-seeds a
+# realm with two users (alice/alice = admin, bob/bob = viewer). See
+# docker-compose.uat.keycloak.yml for the topology and the Linux
+# /etc/hosts requirement for host.docker.internal.
+uat-up-with-keycloak:
+	@if [ ! -f .env.uat ]; then \
+	  cp .env.uat.example .env.uat; \
+	  echo "COOKER_SECRET_KEY=$$(head -c 32 /dev/urandom | base64)" >> .env.uat; \
+	  echo "DOCKER_GID=$(DOCKER_GID)" >> .env.uat; \
+	  echo "Created .env.uat from .env.uat.example (DOCKER_GID=$(DOCKER_GID))."; \
+	fi
+	@# Append Keycloak OIDC config (idempotent — only added if absent).
+	@if ! grep -q '^COOKER_OIDC_ENABLED=true' .env.uat; then \
+	  echo "" >> .env.uat; \
+	  echo "# Keycloak OIDC config injected by make uat-up-with-keycloak" >> .env.uat; \
+	  echo "COOKER_OIDC_ENABLED=true" >> .env.uat; \
+	  echo "COOKER_OIDC_ISSUER_URL=http://host.docker.internal:8081/realms/cooker" >> .env.uat; \
+	  echo "COOKER_OIDC_CLIENT_ID=cooker" >> .env.uat; \
+	  echo "COOKER_OIDC_CLIENT_SECRET=" >> .env.uat; \
+	  echo "COOKER_OIDC_REDIRECT_URL=http://localhost:8080/callback" >> .env.uat; \
+	  echo "COOKER_ALLOWED_ORIGINS=http://localhost:8080" >> .env.uat; \
+	  echo "VITE_OIDC_ENABLED=true" >> .env.uat; \
+	  echo "VITE_OIDC_AUTHORITY=http://host.docker.internal:8081/realms/cooker" >> .env.uat; \
+	  echo "VITE_OIDC_CLIENT_ID=cooker" >> .env.uat; \
+	  echo "VITE_OIDC_REDIRECT_URI=http://localhost:8080/callback" >> .env.uat; \
+	  echo "VITE_OIDC_POST_LOGOUT_REDIRECT_URI=http://localhost:8080" >> .env.uat; \
+	  echo "VITE_OIDC_SCOPE=openid profile email groups" >> .env.uat; \
+	  echo "Appended Keycloak OIDC config to .env.uat."; \
+	fi
+	docker compose -f docker-compose.uat.yml -f docker-compose.uat.keycloak.yml \
+	  --profile keycloak --env-file .env.uat up -d --build
+	@echo
+	@echo "Cooker UAT (Keycloak) ready at http://localhost:8080"
+	@echo "  Keycloak admin:  http://localhost:8081  (admin / admin)"
+	@echo "  Realm sign-in:   http://host.docker.internal:8081/realms/cooker/account"
+	@echo "  Test users:      alice / alice  (admin)"
+	@echo "                   bob   / bob    (viewer)"
+	@echo
+	@echo "Linux operators without Docker Desktop must add to /etc/hosts:"
+	@echo "  127.0.0.1 host.docker.internal"
+	@echo "(macOS/Windows Docker Desktop resolves this automatically.)"
+
 uat-down:
 	-$(UAT_COMPOSE) down -v --remove-orphans
 	rm -f .env.uat
@@ -158,6 +202,22 @@ uat-shell:
 	$(UAT_COMPOSE) exec cooker sh
 
 uat-reset: uat-down uat-up
+
+# End-to-end smoke: boot UAT, drive a deterministic pipeline through
+# the API, tear down. Uses the no-op "custom" stage so it doesn't
+# depend on the build/push/deploy adapters working in the host
+# environment. Requires curl + jq on PATH.
+#
+# Override the API host with COOKER_API=http://… or the timeouts with
+# COOKER_E2E_READY_TIMEOUT / COOKER_E2E_RUN_TIMEOUT (seconds).
+test-e2e:
+	@command -v curl >/dev/null 2>&1 || { echo "missing required tool: curl"; exit 2; }
+	@command -v jq   >/dev/null 2>&1 || { echo "missing required tool: jq"; exit 2; }
+	@echo "==> booting UAT stack"
+	$(MAKE) uat-up
+	@trap '$(MAKE) uat-down >/dev/null 2>&1 || true' EXIT INT TERM; \
+	  echo "==> running e2e harness" && \
+	  bash scripts/e2e/run.sh
 
 clean:
 	rm -rf bin/ $(FRONTEND_DIR)/dist $(FRONTEND_DIR)/node_modules
