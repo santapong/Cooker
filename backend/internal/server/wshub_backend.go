@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"math/rand"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -15,6 +17,16 @@ import (
 // fan-out (which channel name a browser is listening on) stays inside
 // each replica's local clients map.
 const redisWSBroadcastChannel = "cooker:ws:broadcast"
+
+// Backoff parameters for the Redis subscriber. Tuned to recover quickly
+// from a brief blip without hammering a flapping Redis. Receive timeout
+// caps how long a half-open TCP connection can wedge the resubscribe
+// loop past TCP keepalive defaults.
+const (
+	redisHubInitialBackoff = 500 * time.Millisecond
+	redisHubMaxBackoff     = 30 * time.Second
+	redisHubReceiveTimeout = 5 * time.Second
+)
 
 // HubBackend is the swap point for the WebSocket fan-out layer.
 // Memory keeps the historical in-process channel; Redis pub/sub
@@ -53,28 +65,37 @@ func (b *memoryHubBackend) Close() error { return nil }
 // redisHubBackend uses Redis pub/sub. Each replica's hub publishes
 // every Broadcast through Redis and subscribes to the shared topic so
 // inbound messages arrive on the .ch returned by Subscribe.
+//
+// The subscriber loop in consume() survives Redis blips: the channel
+// returned by Subscribe() only closes when Close() is called. Messages
+// published during a disconnect window are lost (Redis pub/sub has no
+// replay) — clients refetch state via WS reconnect.
 type redisHubBackend struct {
 	client *redis.Client
-	pubsub *redis.PubSub
 	ch     chan BroadcastMessage
+	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func newRedisHubBackend(ctx context.Context, client *redis.Client) (*redisHubBackend, error) {
-	subCtx, cancel := context.WithCancel(ctx)
-	ps := client.Subscribe(subCtx, redisWSBroadcastChannel)
-	if _, err := ps.Receive(subCtx); err != nil {
+func newRedisHubBackend(parent context.Context, client *redis.Client) (*redisHubBackend, error) {
+	ctx, cancel := context.WithCancel(parent)
+	// Boot-time connectivity check — fail fast if Redis is unreachable
+	// at startup. Once consume() takes over, transient disconnects are
+	// handled by the resubscribe loop instead.
+	ps := client.Subscribe(ctx, redisWSBroadcastChannel)
+	if _, err := ps.Receive(ctx); err != nil {
 		cancel()
 		_ = ps.Close()
 		return nil, err
 	}
+	_ = ps.Close()
 	b := &redisHubBackend{
 		client: client,
-		pubsub: ps,
 		ch:     make(chan BroadcastMessage, 256),
+		ctx:    ctx,
 		cancel: cancel,
 	}
-	go b.consume(subCtx, ps.Channel())
+	go b.consume()
 	return b, nil
 }
 
@@ -96,18 +117,67 @@ func (b *redisHubBackend) Close() error {
 	if b.cancel != nil {
 		b.cancel()
 	}
-	return b.pubsub.Close()
+	return nil
 }
 
-func (b *redisHubBackend) consume(ctx context.Context, source <-chan *redis.Message) {
+// consume keeps a Redis pub/sub subscription open across transient
+// disconnects. When the underlying channel closes (Redis flap, network
+// blip), it waits with jittered exponential backoff and resubscribes.
+// Only context cancellation closes b.ch, so readers see a stable
+// stream across blips. Each iteration owns its *redis.PubSub; the
+// previous one is closed before re-subscribing so we don't leak
+// connections or goroutines.
+func (b *redisHubBackend) consume() {
+	defer close(b.ch)
+	delay := redisHubInitialBackoff
+	for {
+		if b.ctx.Err() != nil {
+			return
+		}
+		ps := b.client.Subscribe(b.ctx, redisWSBroadcastChannel)
+		recvCtx, recvCancel := context.WithTimeout(b.ctx, redisHubReceiveTimeout)
+		_, err := ps.Receive(recvCtx)
+		recvCancel()
+		if err != nil {
+			_ = ps.Close()
+			if b.ctx.Err() != nil {
+				return
+			}
+			observability.IncRedisConnectionError()
+			slog.Warn("ws redis backend: subscribe failed; backing off", "delay", delay.String(), "err", err)
+			if !sleepJitter(b.ctx, delay) {
+				return
+			}
+			delay = nextBackoff(delay, redisHubMaxBackoff)
+			continue
+		}
+		// Resubscribe succeeded — reset the next failure's delay.
+		delay = redisHubInitialBackoff
+		b.drain(ps.Channel())
+		_ = ps.Close()
+		if b.ctx.Err() != nil {
+			return
+		}
+		observability.IncRedisConnectionError()
+		slog.Warn("ws redis backend: subscription closed; reconnecting", "delay", delay.String())
+		if !sleepJitter(b.ctx, delay) {
+			return
+		}
+		delay = nextBackoff(delay, redisHubMaxBackoff)
+	}
+}
+
+// drain reads from a single subscription's channel until it closes
+// (Redis flap) or the parent context is cancelled. Returns either way.
+// b.ch is intentionally NOT closed here — only consume's defer does
+// that, and only on context cancellation.
+func (b *redisHubBackend) drain(source <-chan *redis.Message) {
 	for {
 		select {
-		case <-ctx.Done():
-			close(b.ch)
+		case <-b.ctx.Done():
 			return
 		case raw, ok := <-source:
 			if !ok {
-				close(b.ch)
 				return
 			}
 			var msg BroadcastMessage
@@ -122,4 +192,28 @@ func (b *redisHubBackend) consume(ctx context.Context, source <-chan *redis.Mess
 			}
 		}
 	}
+}
+
+// sleepJitter sleeps for d plus 0..d/2 jitter, returning false if ctx
+// fires during the sleep. Uses NewTimer so the timer is reclaimed when
+// ctx wins the race.
+func sleepJitter(ctx context.Context, d time.Duration) bool {
+	jittered := d + time.Duration(rand.Int63n(int64(d/2+1)))
+	t := time.NewTimer(jittered)
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		t.Stop()
+		return false
+	}
+}
+
+// nextBackoff doubles d up to max.
+func nextBackoff(d, max time.Duration) time.Duration {
+	d *= 2
+	if d > max {
+		d = max
+	}
+	return d
 }
