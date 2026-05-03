@@ -2,8 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { appsApi } from '../api/apps';
 import type { AppModel, AppDeployResponse } from '../types/app';
+import { useTheme } from '../theme/ThemeProvider';
+import { hexA } from '../theme/tokens';
+import { Btn, Card, Field, PageHeader, Pill } from '../components/ui/atoms';
 
 export default function AppDetailPage() {
+  const t = useTheme();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [app, setApp] = useState<AppModel | null>(null);
@@ -18,7 +22,11 @@ export default function AppDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    appsApi.get(id).then(setApp).catch((e) => setError(e.message)).finally(() => setLoading(false));
+    appsApi
+      .get(id)
+      .then(setApp)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
     return () => {
       wsRef.current?.close();
     };
@@ -50,9 +58,7 @@ export default function AppDetailPage() {
     ws.onmessage = (ev) => {
       setLogs((s) => s + (typeof ev.data === 'string' ? ev.data : ''));
     };
-    ws.onclose = () => {
-      setDeploying(false);
-    };
+    ws.onclose = () => setDeploying(false);
     ws.onerror = () => {
       setLogs((s) => s + '\n[ws] connection error\n');
       setDeploying(false);
@@ -66,55 +72,102 @@ export default function AppDetailPage() {
     navigate('/apps');
   };
 
-  if (loading) return <div style={styles.loading}>Loading...</div>;
-  if (error || !app) return <div style={styles.error}>{error ?? 'app not found'}</div>;
+  if (loading) {
+    return (
+      <div
+        style={{
+          padding: 60,
+          color: t.textMute,
+          fontFamily: t.serif,
+          fontSize: 18,
+          textAlign: 'center',
+        }}
+      >
+        Loading…
+      </div>
+    );
+  }
+  if (error || !app) {
+    return (
+      <div style={{ padding: 60, color: t.bad, textAlign: 'center' }}>
+        {error ?? 'App not found'}
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div style={styles.header}>
-        <div>
-          <button style={styles.backBtn} onClick={() => navigate('/apps')}>← Apps</button>
-          <h2 style={styles.title}>{app.name}</h2>
-          <p style={styles.subtitle}>
-            github.com/{app.githubRepo} @ {app.branch} · target: {app.deployTarget.kind}
-            {app.deployTarget.namespace ? ` (${app.deployTarget.namespace})` : ''}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn-secondary" onClick={remove}>Delete</button>
-          <button className="btn-primary" onClick={deploy} disabled={deploying}>
-            {deploying ? 'Deploying…' : 'Deploy'}
-          </button>
-        </div>
+    <div style={{ padding: '26px 28px 60px' }}>
+      <PageHeader
+        eyebrow={`github.com/${app.githubRepo} @ ${app.branch}`}
+        title={app.name}
+        subtitle={
+          <>
+            target: <strong style={{ color: t.text }}>{app.deployTarget.kind}</strong>
+            {app.deployTarget.namespace ? ` · ns/${app.deployTarget.namespace}` : ''}
+          </>
+        }
+        actions={
+          <>
+            <Btn kind="danger" onClick={remove}>Delete</Btn>
+            <Btn kind="primary" icon="play" onClick={deploy} disabled={deploying}>
+              {deploying ? 'Deploying…' : 'Deploy'}
+            </Btn>
+          </>
+        }
+      />
+
+      <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 22 }}>
+        <Card style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Field label="App ID" mono={app.id} />
+          <Field label="Repo" mono={`github.com/${app.githubRepo}`} />
+          <Field label="Branch" mono={app.branch} />
+          {app.registryRef && <Field label="Registry ref" mono={app.registryRef} />}
+          {app.environmentId && <Field label="Environment" mono={app.environmentId} />}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+            {app.hasWebhook && <Pill tone="cool">webhook</Pill>}
+            {app.autoDeploy && <Pill tone="good">auto-deploy</Pill>}
+          </div>
+        </Card>
+
+        <Card pad={0}>
+          <div
+            style={{
+              padding: '14px 18px',
+              borderBottom: `1px solid ${t.line}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
+            <span style={{ fontFamily: t.serif, fontSize: 18, fontWeight: 500, color: t.text }}>
+              Build & deploy logs
+            </span>
+            {lastDeploy && (
+              <Pill tone="cool">run {lastDeploy.runId.slice(0, 8)}</Pill>
+            )}
+            <div style={{ flex: 1 }} />
+            {deploying && <Pill tone="ember">streaming</Pill>}
+          </div>
+          <pre
+            ref={logRef}
+            style={{
+              background: t.bg,
+              color: t.text,
+              fontFamily: t.mono,
+              fontSize: 12,
+              padding: 16,
+              margin: 0,
+              maxHeight: 480,
+              minHeight: 280,
+              overflow: 'auto',
+              whiteSpace: 'pre-wrap',
+              borderTop: `1px solid ${hexA(t.line, 0.4)}`,
+            }}
+          >
+            {logs || 'Click Deploy to start. Build logs stream here in real time.'}
+          </pre>
+        </Card>
       </div>
-
-      {lastDeploy && (
-        <div style={styles.runMeta}>
-          Run ID: <code>{lastDeploy.runId}</code>
-        </div>
-      )}
-
-      <pre ref={logRef} style={styles.logs}>
-        {logs || 'Click Deploy to start. Build logs stream here in real time.'}
-      </pre>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, gap: 16 },
-  title: { fontSize: 22, fontWeight: 700, color: '#f1f5f9', margin: '4px 0' },
-  subtitle: { fontSize: 13, color: '#94a3b8', margin: 0 },
-  backBtn: {
-    background: 'transparent', border: 'none', color: '#93c5fd',
-    fontSize: 13, cursor: 'pointer', padding: 0, marginBottom: 4,
-  },
-  loading: { color: '#94a3b8', textAlign: 'center', padding: 40 },
-  error: { color: '#f87171', textAlign: 'center', padding: 40 },
-  runMeta: { color: '#94a3b8', fontSize: 13, marginBottom: 12 },
-  logs: {
-    backgroundColor: '#0b1220', border: '1px solid #334155', borderRadius: 6,
-    padding: 16, color: '#e2e8f0', fontFamily: 'ui-monospace, Menlo, monospace',
-    fontSize: 12, maxHeight: 480, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap',
-  },
-};

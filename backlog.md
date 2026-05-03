@@ -94,7 +94,7 @@ remaining bullet is operator-side only:
 
 ### P5 — Frontend UX
 
-- [ ] **Sign-in landing page theme.** **Blocked on Claude-generated design source** (file path / screenshot / external link).
+- [x] **Sign-in landing page theme + full-app workshop redesign.** Closed by the Aegis frontend port — see "Closed (recent)" below.
 - [x] **Loading skeletons** — `Skeleton` + `SkeletonStack` shipped. `ProtectedRoute` uses them during auth restore.
 - [x] **App-root error boundary** — `ErrorBoundary` shipped.
 - [x] **Toast primitive + OIDC silent renew toast.** `frontend/src/stores/toastStore.ts` (Zustand) + `components/Toast.tsx` viewport mounted in `App.tsx`. `OIDCProvider` pushes a warning toast on `addSilentRenewError`.
@@ -232,7 +232,9 @@ the `--cache-to` registry wiring); ~half day for the CLI shell-out.
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, and the `claude/finish-backlog-priority-psf4D` PR (this one — closes the entire P2/P3/P4/P5/P6/P7/P8/P9 batch except P9.4):
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, and the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port):
+
+- ✅ **Aegis "Workshop" frontend redesign** — port of the Claude-Design Aegis bundle into `frontend/src/`. Theme system (`theme/tokens.ts` paper / coal / rust), Fraunces serif + Inter Tight + JetBrains Mono, shared atoms (`Pill`, `StatusDot`, `Btn`, `Card`, `KindBadge`, `Toggle`, `HealthBar`, `DataTable`), Simple ⇄ Pro mode toggle persisted in `uiStore`, sidebar / topbar restyled, every page re-laid (Apps editorial dashboard, Pipelines list, PipelineEditor with palette + inspector, RunPage with step rail + logs + telemetry, NewAppWizard 4-step deploy wizard, Docker / Kubernetes / Environments tables, Compose graph, AppDetail). Sign-in landing + Callback + ErrorBoundary themed. Closes P5 sign-in landing.
 
 - ✅ **Go 1.25 toolchain bump** — `go.mod`, `Dockerfile`, CI matrix all moved together; `golang.org/x/time` unpinned to v0.15.0; `golangci-lint` migrated v1.59 → v2.0 with a v2-format `.golangci.yml`. — P6
 - ✅ **`log/slog` migration** — JSON handler installed in `cmd/cooker/main.go`; all `log` callers across the codebase rewritten as structured slog calls. — P4

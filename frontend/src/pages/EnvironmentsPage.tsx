@@ -1,102 +1,187 @@
 import { useEffect, useState } from 'react';
 import { useEnvironmentStore } from '../stores/environmentStore';
+import { useTheme } from '../theme/ThemeProvider';
+import { hexA } from '../theme/tokens';
+import { Btn, Card, EmptyState, PageHeader, Pill } from '../components/ui/atoms';
+import { Icon } from '../components/ui/Icon';
 
 export default function EnvironmentsPage() {
+  const t = useTheme();
   const { environments, loading, fetchEnvironments, createEnvironment } = useEnvironmentStore();
-  const [showCreate, setShowCreate] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     fetchEnvironments();
   }, [fetchEnvironments]);
 
-  const handleCreate = async (name: string, order: number, strategy: 'auto' | 'manual') => {
-    await createEnvironment({
-      name,
-      order,
-      target: { type: 'namespace', clusterId: '', namespace: `cooker-${name}`, kubeContext: '' },
-      promotion: { strategy },
-      variables: {},
-    });
-    setShowCreate(false);
+  const seed = async () => {
+    setBusy(true);
+    try {
+      await createEnvironment({
+        name: 'dev',
+        order: 1,
+        target: { type: 'namespace', clusterId: '', namespace: 'cooker-dev', kubeContext: '' },
+        promotion: { strategy: 'auto' },
+        variables: {},
+      });
+      await createEnvironment({
+        name: 'staging',
+        order: 2,
+        target: { type: 'namespace', clusterId: '', namespace: 'cooker-staging', kubeContext: '' },
+        promotion: { strategy: 'auto' },
+        variables: {},
+      });
+      await createEnvironment({
+        name: 'production',
+        order: 3,
+        target: { type: 'namespace', clusterId: '', namespace: 'cooker-prod', kubeContext: '' },
+        promotion: { strategy: 'manual' },
+        variables: {},
+      });
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const envColors: Record<string, string> = {
-    dev: '#3b82f6',
-    staging: '#f59e0b',
-    production: '#22c55e',
+  const colorFor = (name: string): string => {
+    if (name.startsWith('prod')) return t.accent;
+    if (name.startsWith('stag')) return t.warn;
+    return t.cool;
   };
 
   return (
-    <div>
-      <div style={styles.header}>
-        <h2 style={styles.title}>Environments</h2>
-        <button className="btn-primary" onClick={() => setShowCreate(true)}>Add Environment</button>
-      </div>
+    <div style={{ padding: '26px 28px 60px' }}>
+      <PageHeader
+        eyebrow="promotion path"
+        title="Environments"
+        subtitle="The conveyor belt your services move along. Deploys land in the leftmost env first, then promote (auto or manual) to the next."
+        actions={<Btn kind="primary" icon="plus">Add environment</Btn>}
+      />
 
-      <div style={styles.envFlow}>
-        {environments.length === 0 && !loading ? (
-          <div style={styles.empty}>
-            <p>No environments configured.</p>
-            <p style={styles.muted}>Set up Dev, Staging, and Production environments for your deployment pipeline.</p>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'center' }}>
-              <button className="btn-primary" onClick={() => handleCreate('dev', 1, 'auto')}>Add Dev</button>
-              <button className="btn-primary" onClick={() => handleCreate('staging', 2, 'auto')}>Add Staging</button>
-              <button className="btn-primary" onClick={() => handleCreate('production', 3, 'manual')}>Add Production</button>
-            </div>
-          </div>
-        ) : (
-          environments
+      {environments.length === 0 && !loading ? (
+        <EmptyState
+          title="No environments yet."
+          body="Set up dev → staging → production so promotions have somewhere to flow."
+          action={
+            <Btn kind="primary" icon="spark" onClick={seed} disabled={busy}>
+              {busy ? 'Setting up…' : 'Seed dev / staging / prod'}
+            </Btn>
+          }
+        />
+      ) : (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'stretch',
+            flexWrap: 'wrap',
+            gap: 14,
+          }}
+        >
+          {environments
+            .slice()
             .sort((a, b) => a.order - b.order)
-            .map((env, i) => (
-              <div key={env.id} style={{ display: 'flex', alignItems: 'center' }}>
-                <div style={{ ...styles.envCard, borderColor: envColors[env.name] || '#475569' }}>
-                  <div style={styles.envName}>{env.name.toUpperCase()}</div>
-                  <div style={styles.envMeta}>
-                    Target: {env.target.type === 'namespace' ? `ns/${env.target.namespace}` : `cluster/${env.target.clusterId}`}
-                  </div>
-                  <div style={styles.envMeta}>
-                    Promotion: <span style={{ color: env.promotion.strategy === 'auto' ? '#22c55e' : '#f59e0b' }}>
-                      {env.promotion.strategy}
-                    </span>
-                  </div>
-                  <div style={styles.envVars}>
-                    {Object.keys(env.variables).length} variables
-                  </div>
-                </div>
-                {i < environments.length - 1 && (
-                  <div style={styles.arrow}>-&gt;</div>
-                )}
-              </div>
-            ))
-        )}
-      </div>
-
-      {showCreate && (
-        <div style={styles.modal}>
-          <p style={{ color: '#94a3b8' }}>Use the quick setup buttons above or configure via API.</p>
-          <button className="btn-secondary" onClick={() => setShowCreate(false)}>Close</button>
+            .map((env, i, arr) => {
+              const color = colorFor(env.name);
+              return (
+                <span
+                  key={env.id}
+                  style={{ display: 'flex', alignItems: 'center', flex: '1 1 280px' }}
+                >
+                  <Card
+                    style={{
+                      flex: 1,
+                      borderTop: `3px solid ${color}`,
+                      borderColor: hexA(color, 0.4),
+                      background: hexA(color, 0.04),
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span
+                        style={{
+                          fontFamily: t.mono,
+                          fontSize: 10.5,
+                          letterSpacing: 1.4,
+                          textTransform: 'uppercase',
+                          color,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {env.name}
+                      </span>
+                      <Pill tone={env.promotion.strategy === 'auto' ? 'good' : 'warn'}>
+                        {env.promotion.strategy}
+                      </Pill>
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: t.serif,
+                        fontSize: 22,
+                        fontWeight: 500,
+                        color: t.text,
+                        letterSpacing: -0.3,
+                        marginBottom: 12,
+                      }}
+                    >
+                      {env.name === 'dev'
+                        ? 'Development'
+                        : env.name === 'staging'
+                          ? 'Staging'
+                          : env.name === 'production'
+                            ? 'Production'
+                            : env.name}
+                    </div>
+                    <Detail
+                      label="Target"
+                      value={
+                        env.target.type === 'namespace'
+                          ? `ns/${env.target.namespace}`
+                          : `cluster/${env.target.clusterId}`
+                      }
+                    />
+                    <Detail
+                      label="Variables"
+                      value={`${Object.keys(env.variables).length} keys`}
+                    />
+                  </Card>
+                  {i < arr.length - 1 && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        color: t.textMute,
+                        padding: '0 12px',
+                        gap: 4,
+                      }}
+                    >
+                      <Icon name="arrow" size={20} />
+                      <span
+                        style={{
+                          fontFamily: t.mono,
+                          fontSize: 9.5,
+                          letterSpacing: 0.8,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        promote
+                      </span>
+                    </div>
+                  )}
+                </span>
+              );
+            })}
         </div>
       )}
     </div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  title: { fontSize: 22, fontWeight: 700, color: '#f1f5f9', margin: 0 },
-  envFlow: { display: 'flex', alignItems: 'center', gap: 0, justifyContent: 'center', flexWrap: 'wrap' },
-  envCard: {
-    padding: 20,
-    backgroundColor: '#1e293b',
-    borderRadius: 8,
-    border: '2px solid #475569',
-    minWidth: 200,
-  },
-  envName: { fontSize: 16, fontWeight: 700, color: '#f1f5f9', marginBottom: 8 },
-  envMeta: { fontSize: 12, color: '#94a3b8', marginBottom: 4 },
-  envVars: { fontSize: 11, color: '#475569', marginTop: 8 },
-  arrow: { fontSize: 24, color: '#475569', padding: '0 12px' },
-  empty: { textAlign: 'center', padding: 40, color: '#f1f5f9' },
-  muted: { color: '#94a3b8', fontSize: 14 },
-  modal: { marginTop: 20, padding: 20, backgroundColor: '#1e293b', borderRadius: 8, border: '1px solid #334155' },
-};
+function Detail({ label, value }: { label: string; value: string }) {
+  const t = useTheme();
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginTop: 4 }}>
+      <span style={{ color: t.textMute }}>{label}</span>
+      <span style={{ fontFamily: t.mono, color: t.text }}>{value}</span>
+    </div>
+  );
+}

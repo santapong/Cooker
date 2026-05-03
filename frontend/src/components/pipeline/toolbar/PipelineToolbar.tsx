@@ -1,12 +1,21 @@
+import { useTheme } from '../../../theme/ThemeProvider';
+import { Btn, KindBadge, Pill, SectionLabel } from '../../ui/atoms';
+import { hexA } from '../../../theme/tokens';
 import type { StageType } from '../../../types/pipeline';
 
-const stageTypes: { type: StageType; label: string; color: string }[] = [
-  { type: 'build', label: 'Build', color: '#7c3aed' },
-  { type: 'test', label: 'Test', color: '#0891b2' },
-  { type: 'push', label: 'Push', color: '#d97706' },
-  { type: 'deploy', label: 'Deploy', color: '#059669' },
-  { type: 'approval', label: 'Approval', color: '#f59e0b' },
-  { type: 'custom', label: 'Custom', color: '#6b7280' },
+interface StageDef {
+  type: StageType;
+  label: string;
+  desc: string;
+}
+
+const stageTypes: StageDef[] = [
+  { type: 'build', label: 'Build image', desc: 'Docker / Buildx' },
+  { type: 'test', label: 'Run tests', desc: 'go / npm / pytest' },
+  { type: 'push', label: 'Push to registry', desc: 'OCI distribution' },
+  { type: 'deploy', label: 'Deploy', desc: 'Kubernetes' },
+  { type: 'approval', label: 'Approval gate', desc: 'human in the loop' },
+  { type: 'custom', label: 'Custom shell', desc: 'any container' },
 ];
 
 interface Props {
@@ -16,76 +25,108 @@ interface Props {
 }
 
 export default function PipelineToolbar({ onSave, onValidate, onRun }: Props) {
+  const t = useTheme();
   const onDragStart = (event: React.DragEvent, nodeType: string) => {
     event.dataTransfer.setData('application/cooker-node', nodeType);
     event.dataTransfer.effectAllowed = 'move';
   };
 
   return (
-    <div style={styles.toolbar}>
-      <div style={styles.section}>
-        <span style={styles.sectionLabel}>Drag to add:</span>
-        <div style={styles.nodeTypes}>
-          {stageTypes.map((st) => (
-            <div
-              key={st.type}
-              draggable
-              onDragStart={(e) => onDragStart(e, st.type)}
-              style={{ ...styles.nodeChip, borderColor: st.color }}
-            >
-              <span style={{ ...styles.chipIcon, backgroundColor: st.color }}>
-                {st.label[0]}
-              </span>
-              {st.label}
+    <aside
+      style={{
+        width: 240,
+        flexShrink: 0,
+        borderRight: `1px solid ${t.line}`,
+        background: t.surface,
+        padding: '18px 14px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        overflow: 'auto',
+      }}
+    >
+      <SectionLabel>Add step</SectionLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {stageTypes.map((s) => (
+          <div
+            key={s.type}
+            draggable
+            onDragStart={(e) => onDragStart(e, s.type)}
+            style={{
+              padding: '10px 12px',
+              border: `1px solid ${t.line}`,
+              background: t.bg,
+              borderRadius: 8,
+              cursor: 'grab',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              userSelect: 'none',
+            }}
+          >
+            <KindBadge kind={s.type} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: t.text }}>{s.label}</div>
+              <div
+                style={{
+                  fontFamily: t.mono,
+                  fontSize: 10,
+                  color: t.textMute,
+                  marginTop: 2,
+                }}
+              >
+                {s.desc}
+              </div>
             </div>
-          ))}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ height: 8 }} />
+      <SectionLabel>Templates</SectionLabel>
+      {['Go service · k8s', 'Node site · static', 'Worker · Redis'].map((s) => (
+        <div
+          key={s}
+          style={{
+            padding: '8px 12px',
+            fontSize: 12,
+            color: t.textSoft,
+            cursor: 'pointer',
+            borderRadius: 6,
+            background: hexA(t.line, 0.15),
+          }}
+        >
+          {s}
         </div>
+      ))}
+
+      <div style={{ flex: 1 }} />
+
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          paddingTop: 12,
+          borderTop: `1px solid ${t.line}`,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Pill tone="neutral">draft</Pill>
+          <span style={{ fontFamily: t.mono, fontSize: 10.5, color: t.textMute }}>
+            unsaved · ⌘S
+          </span>
+        </div>
+        <Btn kind="secondary" onClick={onValidate}>
+          Validate DAG
+        </Btn>
+        <Btn kind="ink" onClick={onSave}>
+          Save pipeline
+        </Btn>
+        <Btn kind="primary" icon="play" onClick={onRun}>
+          Run pipeline
+        </Btn>
       </div>
-      <div style={styles.actions}>
-        <button className="btn-secondary" onClick={onValidate}>Validate</button>
-        <button className="btn-primary" onClick={onSave}>Save</button>
-        <button className="btn-success" onClick={onRun}>Run</button>
-      </div>
-    </div>
+    </aside>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '8px 16px',
-    backgroundColor: '#1e293b',
-    borderBottom: '1px solid #334155',
-    gap: 16,
-  },
-  section: { display: 'flex', alignItems: 'center', gap: 12 },
-  sectionLabel: { fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap' },
-  nodeTypes: { display: 'flex', gap: 6 },
-  nodeChip: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 4,
-    padding: '4px 8px',
-    borderRadius: 6,
-    border: '1px solid',
-    backgroundColor: '#0f172a',
-    color: '#f1f5f9',
-    fontSize: 12,
-    cursor: 'grab',
-    userSelect: 'none' as const,
-  },
-  chipIcon: {
-    width: 18,
-    height: 18,
-    borderRadius: 3,
-    color: 'white',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  actions: { display: 'flex', gap: 8 },
-};

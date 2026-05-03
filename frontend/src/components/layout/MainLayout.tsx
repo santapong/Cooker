@@ -1,21 +1,41 @@
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import { useTheme } from '../../theme/ThemeProvider';
 
-export default function MainLayout({ children }: { children: ReactNode }) {
+interface Props {
+  children: ReactNode;
+  fullBleed?: boolean;
+}
+
+export default function MainLayout({ children, fullBleed = false }: Props) {
+  const t = useTheme();
   return (
-    <div style={styles.layout}>
+    <div
+      style={{
+        display: 'flex',
+        height: '100vh',
+        width: '100%',
+        background: t.bg,
+        color: t.text,
+        fontFamily: t.sans,
+        overflow: 'hidden',
+      }}
+    >
       <Sidebar />
-      <div style={styles.main}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <TopBar />
-        <div style={styles.content}>{children}</div>
+        <main
+          style={{
+            flex: 1,
+            overflow: fullBleed ? 'hidden' : 'auto',
+            position: 'relative',
+            background: t.bg,
+          }}
+        >
+          {children}
+        </main>
       </div>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  layout: { display: 'flex', minHeight: '100vh', width: '100%' },
-  main: { flex: 1, display: 'flex', flexDirection: 'column' },
-  content: { flex: 1, padding: 20, overflow: 'auto' },
-};

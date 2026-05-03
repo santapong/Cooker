@@ -5,42 +5,94 @@ import PipelineCanvas from '../components/pipeline/PipelineCanvas';
 import PipelineToolbar from '../components/pipeline/toolbar/PipelineToolbar';
 import NodeConfigPanel from '../components/pipeline/panels/NodeConfigPanel';
 import { usePipelineStore } from '../stores/pipelineStore';
+import { useUIStore } from '../stores/uiStore';
+import { useTheme } from '../theme/ThemeProvider';
 import { pipelineApi } from '../api/pipelines';
+import { useToastStore } from '../stores/toastStore';
+import { Pill } from '../components/ui/atoms';
 
 export default function PipelineEditorPage() {
+  const t = useTheme();
+  const mode = useUIStore((s) => s.mode);
+  const pushToast = useToastStore((s) => s.push);
   const { id } = useParams<{ id: string }>();
   const { pipeline, loadPipeline, savePipeline, selectedNodeId } = usePipelineStore();
 
   useEffect(() => {
-    if (id) {
-      loadPipeline(id);
-    }
+    if (id) loadPipeline(id);
   }, [id, loadPipeline]);
 
   const handleValidate = async () => {
     if (!pipeline) return;
-    const result = await pipelineApi.validate(pipeline.id);
-    if (result.valid) {
-      alert('Pipeline is valid!');
-    } else {
-      alert('Validation errors:\n' + result.errors.join('\n'));
+    try {
+      const result = await pipelineApi.validate(pipeline.id);
+      if (result.valid) {
+        pushToast({ kind: 'success', message: 'Pipeline DAG is valid.' });
+      } else {
+        pushToast({
+          kind: 'error',
+          message: `Validation failed: ${result.errors.join('; ')}`,
+        });
+      }
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
     }
   };
 
   const handleRun = async () => {
     if (!pipeline) return;
-    const run = await pipelineApi.run(pipeline.id);
-    alert(`Pipeline run started: ${run.id}`);
+    try {
+      const run = await pipelineApi.run(pipeline.id);
+      pushToast({ kind: 'success', message: `Run #${run.id.slice(0, 8)} started.` });
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
+    }
   };
 
   if (!pipeline) {
-    return <div style={{ color: '#94a3b8', padding: 40, textAlign: 'center' }}>Loading pipeline...</div>;
+    return (
+      <div
+        style={{
+          height: '100%',
+          display: 'grid',
+          placeItems: 'center',
+          color: t.textMute,
+          fontFamily: t.serif,
+          fontSize: 18,
+        }}
+      >
+        Loading pipeline…
+      </div>
+    );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 72px)', margin: -20 }}>
-      <PipelineToolbar onSave={savePipeline} onValidate={handleValidate} onRun={handleRun} />
-      <div style={{ display: 'flex', flex: 1 }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div
+        style={{
+          padding: '12px 18px',
+          borderBottom: `1px solid ${t.line}`,
+          background: t.surface,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        <span style={{ fontFamily: t.serif, fontSize: 18, fontWeight: 500, color: t.text }}>
+          {pipeline.name}
+        </span>
+        <Pill>{pipeline.stages.length} steps</Pill>
+        <Pill tone="cool">{pipeline.edges.length} edges</Pill>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontFamily: t.mono, fontSize: 11, color: t.textMute }}>
+          {pipeline.id.slice(0, 12)} · updated {new Date(pipeline.updatedAt).toLocaleString()}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+        {mode === 'pro' && (
+          <PipelineToolbar onSave={savePipeline} onValidate={handleValidate} onRun={handleRun} />
+        )}
         <ReactFlowProvider>
           <PipelineCanvas />
         </ReactFlowProvider>
