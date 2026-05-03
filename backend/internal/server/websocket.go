@@ -17,25 +17,35 @@ type Client struct {
 }
 
 // WebSocketHub manages all WebSocket connections and message broadcasting.
+// Per-client subscription state (the clients map) is per-process; broadcast
+// fan-out can be cross-replica via a Redis HubBackend.
 type WebSocketHub struct {
 	upgrader   websocket.Upgrader
 	mu         sync.RWMutex
 	clients    map[string]map[*Client]bool // channel -> clients
-	broadcast  chan BroadcastMessage
+	backend    HubBackend
 	register   chan *Client
 	unregister chan *Client
 }
 
-// BroadcastMessage is a message sent to a specific channel.
+// BroadcastMessage is a message sent to a specific channel. Tagged for
+// json so the Redis backend can ship it across the wire.
 type BroadcastMessage struct {
-	Channel string
-	Data    []byte
+	Channel string `json:"channel"`
+	Data    []byte `json:"data"`
 }
 
-// NewWebSocketHub creates a new hub. allowedOrigins controls which
-// Origin headers are accepted on the WebSocket upgrade; ["*"] means
-// allow any. Rejected origins produce HTTP 403 from the gorilla upgrader.
+// NewWebSocketHub creates a new hub backed by the in-process channel.
+// allowedOrigins controls which Origin headers are accepted on the
+// WebSocket upgrade; ["*"] means allow any.
 func NewWebSocketHub(allowedOrigins []string) *WebSocketHub {
+	return NewWebSocketHubWithBackend(allowedOrigins, newMemoryHubBackend())
+}
+
+// NewWebSocketHubWithBackend builds a hub with a caller-supplied
+// backend. Used by server.New to swap in the Redis pub/sub backend
+// when COOKER_WS_HUB_BACKEND=redis.
+func NewWebSocketHubWithBackend(allowedOrigins []string, backend HubBackend) *WebSocketHub {
 	allowAll, set := originSet(allowedOrigins)
 	return &WebSocketHub{
 		upgrader: websocket.Upgrader{
@@ -51,14 +61,16 @@ func NewWebSocketHub(allowedOrigins []string) *WebSocketHub {
 			},
 		},
 		clients:    make(map[string]map[*Client]bool),
-		broadcast:  make(chan BroadcastMessage, 256),
+		backend:    backend,
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 	}
 }
 
-// Run processes WebSocket hub events.
+// Run processes WebSocket hub events. Reads broadcasts from the
+// backend's Subscribe channel (memory or Redis).
 func (h *WebSocketHub) Run() {
+	inbox := h.backend.Subscribe()
 	for {
 		select {
 		case client := <-h.register:
@@ -79,7 +91,10 @@ func (h *WebSocketHub) Run() {
 			}
 			h.mu.Unlock()
 
-		case msg := <-h.broadcast:
+		case msg, ok := <-inbox:
+			if !ok {
+				return
+			}
 			h.mu.RLock()
 			if clients, ok := h.clients[msg.Channel]; ok {
 				for client := range clients {
@@ -96,9 +111,12 @@ func (h *WebSocketHub) Run() {
 	}
 }
 
-// Broadcast sends a message to all clients on a channel.
+// Broadcast sends a message to all clients on a channel across every
+// replica, depending on the configured backend.
 func (h *WebSocketHub) Broadcast(channel string, data []byte) {
-	h.broadcast <- BroadcastMessage{Channel: channel, Data: data}
+	if err := h.backend.Publish(BroadcastMessage{Channel: channel, Data: data}); err != nil {
+		slog.Warn("ws hub: publish failed", "err", err, "channel", channel)
+	}
 }
 
 // HandlePipelineRun handles WebSocket connections for pipeline run updates.

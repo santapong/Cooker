@@ -1,17 +1,27 @@
 # Multi-replica deployment
 
-Cooker is single-replica by default. Running 2+ replicas behind a load balancer works, but you have to choose between two strategies for two pieces of per-process state: the **rate limiter** (PR H) and the **WebSocket ticket store** (PR F). This document covers both.
+Cooker can run 2+ replicas safely. The default Helm chart now ships **Redis-backed** rate limiter, WS ticket store, and WS broadcast hub, so you don't need sticky sessions for correctness. Sticky sessions remain a supported fallback when you can't (or don't want to) run Redis.
 
 > Backlog reference: P3.
 
 ## What breaks without action
 
-| Component | Per-process state | Failure mode under naive multi-replica |
+| Component | Per-process state | Failure mode under naive multi-replica + memory backend |
 |---|---|---|
-| Rate limiter (`backend/internal/rate/`) | In-memory token bucket per user | Limits effectively N× looser than configured (one bucket per replica). Bursty users can pin a single replica. |
-| WebSocket ticket store (`backend/internal/server/wsticket.go`) | In-memory single-use tickets | Client opens an HTTP request to replica A, receives a ticket; the WS upgrade hits replica B → ticket unknown → 401. Manifests as random sign-in / live-log failures. |
+| Rate limiter | In-memory token bucket per user | Limits effectively N× looser than configured. Bursty users can pin one replica. |
+| WS ticket store | In-memory single-use tickets | Client receives a ticket from replica A; WS upgrade hits replica B → 401. Random sign-in / live-log failures. |
+| WS broadcast hub | In-memory `clients map` + channel | A run-status broadcast on replica A is invisible to a UI tab pinned to replica B. |
 
-Both components ship in-process and per-replica today. PR F's commit message explicitly calls this out.
+Cooker's `Config.Validate()` refuses production boot when `replicaCount>1` and any of those is set to `memory` without `stickySessions=true`.
+
+## WS broadcast topology (Redis backend)
+
+When `wsHub.backend=redis`, every `Broadcast()` is published to the Redis topic `cooker:ws:broadcast`. Each replica subscribes to that topic and fans the message out to its **local** clients via the existing in-process `clients` map. Per-client subscription state stays per-replica; only the broadcast message itself crosses Redis.
+
+This means:
+- Hot path is unchanged for browsers connected to replica A — they still receive their messages from replica A's writePump.
+- A pod restart drops only that replica's clients (they reconnect via the existing exponential-backoff hook).
+- Redis is not on the critical path of the WS upgrade itself — it only carries broadcasts. A Redis blip silences broadcasts (visible as missing log lines) but the UI itself stays up.
 
 ## Strategy 1 — Sticky sessions at the ingress (recommended for now)
 
@@ -70,14 +80,15 @@ Key settings:
 
 Sticky sessions do **not** synchronize the rate-limiter state across replicas. A coordinated burst that lands on multiple sticky cookies (multiple browser sessions, scripted clients) still gets N× the configured limit. For most setups this is acceptable; if not, see Strategy 2.
 
-## Strategy 2 — Redis-backed shared state (open backlog item)
+## Strategy 2 — Redis-backed shared state (default)
 
-Swap both per-process stores for Redis-backed equivalents:
+The chart now defaults to Redis for all three components:
 
-- Rate limiter: `redis_rate` package (`github.com/go-redis/redis_rate/v10`) sliding-window over Redis keys.
-- WS ticket store: SETEX with the ticket as the key, single-use enforced by `GETDEL`.
+- Rate limiter: `redis_rate/v10` GCRA sliding window.
+- WS ticket store: `SETEX` + atomic `GETDEL` on Redis 6.2+.
+- WS broadcast hub: pub/sub on `cooker:ws:broadcast`.
 
-This is **not implemented today.** Tracked in backlog `P3`. Until then, sticky sessions are the supported multi-replica path.
+Toggle via `wsHub.backend`, `wsTicket.backend`, `rateLimit.backend` (each accept `memory` or `redis`). A single `redis.url` is shared across all three. With these three set to `redis`, sticky sessions are unnecessary for correctness (you may still want them for cache locality).
 
 ## Verification
 

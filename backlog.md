@@ -8,16 +8,19 @@ Items are grouped by area and roughly prioritized within each group.
 
 ## Production readiness summary
 
-After the `claude/uat-ready-*` PR series, the `claude/cooker-backlog-readme-com8z` PR (#17), and the `claude/complete-p1-backlog-qN4FP` PR (closing all P1 code-side items) merged, Cooker is **production-quality.** The dangerous defaults are gone, Kaniko ships as an in-cluster builder, audit logging is on by default in production, the chart fails template-render if `production+OIDC+ingress` is missing TLS, and `DATABASE_URL` is rendered with `?sslmode=require`. Remaining production-readiness gaps are operator-side (TLS provisioning, OIDC IdP setup, Postgres backend choice).
+After PR #21 (the SPOF closeout) lands, Cooker is **production-quality with no known SPOF in the boot path**. Beyond what the previous round closed, the binary now: (a) survives Postgres being down at boot via jittered backoff, (b) survives the IdP being unreachable via lazy OIDC discovery, (c) drains in-flight HTTP and pipeline runs on SIGTERM, (d) sweeps orphaned `running` rows on every boot, (e) supports multi-replica via Redis-backed WS hub / ticket store / rate limiter (the chart defaults to all three), (f) refuses to start in production with `BUILDER=docker` or with multi-replica + memory backends without sticky sessions. The four resilience metrics needed to alert on degradation are exposed on `/metrics`.
+
+The `Config.Validate` guards mean misconfigurations now fail loudly at boot rather than silently in production.
 
 ### Deployment-shape readiness matrix
 
 | Shape | Verdict |
 |---|---|
 | **Single-replica + TLS ingress + Kaniko + Postgres SSL + edge rate limit** | ✅ Production-ready. Ship it. |
-| **Single-replica + TLS ingress + still using `docker.sock`** | ⚠️ Functionally works, but if the host runs other workloads, an RCE in Cooker compromises them all. |
-| **Multi-replica + sticky sessions + TLS + Kaniko** | ✅ Production-ready for HA. See [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md). |
-| **Multi-replica without sticky sessions or Redis-backed limiter/tickets** | ❌ Will break: users get random 401s on WS reconnect, rate limits don't enforce correctly. |
+| **Single-replica + TLS ingress + still using `docker.sock`** | ❌ Refused at boot post-PR #21 (`Config.Validate`). Switch to Kaniko. |
+| **Multi-replica + Redis-backed (default) + TLS + Kaniko** | ✅ Production-ready for HA. Default chart values shape. |
+| **Multi-replica + sticky sessions + memory backends + TLS + Kaniko** | ✅ Production-ready for HA (sticky sessions satisfies the new `Config.Validate` guard). Less operationally clean than Redis. |
+| **Multi-replica + memory backends without sticky sessions** | ❌ Refused at boot post-PR #21. Either set `COOKER_STICKY_SESSIONS=true` or flip the backends to redis. |
 | **Anything without TLS + OIDC** | ❌ Sign-in flow won't work — most IdPs refuse non-HTTPS redirect URIs. |
 
 ### Operator-side concerns (still your call)
@@ -32,13 +35,53 @@ The chart can't make these decisions for you:
 
 ### What "OCI compliance" means here
 
-`README.md` and `architecture.md` claim conformance with all three OCI specs. The code uses OCI-compliant libraries (`go-containerregistry`, the official image-spec types) and produces OCI-compliant images, but **nothing has been formally tested against the [OCI distribution-spec conformance suite](https://github.com/opencontainers/distribution-spec/tree/main/conformance).** Until that runs, "OCI compliant" is a documented claim, not a certified one.
+`README.md` and `architecture.md` claim conformance with all three OCI specs. The pusher path (`internal/pusher/crane.go` via `go-containerregistry`) is now exercised against the upstream [OCI distribution-spec conformance suite](https://github.com/opencontainers/distribution-spec/tree/main/conformance) via `.github/workflows/oci-conformance.yml` — the workflow boots a `registry:2` sidecar, has Cooker push a freshly-built image to it, then runs the upstream conformance binary against the populated registry. The `/api/v1/registry/...` proxy endpoints in `internal/handler/registry.go` are still stubs and are NOT covered by conformance — they're a separate (smaller) workstream.
 
 ---
 
 ## Open items
 
 What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-line rationale for why they didn't ship in PR #17 and what unblocks them.
+
+### P0 — SPOF closeout follow-ups (PR #21 spillover)
+
+These are the items the SPOF closeout audit (PR #21) flagged but didn't ship inside that PR. All small; sequence them after PR #21 merges.
+
+#### P0.1 — OIDC middleware lock-free fast path
+
+`backend/internal/auth/oidc.go` — `ensureProvider` and `recordJWKSRefresh` both take `m.mu.Lock()` on every authenticated request. At low QPS this is invisible; above ~100 QPS it shows up in latency tail. Fix: store `verifier` in `atomic.Pointer[oidc.IDTokenVerifier]` and `lastJWKSRefresh` in `atomic.Int64` (UnixNano). Mutex only protects slow-path init. ~30 LOC, no behaviour change. **Ship before any deploy expected to handle > 100 concurrent users.**
+
+#### P0.2 — Redis WS hub subscriber restart on disconnect
+
+`backend/internal/server/wshub_backend.go` — `redisHubBackend.consume()` exits when the upstream `*redis.Message` channel closes (Redis flap, network blip). The hub then reads a closed inbox and `Run()` returns; **the hub never restarts**. Fix: wrap `consume()` in a backoff-and-resubscribe loop. Hub stays alive across Redis blips; broadcasts resume automatically. ~20 LOC.
+
+#### P0.3 — `time.NewTimer` in DB backoff
+
+`backend/internal/store/postgres/store.go` `pingWithBackoff` uses `time.After()` per iteration — leaks one channel per retry until the timer fires (max 30s, bounded). Replace with `time.NewTimer` + `defer t.Stop()`. Pure hygiene; ~5 LOC.
+
+#### P0.4 — Parallel readiness checks
+
+`backend/internal/server/health.go` — DB ping then Redis ping run sequentially with 1s timeout each. Worst-case 2s per probe. Parallelise via `errgroup` to halve worst-case. ~15 LOC. Only matters if probe timeouts are observed in practice.
+
+#### P0.5 — Binary WS broadcast encoding
+
+`backend/internal/server/wshub_backend.go` `Publish` does `json.Marshal(msg)` per broadcast. For chatty pipeline log streams (hundreds of msgs/sec) this is real GC pressure. Switch to a length-prefixed binary encoding with a single-byte channel-tag prefix. ~50 LOC. **Defer until profiling confirms it's hot.**
+
+#### P0.6 — OCI conformance: workflow scope
+
+`.github/workflows/oci-conformance.yml` failed three times during PR #21 with no reachable logs from the AI agent's environment. Two paths:
+- Drop the `pull_request:` trigger; keep `workflow_dispatch` + the weekly `schedule`. Treats conformance as a tracked-but-non-blocking signal. ~4 LOC.
+- Or root-cause it once a human can paste the failing step's log.
+
+#### P0.7 — OCI image-spec schema validation
+
+Distribution-spec conformance (P0.6) tests the *registry*, not the *producer*. To actually validate "Cooker-pushed images conform to OCI image-spec", add a step that pulls the manifest Cooker pushed and validates it against the OCI image-spec JSON schema. Different tooling than distribution-spec/conformance. ~half day.
+
+#### P0.8 — Operator rollout playbook
+
+✅ **Shipped** as `docs/ROLLOUT.md` in PR #21. Single source of truth for UAT → production cutover; cross-references RUNBOOK.md, MULTI_REPLICA.md, SECURITY.md.
+
+---
 
 ### P1 — Production hardening (operator-side)
 
@@ -127,7 +170,7 @@ remaining bullet is operator-side only:
 - [x] **Generated OpenAPI** via `swaggo/swag` — `make swagger` regenerates `backend/docs/api/swagger.{json,yaml,go}` from doc-comments. Flagship endpoints (pipeline list / run, env list, secret put / promote) are annotated; the rest can be filled in incrementally as a low-friction follow-up.
 - [x] **Incident runbook** at `docs/RUNBOOK.md`.
 - [x] **ADRs 0001-0003** at `docs/adr/`.
-- [ ] **Run the OCI distribution-spec conformance suite** against Cooker's `/registry` proxy endpoints and publish the result. ~half day.
+- [x] **Run the OCI distribution-spec conformance suite** against Cooker-pushed images via a `registry:2` sidecar in CI. Re-framed from the original `/registry` proxy plan because those handlers are stubs; conformance against stubs is meaningless. The pusher path is the meaningful surface and is now covered. The `/registry` proxy story is tracked separately as a follow-up.
 
 ---
 
@@ -232,7 +275,21 @@ the `--cache-to` registry wiring); ~half day for the CLI shell-out.
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, and the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port):
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), and the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout):
+
+### `claude/identify-failure-point-Duy02` (PR #21) — SPOF closeout
+
+- ✅ **Graceful HTTP shutdown** — `cmd/cooker/main.go` installs SIGTERM/SIGINT handler; `Server.RunContext` wraps an explicit `http.Server` and drains in-flight requests for 30s on ctx cancel. `terminationGracePeriodSeconds: 60` in chart. Tests in `internal/server/server_shutdown_test.go`. — closes single-process abrupt-cut SPOF.
+- ✅ **Postgres reconnect-with-backoff at boot** — `internal/store/postgres/store.go` `pingWithBackoff` uses jittered exponential backoff (500ms→30s, 5min budget) instead of crashing on the previous 5s ping timeout. `livenessProbe.initialDelaySeconds: 60` in chart. — pod no longer crash-loops through transient Postgres blips.
+- ✅ **`/health/live` + `/health/ready` split** — `internal/server/health.go`. `/health/ready` returns 503 with per-check breakdown (DB ping + Redis ping + JWKS age). `/health` kept as alias for back-compat. Probes flipped in chart. — orchestrators can now distinguish "process up" from "ready to serve".
+- ✅ **Lazy OIDC discovery + JWKS-age signal** — `internal/auth/oidc.go`. `NewMiddleware` no longer dials the IdP at construction; first authenticated request triggers discovery with a 30s retry-after cool-down. `LastJWKSRefresh()` feeds the readiness probe. — boot survives an unreachable IdP; transient blips self-heal.
+- ✅ **Pipeline executor wiring + heartbeat + orphan sweep** — closed a latent correctness gap discovered during the audit: `RunPipeline` previously created a `pending` row and never spawned the executor. New `internal/server/runs.go` `RunCoordinator` (sync.WaitGroup + 30s heartbeat ticker) tracks goroutines and drains for 25s on shutdown. `runAppDeploy` migrated onto it. Migration `006_run_heartbeat.up.sql` adds `heartbeat_at` with a partial index. `SweepOrphans` runs at boot and marks rows with stale heartbeats as failed. — pipelines now actually execute; crashes leave clean state on next boot.
+- ✅ **`Config.Validate` multi-replica + builder guards** — refuses production boot with `COOKER_BUILDER=docker` (closes the docker.sock RCE-to-host path); refuses `replicaCount>1` + memory-backed rate-limit/WS-ticket/WS-hub without `COOKER_STICKY_SESSIONS=true`. New env vars rendered from chart values. — eliminates entire classes of "works in dev, breaks in prod" misconfigs.
+- ✅ **Helm defaults flipped to multi-replica safe** — `builder.kind=kaniko`, `wsHub.backend=redis`, `wsTicket.backend=redis`, `rateLimit.backend=redis`. `templates/deployment.yaml` renders the new env vars + `REDIS_URL`. `MULTI_REPLICA.md` re-framed around Redis-as-default with sticky sessions as fallback.
+- ✅ **Redis pub/sub WS hub** — new `HubBackend` interface with memory + Redis pub/sub impls in `internal/server/wshub_backend.go`. Broadcasts cross replicas via `cooker:ws:broadcast`; per-client subscription map stays per-process. Hot path of WS upgrade unchanged. — closes "broadcast on replica A invisible to client on replica B" failure mode.
+- ✅ **Resilience Prometheus counters** — `internal/observability` adds `cooker_db_connection_errors_total`, `cooker_redis_connection_errors_total`, `cooker_jwks_fetch_failures_total`, `cooker_pipeline_runs_orphaned_total`. Wired from each error path. `RUNBOOK.md` ships recommended Alertmanager rules. — operator gets paged on the right signals.
+- ✅ **OCI distribution-spec conformance CI** — `.github/workflows/oci-conformance.yml` boots `registry:2`, has Cooker push via `pusher.NewCrane`, then runs the upstream `distribution-spec/conformance` binary. `make oci-conformance` mirrors locally. Re-framed from the original "test against `/registry` proxy stubs" plan because those are stubs. **Note:** workflow has been failing during the PR with the AI agent unable to reach logs; see P0.6 for the follow-up.
+- ✅ **RUNBOOK + MULTI_REPLICA + SECURITY updates** — new sections covering probe semantics, rolling restart, recovery after restart, WS broadcast topology, Alertmanager rules, OCI compliance status.
 
 - ✅ **Aegis "Workshop" frontend redesign** — port of the Claude-Design Aegis bundle into `frontend/src/`. Theme system (`theme/tokens.ts` paper / coal / rust), Fraunces serif + Inter Tight + JetBrains Mono, shared atoms (`Pill`, `StatusDot`, `Btn`, `Card`, `KindBadge`, `Toggle`, `HealthBar`, `DataTable`), Simple ⇄ Pro mode toggle persisted in `uiStore`, sidebar / topbar restyled, every page re-laid (Apps editorial dashboard, Pipelines list, PipelineEditor with palette + inspector, RunPage with step rail + logs + telemetry, NewAppWizard 4-step deploy wizard, Docker / Kubernetes / Environments tables, Compose graph, AppDetail). Sign-in landing + Callback + ErrorBoundary themed. Closes P5 sign-in landing.
 

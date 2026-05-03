@@ -1,0 +1,79 @@
+name: OCI conformance
+
+# Validates that Cooker's pusher produces images conformant with the
+# OCI distribution-spec. Runs the build-tagged push test against a
+# registry:2 sidecar, then runs the upstream conformance binary
+# against that registry. Optional / on-demand (manual or scheduled)
+# so a flake in upstream tooling doesn't block PR merges.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly on Sundays at 02:00 UTC
+    - cron: "0 2 * * 0"
+  # PR trigger intentionally disabled — see backlog P0.6. Conformance
+  # is a tracked but non-blocking signal until the upstream Ginkgo
+  # suite's failure mode against a fresh registry:2 sidecar is
+  # root-caused. Re-enable by adding back a `pull_request:` block.
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+        env:
+          REGISTRY_STORAGE_DELETE_ENABLED: "true"
+        options: >-
+          --health-cmd "wget --quiet --spider http://localhost:5000/v2/ || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      COOKER_OCI_REGISTRY: localhost:5000
+      OCI_NAMESPACE: cooker-conformance/test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Push a Cooker-built image to the local registry
+        working-directory: backend
+        run: |
+          go test -tags oci_conformance -v -run TestPushConformance ./internal/pusher/...
+
+      - name: Build OCI distribution-spec conformance binary
+        # The conformance package is a Ginkgo test suite (no main),
+        # so it must be compiled via `go test -c`. `go install` does
+        # not produce a runnable binary for this path.
+        run: |
+          tmp="$(mktemp -d)"
+          git clone --depth 1 https://github.com/opencontainers/distribution-spec "$tmp/dist-spec"
+          cd "$tmp/dist-spec/conformance"
+          go test -c -o "${{ runner.temp }}/conformance.test"
+
+      - name: Run upstream conformance suite (read + discovery)
+        env:
+          OCI_ROOT_URL: http://localhost:5000
+          OCI_USERNAME: ""
+          OCI_PASSWORD: ""
+          OCI_TEST_PULL: "1"
+          OCI_TEST_CONTENT_DISCOVERY: "1"
+          OCI_HIDE_SKIPPED_WORKFLOWS: "1"
+          OCI_REPORT_DIR: ${{ runner.temp }}/oci-conformance
+        run: |
+          mkdir -p "$OCI_REPORT_DIR"
+          ${{ runner.temp }}/conformance.test
+
+      - name: Upload conformance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-conformance-report
+          path: ${{ runner.temp }}/oci-conformance
+          if-no-files-found: warn

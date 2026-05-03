@@ -44,6 +44,7 @@ type Server struct {
 	redisClient   *redis.Client
 	audit         audit.Sink
 	traceShutdown func(context.Context) error
+	runs          *RunCoordinator
 }
 
 // New creates a new Server instance with all routes and middleware.
@@ -90,16 +91,32 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	router := gin.Default()
-	wsHub := NewWebSocketHub(cfg.AllowedOrigins)
 
 	var redisClient *redis.Client
-	if cfg.WSTicket.Backend == "redis" || cfg.RateLimit.Backend == "redis" {
+	if cfg.WSTicket.Backend == "redis" || cfg.RateLimit.Backend == "redis" || cfg.WSHub.Backend == "redis" {
 		opts, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {
 			st.Close()
 			return nil, fmt.Errorf("redis: parse url: %w", err)
 		}
 		redisClient = redis.NewClient(opts)
+	}
+
+	var wsHub *WebSocketHub
+	switch cfg.WSHub.Backend {
+	case "redis":
+		if redisClient == nil {
+			st.Close()
+			return nil, fmt.Errorf("ws hub backend=redis requires REDIS_URL")
+		}
+		backend, err := newRedisHubBackend(ctx, redisClient)
+		if err != nil {
+			st.Close()
+			return nil, fmt.Errorf("ws hub redis backend: %w", err)
+		}
+		wsHub = NewWebSocketHubWithBackend(cfg.AllowedOrigins, backend)
+	default:
+		wsHub = NewWebSocketHub(cfg.AllowedOrigins)
 	}
 
 	var wsTickets ticketStore
@@ -141,9 +158,25 @@ func New(cfg *config.Config) (*Server, error) {
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 
+	runs := NewRunCoordinator(st)
+
 	h := handler.New(st, codec, secMgr)
 	h.AppDeployer = appDeployer
 	h.WSBroadcast = wsHub.Broadcast
+	h.Executor = exec
+	h.Runs = runs
+
+	// Sweep runs that were orphaned by a previous crash. Safe to run
+	// before any new runs spawn — the threshold protects in-flight
+	// rows from being reaped by a fast restart.
+	sweepCtx, sweepCancel := context.WithTimeout(ctx, 5*time.Second)
+	if n, err := st.Runs.SweepOrphans(sweepCtx, orphanThreshold); err != nil {
+		slog.Warn("orphan sweep failed", "err", err)
+	} else if n > 0 {
+		slog.Info("orphan sweep: marked stale runs failed", "count", n)
+		observability.AddPipelineRunsOrphaned(n)
+	}
+	sweepCancel()
 
 	s := &Server{
 		router:        router,
@@ -157,6 +190,7 @@ func New(cfg *config.Config) (*Server, error) {
 		audit:         auditSink,
 		traceShutdown: traceShutdown,
 		redisClient:   redisClient,
+		runs:          runs,
 	}
 
 	router.Use(corsMiddleware(cfg.AllowedOrigins))
@@ -167,9 +201,15 @@ func New(cfg *config.Config) (*Server, error) {
 	if cfg.Observability.TracingEnabled {
 		router.Use(observability.TracingMiddleware(cfg.Observability.ServiceName))
 	}
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "cooker"})
-	})
+	live := livenessHandler()
+	var jwksAge func() (time.Duration, bool)
+	if cfg.OIDC.Enabled && oidcMW != nil {
+		jwksAge = oidcMW.LastJWKSRefresh
+	}
+	ready := readinessHandler(st, redisClient, jwksAge)
+	router.GET("/health", live)
+	router.GET("/health/live", live)
+	router.GET("/health/ready", ready)
 
 	registerDeployTargets(cfg.DeployTargets)
 	s.registerRoutes()
@@ -177,7 +217,42 @@ func New(cfg *config.Config) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) Run(addr string) error { return s.router.Run(addr) }
+// shutdownTimeout is how long Shutdown waits for in-flight HTTP
+// requests to finish before forcing connections closed.
+const shutdownTimeout = 30 * time.Second
+
+// RunContext runs the HTTP server until ctx is cancelled (e.g. SIGTERM),
+// then drains in-flight requests with shutdownTimeout before returning.
+// Returns the first error from ListenAndServe or Shutdown, or nil on a
+// clean drain.
+func (s *Server) RunContext(ctx context.Context, addr string) error {
+	httpSrv := &http.Server{Addr: addr, Handler: s.router}
+	errCh := make(chan error, 1)
+	go func() {
+		err := httpSrv.ListenAndServe()
+		if err == http.ErrServerClosed {
+			err = nil
+		}
+		errCh <- err
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		slog.Info("shutdown: draining HTTP server", "timeout", shutdownTimeout.String())
+		drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := httpSrv.Shutdown(drainCtx); err != nil {
+			return fmt.Errorf("shutdown: %w", err)
+		}
+		if s.runs != nil {
+			runDrainCtx, runCancel := context.WithTimeout(context.Background(), runDrainTimeout)
+			s.runs.Wait(runDrainCtx)
+			runCancel()
+		}
+		return <-errCh
+	}
+}
 
 func (s *Server) Close() error {
 	if s == nil {

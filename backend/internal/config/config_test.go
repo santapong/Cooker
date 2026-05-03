@@ -369,3 +369,68 @@ func TestValidate_ProductionAccumulatesProblems(t *testing.T) {
 		t.Errorf("expected both problems in error, got: %v", err)
 	}
 }
+
+func TestValidate_ProductionRefusesDockerBuilder(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		BuilderBackend: "docker",
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "COOKER_BUILDER=docker") {
+		t.Fatalf("expected docker-builder rejection, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionMultiReplicaRequiresRedisOrSticky(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		ReplicaCount:   3,
+		RateLimit:      RateLimitConfig{Enabled: true, Backend: "memory"},
+		WSTicket:       WSTicketConfig{Backend: "memory"},
+		WSHub:          WSHubConfig{Backend: "memory"},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected multi-replica + memory backend rejection")
+	}
+	for _, want := range []string{"COOKER_RATE_LIMIT_BACKEND", "COOKER_WS_TICKET_BACKEND", "COOKER_WS_HUB_BACKEND", "COOKER_STICKY_SESSIONS"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected error to mention %s, got: %v", want, err)
+		}
+	}
+}
+
+func TestValidate_ProductionMultiReplicaWithStickyOK(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		ReplicaCount:   3,
+		StickySessions: true,
+		RateLimit:      RateLimitConfig{Enabled: true, Backend: "memory"},
+		WSTicket:       WSTicketConfig{Backend: "memory"},
+		WSHub:          WSHubConfig{Backend: "memory"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("sticky sessions should satisfy multi-replica guard, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionMultiReplicaWithRedisOK(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		ReplicaCount:   3,
+		RateLimit:      RateLimitConfig{Enabled: true, Backend: "redis"},
+		WSTicket:       WSTicketConfig{Backend: "redis"},
+		WSHub:          WSHubConfig{Backend: "redis"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("redis backends should satisfy multi-replica guard, got: %v", err)
+	}
+}

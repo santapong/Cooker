@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cooker-ci/cooker/internal/model"
 	"github.com/cooker-ci/cooker/internal/store"
@@ -23,6 +24,7 @@ func New() *store.Store {
 		&apps{m: map[string]*model.App{}},
 		&hosts{m: map[string]*model.Host{}},
 		&users{byID: map[string]*model.User{}, byEmail: map[string]string{}},
+		nil,
 		nil,
 	)
 }
@@ -122,6 +124,38 @@ func (s *runs) Update(_ context.Context, r *model.PipelineRun) error {
 	}
 	s.m[r.ID] = r
 	return nil
+}
+
+func (s *runs) UpdateHeartbeat(_ context.Context, id string, ts time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.m[id]
+	if !ok {
+		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+	}
+	t := ts
+	r.HeartbeatAt = &t
+	return nil
+}
+
+func (s *runs) SweepOrphans(_ context.Context, threshold time.Duration) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	swept := 0
+	for _, r := range s.m {
+		if r.Status != model.RunStatusRunning {
+			continue
+		}
+		if r.HeartbeatAt == nil || now.Sub(*r.HeartbeatAt) > threshold {
+			r.Status = model.RunStatusFailed
+			r.Error = "orphaned: heartbeat stale at boot"
+			finished := now
+			r.FinishedAt = &finished
+			swept++
+		}
+	}
+	return swept, nil
 }
 
 type environments struct {

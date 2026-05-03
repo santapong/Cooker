@@ -17,9 +17,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/cooker-ci/cooker/internal/config"
 	"github.com/cooker-ci/cooker/internal/server"
@@ -39,16 +42,19 @@ func main() {
 		slog.Error("failed to create server", "err", err)
 		os.Exit(1)
 	}
-	defer func() {
-		if err := srv.Close(); err != nil {
-			slog.Warn("shutdown: store close failed", "err", err)
-		}
-	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	slog.Info("cooker starting", "addr", addr, "env", cfg.Env)
-	if err := srv.Run(addr); err != nil {
-		slog.Error("server error", "err", err)
+	runErr := srv.RunContext(ctx, addr)
+	if closeErr := srv.Close(); closeErr != nil {
+		slog.Warn("shutdown: store close failed", "err", closeErr)
+	}
+	if runErr != nil {
+		slog.Error("server error", "err", runErr)
 		os.Exit(1)
 	}
+	slog.Info("cooker stopped cleanly")
 }

@@ -6,6 +6,23 @@ What to do when Cooker is broken. Each section answers: **symptom → first chec
 
 ---
 
+## Recovery after restart
+
+**Symptom:** Several `pipeline_runs` rows show `status='failed'` with `error='orphaned: heartbeat stale at boot'` after a Cooker pod has restarted.
+
+**Cause:** The pod was killed (OOM, SIGKILL past terminationGracePeriodSeconds, node failure) while runs were in flight. On every boot Cooker sweeps `pipeline_runs WHERE status='running' AND (heartbeat_at IS NULL OR heartbeat_at < NOW() - 90s)` and marks them failed so the UI no longer shows them as running forever.
+
+**No action required** unless the count is high — a sustained orphan rate means pods are crashing under load. Check `cooker_pipeline_runs_orphaned_total` (Prometheus) and the pod's previous logs.
+
+**Manual sweep**, if you want to force it without a restart:
+```sql
+UPDATE pipeline_runs
+   SET status='failed', error='orphaned: manual sweep', finished_at=NOW()
+ WHERE status='running' AND (heartbeat_at IS NULL OR heartbeat_at < NOW() - interval '90 seconds');
+```
+
+---
+
 ## Build runs forever
 
 **Symptom:** A pipeline run shows `running` long past the configured stage timeout. WebSocket log stream is silent or repeats the last line.
@@ -14,7 +31,12 @@ What to do when Cooker is broken. Each section answers: **symptom → first chec
 1. `kubectl get pods -n cooker` — is the Cooker pod healthy? OOMKilled?
 2. `kubectl logs -n cooker deploy/cooker --tail 200` — any panic, deadlock, or stuck spawn?
 3. If `COOKER_BUILDER=docker`: `docker ps -a` on the host running Cooker. Is a build container hung?
-4. The DB: `SELECT id, status, started_at FROM pipeline_runs WHERE status='running' ORDER BY started_at LIMIT 20;` Any rows older than the longest reasonable build?
+4. The DB: heartbeat freshness is the most useful signal:
+   ```sql
+   SELECT id, status, started_at, NOW() - heartbeat_at AS staleness
+     FROM pipeline_runs WHERE status='running' ORDER BY started_at LIMIT 20;
+   ```
+   Staleness > 90s = orphan; the next boot's sweep will mark it failed automatically.
 
 **Most-likely causes:**
 - Build process exited but Cooker missed the SIGCHLD (rare; restart Cooker).
@@ -35,15 +57,36 @@ The in-flight run will be marked `failed` on next state reconciliation.
 
 ---
 
+## Probe semantics: live vs ready
+
+`/health/live` is unconditional — it returns 200 as long as the Gin router is serving. Wire it to `livenessProbe` so a stuck process gets restarted.
+
+`/health/ready` runs a 1-second DB ping, a Redis ping when Redis is configured, and (post PR-2) a JWKS-cache age check. Returns 503 with a per-check breakdown when any dep is down. Wire it to `readinessProbe` so a transient infra blip removes the pod from service without restarting it.
+
+`/health` is kept as an alias for `/health/live` for backward compatibility.
+
+---
+
+## Rolling restart
+
+`kubectl rollout restart deploy/cooker` triggers a graceful shutdown. The pod receives SIGTERM, drains in-flight HTTP requests for up to 30 seconds, finishes tracked pipeline runs for up to 25 seconds beyond that, then exits. `terminationGracePeriodSeconds: 60` in the chart leaves a small safety buffer; bump it if you regularly run pipelines longer than 30 seconds and want more drain time.
+
+If the pod takes longer than the grace period, K8s SIGKILLs it; in-flight runs are then surfaced as orphans by the next boot's sweep (see "Recovery after restart").
+
+---
+
 ## PostgreSQL is down or unreachable
 
-**Symptom:** All API requests return `500` with body `{"error":"db: ..."}` or `connection refused`. `/health` may still return `200` (the health endpoint doesn't probe the DB).
+**Symptom:** API requests return `500` with body `{"error":"db: ..."}` or `connection refused`. `/health/ready` returns 503 with `db: err: ...`. `/health/live` keeps returning 200 — the pod is alive, it's just not ready to serve.
 
 **First checks:**
-1. Postgres pod: `kubectl get pod -n cooker -l app.kubernetes.io/name=postgresql`.
-2. Network path: `kubectl exec -n cooker deploy/cooker -- nc -zv cooker-postgresql 5432`.
-3. Connection saturation: `SELECT count(*) FROM pg_stat_activity WHERE datname='cooker';`
-4. `kubectl logs -n cooker statefulset/cooker-postgresql --tail 100`.
+1. `/health/ready` from outside: `curl -fsS https://cooker.example.com/health/ready`. Expect 503 with the failing dep named.
+2. Postgres pod: `kubectl get pod -n cooker -l app.kubernetes.io/name=postgresql`.
+3. Network path: `kubectl exec -n cooker deploy/cooker -- nc -zv cooker-postgresql 5432`.
+4. Connection saturation: `SELECT count(*) FROM pg_stat_activity WHERE datname='cooker';`
+5. `kubectl logs -n cooker statefulset/cooker-postgresql --tail 100`.
+
+**Boot-time blips no longer crash the pod.** The connection logic at startup retries with jittered exponential backoff up to 5 minutes (delay 0.5s → 30s capped). A pod restarted during a Postgres rolling upgrade should reconnect on its own.
 
 **Most-likely causes:**
 - StatefulSet PVC ran out of space — logs show `could not extend file`.
@@ -73,7 +116,8 @@ The in-flight run will be marked `failed` on next state reconciliation.
 - Issuer URL typo (only fails on token refresh; cached `.well-known` masks it for a while).
 
 **Mitigation:**
-- IdP outage: communicate, wait. Existing sessions keep working until access tokens expire (default 1h) and refresh fails.
+- IdP outage: communicate, wait. Existing sessions keep working until access tokens expire (default 1h) and refresh fails. Cooker self-heals when the IdP returns — provider discovery is lazy and retried every 30s after each failure.
+- A boot during an IdP outage no longer crash-loops the pod. The middleware accepts construction with an unreachable IdP; authenticated requests return `503` with `Retry-After: 30` until discovery succeeds.
 - Egress block: temporarily widen the NetworkPolicy egress rule, then narrow back when the IdP DNS is verified.
 - **Emergency bypass** (use with caution, audit log): set `COOKER_OIDC_ENABLED=false` and `COOKER_ENV=uat` and restart. The dev admin user will be injected on every request. Revert as soon as the IdP is back. Log the timeline in the audit channel.
 
@@ -129,3 +173,46 @@ The in-flight run will be marked `failed` on next state reconciliation.
 - Treat the existing logs as advisory, not authoritative.
 - For audit-grade events, correlate with the IdP's access log + the Cooker DB row mtime.
 - Schedule P1.2 as the next P1 alongside Kaniko.
+
+---
+
+## Recommended Alertmanager rules
+
+These four counters are exposed on `/metrics` (when `COOKER_METRICS_ENABLED=true`). Each stays at zero on a healthy deployment; sustained `rate > 0` over 5 minutes indicates degradation worth paging on.
+
+```yaml
+groups:
+  - name: cooker-resilience
+    rules:
+      - alert: CookerDBConnectionErrors
+        expr: rate(cooker_db_connection_errors_total[5m]) > 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Cooker is failing to reach Postgres"
+          runbook: "docs/RUNBOOK.md#postgresql-is-down-or-unreachable"
+
+      - alert: CookerRedisConnectionErrors
+        expr: rate(cooker_redis_connection_errors_total[5m]) > 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Cooker Redis backend (rate limit / WS ticket / WS hub) is erroring"
+
+      - alert: CookerJWKSFetchFailures
+        expr: rate(cooker_jwks_fetch_failures_total[5m]) > 0
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: "Cooker cannot reach the OIDC IdP for JWKS"
+          runbook: "docs/RUNBOOK.md#oidc-issuer-is-unreachable"
+
+      - alert: CookerOrphanedRunsHigh
+        # rate of orphans means pods are crashing under load
+        expr: increase(cooker_pipeline_runs_orphaned_total[1h]) > 5
+        for: 0m
+        labels: { severity: warn }
+        annotations:
+          summary: "Cooker swept >5 orphaned runs in the last hour"
+          runbook: "docs/RUNBOOK.md#recovery-after-restart"
+```

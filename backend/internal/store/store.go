@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/cooker-ci/cooker/internal/model"
 )
@@ -27,6 +28,14 @@ type RunStore interface {
 	Get(ctx context.Context, id string) (*model.PipelineRun, error)
 	Create(ctx context.Context, run *model.PipelineRun) error
 	Update(ctx context.Context, run *model.PipelineRun) error
+	// UpdateHeartbeat is a cheap UPDATE-one-column write used by the
+	// run coordinator's ticker. Implementations should not re-marshal
+	// the JSONB columns.
+	UpdateHeartbeat(ctx context.Context, id string, ts time.Time) error
+	// SweepOrphans marks runs that were status='running' at boot time
+	// without a recent heartbeat as failed (they were orphaned by a
+	// previous crash). Returns the number of rows updated.
+	SweepOrphans(ctx context.Context, threshold time.Duration) (int, error)
 }
 
 // EnvironmentStore manages environment persistence.
@@ -77,11 +86,13 @@ type Store struct {
 	Hosts        HostStore
 	Users        UserStore
 	close        func() error
+	ping         func(context.Context) error
 }
 
 // New builds a Store. closeFn may be nil when no cleanup is required
-// (e.g., in-memory stores).
-func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, h HostStore, u UserStore, closeFn func() error) *Store {
+// (e.g., in-memory stores). pingFn may be nil for backends without a
+// liveness probe; Ping then reports healthy unconditionally.
+func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, h HostStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
 		Pipelines:    p,
 		Runs:         r,
@@ -90,6 +101,7 @@ func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, h HostStor
 		Hosts:        h,
 		Users:        u,
 		close:        closeFn,
+		ping:         pingFn,
 	}
 }
 
@@ -99,4 +111,13 @@ func (s *Store) Close() error {
 		return nil
 	}
 	return s.close()
+}
+
+// Ping reports whether the underlying datastore is reachable. Returns
+// nil when no ping function is registered (memory backend).
+func (s *Store) Ping(ctx context.Context) error {
+	if s == nil || s.ping == nil {
+		return nil
+	}
+	return s.ping(ctx)
 }

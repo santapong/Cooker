@@ -24,6 +24,10 @@ type PipelineRun struct {
 	StartedAt           *time.Time          `json:"startedAt" db:"started_at"`
 	FinishedAt          *time.Time          `json:"finishedAt" db:"finished_at"`
 	Error               string              `json:"error,omitempty" db:"error"`
+	// HeartbeatAt is updated by the run coordinator while the run is
+	// in flight. A NULL value combined with status='running' marks the
+	// row as a candidate for the boot-time orphan sweep.
+	HeartbeatAt *time.Time `json:"heartbeatAt,omitempty" db:"heartbeat_at"`
 }
 
 // StageRun tracks the execution of a single stage within a pipeline run.

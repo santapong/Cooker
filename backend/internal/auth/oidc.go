@@ -4,16 +4,24 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gin-gonic/gin"
 
 	"github.com/cooker-ci/cooker/internal/auth/local"
 	"github.com/cooker-ci/cooker/internal/config"
+	"github.com/cooker-ci/cooker/internal/observability"
 )
+
+// providerDiscoveryRetry is the cool-down between failed attempts to
+// discover the OIDC provider. Keeps boot fast and the IdP unhammered.
+const providerDiscoveryRetry = 30 * time.Second
 
 // Claims represents the OIDC token claims extracted after validation.
 type Claims struct {
@@ -41,14 +49,24 @@ type Claims struct {
 // middleware injects a deterministic admin user.
 type Middleware struct {
 	cfg         config.OIDCConfig
-	verifier    *oidc.IDTokenVerifier
 	localIssuer *local.Issuer
+
+	// mu guards verifier, nextProviderTry, and lastJWKSRefresh.
+	// OIDC provider discovery is deferred to first request so that
+	// boot survives a transient IdP outage. nextProviderTry caps the
+	// retry rate; lastJWKSRefresh feeds the readiness probe.
+	mu              sync.Mutex
+	verifier        *oidc.IDTokenVerifier
+	nextProviderTry time.Time
+	lastJWKSRefresh time.Time
 }
 
-// NewMiddleware builds an auth middleware. Returns an error when
-// OIDC is enabled but the issuer is unreachable, or when local auth
-// is enabled with a missing/short signing key.
-func NewMiddleware(ctx context.Context, cfg config.OIDCConfig) (*Middleware, error) {
+// NewMiddleware builds an auth middleware. Returns an error only when
+// configuration itself is invalid (missing required fields, bad local
+// signing key). Provider discovery is deferred to the first
+// authenticated request so a temporarily unreachable IdP doesn't
+// prevent Cooker from starting.
+func NewMiddleware(_ context.Context, cfg config.OIDCConfig) (*Middleware, error) {
 	m := &Middleware{cfg: cfg}
 	if !cfg.Enabled {
 		return m, nil
@@ -59,12 +77,51 @@ func NewMiddleware(ctx context.Context, cfg config.OIDCConfig) (*Middleware, err
 	if cfg.ClientID == "" {
 		return nil, fmt.Errorf("oidc enabled but COOKER_OIDC_CLIENT_ID is empty")
 	}
-	provider, err := oidc.NewProvider(ctx, cfg.IssuerURL)
-	if err != nil {
-		return nil, fmt.Errorf("oidc: discover provider %q: %w", cfg.IssuerURL, err)
-	}
-	m.verifier = provider.Verifier(&oidc.Config{ClientID: cfg.ClientID})
 	return m, nil
+}
+
+// ensureProvider lazily discovers the OIDC provider on the first
+// authenticated request. Subsequent failures are rate-limited to one
+// attempt every providerDiscoveryRetry seconds so Cooker doesn't
+// hammer a recovering IdP.
+func (m *Middleware) ensureProvider(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.verifier != nil {
+		return nil
+	}
+	if !m.nextProviderTry.IsZero() && time.Now().Before(m.nextProviderTry) {
+		return errors.New("provider discovery cooling down")
+	}
+	provider, err := oidc.NewProvider(ctx, m.cfg.IssuerURL)
+	if err != nil {
+		m.nextProviderTry = time.Now().Add(providerDiscoveryRetry)
+		observability.IncJWKSFetchFailure()
+		return fmt.Errorf("discover provider %q: %w", m.cfg.IssuerURL, err)
+	}
+	m.verifier = provider.Verifier(&oidc.Config{ClientID: m.cfg.ClientID})
+	m.nextProviderTry = time.Time{}
+	return nil
+}
+
+// recordJWKSRefresh stamps the time of the most recent successful
+// token verification so the readiness probe can report JWKS freshness.
+func (m *Middleware) recordJWKSRefresh() {
+	m.mu.Lock()
+	m.lastJWKSRefresh = time.Now()
+	m.mu.Unlock()
+}
+
+// LastJWKSRefresh returns how long ago the JWKS was last successfully
+// used to verify a token. The bool is false until the first verify
+// has happened (boot, no traffic). Used by the /health/ready handler.
+func (m *Middleware) LastJWKSRefresh() (time.Duration, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lastJWKSRefresh.IsZero() {
+		return 0, false
+	}
+	return time.Since(m.lastJWKSRefresh), true
 }
 
 // EnableLocalAuth attaches the local-auth issuer so the middleware
@@ -114,6 +171,13 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 			})
 			return
 		}
+		if err := m.ensureProvider(c.Request.Context()); err != nil {
+			c.Header("Retry-After", "30")
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error": "oidc: " + err.Error(),
+			})
+			return
+		}
 		idToken, err := m.verifier.Verify(c.Request.Context(), token)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
@@ -121,6 +185,7 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 			})
 			return
 		}
+		m.recordJWKSRefresh()
 		var raw struct {
 			Subject string   `json:"sub"`
 			Email   string   `json:"email"`

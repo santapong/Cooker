@@ -17,6 +17,7 @@ spec:
       {{- if .Values.serviceAccount.create }}
       serviceAccountName: {{ .Values.serviceAccount.name | default (include "cooker.fullname" .) }}
       {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 60 }}
       {{- if .Values.securityContext.enabled }}
       securityContext:
         runAsNonRoot: true
@@ -47,6 +48,20 @@ spec:
               value: {{ .Values.service.port | quote }}
             - name: COOKER_K8S_IN_CLUSTER
               value: {{ .Values.kubernetes.inCluster | quote }}
+            - name: COOKER_REPLICA_COUNT
+              value: {{ .Values.replicaCount | quote }}
+            - name: COOKER_STICKY_SESSIONS
+              value: {{ .Values.stickySessions | default false | quote }}
+            - name: COOKER_WS_HUB_BACKEND
+              value: {{ .Values.wsHub.backend | default "memory" | quote }}
+            - name: COOKER_WS_TICKET_BACKEND
+              value: {{ .Values.wsTicket.backend | default "memory" | quote }}
+            - name: COOKER_RATE_LIMIT_BACKEND
+              value: {{ .Values.rateLimit.backend | default "memory" | quote }}
+            {{- if .Values.redis.url }}
+            - name: REDIS_URL
+              value: {{ .Values.redis.url | quote }}
+            {{- end }}
             - name: COOKER_BUILDER
               value: {{ .Values.builder.kind | quote }}
             {{- if eq .Values.builder.kind "kaniko" }}
@@ -156,12 +171,12 @@ spec:
             {{- end }}
           livenessProbe:
             httpGet:
-              path: /health
+              path: /health/live
               port: http
-            initialDelaySeconds: 10
+            initialDelaySeconds: 60
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/ready
               port: http
             initialDelaySeconds: 5
           resources:

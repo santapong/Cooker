@@ -153,7 +153,14 @@ func (h *Handler) DeployApp(c *gin.Context) {
 	runID := uuid.New().String()
 	channel := "app-run:" + runID
 
-	go h.runAppDeploy(a, runID, channel)
+	if h.Runs != nil {
+		h.Runs.Spawn(context.Background(), runID, func(ctx context.Context) error {
+			h.runAppDeployCtx(ctx, a, runID, channel)
+			return nil
+		})
+	} else {
+		go h.runAppDeploy(a, runID, channel)
+	}
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"appId":   a.ID,
@@ -166,24 +173,38 @@ func (h *Handler) DeployApp(c *gin.Context) {
 	})
 }
 
-// runAppDeploy is the background worker. Keeps the deploy running
-// past the HTTP request that started it and funnels log lines to
-// the WebSocket hub.
+// runAppDeploy is the background worker for the legacy untracked path
+// (used when no RunCoordinator is wired). Prefer runAppDeployCtx via
+// the coordinator so heartbeats land in the run row.
 func (h *Handler) runAppDeploy(a *model.App, runID, channel string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	h.runAppDeployCtx(ctx, a, runID, channel)
+}
+
+// runAppDeployCtx is the deploy worker bound to a caller-supplied ctx.
+// The RunCoordinator owns the lifetime; this function should not
+// install its own deadline so shutdown can cut off the work cleanly.
+func (h *Handler) runAppDeployCtx(ctx context.Context, a *model.App, runID, channel string) {
+	deployCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
 	sink := &wsLogSink{channel: channel, broadcast: h.WSBroadcast}
 	sink.writef("[start] app=%s repo=%s branch=%s run=%s\n", a.Name, a.GitHubRepo, a.Branch, runID)
 
-	run, err := h.AppDeployer.Deploy(ctx, a, sink)
+	run, err := h.AppDeployer.Deploy(deployCtx, a, sink)
 	if err != nil {
 		sink.writef("[error] %v\n", err)
 	}
 	if run != nil {
-		// Persist the synthesised run so the UI can poll/browse it.
-		if persistErr := h.Store.Runs.Create(ctx, run); persistErr != nil {
-			sink.writef("[warn] persist run: %v\n", persistErr)
+		// Coordinator-spawned runs have already had a row Created via
+		// the synthesised PipelineRun returned by the deployer, so we
+		// Update if it exists or fall back to Create. Use Update first
+		// to preserve heartbeats written by the coordinator.
+		if updateErr := h.Store.Runs.Update(deployCtx, run); updateErr != nil {
+			if persistErr := h.Store.Runs.Create(deployCtx, run); persistErr != nil {
+				sink.writef("[warn] persist run: %v\n", persistErr)
+			}
 		}
 		sink.writef("[final] status=%s\n", run.Status)
 	}
