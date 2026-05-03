@@ -34,6 +34,7 @@ jobs:
           --health-retries 10
     env:
       COOKER_OCI_REGISTRY: localhost:5000
+      OCI_NAMESPACE: cooker-conformance/test
     steps:
       - uses: actions/checkout@v4
 
@@ -47,21 +48,28 @@ jobs:
         run: |
           go test -tags oci_conformance -v -run TestPushConformance ./internal/pusher/...
 
-      - name: Install OCI distribution-spec conformance binary
+      - name: Build OCI distribution-spec conformance binary
+        # The conformance package is a Ginkgo test suite (no main),
+        # so it must be compiled via `go test -c`. `go install` does
+        # not produce a runnable binary for this path.
         run: |
-          go install github.com/opencontainers/distribution-spec/conformance@latest
+          tmp="$(mktemp -d)"
+          git clone --depth 1 https://github.com/opencontainers/distribution-spec "$tmp/dist-spec"
+          cd "$tmp/dist-spec/conformance"
+          go test -c -o "${{ runner.temp }}/conformance.test"
 
-      - name: Run upstream conformance suite (read-only)
+      - name: Run upstream conformance suite (read + discovery)
         env:
           OCI_ROOT_URL: http://localhost:5000
-          OCI_NAMESPACE: cooker-conformance/test
+          OCI_USERNAME: ""
+          OCI_PASSWORD: ""
           OCI_TEST_PULL: "1"
-          OCI_TEST_DISCOVERY: "1"
+          OCI_TEST_CONTENT_DISCOVERY: "1"
           OCI_HIDE_SKIPPED_WORKFLOWS: "1"
           OCI_REPORT_DIR: ${{ runner.temp }}/oci-conformance
         run: |
           mkdir -p "$OCI_REPORT_DIR"
-          $(go env GOPATH)/bin/conformance
+          ${{ runner.temp }}/conformance.test
 
       - name: Upload conformance report
         if: always()

@@ -65,7 +65,8 @@ swagger:
 # --- OCI distribution-spec conformance ---
 # Boots a local registry:2, pushes via Cooker's pusher, then runs the
 # upstream conformance binary against that registry. Mirrors the CI
-# workflow at .github/workflows/oci-conformance.yml.
+# workflow at .github/workflows/oci-conformance.yml. The upstream
+# binary is a Ginkgo test suite (no main) — built with `go test -c`.
 oci-conformance:
 	docker rm -f cooker-conformance-registry 2>/dev/null || true
 	docker run -d --rm --name cooker-conformance-registry -p 5000:5000 registry:2 \
@@ -76,15 +77,18 @@ oci-conformance:
 		sleep 1; \
 	done
 	cd $(BACKEND_DIR) && \
+		OCI_NAMESPACE=cooker-conformance/test \
 		COOKER_OCI_REGISTRY=localhost:5000 \
 		go test -tags oci_conformance -v -run TestPushConformance ./internal/pusher/...
-	@echo "Push OK; running upstream conformance..."
-	@command -v conformance >/dev/null 2>&1 || \
-		go install github.com/opencontainers/distribution-spec/conformance@latest
+	@echo "Push OK; building upstream conformance binary..."
+	@tmp=$$(mktemp -d); \
+	 git clone --depth 1 https://github.com/opencontainers/distribution-spec "$$tmp/dist-spec" >/dev/null 2>&1 && \
+	 cd "$$tmp/dist-spec/conformance" && go test -c -o /tmp/cooker-conformance.test
 	@OCI_ROOT_URL=http://localhost:5000 \
 	 OCI_NAMESPACE=cooker-conformance/test \
-	 OCI_TEST_PULL=1 OCI_TEST_DISCOVERY=1 \
-	 conformance || (docker rm -f cooker-conformance-registry; exit 1)
+	 OCI_USERNAME="" OCI_PASSWORD="" \
+	 OCI_TEST_PULL=1 OCI_TEST_CONTENT_DISCOVERY=1 \
+	 /tmp/cooker-conformance.test || (docker rm -f cooker-conformance-registry; exit 1)
 	docker rm -f cooker-conformance-registry
 
 # --- Helm ---

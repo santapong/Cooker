@@ -9,8 +9,6 @@ package pusher
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -34,17 +32,21 @@ func registryHost(t *testing.T) string {
 	return host
 }
 
+func conformanceNamespace() string {
+	if v := os.Getenv("OCI_NAMESPACE"); v != "" {
+		return v
+	}
+	return "cooker-conformance/test"
+}
+
 // TestPushConformance pushes a freshly-synthesised single-layer image
-// to the upstream registry, then re-reads it via the OCI digest path.
-// The presence of a valid manifest at $registry/$repo@<digest> is what
-// the upstream conformance binary then verifies further.
+// to the upstream registry on a deterministic namespace so the
+// upstream conformance binary's pull tests can target the same path.
+// Repo path is taken from $OCI_NAMESPACE so CI and `make
+// oci-conformance` agree.
 func TestPushConformance(t *testing.T) {
 	host := registryHost(t)
-	suffix := make([]byte, 4)
-	if _, err := rand.Read(suffix); err != nil {
-		t.Fatalf("rand: %v", err)
-	}
-	repo := fmt.Sprintf("cooker-conformance/%s", hex.EncodeToString(suffix))
+	repo := conformanceNamespace()
 	tag := "test"
 	ref := fmt.Sprintf("%s/%s:%s", host, repo, tag)
 
