@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/cooker-ci/cooker/internal/store"
 )
@@ -32,19 +33,45 @@ func readinessHandler(st *store.Store, redisClient *redis.Client, jwksAge func()
 		checks := gin.H{}
 		ok := true
 
-		if err := st.Ping(ctx); err != nil {
-			checks["db"] = "err: " + err.Error()
-			ok = false
-		} else {
-			checks["db"] = "ok"
-		}
-
-		if redisClient != nil {
-			if err := redisClient.Ping(ctx).Err(); err != nil {
-				checks["redis"] = "err: " + err.Error()
-				ok = false
+		// Run DB and Redis probes in parallel against the shared 1s
+		// deadline so worst-case probe latency is max(db, redis), not
+		// their sum. errgroup is used purely for parallel run + Wait;
+		// the goroutines never return an error because we want both
+		// probe results, not first-error semantics.
+		var dbResult, redisResult string
+		g, gctx := errgroup.WithContext(ctx)
+		g.Go(func() error {
+			if err := st.Ping(gctx); err != nil {
+				dbResult = "err: " + err.Error()
 			} else {
+				dbResult = "ok"
+			}
+			return nil
+		})
+		if redisClient != nil {
+			g.Go(func() error {
+				if err := redisClient.Ping(gctx).Err(); err != nil {
+					redisResult = "err: " + err.Error()
+				} else {
+					redisResult = "ok"
+				}
+				return nil
+			})
+		}
+		_ = g.Wait()
+
+		if dbResult == "ok" {
+			checks["db"] = "ok"
+		} else {
+			checks["db"] = dbResult
+			ok = false
+		}
+		if redisClient != nil {
+			if redisResult == "ok" {
 				checks["redis"] = "ok"
+			} else {
+				checks["redis"] = redisResult
+				ok = false
 			}
 		} else {
 			checks["redis"] = "n/a"
