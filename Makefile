@@ -79,8 +79,10 @@ oci-conformance:
 	cd $(BACKEND_DIR) && \
 		OCI_NAMESPACE=cooker-conformance/test \
 		COOKER_OCI_REGISTRY=localhost:5000 \
-		go test -tags oci_conformance -v -run TestPushConformance ./internal/pusher/...
-	@echo "Push OK; building upstream conformance binary..."
+		go test -tags oci_conformance -v \
+			-run 'TestPushConformance|TestManifestSpecConformance' \
+			./internal/pusher/...
+	@echo "Push + image-spec validation OK; building upstream conformance binary..."
 	@tmp=$$(mktemp -d); \
 	 git clone --depth 1 https://github.com/opencontainers/distribution-spec "$$tmp/dist-spec" >/dev/null 2>&1 && \
 	 cd "$$tmp/dist-spec/conformance" && go test -c -o /tmp/cooker-conformance.test

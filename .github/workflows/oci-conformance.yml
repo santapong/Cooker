@@ -42,10 +42,15 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
 
-      - name: Push a Cooker-built image to the local registry
+      - name: Push a Cooker-built image and validate manifest spec
         working-directory: backend
         run: |
-          go test -tags oci_conformance -v -run TestPushConformance ./internal/pusher/...
+          # TestPushConformance must run first (it pushes the image);
+          # TestManifestSpecConformance pulls + validates the manifest
+          # against OCI image-spec v1.1. Backlog item P0.7.
+          go test -tags oci_conformance -v \
+            -run 'TestPushConformance|TestManifestSpecConformance' \
+            ./internal/pusher/...
 
       - name: Build OCI distribution-spec conformance binary
         # The conformance package is a Ginkgo test suite (no main),
