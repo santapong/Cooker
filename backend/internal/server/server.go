@@ -168,7 +168,11 @@ func New(cfg *config.Config) (*Server, error) {
 		router.Use(observability.TracingMiddleware(cfg.Observability.ServiceName))
 	}
 	live := livenessHandler()
-	ready := readinessHandler(st, redisClient, nil)
+	var jwksAge func() (time.Duration, bool)
+	if cfg.OIDC.Enabled && oidcMW != nil {
+		jwksAge = oidcMW.LastJWKSRefresh
+	}
+	ready := readinessHandler(st, redisClient, jwksAge)
 	router.GET("/health", live)
 	router.GET("/health/live", live)
 	router.GET("/health/ready", ready)

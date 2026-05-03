@@ -94,7 +94,8 @@ If the pod takes longer than the grace period, K8s SIGKILLs it; in-flight runs a
 - Issuer URL typo (only fails on token refresh; cached `.well-known` masks it for a while).
 
 **Mitigation:**
-- IdP outage: communicate, wait. Existing sessions keep working until access tokens expire (default 1h) and refresh fails.
+- IdP outage: communicate, wait. Existing sessions keep working until access tokens expire (default 1h) and refresh fails. Cooker self-heals when the IdP returns — provider discovery is lazy and retried every 30s after each failure.
+- A boot during an IdP outage no longer crash-loops the pod. The middleware accepts construction with an unreachable IdP; authenticated requests return `503` with `Retry-After: 30` until discovery succeeds.
 - Egress block: temporarily widen the NetworkPolicy egress rule, then narrow back when the IdP DNS is verified.
 - **Emergency bypass** (use with caution, audit log): set `COOKER_OIDC_ENABLED=false` and `COOKER_ENV=uat` and restart. The dev admin user will be injected on every request. Revert as soon as the IdP is back. Log the timeline in the audit channel.
 
