@@ -16,6 +16,7 @@ import (
 
 	"github.com/cooker-ci/cooker/internal/auth/local"
 	"github.com/cooker-ci/cooker/internal/config"
+	"github.com/cooker-ci/cooker/internal/observability"
 )
 
 // providerDiscoveryRetry is the cool-down between failed attempts to
@@ -95,6 +96,7 @@ func (m *Middleware) ensureProvider(ctx context.Context) error {
 	provider, err := oidc.NewProvider(ctx, m.cfg.IssuerURL)
 	if err != nil {
 		m.nextProviderTry = time.Now().Add(providerDiscoveryRetry)
+		observability.IncJWKSFetchFailure()
 		return fmt.Errorf("discover provider %q: %w", m.cfg.IssuerURL, err)
 	}
 	m.verifier = provider.Verifier(&oidc.Config{ClientID: m.cfg.ClientID})

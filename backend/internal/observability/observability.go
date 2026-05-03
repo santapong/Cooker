@@ -46,7 +46,50 @@ var (
 		Help:    "Latency of HTTP requests handled by the Cooker API.",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"method", "route"})
+
+	// Resilience counters introduced for the SPOF closeout. All four
+	// stay at zero on a healthy deployment; rate > 0 / 5m is page-worthy.
+	dbConnectionErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cooker_db_connection_errors_total",
+		Help: "Number of times the Postgres ping failed during the boot-time backoff loop or readiness probe.",
+	})
+
+	redisConnectionErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cooker_redis_connection_errors_total",
+		Help: "Number of times a Redis call (rate limiter, ws-ticket, ws-hub publish) returned an error.",
+	})
+
+	jwksFetchFailures = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cooker_jwks_fetch_failures_total",
+		Help: "Number of times OIDC provider discovery or JWKS fetch failed.",
+	})
+
+	pipelineRunsOrphaned = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cooker_pipeline_runs_orphaned_total",
+		Help: "Number of pipeline_runs rows the boot-time orphan sweep marked failed.",
+	})
 )
+
+// IncDBConnectionError records a database connection / ping error.
+// Called from postgres.NewStore's backoff loop and the readiness
+// probe's DB check.
+func IncDBConnectionError() { dbConnectionErrors.Inc() }
+
+// IncRedisConnectionError records a failed Redis call from any of the
+// Redis-backed adapters (rate limiter, ws-ticket, ws-hub).
+func IncRedisConnectionError() { redisConnectionErrors.Inc() }
+
+// IncJWKSFetchFailure records a failed OIDC provider discovery or
+// JWKS fetch. The lazy-init middleware calls this on every miss.
+func IncJWKSFetchFailure() { jwksFetchFailures.Inc() }
+
+// AddPipelineRunsOrphaned records the size of a boot-time orphan
+// sweep. Sums to the total number of orphans across all boots.
+func AddPipelineRunsOrphaned(n int) {
+	if n > 0 {
+		pipelineRunsOrphaned.Add(float64(n))
+	}
+}
 
 // MetricsHandler returns the Prometheus /metrics handler.
 func MetricsHandler() gin.HandlerFunc {

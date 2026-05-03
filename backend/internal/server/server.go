@@ -174,6 +174,7 @@ func New(cfg *config.Config) (*Server, error) {
 		slog.Warn("orphan sweep failed", "err", err)
 	} else if n > 0 {
 		slog.Info("orphan sweep: marked stale runs failed", "count", n)
+		observability.AddPipelineRunsOrphaned(n)
 	}
 	sweepCancel()
 

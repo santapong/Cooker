@@ -173,3 +173,46 @@ If the pod takes longer than the grace period, K8s SIGKILLs it; in-flight runs a
 - Treat the existing logs as advisory, not authoritative.
 - For audit-grade events, correlate with the IdP's access log + the Cooker DB row mtime.
 - Schedule P1.2 as the next P1 alongside Kaniko.
+
+---
+
+## Recommended Alertmanager rules
+
+These four counters are exposed on `/metrics` (when `COOKER_METRICS_ENABLED=true`). Each stays at zero on a healthy deployment; sustained `rate > 0` over 5 minutes indicates degradation worth paging on.
+
+```yaml
+groups:
+  - name: cooker-resilience
+    rules:
+      - alert: CookerDBConnectionErrors
+        expr: rate(cooker_db_connection_errors_total[5m]) > 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Cooker is failing to reach Postgres"
+          runbook: "docs/RUNBOOK.md#postgresql-is-down-or-unreachable"
+
+      - alert: CookerRedisConnectionErrors
+        expr: rate(cooker_redis_connection_errors_total[5m]) > 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: "Cooker Redis backend (rate limit / WS ticket / WS hub) is erroring"
+
+      - alert: CookerJWKSFetchFailures
+        expr: rate(cooker_jwks_fetch_failures_total[5m]) > 0
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: "Cooker cannot reach the OIDC IdP for JWKS"
+          runbook: "docs/RUNBOOK.md#oidc-issuer-is-unreachable"
+
+      - alert: CookerOrphanedRunsHigh
+        # rate of orphans means pods are crashing under load
+        expr: increase(cooker_pipeline_runs_orphaned_total[1h]) > 5
+        for: 0m
+        labels: { severity: warn }
+        annotations:
+          summary: "Cooker swept >5 orphaned runs in the last hour"
+          runbook: "docs/RUNBOOK.md#recovery-after-restart"
+```

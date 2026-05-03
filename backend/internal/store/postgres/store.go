@@ -16,6 +16,7 @@ import (
 
 	_ "github.com/lib/pq"
 
+	"github.com/cooker-ci/cooker/internal/observability"
 	"github.com/cooker-ci/cooker/internal/store"
 )
 
@@ -84,6 +85,7 @@ func pingWithBackoff(ctx context.Context, db *sql.DB) error {
 			}
 			return nil
 		}
+		observability.IncDBConnectionError()
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

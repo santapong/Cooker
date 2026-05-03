@@ -87,6 +87,7 @@ The frontend API client recognises this response and re-issues the OIDC sign-in 
 - **Authentication**: Registry credentials stored server-side only, never exposed to the frontend
 - **Transport**: All registry communication over TLS (HTTPS)
 - **Content trust**: Images tracked by content-addressable digests (`sha256:...`) per OCI image-spec
+- **Conformance**: The image-push path is exercised against the upstream [OCI distribution-spec conformance suite](https://github.com/opencontainers/distribution-spec/tree/main/conformance) via `.github/workflows/oci-conformance.yml` (weekly + on pusher changes).
 - **Supply chain**: Referrers API support for attaching signatures, SBOMs, and build provenance to images
 
 ### Kubernetes Access

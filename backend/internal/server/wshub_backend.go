@@ -6,6 +6,8 @@ import (
 	"log/slog"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/cooker-ci/cooker/internal/observability"
 )
 
 // redisWSBroadcastChannel is the single Redis pub/sub channel that
@@ -81,7 +83,11 @@ func (b *redisHubBackend) Publish(msg BroadcastMessage) error {
 	if err != nil {
 		return err
 	}
-	return b.client.Publish(context.Background(), redisWSBroadcastChannel, payload).Err()
+	if err := b.client.Publish(context.Background(), redisWSBroadcastChannel, payload).Err(); err != nil {
+		observability.IncRedisConnectionError()
+		return err
+	}
+	return nil
 }
 
 func (b *redisHubBackend) Subscribe() <-chan BroadcastMessage { return b.ch }

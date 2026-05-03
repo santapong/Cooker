@@ -32,7 +32,7 @@ The chart can't make these decisions for you:
 
 ### What "OCI compliance" means here
 
-`README.md` and `architecture.md` claim conformance with all three OCI specs. The code uses OCI-compliant libraries (`go-containerregistry`, the official image-spec types) and produces OCI-compliant images, but **nothing has been formally tested against the [OCI distribution-spec conformance suite](https://github.com/opencontainers/distribution-spec/tree/main/conformance).** Until that runs, "OCI compliant" is a documented claim, not a certified one.
+`README.md` and `architecture.md` claim conformance with all three OCI specs. The pusher path (`internal/pusher/crane.go` via `go-containerregistry`) is now exercised against the upstream [OCI distribution-spec conformance suite](https://github.com/opencontainers/distribution-spec/tree/main/conformance) via `.github/workflows/oci-conformance.yml` — the workflow boots a `registry:2` sidecar, has Cooker push a freshly-built image to it, then runs the upstream conformance binary against the populated registry. The `/api/v1/registry/...` proxy endpoints in `internal/handler/registry.go` are still stubs and are NOT covered by conformance — they're a separate (smaller) workstream.
 
 ---
 
@@ -127,7 +127,7 @@ remaining bullet is operator-side only:
 - [x] **Generated OpenAPI** via `swaggo/swag` — `make swagger` regenerates `backend/docs/api/swagger.{json,yaml,go}` from doc-comments. Flagship endpoints (pipeline list / run, env list, secret put / promote) are annotated; the rest can be filled in incrementally as a low-friction follow-up.
 - [x] **Incident runbook** at `docs/RUNBOOK.md`.
 - [x] **ADRs 0001-0003** at `docs/adr/`.
-- [ ] **Run the OCI distribution-spec conformance suite** against Cooker's `/registry` proxy endpoints and publish the result. ~half day.
+- [x] **Run the OCI distribution-spec conformance suite** against Cooker-pushed images via a `registry:2` sidecar in CI. Re-framed from the original `/registry` proxy plan because those handlers are stubs; conformance against stubs is meaningless. The pusher path is the meaningful surface and is now covered. The `/registry` proxy story is tracked separately as a follow-up.
 
 ---
 
