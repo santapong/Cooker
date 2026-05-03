@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"log/slog"
+	"math/rand"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +17,15 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/cooker-ci/cooker/internal/store"
+)
+
+// pingBudget caps how long NewStore waits for the database to become
+// reachable before giving up. K8s readiness probes ride out the
+// per-attempt failures via the readiness endpoint.
+var (
+	pingBudget       = 5 * time.Minute
+	pingInitialDelay = 500 * time.Millisecond
+	pingMaxDelay     = 30 * time.Second
 )
 
 //go:embed migrations/*.up.sql
@@ -33,9 +44,7 @@ func NewStore(ctx context.Context, databaseURL string) (*store.Store, error) {
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(5)
 
-	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := db.PingContext(pingCtx); err != nil {
+	if err := pingWithBackoff(ctx, db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("postgres: ping: %w", err)
 	}
@@ -53,7 +62,48 @@ func NewStore(ctx context.Context, databaseURL string) (*store.Store, error) {
 		NewHostStore(db),
 		NewUserStore(db),
 		db.Close,
+		db.PingContext,
 	), nil
+}
+
+// pingWithBackoff retries Ping with jittered exponential backoff up to
+// pingBudget. Each attempt has a 2s timeout; the loop exits cleanly if
+// the parent context is cancelled (e.g. SIGTERM during boot).
+func pingWithBackoff(ctx context.Context, db *sql.DB) error {
+	deadline := time.Now().Add(pingBudget)
+	delay := pingInitialDelay
+	attempt := 0
+	for {
+		attempt++
+		attemptCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		err := db.PingContext(attemptCtx)
+		cancel()
+		if err == nil {
+			if attempt > 1 {
+				slog.Info("postgres: connected", "attempts", attempt)
+			}
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if time.Now().Add(delay).After(deadline) {
+			return fmt.Errorf("budget exhausted after %d attempts: %w", attempt, err)
+		}
+		jittered := delay + time.Duration(rand.Int63n(int64(delay/2+1)))
+		slog.Warn("postgres: ping failed, retrying", "attempt", attempt, "delay", jittered.String(), "err", err)
+		select {
+		case <-time.After(jittered):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if delay < pingMaxDelay {
+			delay *= 2
+			if delay > pingMaxDelay {
+				delay = pingMaxDelay
+			}
+		}
+	}
 }
 
 // applyMigrations runs each embedded *.up.sql file in filename order.

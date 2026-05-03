@@ -24,6 +24,7 @@ func New() *store.Store {
 		&hosts{m: map[string]*model.Host{}},
 		&users{byID: map[string]*model.User{}, byEmail: map[string]string{}},
 		nil,
+		nil,
 	)
 }
 

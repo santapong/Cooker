@@ -35,15 +35,36 @@ The in-flight run will be marked `failed` on next state reconciliation.
 
 ---
 
+## Probe semantics: live vs ready
+
+`/health/live` is unconditional — it returns 200 as long as the Gin router is serving. Wire it to `livenessProbe` so a stuck process gets restarted.
+
+`/health/ready` runs a 1-second DB ping, a Redis ping when Redis is configured, and (post PR-2) a JWKS-cache age check. Returns 503 with a per-check breakdown when any dep is down. Wire it to `readinessProbe` so a transient infra blip removes the pod from service without restarting it.
+
+`/health` is kept as an alias for `/health/live` for backward compatibility.
+
+---
+
+## Rolling restart
+
+`kubectl rollout restart deploy/cooker` triggers a graceful shutdown. The pod receives SIGTERM, drains in-flight HTTP requests for up to 30 seconds, finishes tracked pipeline runs for up to 25 seconds beyond that, then exits. `terminationGracePeriodSeconds: 60` in the chart leaves a small safety buffer; bump it if you regularly run pipelines longer than 30 seconds and want more drain time.
+
+If the pod takes longer than the grace period, K8s SIGKILLs it; in-flight runs are then surfaced as orphans by the next boot's sweep (see "Recovery after restart").
+
+---
+
 ## PostgreSQL is down or unreachable
 
-**Symptom:** All API requests return `500` with body `{"error":"db: ..."}` or `connection refused`. `/health` may still return `200` (the health endpoint doesn't probe the DB).
+**Symptom:** API requests return `500` with body `{"error":"db: ..."}` or `connection refused`. `/health/ready` returns 503 with `db: err: ...`. `/health/live` keeps returning 200 — the pod is alive, it's just not ready to serve.
 
 **First checks:**
-1. Postgres pod: `kubectl get pod -n cooker -l app.kubernetes.io/name=postgresql`.
-2. Network path: `kubectl exec -n cooker deploy/cooker -- nc -zv cooker-postgresql 5432`.
-3. Connection saturation: `SELECT count(*) FROM pg_stat_activity WHERE datname='cooker';`
-4. `kubectl logs -n cooker statefulset/cooker-postgresql --tail 100`.
+1. `/health/ready` from outside: `curl -fsS https://cooker.example.com/health/ready`. Expect 503 with the failing dep named.
+2. Postgres pod: `kubectl get pod -n cooker -l app.kubernetes.io/name=postgresql`.
+3. Network path: `kubectl exec -n cooker deploy/cooker -- nc -zv cooker-postgresql 5432`.
+4. Connection saturation: `SELECT count(*) FROM pg_stat_activity WHERE datname='cooker';`
+5. `kubectl logs -n cooker statefulset/cooker-postgresql --tail 100`.
+
+**Boot-time blips no longer crash the pod.** The connection logic at startup retries with jittered exponential backoff up to 5 minutes (delay 0.5s → 30s capped). A pod restarted during a Postgres rolling upgrade should reconnect on its own.
 
 **Most-likely causes:**
 - StatefulSet PVC ran out of space — logs show `could not extend file`.

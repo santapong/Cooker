@@ -167,9 +167,11 @@ func New(cfg *config.Config) (*Server, error) {
 	if cfg.Observability.TracingEnabled {
 		router.Use(observability.TracingMiddleware(cfg.Observability.ServiceName))
 	}
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "cooker"})
-	})
+	live := livenessHandler()
+	ready := readinessHandler(st, redisClient, nil)
+	router.GET("/health", live)
+	router.GET("/health/live", live)
+	router.GET("/health/ready", ready)
 
 	registerDeployTargets(cfg.DeployTargets)
 	s.registerRoutes()
@@ -177,7 +179,37 @@ func New(cfg *config.Config) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) Run(addr string) error { return s.router.Run(addr) }
+// shutdownTimeout is how long Shutdown waits for in-flight HTTP
+// requests to finish before forcing connections closed.
+const shutdownTimeout = 30 * time.Second
+
+// RunContext runs the HTTP server until ctx is cancelled (e.g. SIGTERM),
+// then drains in-flight requests with shutdownTimeout before returning.
+// Returns the first error from ListenAndServe or Shutdown, or nil on a
+// clean drain.
+func (s *Server) RunContext(ctx context.Context, addr string) error {
+	httpSrv := &http.Server{Addr: addr, Handler: s.router}
+	errCh := make(chan error, 1)
+	go func() {
+		err := httpSrv.ListenAndServe()
+		if err == http.ErrServerClosed {
+			err = nil
+		}
+		errCh <- err
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		slog.Info("shutdown: draining HTTP server", "timeout", shutdownTimeout.String())
+		drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := httpSrv.Shutdown(drainCtx); err != nil {
+			return fmt.Errorf("shutdown: %w", err)
+		}
+		return <-errCh
+	}
+}
 
 func (s *Server) Close() error {
 	if s == nil {

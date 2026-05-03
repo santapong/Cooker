@@ -77,11 +77,13 @@ type Store struct {
 	Hosts        HostStore
 	Users        UserStore
 	close        func() error
+	ping         func(context.Context) error
 }
 
 // New builds a Store. closeFn may be nil when no cleanup is required
-// (e.g., in-memory stores).
-func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, h HostStore, u UserStore, closeFn func() error) *Store {
+// (e.g., in-memory stores). pingFn may be nil for backends without a
+// liveness probe; Ping then reports healthy unconditionally.
+func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, h HostStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
 		Pipelines:    p,
 		Runs:         r,
@@ -90,6 +92,7 @@ func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, h HostStor
 		Hosts:        h,
 		Users:        u,
 		close:        closeFn,
+		ping:         pingFn,
 	}
 }
 
@@ -99,4 +102,13 @@ func (s *Store) Close() error {
 		return nil
 	}
 	return s.close()
+}
+
+// Ping reports whether the underlying datastore is reachable. Returns
+// nil when no ping function is registered (memory backend).
+func (s *Store) Ping(ctx context.Context) error {
+	if s == nil || s.ping == nil {
+		return nil
+	}
+	return s.ping(ctx)
 }

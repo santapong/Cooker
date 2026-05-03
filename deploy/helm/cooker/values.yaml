@@ -1,5 +1,10 @@
 replicaCount: 1
 
+# Pod termination grace period. Cooker drains in-flight HTTP
+# requests for up to 30s and finishes tracked pipeline runs for
+# up to 25s after that, so 60s leaves a small safety buffer.
+terminationGracePeriodSeconds: 60
+
 # Cooker runtime environment. Production gates strict defaults
 # (deny-all CORS, fatal startup checks for missing SECRET_KEY).
 # Dev / uat skip these. The chart defaults to "production"; flip
