@@ -173,3 +173,5 @@
 6. **Build-cache wiring (≈1-2 days):** item 5 — landing this alongside the in-progress P1.1 (Kaniko adapter, see `backlog.md`) is the natural pairing.
 
 The remaining items (multi-replica rate limit, mid-run progress writes, deploy event capture) are larger and should land after the items above are stable.
+
+**See also:** [`spof-and-database.md`](spof-and-database.md) extends this audit with SPOF/blast-radius analysis (Redis, Postgres, in-memory state, panic cost) and a database-schema review (indexes, foreign keys, migration rollback, secrets-at-rest). The two docs share severity ranking conventions and are cross-referenced.
