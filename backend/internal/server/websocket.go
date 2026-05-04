@@ -145,6 +145,16 @@ func (h *WebSocketHub) Broadcast(channel string, data []byte) {
 	}
 }
 
+// Close releases hub-backend resources. Closing the backend causes
+// its Subscribe() channel to close, which makes Run() return cleanly.
+// Safe to call multiple times.
+func (h *WebSocketHub) Close() error {
+	if h == nil || h.backend == nil {
+		return nil
+	}
+	return h.backend.Close()
+}
+
 // HandlePipelineRun handles WebSocket connections for pipeline run updates.
 func (h *WebSocketHub) HandlePipelineRun(w http.ResponseWriter, r *http.Request, runID string) {
 	h.handleConnection(w, r, "pipeline-run:"+runID)

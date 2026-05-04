@@ -92,32 +92,47 @@ func New(cfg *config.Config) (*Server, error) {
 
 	router := gin.Default()
 
+	// Stack of cleanups to run if New() returns with err. The first
+	// item pushed runs last; matches the deferred-close pattern used
+	// by Server.Close itself. Without this, an error mid-construction
+	// would leak the redis client, the hub backend, or the audit
+	// sink.
+	var cleanups []func()
+	cleanup := func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i]()
+		}
+	}
+	cleanups = append(cleanups, func() { st.Close() })
+
 	var redisClient *redis.Client
 	if cfg.WSTicket.Backend == "redis" || cfg.RateLimit.Backend == "redis" || cfg.WSHub.Backend == "redis" {
 		opts, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {
-			st.Close()
+			cleanup()
 			return nil, fmt.Errorf("redis: parse url: %w", err)
 		}
 		redisClient = redis.NewClient(opts)
+		cleanups = append(cleanups, func() { _ = redisClient.Close() })
 	}
 
 	var wsHub *WebSocketHub
 	switch cfg.WSHub.Backend {
 	case "redis":
 		if redisClient == nil {
-			st.Close()
+			cleanup()
 			return nil, fmt.Errorf("ws hub backend=redis requires REDIS_URL")
 		}
 		backend, err := newRedisHubBackend(ctx, redisClient)
 		if err != nil {
-			st.Close()
+			cleanup()
 			return nil, fmt.Errorf("ws hub redis backend: %w", err)
 		}
 		wsHub = NewWebSocketHubWithBackend(cfg.AllowedOrigins, backend)
 	default:
 		wsHub = NewWebSocketHub(cfg.AllowedOrigins)
 	}
+	cleanups = append(cleanups, func() { _ = wsHub.Close() })
 
 	var wsTickets ticketStore
 	switch cfg.WSTicket.Backend {
@@ -136,19 +151,29 @@ func New(cfg *config.Config) (*Server, error) {
 		ServiceVersion: cfg.Observability.ServiceVersion,
 	})
 	if err != nil {
-		st.Close()
+		cleanup()
 		return nil, fmt.Errorf("observability: %w", err)
+	}
+	if traceShutdown != nil {
+		cleanups = append(cleanups, func() {
+			c, cancelTrace := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = traceShutdown(c)
+			cancelTrace()
+		})
 	}
 
 	auditSink, err := newAuditSink(cfg.Audit)
 	if err != nil {
-		st.Close()
+		cleanup()
 		return nil, fmt.Errorf("audit: %w", err)
+	}
+	if auditSink != nil {
+		cleanups = append(cleanups, func() { _ = auditSink.Close() })
 	}
 
 	bld, err := selectBuilder(cfg.BuilderBackend, cfg.Kubernetes)
 	if err != nil {
-		st.Close()
+		cleanup()
 		return nil, fmt.Errorf("builder: %w", err)
 	}
 	exec := service.NewExecutor(
@@ -258,6 +283,12 @@ func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
+	// Order matters. Tracing first so the rest of shutdown is captured
+	// in any final span; audit next so authenticated mutations flush
+	// before the file is closed; the WebSocket hub before its Redis
+	// transport so consume() exits cleanly; the shared Redis client
+	// after the hub since the hub publishes through it; the store last
+	// because anything above might want to record a final write.
 	if s.traceShutdown != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = s.traceShutdown(shutdownCtx)
@@ -265,6 +296,12 @@ func (s *Server) Close() error {
 	}
 	if s.audit != nil {
 		_ = s.audit.Close()
+	}
+	if s.wsHub != nil {
+		_ = s.wsHub.Close()
+	}
+	if s.redisClient != nil {
+		_ = s.redisClient.Close()
 	}
 	if s.store == nil {
 		return nil
