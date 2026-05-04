@@ -4,8 +4,19 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+// WebSocket idle / ping-pong tunables. pongWait should be larger
+// than pingPeriod with a comfortable margin so a single dropped ping
+// doesn't immediately drop the client. writeWait caps how long a
+// single WriteMessage blocks before we treat the client as dead.
+const (
+	wsPongWait   = 60 * time.Second
+	wsPingPeriod = (wsPongWait * 9) / 10
+	wsWriteWait  = 10 * time.Second
 )
 
 // Client represents a single WebSocket connection.
@@ -196,6 +207,14 @@ func (c *Client) readPump() {
 		c.hub.unregister <- c
 		c.conn.Close()
 	}()
+	// Stalled / silent connections (Slow-Loris pattern) can pin a
+	// goroutine and a file descriptor indefinitely. Set a read
+	// deadline that the pong handler refreshes; if no pong arrives
+	// within wsPongWait, ReadMessage returns and we unregister.
+	_ = c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
 	for {
 		_, _, err := c.conn.ReadMessage()
 		if err != nil {
@@ -205,10 +224,30 @@ func (c *Client) readPump() {
 }
 
 func (c *Client) writePump() {
-	defer c.conn.Close()
-	for msg := range c.send {
-		if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			break
+	ticker := time.NewTicker(wsPingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
+	for {
+		select {
+		case msg, ok := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if !ok {
+				// Hub closed our send channel — politely close the
+				// connection rather than letting the proxy time us
+				// out.
+				_ = c.conn.WriteMessage(websocket.CloseMessage, nil)
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
 }
