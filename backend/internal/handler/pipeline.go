@@ -9,7 +9,26 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/cooker-ci/cooker/internal/validate"
 )
+
+// validatePipelineInput rejects malformed pipeline payloads. Called
+// from CreatePipeline and UpdatePipeline before any store write.
+func validatePipelineInput(p *model.Pipeline) error {
+	if err := validate.Name("name", p.Name); err != nil {
+		return err
+	}
+	if err := validate.Description("description", p.Description); err != nil {
+		return err
+	}
+	for i, s := range p.Stages {
+		if err := validate.StageType(s.Type); err != nil {
+			return err
+		}
+		_ = i
+	}
+	return nil
+}
 
 // ListPipelines returns all pipelines visible to the caller.
 //
@@ -34,6 +53,10 @@ func (h *Handler) ListPipelines(c *gin.Context) {
 func (h *Handler) CreatePipeline(c *gin.Context) {
 	var p model.Pipeline
 	if err := c.ShouldBindJSON(&p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validatePipelineInput(&p); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -77,6 +100,10 @@ func (h *Handler) UpdatePipeline(c *gin.Context) {
 
 	var p model.Pipeline
 	if err := c.ShouldBindJSON(&p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validatePipelineInput(&p); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

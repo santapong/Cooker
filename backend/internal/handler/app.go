@@ -15,7 +15,25 @@ import (
 	"github.com/cooker-ci/cooker/internal/auth"
 	"github.com/cooker-ci/cooker/internal/model"
 	"github.com/cooker-ci/cooker/internal/source/github"
+	"github.com/cooker-ci/cooker/internal/validate"
 )
+
+// validateAppInput rejects malformed App payloads.
+func validateAppInput(a *model.App) error {
+	if err := validate.Name("name", a.Name); err != nil {
+		return err
+	}
+	if err := validate.Description("description", a.Description); err != nil {
+		return err
+	}
+	if err := validate.GitHubRepo(a.GitHubRepo); err != nil {
+		return err
+	}
+	if err := validate.GitRefName("branch", a.Branch); err != nil {
+		return err
+	}
+	return nil
+}
 
 // ListApps returns all apps with webhook secrets redacted.
 func (h *Handler) ListApps(c *gin.Context) {
@@ -44,8 +62,8 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if a.GitHubRepo == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "githubRepo is required"})
+	if err := validateAppInput(&a); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if a.Branch == "" {
@@ -71,6 +89,10 @@ func (h *Handler) UpdateApp(c *gin.Context) {
 	}
 	var a model.App
 	if err := c.ShouldBindJSON(&a); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validateAppInput(&a); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
