@@ -216,6 +216,15 @@ func (k *Kaniko) buildJob(req Request) *batchv1.Job {
 								corev1.ResourceCPU:    resource.MustParse("500m"),
 								corev1.ResourceMemory: resource.MustParse("1Gi"),
 							},
+							// Limits cap the pathological case (a 5 GiB
+							// COPY context, a runaway image layer
+							// extraction) so a single bad Dockerfile
+							// can't OOM the node and take other Pods
+							// with it.
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("2"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							},
 						},
 						VolumeMounts: []corev1.VolumeMount{{
 							Name:      "build-context",

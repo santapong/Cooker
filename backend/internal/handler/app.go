@@ -239,9 +239,21 @@ func (h *Handler) GitHubWebhook(c *gin.Context) {
 	if !h.requireCodec(c) {
 		return
 	}
-	body, err := io.ReadAll(c.Request.Body)
+	// GitHub's documented webhook payload cap is 25 MiB; we set a
+	// hard 10 MiB limit because cooker only consumes push events
+	// where realistic payloads are much smaller (a hundred-commit
+	// push is around 200 KiB). Reading a 1 GiB body unbounded was
+	// the simplest path to OOM-killing the pod.
+	const maxWebhookBody = 10 << 20
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxWebhookBody+1))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "read body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "read body"})
+		return
+	}
+	if len(body) > maxWebhookBody {
+		c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{
+			"error": "payload exceeds limit",
+		})
 		return
 	}
 

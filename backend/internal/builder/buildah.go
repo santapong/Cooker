@@ -194,6 +194,10 @@ func (b *Buildah) buildJob(req Request) *batchv1.Job {
 								corev1.ResourceCPU:    resource.MustParse("500m"),
 								corev1.ResourceMemory: resource.MustParse("1Gi"),
 							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("2"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							},
 						},
 						VolumeMounts: []corev1.VolumeMount{{
 							Name:      "build-context",
