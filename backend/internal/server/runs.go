@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cooker-ci/cooker/internal/observability"
 	"github.com/cooker-ci/cooker/internal/store"
 )
 
@@ -88,6 +89,7 @@ func (rc *RunCoordinator) heartbeatBestEffort(ctx context.Context, runID string,
 	if err == nil || errors.Is(err, store.ErrNotFound) {
 		return
 	}
+	observability.IncHeartbeatError()
 	slog.Warn("run coordinator: heartbeat failed", "run", runID, "err", err)
 }
 

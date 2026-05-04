@@ -68,7 +68,39 @@ var (
 		Name: "cooker_pipeline_runs_orphaned_total",
 		Help: "Number of pipeline_runs rows the boot-time orphan sweep marked failed.",
 	})
+
+	// Pipeline-stage histograms — one per stage type so dashboards
+	// can split out build vs push vs deploy without a separate
+	// label. Labelled by status to count succ/fail at the same time.
+	stageDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "cooker_pipeline_stage_duration_seconds",
+		Help:    "Wall-clock duration of pipeline stages, labelled by stage type and final status.",
+		Buckets: []float64{0.5, 1, 5, 15, 30, 60, 180, 300, 600, 1800, 3600},
+	}, []string{"type", "status"})
+
+	auditDropped = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cooker_audit_events_dropped_total",
+		Help: "Number of audit events dropped because the file sink's queue was full (T16 fail-open).",
+	})
+
+	heartbeatErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cooker_run_heartbeat_errors_total",
+		Help: "Number of run-coordinator heartbeat write failures.",
+	})
 )
+
+// ObserveStageDuration records the wall-clock time a pipeline stage
+// took, labelled by type and final status. Called from the
+// executor's per-stage callback.
+func ObserveStageDuration(stageType, status string, d time.Duration) {
+	stageDuration.WithLabelValues(stageType, status).Observe(d.Seconds())
+}
+
+// IncAuditDropped records an audit-sink overflow event.
+func IncAuditDropped() { auditDropped.Inc() }
+
+// IncHeartbeatError records a heartbeat write failure (any cause).
+func IncHeartbeatError() { heartbeatErrors.Inc() }
 
 // IncDBConnectionError records a database connection / ping error.
 // Called from postgres.NewStore's backoff loop and the readiness

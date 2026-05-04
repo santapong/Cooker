@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 // TaskFunc is the function executed for each node. It receives the node ID and returns an error.
@@ -61,6 +64,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		var wg sync.WaitGroup
 		errCh := make(chan error, len(level))
 
+		// Capture the parent's OpenTelemetry span context as a TextMap
+		// carrier; each goroutine extracts it back into its own ctx so
+		// builder/pusher/deployer adapters running concurrently still
+		// link to the right trace.
+		carrier := propagation.MapCarrier{}
+		otel.GetTextMapPropagator().Inject(ctx, carrier)
+
 		for _, nodeID := range level {
 			wg.Add(1)
 			go func(id string) {
@@ -73,9 +83,10 @@ func (r *Runner) Run(ctx context.Context) error {
 					}
 				}()
 
+				stageCtx := otel.GetTextMapPropagator().Extract(ctx, carrier)
 				r.emitStatus(id, "running", nil)
 
-				if taskErr := r.taskFunc(ctx, id); taskErr != nil {
+				if taskErr := r.taskFunc(stageCtx, id); taskErr != nil {
 					r.emitStatus(id, "failed", taskErr)
 					errCh <- fmt.Errorf("node %s failed: %w", id, taskErr)
 					return

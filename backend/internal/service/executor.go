@@ -11,6 +11,7 @@ import (
 	"github.com/cooker-ci/cooker/internal/deployer"
 	"github.com/cooker-ci/cooker/internal/gitops"
 	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/cooker-ci/cooker/internal/observability"
 	"github.com/cooker-ci/cooker/internal/pusher"
 	"github.com/cooker-ci/cooker/internal/retry"
 	"github.com/cooker-ci/cooker/pkg/dagrunner"
@@ -208,14 +209,18 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		endTime := time.Now()
 		stageRun.FinishedAt = &endTime
 
+		duration := endTime.Sub(startTime)
+
 		if stageErr != nil {
 			stageRun.Status = model.RunStatusFailed
 			stageRun.Error = stageErr.Error()
+			observability.ObserveStageDuration(string(stage.Type), "failed", duration)
 			e.persistProgress(ctx, run)
 			return stageErr
 		}
 
 		stageRun.Status = model.RunStatusSuccess
+		observability.ObserveStageDuration(string(stage.Type), "success", duration)
 		e.persistProgress(ctx, run)
 		return nil
 	})
