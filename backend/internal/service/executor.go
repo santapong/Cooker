@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -15,19 +16,33 @@ import (
 	"github.com/cooker-ci/cooker/pkg/dagrunner"
 )
 
+// stageLogCap caps how many bytes of build/push/deploy output land
+// in StageRun.Logs. A runaway build can produce GB of output; we
+// keep the head and append a marker when we hit the cap so the UI
+// never tries to render an arbitrary-sized blob from JSONB.
+const stageLogCap = 1 << 20 // 1 MiB
+
 // defaultStageTimeout caps any individual stage that doesn't set its
 // own. Picked to be longer than realistic Kaniko builds (~30 min)
 // without being so long that a stuck stage pins resources for a day.
 const defaultStageTimeout = 30 * time.Minute
 
+// RunUpdater persists in-progress run state. Called by the executor
+// after every stage transition (start + finish) so a crash mid-run
+// leaves a row that reflects what was completed instead of "still
+// pending" everywhere. Errors are logged but don't fail the run —
+// the work itself is the source of truth.
+type RunUpdater func(ctx context.Context, run *model.PipelineRun) error
+
 // Executor runs pipelines using the DAG runner and reports progress.
 // Production wiring injects real Builder/Pusher/Deployer; tests
 // inject mocks.
 type Executor struct {
-	builder  builder.Builder
-	pusher   pusher.Pusher
-	deployer deployer.Deployer
-	gitops   gitops.Writer
+	builder    builder.Builder
+	pusher     pusher.Pusher
+	deployer   deployer.Deployer
+	gitops     gitops.Writer
+	runUpdater RunUpdater
 }
 
 // Option configures a new Executor. Use the With* constructors.
@@ -67,6 +82,15 @@ func WithGitOps(g gitops.Writer) Option {
 		if g != nil {
 			e.gitops = g
 		}
+	}
+}
+
+// WithRunUpdater installs a callback the executor invokes after
+// every stage transition so a Postgres-backed handler can persist
+// progress as it happens. Pass nil (or skip the option) to disable.
+func WithRunUpdater(u RunUpdater) Option {
+	return func(e *Executor) {
+		e.runUpdater = u
 	}
 }
 
@@ -134,6 +158,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		startTime := time.Now()
 		stageRun.StartedAt = &startTime
 		stageRun.Status = model.RunStatusRunning
+		e.persistProgress(ctx, run)
 
 		slog.Info("pipeline executing stage",
 			"pipeline", p.ID, "stage", stage.Name, "type", stage.Type, "timeout", timeout)
@@ -186,10 +211,12 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		if stageErr != nil {
 			stageRun.Status = model.RunStatusFailed
 			stageRun.Error = stageErr.Error()
+			e.persistProgress(ctx, run)
 			return stageErr
 		}
 
 		stageRun.Status = model.RunStatusSuccess
+		e.persistProgress(ctx, run)
 		return nil
 	})
 
@@ -215,13 +242,29 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 	return nil
 }
 
+// persistProgress invokes the registered RunUpdater (if any) so the
+// store catches up to the in-memory run state. Errors are logged
+// and discarded — losing a progress write is not a reason to fail
+// the run.
+func (e *Executor) persistProgress(ctx context.Context, run *model.PipelineRun) {
+	if e.runUpdater == nil {
+		return
+	}
+	if err := e.runUpdater(ctx, run); err != nil {
+		slog.Warn("pipeline: persist progress failed", "run", run.ID, "err", err)
+	}
+}
+
 func (e *Executor) executeBuild(ctx context.Context, stage *model.Stage, sr *model.StageRun) error {
+	logs := newCappedBuffer(stageLogCap)
+	defer func() { sr.Logs = logs.String() }()
 	req := builder.Request{
 		ContextDir: stage.Config.Context,
 		Dockerfile: stage.Config.Dockerfile,
 		Tags:       stage.Config.Tags,
 		BuildArgs:  stage.Config.BuildArgs,
 		Platforms:  stage.Config.Platforms,
+		LogWriter:  logs,
 	}
 	res, err := e.builder.Build(ctx, req)
 	if err != nil {
@@ -236,6 +279,39 @@ func (e *Executor) executeBuild(ctx context.Context, stage *model.Stage, sr *mod
 	}
 	return nil
 }
+
+// cappedBuffer is a write-capped bytes.Buffer. Writes after the cap
+// are silently dropped except for a one-time truncation marker so
+// the reader can tell logs were trimmed.
+type cappedBuffer struct {
+	buf       *bytes.Buffer
+	cap       int
+	truncated bool
+}
+
+func newCappedBuffer(cap int) *cappedBuffer {
+	return &cappedBuffer{buf: &bytes.Buffer{}, cap: cap}
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if c.buf.Len() >= c.cap {
+		if !c.truncated {
+			c.buf.WriteString("\n... [log truncated at 1 MiB] ...\n")
+			c.truncated = true
+		}
+		return len(p), nil
+	}
+	remaining := c.cap - c.buf.Len()
+	if len(p) <= remaining {
+		return c.buf.Write(p)
+	}
+	c.buf.Write(p[:remaining])
+	c.buf.WriteString("\n... [log truncated at 1 MiB] ...\n")
+	c.truncated = true
+	return len(p), nil
+}
+
+func (c *cappedBuffer) String() string { return c.buf.String() }
 
 func (e *Executor) executeTest(ctx context.Context, stage *model.Stage) error {
 	// TODO: Run test container with specified image and command
