@@ -82,6 +82,8 @@ type App struct {
 
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	// Version powers optimistic concurrency on Update; see store.ErrConflict.
+	Version int `json:"version"`
 }
 
 // Redact returns a copy of a safe for client responses.

@@ -59,6 +59,15 @@ func abortStoreErr(c *gin.Context, err error, notFoundMsg string) bool {
 		c.JSON(http.StatusNotFound, gin.H{"error": notFoundMsg})
 		return true
 	}
+	if errors.Is(err, store.ErrConflict) {
+		// Optimistic-concurrency miss: another writer moved the row's
+		// version since the caller fetched it. Tell the client to
+		// refetch and retry.
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "version conflict; refetch and retry",
+		})
+		return true
+	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 	return true
 }

@@ -24,7 +24,7 @@ func (s *AppStore) List(ctx context.Context) ([]*model.App, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, description, github_repo, branch, build_plan, deploy_target,
 		       registry_ref, environment_id, webhook_secret, auto_deploy,
-		       created_at, updated_at
+		       created_at, updated_at, version
 		FROM apps ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing apps: %w", err)
@@ -46,7 +46,7 @@ func (s *AppStore) Get(ctx context.Context, id string) (*model.App, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, description, github_repo, branch, build_plan, deploy_target,
 		       registry_ref, environment_id, webhook_secret, auto_deploy,
-		       created_at, updated_at
+		       created_at, updated_at, version
 		FROM apps WHERE id=$1`, id)
 	a, err := scanApp(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -59,7 +59,7 @@ func (s *AppStore) GetByRepo(ctx context.Context, repo, branch string) (*model.A
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, description, github_repo, branch, build_plan, deploy_target,
 		       registry_ref, environment_id, webhook_secret, auto_deploy,
-		       created_at, updated_at
+		       created_at, updated_at, version
 		FROM apps WHERE github_repo=$1 AND branch=$2`, repo, branch)
 	a, err := scanApp(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -98,16 +98,21 @@ func (s *AppStore) Update(ctx context.Context, a *model.App) error {
 		UPDATE apps SET name=$2, description=$3, github_repo=$4, branch=$5,
 		                build_plan=$6, deploy_target=$7, registry_ref=$8,
 		                environment_id=$9, webhook_secret=$10, auto_deploy=$11,
-		                updated_at=$12
-		WHERE id=$1`,
+		                updated_at=$12, version=version+1
+		WHERE id=$1 AND version=$13`,
 		a.ID, a.Name, a.Description, a.GitHubRepo, a.Branch, bp, dt,
-		a.RegistryRef, a.EnvironmentID, secret, a.AutoDeploy, a.UpdatedAt)
+		a.RegistryRef, a.EnvironmentID, secret, a.AutoDeploy, a.UpdatedAt, a.Version)
 	if err != nil {
 		return fmt.Errorf("updating app: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
+		var exists bool
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM apps WHERE id=$1)`, a.ID).Scan(&exists); err == nil && exists {
+			return fmt.Errorf("app %s: %w", a.ID, store.ErrConflict)
+		}
 		return fmt.Errorf("app %s: %w", a.ID, store.ErrNotFound)
 	}
+	a.Version++
 	return nil
 }
 
@@ -141,7 +146,7 @@ func scanApp(row scannable) (*model.App, error) {
 	if err := row.Scan(
 		&a.ID, &a.Name, &a.Description, &a.GitHubRepo, &a.Branch,
 		&bp, &dt, &a.RegistryRef, &a.EnvironmentID, &secretB64, &a.AutoDeploy,
-		&a.CreatedAt, &a.UpdatedAt,
+		&a.CreatedAt, &a.UpdatedAt, &a.Version,
 	); err != nil {
 		return nil, err
 	}

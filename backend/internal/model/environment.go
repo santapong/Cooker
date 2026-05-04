@@ -30,6 +30,8 @@ type Environment struct {
 	Variables map[string]string `json:"variables,omitempty"`
 
 	CreatedAt time.Time `json:"createdAt" db:"created_at"`
+	// Version powers optimistic concurrency on Update; see store.ErrConflict.
+	Version int `json:"version" db:"version"`
 }
 
 // EnvironmentTarget defines where an environment deploys to.
