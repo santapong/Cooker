@@ -1,6 +1,6 @@
 # SPOF & Database Audit
 
-**Companion to:** [`dag-performance.md`](dag-performance.md), [`crash-and-service-quality.md`](crash-and-service-quality.md), and [`vulnerabilities-and-chains.md`](vulnerabilities-and-chains.md). Together those cover the DAG executor, crash bugs and service-quality gaps in the rest of the codebase, and a 20-agent vulnerability-and-chain audit. This one zooms out to the rest of the stack:
+**Companion to:** [`dag-performance.md`](dag-performance.md), [`crash-and-service-quality.md`](crash-and-service-quality.md), [`vulnerabilities-and-chains.md`](vulnerabilities-and-chains.md), and [`remediation-plan.md`](remediation-plan.md) (the phased fix plan). This one zooms out to the rest of the stack:
 
 - **Part A — SPOFs and crash blast radius.** What happens when a single component dies?
 - **Part B — Database schema, indexing, migrations, rollback.** What does the schema cost at scale, and how do we get out of a bad migration?

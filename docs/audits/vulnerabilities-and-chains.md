@@ -1,6 +1,6 @@
 # Vulnerabilities & Failure-Chain Audit
 
-**Companion to:** [`dag-performance.md`](dag-performance.md), [`spof-and-database.md`](spof-and-database.md), [`crash-and-service-quality.md`](crash-and-service-quality.md). Those covered the DAG executor, SPOFs/database, and a 10-agent crash + service-quality scan. This one is a 20-agent fan-out — 12 deeper-scope agents (vulnerabilities and performance gaps the prior audits didn't reach) and 8 "chain-error" analysts that look at *interactions* between components: "if A and B happen together, C fails because D."
+**Companion to:** [`dag-performance.md`](dag-performance.md), [`spof-and-database.md`](spof-and-database.md), [`crash-and-service-quality.md`](crash-and-service-quality.md), and [`remediation-plan.md`](remediation-plan.md) (the phased fix plan that addresses every Critical and High finding here). This one is a 20-agent fan-out — 12 deeper-scope agents (vulnerabilities and performance gaps the prior audits didn't reach) and 8 "chain-error" analysts that look at *interactions* between components: "if A and B happen together, C fails because D."
 
 **Method:** 20 parallel Explore agents, each scoped to one focus area and briefed not to repeat material already in the three existing audit docs. Critical/High findings were spot-checked in the source before publishing.
 
