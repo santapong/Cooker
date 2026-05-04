@@ -71,7 +71,7 @@ func (s *Server) registerRoutes() {
 		pipelines.PUT("/:id", writeRole, h.UpdatePipeline)
 		pipelines.DELETE("/:id", adminRole, mfa, h.DeletePipeline)
 		pipelines.POST("/:id/validate", h.ValidatePipeline)
-		pipelines.POST("/:id/run", writeRole, expensive, h.RunPipeline)
+		pipelines.POST("/:id/run", writeRole, expensive, idempotencyMiddleware(s.idempotency), h.RunPipeline)
 		pipelines.GET("/:id/runs", h.ListPipelineRuns)
 		pipelines.GET("/:id/runs/:runId", h.GetPipelineRun)
 		pipelines.POST("/:id/runs/:runId/cancel", writeRole, h.CancelPipelineRun)
@@ -167,7 +167,7 @@ func (s *Server) registerRoutes() {
 		apps.GET("/:id", h.GetApp)
 		apps.PUT("/:id", writeRole, h.UpdateApp)
 		apps.DELETE("/:id", adminRole, mfa, h.DeleteApp)
-		apps.POST("/:id/deploy", writeRole, expensive, h.DeployApp)
+		apps.POST("/:id/deploy", writeRole, expensive, idempotencyMiddleware(s.idempotency), h.DeployApp)
 		// Webhook rotation re-checks admin in the handler; keeping the
 		// gate here means a viewer can't even reach it to probe codec
 		// behaviour.
@@ -185,7 +185,10 @@ func (s *Server) registerRoutes() {
 	}
 
 	// GitHub webhook receiver (unauthenticated — HMAC is the auth).
-	s.router.POST("/webhooks/github", h.GitHubWebhook)
+	// X-GitHub-Delivery is captured by the idempotency middleware so a
+	// retry from GitHub replays the original response instead of
+	// triggering a duplicate deploy.
+	s.router.POST("/webhooks/github", idempotencyMiddleware(s.idempotency), h.GitHubWebhook)
 
 	// Local-auth /me lives inside the auth group because it needs a
 	// session. It works for both local and OIDC sessions because the

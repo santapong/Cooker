@@ -15,6 +15,7 @@ import (
 	"github.com/cooker-ci/cooker/internal/crypto"
 	"github.com/cooker-ci/cooker/internal/deployer"
 	"github.com/cooker-ci/cooker/internal/handler"
+	"github.com/cooker-ci/cooker/internal/idempotency"
 	"github.com/cooker-ci/cooker/internal/observability"
 	"github.com/cooker-ci/cooker/internal/pusher"
 	"github.com/cooker-ci/cooker/internal/secrets"
@@ -45,6 +46,7 @@ type Server struct {
 	audit         audit.Sink
 	traceShutdown func(context.Context) error
 	runs          *RunCoordinator
+	idempotency   idempotency.Store
 }
 
 // New creates a new Server instance with all routes and middleware.
@@ -185,6 +187,12 @@ func New(cfg *config.Config) (*Server, error) {
 
 	runs := NewRunCoordinator(st)
 
+	// Idempotency cache for mutating routes. In-memory only for now;
+	// a Redis-backed implementation would slot in here for multi-
+	// replica fleets.
+	idem := idempotency.NewMemory(5 * time.Minute)
+	cleanups = append(cleanups, func() { idem.Close() })
+
 	h := handler.New(st, codec, secMgr)
 	h.AppDeployer = appDeployer
 	h.WSBroadcast = wsHub.Broadcast
@@ -216,6 +224,7 @@ func New(cfg *config.Config) (*Server, error) {
 		traceShutdown: traceShutdown,
 		redisClient:   redisClient,
 		runs:          runs,
+		idempotency:   idem,
 	}
 
 	router.Use(corsMiddleware(cfg.AllowedOrigins))
