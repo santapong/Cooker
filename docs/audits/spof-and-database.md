@@ -1,6 +1,6 @@
 # SPOF & Database Audit
 
-**Companion to:** [`dag-performance.md`](dag-performance.md). That doc covered cache/queue/fault-tolerance/logging *inside* the DAG executor. This one zooms out to the rest of the stack:
+**Companion to:** [`dag-performance.md`](dag-performance.md) and [`crash-and-service-quality.md`](crash-and-service-quality.md). That first doc covered cache/queue/fault-tolerance/logging *inside* the DAG executor; the third doc covers crash bugs and service-quality gaps in the rest of the codebase. This one zooms out to the rest of the stack:
 
 - **Part A — SPOFs and crash blast radius.** What happens when a single component dies?
 - **Part B — Database schema, indexing, migrations, rollback.** What does the schema cost at scale, and how do we get out of a bad migration?
