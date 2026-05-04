@@ -11,8 +11,14 @@ import (
 	"github.com/cooker-ci/cooker/internal/gitops"
 	"github.com/cooker-ci/cooker/internal/model"
 	"github.com/cooker-ci/cooker/internal/pusher"
+	"github.com/cooker-ci/cooker/internal/retry"
 	"github.com/cooker-ci/cooker/pkg/dagrunner"
 )
+
+// defaultStageTimeout caps any individual stage that doesn't set its
+// own. Picked to be longer than realistic Kaniko builds (~30 min)
+// without being so long that a stuck stage pins resources for a day.
+const defaultStageTimeout = 30 * time.Minute
 
 // Executor runs pipelines using the DAG runner and reports progress.
 // Production wiring injects real Builder/Pusher/Deployer; tests
@@ -101,34 +107,78 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 	run.StartedAt = &now
 
 	runner := dagrunner.NewRunner(dag, func(ctx context.Context, nodeID string) error {
-		stage := stageMap[nodeID]
-		stageRun := stageRunMap[nodeID]
+		stage, ok := stageMap[nodeID]
+		if !ok || stage == nil {
+			return fmt.Errorf("stage %q not found in pipeline", nodeID)
+		}
+		stageRun, ok := stageRunMap[nodeID]
+		if !ok || stageRun == nil {
+			return fmt.Errorf("stage run %q not allocated", nodeID)
+		}
+
+		// Apply per-stage timeout. stage.Config.Timeout is a Go-format
+		// duration string (e.g. "5m", "1h"); fall back to a 30-minute
+		// default so a runaway stage can't hang the run forever.
+		timeout := defaultStageTimeout
+		if stage.Config.Timeout != "" {
+			if d, err := time.ParseDuration(stage.Config.Timeout); err == nil && d > 0 {
+				timeout = d
+			} else if err != nil {
+				slog.Warn("pipeline stage timeout parse failed; using default",
+					"stage", stage.Name, "value", stage.Config.Timeout, "err", err)
+			}
+		}
+		stageCtx, cancelStage := context.WithTimeout(ctx, timeout)
+		defer cancelStage()
 
 		startTime := time.Now()
 		stageRun.StartedAt = &startTime
 		stageRun.Status = model.RunStatusRunning
 
-		slog.Info("pipeline executing stage", "pipeline", p.ID, "stage", stage.Name, "type", stage.Type)
+		slog.Info("pipeline executing stage",
+			"pipeline", p.ID, "stage", stage.Name, "type", stage.Type, "timeout", timeout)
 
-		var stageErr error
-		switch stage.Type {
-		case model.StageTypeBuild:
-			stageErr = e.executeBuild(ctx, stage, stageRun)
-		case model.StageTypeTest:
-			stageErr = e.executeTest(ctx, stage)
-		case model.StageTypePush:
-			stageErr = e.executePush(ctx, stage, stageRun)
-		case model.StageTypeDeploy:
-			stageErr = e.executeDeploy(ctx, stage, stageRun)
-		case model.StageTypeApproval:
-			stageErr = e.executeApproval(ctx, stage)
-		case model.StageTypeCustom:
-			stageErr = e.executeCustom(ctx, stage)
-		case model.StageTypeGitOpsCommit:
-			stageErr = e.executeGitOpsCommit(ctx, stage, stageRun)
-		default:
-			stageErr = fmt.Errorf("unknown stage type: %s", stage.Type)
+		// Wrap the type-specific dispatch with retry so transient
+		// adapter errors (registry 5xx, kube-API blip) don't fail
+		// the whole pipeline. Approval / custom stages don't make
+		// sense to retry — they're skipped via MaxAttempts=1 below.
+		retryPolicy := retry.Policy{
+			MaxAttempts: 1 + stage.Config.Retries,
+			Initial:     1 * time.Second,
+			Max:         15 * time.Second,
+			IsTransient: func(err error) bool {
+				// Don't retry if the parent context is gone — that's
+				// shutdown, cancellation, or the per-stage deadline
+				// firing. Also don't retry validation-shaped errors
+				// (those are caller bugs, not network blips).
+				return !retry.IsContextErr(err)
+			},
 		}
+		switch stage.Type {
+		case model.StageTypeApproval, model.StageTypeCustom, model.StageTypeTest:
+			retryPolicy.MaxAttempts = 1
+		}
+
+		stageErr := retry.Do(stageCtx, retryPolicy, func(ctx context.Context) error {
+			switch stage.Type {
+			case model.StageTypeBuild:
+				return e.executeBuild(ctx, stage, stageRun)
+			case model.StageTypeTest:
+				return e.executeTest(ctx, stage)
+			case model.StageTypePush:
+				return e.executePush(ctx, stage, stageRun)
+			case model.StageTypeDeploy:
+				return e.executeDeploy(ctx, stage, stageRun)
+			case model.StageTypeApproval:
+				return e.executeApproval(ctx, stage)
+			case model.StageTypeCustom:
+				return e.executeCustom(ctx, stage)
+			case model.StageTypeGitOpsCommit:
+				return e.executeGitOpsCommit(ctx, stage, stageRun)
+			default:
+				return fmt.Errorf("unknown stage type: %s", stage.Type)
+			}
+		})
 
 		endTime := time.Now()
 		stageRun.FinishedAt = &endTime
