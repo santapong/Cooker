@@ -1,6 +1,6 @@
 # Crash & Service-Quality Audit
 
-**Companion to:** [`dag-performance.md`](dag-performance.md) and [`spof-and-database.md`](spof-and-database.md). Those covered the DAG executor and the SPOF/database surface; this one fans out to the rest of the codebase.
+**Companion to:** [`dag-performance.md`](dag-performance.md), [`spof-and-database.md`](spof-and-database.md), and [`vulnerabilities-and-chains.md`](vulnerabilities-and-chains.md). Those covered the DAG executor, the SPOF/database surface, and a 20-agent vulnerability + chain-error scan respectively. This one fans out to the rest of the codebase.
 
 **Method:** ten parallel Explore agents, each scoped to one failure class (panics, goroutine leaks, resource exhaustion, races, startup, availability, performance, security, observability, operational readiness). Each was briefed not to re-cover material already in the two earlier audits. Headline findings were spot-checked against the source before publishing — every Critical/High finding here has been read directly.
 
