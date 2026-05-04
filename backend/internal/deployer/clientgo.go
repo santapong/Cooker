@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,8 +32,12 @@ type ClientGo struct {
 
 	// dynamic, mapper, and discovery are lazy-initialised on first
 	// Deploy so constructing a ClientGo doesn't require cluster auth.
-	cli    dynamic.Interface
-	mapper *restmapper.DeferredDiscoveryRESTMapper
+	// initOnce serialises lazy init across concurrent Deploy calls;
+	// initErr captures the result of the one-shot init for callers.
+	initOnce sync.Once
+	initErr  error
+	cli      dynamic.Interface
+	mapper   *restmapper.DeferredDiscoveryRESTMapper
 }
 
 func NewClientGo(kubeconfig string) *ClientGo { return &ClientGo{Kubeconfig: kubeconfig} }
@@ -53,24 +58,26 @@ func (c *ClientGo) restConfig() (*rest.Config, error) {
 }
 
 func (c *ClientGo) ensureClients() error {
-	if c.cli != nil && c.mapper != nil {
-		return nil
-	}
-	cfg, err := c.restConfig()
-	if err != nil {
-		return fmt.Errorf("%w: rest config: %v", ErrUnavailable, err)
-	}
-	dyn, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("%w: dynamic client: %v", ErrUnavailable, err)
-	}
-	disc, err := discovery.NewDiscoveryClientForConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("%w: discovery: %v", ErrUnavailable, err)
-	}
-	c.cli = dyn
-	c.mapper = restmapper.NewDeferredDiscoveryRESTMapper(memcache.NewMemCacheClient(disc))
-	return nil
+	c.initOnce.Do(func() {
+		cfg, err := c.restConfig()
+		if err != nil {
+			c.initErr = fmt.Errorf("%w: rest config: %v", ErrUnavailable, err)
+			return
+		}
+		dyn, err := dynamic.NewForConfig(cfg)
+		if err != nil {
+			c.initErr = fmt.Errorf("%w: dynamic client: %v", ErrUnavailable, err)
+			return
+		}
+		disc, err := discovery.NewDiscoveryClientForConfig(cfg)
+		if err != nil {
+			c.initErr = fmt.Errorf("%w: discovery: %v", ErrUnavailable, err)
+			return
+		}
+		c.cli = dyn
+		c.mapper = restmapper.NewDeferredDiscoveryRESTMapper(memcache.NewMemCacheClient(disc))
+	})
+	return c.initErr
 }
 
 // Deploy applies the manifest in req. Server-side apply is used so

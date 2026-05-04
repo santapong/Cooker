@@ -54,8 +54,9 @@ func (rc *RunCoordinator) Spawn(ctx context.Context, runID string, work func(con
 		// row post-hoc (synthesised app-deploys) don't spam warnings.
 		rc.heartbeatBestEffort(ctx, runID, time.Now())
 		hbCtx, hbCancel := context.WithCancel(ctx)
-		defer hbCancel()
+		hbDone := make(chan struct{})
 		go func() {
+			defer close(hbDone)
 			for {
 				select {
 				case <-hbCtx.Done():
@@ -65,7 +66,15 @@ func (rc *RunCoordinator) Spawn(ctx context.Context, runID string, work func(con
 				}
 			}
 		}()
-		if err := work(ctx); err != nil {
+		// Run work, then deterministically tear down the heartbeat
+		// goroutine before this outer goroutine returns. Without the
+		// join the inner goroutine could outlive the WaitGroup-tracked
+		// outer one, missing the final heartbeat and producing a
+		// false-positive orphan on the next replica's boot sweep.
+		err := work(ctx)
+		hbCancel()
+		<-hbDone
+		if err != nil {
 			slog.Warn("run coordinator: work returned error", "run", runID, "err", err)
 		}
 	}()

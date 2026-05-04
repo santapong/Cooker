@@ -14,6 +14,18 @@ type Client struct {
 	conn    *websocket.Conn
 	send    chan []byte
 	channel string
+	// closeOnce guards close(send) so it can fire from at most one
+	// path (broadcast-backpressure or unregister) without panicking.
+	closeOnce sync.Once
+}
+
+// closeSend is the single-path-safe close on the send channel.
+// Multiple callers may race (broadcast loop saw the channel full
+// and decided to drop the client; the hub also processes an
+// unregister from readPump/writePump exit) — sync.Once ensures
+// only one wins.
+func (c *Client) closeSend() {
+	c.closeOnce.Do(func() { close(c.send) })
 }
 
 // WebSocketHub manages all WebSocket connections and message broadcasting.
@@ -86,7 +98,7 @@ func (h *WebSocketHub) Run() {
 			if clients, ok := h.clients[client.channel]; ok {
 				if _, exists := clients[client]; exists {
 					delete(clients, client)
-					close(client.send)
+					client.closeSend()
 				}
 			}
 			h.mu.Unlock()
@@ -95,18 +107,32 @@ func (h *WebSocketHub) Run() {
 			if !ok {
 				return
 			}
+			// Two-pass to avoid mutating the map while iterating
+			// under RLock: collect victims first, then upgrade to
+			// Lock to delete + close. Go panics on concurrent
+			// map-write-during-iterate.
+			var dropped []*Client
 			h.mu.RLock()
 			if clients, ok := h.clients[msg.Channel]; ok {
 				for client := range clients {
 					select {
 					case client.send <- msg.Data:
 					default:
-						close(client.send)
-						delete(clients, client)
+						dropped = append(dropped, client)
 					}
 				}
 			}
 			h.mu.RUnlock()
+			if len(dropped) > 0 {
+				h.mu.Lock()
+				if clients, ok := h.clients[msg.Channel]; ok {
+					for _, client := range dropped {
+						delete(clients, client)
+						client.closeSend()
+					}
+				}
+				h.mu.Unlock()
+			}
 		}
 	}
 }

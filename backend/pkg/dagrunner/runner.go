@@ -65,6 +65,13 @@ func (r *Runner) Run(ctx context.Context) error {
 			wg.Add(1)
 			go func(id string) {
 				defer wg.Done()
+				defer func() {
+					if rec := recover(); rec != nil {
+						err := fmt.Errorf("node %s panic: %v", id, rec)
+						r.emitStatus(id, "failed", err)
+						errCh <- err
+					}
+				}()
 
 				r.emitStatus(id, "running", nil)
 
