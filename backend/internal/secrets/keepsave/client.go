@@ -9,6 +9,7 @@ package keepsave
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,15 @@ import (
 	"net/url"
 	"time"
 )
+
+// secureTransport returns an http.Transport with TLS 1.2 floored.
+// Used for every outbound call from this package so a misconfigured
+// CDN / proxy can't downgrade traffic to TLS 1.0/1.1.
+func secureTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	return t
+}
 
 // Client is a thin REST client for KeepSave's secrets endpoints.
 type Client struct {
@@ -31,7 +41,10 @@ func NewClient(baseURL, apiKey string) *Client {
 	return &Client{
 		BaseURL: baseURL,
 		APIKey:  apiKey,
-		HTTP:    &http.Client{Timeout: 30 * time.Second},
+		HTTP: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: secureTransport(),
+		},
 	}
 }
 
