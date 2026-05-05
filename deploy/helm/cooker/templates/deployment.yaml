@@ -134,7 +134,11 @@ spec:
                   name: {{ include "cooker.fullname" . }}-secret-key
                   key: key
                   {{- end }}
-                  optional: true
+                  # optional: false (default). Force the Pod to fail
+                  # creation if the Secret is missing, rather than
+                  # booting silently with COOKER_SECRET_KEY="" and
+                  # sidestepping production validation.
+                  optional: false
             - name: COOKER_OIDC_ENABLED
               value: {{ .Values.oidc.enabled | quote }}
             {{- if .Values.oidc.enabled }}

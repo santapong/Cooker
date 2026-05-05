@@ -8,10 +8,27 @@ package retry
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
-	"math/rand"
 	"time"
 )
+
+// jitter returns a non-negative duration in [0, d/2]. Uses crypto/rand
+// to side-step the global math/rand mutex; the random quality isn't
+// the goal here, the lock-freedom is.
+func jitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	max := int64(d/2) + 1
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return 0
+	}
+	n := int64(binary.BigEndian.Uint64(b[:]) & ((1 << 62) - 1))
+	return time.Duration(n % max)
+}
 
 // Policy controls the backoff loop. Zero / negative MaxAttempts
 // means "run once with no retry"; an empty IsTransient classifier
@@ -71,7 +88,7 @@ func Do(ctx context.Context, p Policy, op func(context.Context) error) error {
 		// Jittered exponential backoff. The jitter is bounded at
 		// half the current delay so the worst-case pause is 1.5×
 		// of what the policy advertises.
-		jittered := delay + time.Duration(rand.Int63n(int64(delay/2)+1))
+		jittered := delay + jitter(delay)
 		t := time.NewTimer(jittered)
 		select {
 		case <-t.C:

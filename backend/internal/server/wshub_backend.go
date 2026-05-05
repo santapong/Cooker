@@ -2,16 +2,38 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"log/slog"
-	"math/rand"
+	mrand "math/rand"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
 	"github.com/cooker-ci/cooker/internal/observability"
 )
+
+// secureJitter returns a uniformly-random duration in [0, d/2]. The
+// jitter is for backoff-spread, not security, but using crypto/rand
+// avoids the global math/rand source's lock contention on hot paths
+// and keeps the project's "math/rand only for non-essential
+// randomness" convention consistent.
+func secureJitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	max := int64(d/2) + 1
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Fall back to math/rand if the crypto source is somehow
+		// unavailable. This branch is unreachable in practice on
+		// Linux but we never want backoff to panic.
+		return time.Duration(mrand.Int63n(max))
+	}
+	n := int64(binary.BigEndian.Uint64(b[:]) & ((1 << 62) - 1))
+	return time.Duration(n % max)
+}
 
 // redisWSBroadcastChannel is the single Redis pub/sub channel that
 // every Cooker replica publishes to and subscribes to. The per-client
@@ -199,7 +221,7 @@ func (b *redisHubBackend) drain(source <-chan *redis.Message) {
 // fires during the sleep. Uses NewTimer so the timer is reclaimed when
 // ctx wins the race.
 func sleepJitter(ctx context.Context, d time.Duration) bool {
-	jittered := d + time.Duration(rand.Int63n(int64(d/2+1)))
+	jittered := d + secureJitter(d)
 	t := time.NewTimer(jittered)
 	select {
 	case <-t.C:

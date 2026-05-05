@@ -48,8 +48,18 @@ type PushEvent struct {
 	Repository struct {
 		FullName string `json:"full_name"` // "owner/name"
 	} `json:"repository"`
-	After  string `json:"after"`  // new commit SHA
-	Before string `json:"before"` // old commit SHA
+	After   string `json:"after"`   // new commit SHA
+	Before  string `json:"before"`  // old commit SHA
+	Deleted bool   `json:"deleted"` // true when the push is a branch / tag delete
+}
+
+// zeroSHA is what GitHub sends in `after` when a branch is deleted.
+const zeroSHA = "0000000000000000000000000000000000000000"
+
+// IsBranchDelete reports whether the push was a branch / tag
+// deletion. Cooker should ignore these — there's nothing to deploy.
+func (p *PushEvent) IsBranchDelete() bool {
+	return p.Deleted || p.After == zeroSHA
 }
 
 // Branch extracts the branch name from the push-event Ref.

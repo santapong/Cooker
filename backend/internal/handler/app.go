@@ -297,6 +297,13 @@ func (h *Handler) GitHubWebhook(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ignored": "non-branch push"})
 		return
 	}
+	if ev.IsBranchDelete() {
+		// Branch was deleted (`after` is all zeros / `deleted: true`).
+		// Nothing to deploy — and pushing through to GetByRepo would
+		// surface a misleading "deploy queued" response.
+		c.JSON(http.StatusOK, gin.H{"ignored": "branch delete"})
+		return
+	}
 
 	app, err := h.Store.Apps.GetByRepo(c.Request.Context(), ev.Repository.FullName, branch)
 	if err != nil {

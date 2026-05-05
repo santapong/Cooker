@@ -3,6 +3,7 @@ package deployer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -134,7 +135,26 @@ func (c *ClientGo) Deploy(ctx context.Context, req Request) (Result, error) {
 	return Result{AppliedResources: applied}, nil
 }
 
+// maxManifestBytes caps the total size of an inbound manifest
+// payload. K8s itself accepts up to a couple of MB per object;
+// 4 MiB across the entire multi-doc YAML is more than enough for
+// realistic apps and keeps "billion laughs" / nesting-bomb attacks
+// from hanging the parser.
+const maxManifestBytes = 4 << 20
+
+// maxManifestDocs caps the number of documents in a single payload.
+// A pathological YAML can include thousands of trivial documents to
+// inflate parse time even within the byte cap.
+const maxManifestDocs = 64
+
+// errManifestTooLarge is the error returned when a manifest exceeds
+// either the byte or document cap.
+var errManifestTooLarge = errors.New("deployer: manifest exceeds size or document limit")
+
 func splitManifest(b []byte) ([][]byte, error) {
+	if len(b) > maxManifestBytes {
+		return nil, errManifestTooLarge
+	}
 	r := utilyaml.NewYAMLReader(yamlBufReader(b))
 	var docs [][]byte
 	for {
@@ -149,6 +169,9 @@ func splitManifest(b []byte) ([][]byte, error) {
 			continue
 		}
 		docs = append(docs, raw)
+		if len(docs) > maxManifestDocs {
+			return nil, errManifestTooLarge
+		}
 	}
 	return docs, nil
 }

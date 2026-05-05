@@ -5,11 +5,13 @@ package postgres
 
 import (
 	"context"
+	crand "crypto/rand"
 	"database/sql"
 	"embed"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
-	"math/rand"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -20,6 +22,24 @@ import (
 	"github.com/cooker-ci/cooker/internal/store"
 )
 
+// osEnvGetter is an indirection so envLookup can be stubbed in tests.
+var osEnvGetter = os.Getenv
+
+// jitter returns a non-negative duration in [0, d/2]. crypto/rand
+// avoids the locked global math/rand source.
+func jitter(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	max := int64(d/2) + 1
+	var b [8]byte
+	if _, err := crand.Read(b[:]); err != nil {
+		return 0
+	}
+	n := int64(binary.BigEndian.Uint64(b[:]) & ((1 << 62) - 1))
+	return time.Duration(n % max)
+}
+
 // pingBudget caps how long NewStore waits for the database to become
 // reachable before giving up. K8s readiness probes ride out the
 // per-attempt failures via the readiness endpoint.
@@ -28,6 +48,43 @@ var (
 	pingInitialDelay = 500 * time.Millisecond
 	pingMaxDelay     = 30 * time.Second
 )
+
+// Connection pool tunables. Defaults match the historical
+// hard-coded values; operators can override via env vars without
+// editing the chart. Sizing guidance:
+//   - MaxOpenConns × replicaCount must stay below Postgres's own
+//     max_connections (default 100). 25 × 3 = 75 leaves headroom.
+//   - MaxIdleConns ≤ MaxOpenConns. Tune up if you see frequent
+//     "connection idle for >X" reconnects.
+//   - ConnMaxLifetime should be < the load-balancer's idle timeout
+//     so dead connections don't accumulate.
+const (
+	defaultMaxOpenConns    = 25
+	defaultMaxIdleConns    = 5
+	defaultConnMaxLifetime = time.Hour
+)
+
+func envInt(name string, fallback int) int {
+	if v := strings.TrimSpace(envLookup(name)); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			return n
+		}
+	}
+	return fallback
+}
+
+func envDuration(name string, fallback time.Duration) time.Duration {
+	if v := strings.TrimSpace(envLookup(name)); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return fallback
+}
+
+// envLookup is a small indirection so tests can stub the lookup.
+var envLookup = func(name string) string { return osEnvGetter(name) }
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
@@ -41,9 +98,9 @@ func NewStore(ctx context.Context, databaseURL string) (*store.Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("postgres: open: %w", err)
 	}
-	db.SetConnMaxLifetime(time.Hour)
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(envDuration("COOKER_DB_CONN_MAX_LIFETIME", defaultConnMaxLifetime))
+	db.SetMaxOpenConns(envInt("COOKER_DB_MAX_OPEN_CONNS", defaultMaxOpenConns))
+	db.SetMaxIdleConns(envInt("COOKER_DB_MAX_IDLE_CONNS", defaultMaxIdleConns))
 
 	if err := pingWithBackoff(ctx, db); err != nil {
 		db.Close()
@@ -92,7 +149,7 @@ func pingWithBackoff(ctx context.Context, db *sql.DB) error {
 		if time.Now().Add(delay).After(deadline) {
 			return fmt.Errorf("budget exhausted after %d attempts: %w", attempt, err)
 		}
-		jittered := delay + time.Duration(rand.Int63n(int64(delay/2+1)))
+		jittered := delay + jitter(delay)
 		slog.Warn("postgres: ping failed, retrying", "attempt", attempt, "delay", jittered.String(), "err", err)
 		t := time.NewTimer(jittered)
 		select {
