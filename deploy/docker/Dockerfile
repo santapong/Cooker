@@ -45,19 +45,19 @@ FROM alpine:3.19
 # group_add so this user can still access the bind-mounted
 # /var/run/docker.sock; see docker-compose.uat.yml and Makefile.
 ARG KUBECTL_VERSION=v1.29.4
-# Pin alpine apk packages so a stale mirror / package-name-rotation
-# can't drift the image. Versions match alpine 3.19's `latest` line
-# at the time of writing; bump alongside the FROM tag.
-ARG GIT_VERSION=2.43.7-r0
-ARG DOCKER_CLI_VERSION=24.0.7-r24
-ARG CA_CERTS_VERSION=20240226-r0
+# The alpine:3.19 base tag locks the apk package set. Pinning
+# individual apk versions on top of that is fragile because the
+# 3.19 line backports security fixes (so the -rN revision floats
+# within the same upstream version) — and a CI build in 6 months
+# would fail to find the exact -r revision pinned today. The
+# stronger reproducibility move is to pin the FROM tag to a
+# digest (alpine:3.19@sha256:...) which we'll do once we have a
+# digest-pinning workflow.
+#
 # Fetch kubectl and verify against the upstream-published SHA256 so a
 # compromised mirror or in-flight tampering cannot inject a malicious
 # binary that would run with docker.sock and kubeconfig access.
-RUN apk add --no-cache \
-        ca-certificates=${CA_CERTS_VERSION} \
-        git=${GIT_VERSION} \
-        docker-cli=${DOCKER_CLI_VERSION} \
+RUN apk add --no-cache ca-certificates git docker-cli \
  && wget -qO /usr/local/bin/kubectl \
       https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl \
  && wget -qO /tmp/kubectl.sha256 \
