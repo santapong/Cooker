@@ -245,6 +245,7 @@ func New(cfg *config.Config) (*Server, error) {
 	router.GET("/health", live)
 	router.GET("/health/live", live)
 	router.GET("/health/ready", ready)
+	router.GET("/version", versionHandler())
 
 	registerDeployTargets(cfg.DeployTargets)
 	s.registerRoutes()
