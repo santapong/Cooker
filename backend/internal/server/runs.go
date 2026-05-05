@@ -26,6 +26,13 @@ const orphanThreshold = 90 * time.Second
 // will be flagged by the next boot's orphan sweep.
 const runDrainTimeout = 25 * time.Second
 
+// runDeadline is the upper bound on how long Spawn lets work run
+// before its context is force-cancelled. Picked to outlast the
+// largest realistic Kaniko build. The original spec called for this
+// (matching the app-deploy behaviour); the audit flagged that the
+// comment promised it but the code never set it.
+const runDeadline = 30 * time.Minute
+
 // RunCoordinator tracks in-flight pipeline-run goroutines so they can
 // be heart-beaten and drained on shutdown.
 type RunCoordinator struct {
@@ -47,14 +54,20 @@ func (rc *RunCoordinator) Spawn(ctx context.Context, runID string, work func(con
 	rc.wg.Add(1)
 	go func() {
 		defer rc.wg.Done()
+		// Apply the documented 30-minute upper bound. Without this
+		// a stuck builder / kubectl / git push could hold the
+		// goroutine forever; the sweep wouldn't catch it because
+		// heartbeats keep firing.
+		workCtx, cancelWork := context.WithTimeout(ctx, runDeadline)
+		defer cancelWork()
 		ticker := time.NewTicker(heartbeatInterval)
 		defer ticker.Stop()
 		// First heartbeat, written synchronously, so a sweep that runs
 		// shortly after Spawn never declares a fresh run orphaned.
 		// Missing-row is tolerated silently so paths that create the
 		// row post-hoc (synthesised app-deploys) don't spam warnings.
-		rc.heartbeatBestEffort(ctx, runID, time.Now())
-		hbCtx, hbCancel := context.WithCancel(ctx)
+		rc.heartbeatBestEffort(workCtx, runID, time.Now())
+		hbCtx, hbCancel := context.WithCancel(workCtx)
 		hbDone := make(chan struct{})
 		go func() {
 			defer close(hbDone)
@@ -72,7 +85,7 @@ func (rc *RunCoordinator) Spawn(ctx context.Context, runID string, work func(con
 		// join the inner goroutine could outlive the WaitGroup-tracked
 		// outer one, missing the final heartbeat and producing a
 		// false-positive orphan on the next replica's boot sweep.
-		err := work(ctx)
+		err := work(workCtx)
 		hbCancel()
 		<-hbDone
 		if err != nil {
