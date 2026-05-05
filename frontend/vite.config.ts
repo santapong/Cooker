@@ -9,6 +9,14 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    // Production builds ship without sourcemaps; the prior Vite
+    // default leaked the entire frontend source tree to anyone
+    // with browser dev tools open. Set VITE_SOURCEMAP=true in the
+    // build environment to opt back in for short-lived debug
+    // builds.
+    sourcemap: process.env.VITE_SOURCEMAP === 'true',
+  },
   server: {
     port: 5173,
     proxy: {
