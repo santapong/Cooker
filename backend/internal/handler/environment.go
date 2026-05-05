@@ -149,6 +149,10 @@ func (h *Handler) RevealSecret(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
 		return
 	}
+	// Strict no-store: a leaked browser cache or a forward proxy
+	// shouldn't be holding a copy of the plaintext value.
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private")
+	c.Header("Pragma", "no-cache")
 	if _, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id")); abortStoreErr(c, err, "environment not found") {
 		return
 	}
@@ -158,7 +162,9 @@ func (h *Handler) RevealSecret(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Generic message: the upstream secrets-manager error can leak
+		// Vault path / AWS ARN / KeepSave URL detail.
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "secret backend error"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "value": string(value)})

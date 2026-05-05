@@ -227,6 +227,7 @@ func New(cfg *config.Config) (*Server, error) {
 		idempotency:   idem,
 	}
 
+	router.Use(securityHeadersMiddleware())
 	router.Use(corsMiddleware(cfg.AllowedOrigins))
 	if cfg.Observability.MetricsEnabled {
 		router.Use(observability.MetricsMiddleware())
