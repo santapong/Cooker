@@ -257,10 +257,13 @@ func (h *Handler) DeleteSecret(c *gin.Context) {
 }
 
 func (h *Handler) PromoteRun(c *gin.Context) {
-	runID := c.Param("runId")
+	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
+	if !ok {
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"message": "promotion initiated",
-		"runId":   runID,
+		"runId":   run.ID,
 	})
 }
 
@@ -276,7 +279,10 @@ func (h *Handler) ApprovePromotion(c *gin.Context) {
 		return
 	}
 
-	runID := c.Param("runId")
+	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
+	if !ok {
+		return
+	}
 	var req struct {
 		Note string `json:"note"`
 	}
@@ -284,16 +290,19 @@ func (h *Handler) ApprovePromotion(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "promotion approved",
-		"runId":      runID,
+		"runId":      run.ID,
 		"approvedBy": claims.Email,
 		"note":       req.Note,
 	})
 }
 
 func (h *Handler) GetEnvStatus(c *gin.Context) {
-	runID := c.Param("runId")
+	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
+	if !ok {
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"runId":    runID,
+		"runId":    run.ID,
 		"statuses": []model.EnvironmentStatus{},
 	})
 }

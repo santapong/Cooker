@@ -224,16 +224,16 @@ func (h *Handler) ListPipelineRuns(c *gin.Context) {
 }
 
 func (h *Handler) GetPipelineRun(c *gin.Context) {
-	run, err := h.Store.Runs.Get(c.Request.Context(), c.Param("runId"))
-	if abortStoreErr(c, err, "run not found") {
+	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
+	if !ok {
 		return
 	}
 	c.JSON(http.StatusOK, run)
 }
 
 func (h *Handler) CancelPipelineRun(c *gin.Context) {
-	run, err := h.Store.Runs.Get(c.Request.Context(), c.Param("runId"))
-	if abortStoreErr(c, err, "run not found") {
+	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
+	if !ok {
 		return
 	}
 	run.Status = model.RunStatusCancelled

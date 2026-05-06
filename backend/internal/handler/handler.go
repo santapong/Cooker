@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/cooker-ci/cooker/internal/crypto"
+	"github.com/cooker-ci/cooker/internal/model"
 	"github.com/cooker-ci/cooker/internal/secrets"
 	"github.com/cooker-ci/cooker/internal/service"
 	"github.com/cooker-ci/cooker/internal/store"
@@ -48,6 +49,23 @@ type Handler struct {
 // and no COOKER_SECRET_KEY set); the secret endpoints will return 503.
 func New(s *store.Store, codec *crypto.Codec, secs secrets.Manager) *Handler {
 	return &Handler{Store: s, Codec: codec, Secrets: secs}
+}
+
+// loadRunForPipeline fetches a run by runId and verifies it belongs
+// to the given pipelineID. Mismatches return 404 (rather than 403)
+// so we don't confirm to a probing caller whether a runId exists
+// under a different pipeline. Returns nil + false if a response
+// has already been written (caller should return immediately).
+func (h *Handler) loadRunForPipeline(c *gin.Context, runID, pipelineID string) (*model.PipelineRun, bool) {
+	run, err := h.Store.Runs.Get(c.Request.Context(), runID)
+	if abortStoreErr(c, err, "run not found") {
+		return nil, false
+	}
+	if run.PipelineID != pipelineID {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return nil, false
+	}
+	return run, true
 }
 
 // abortStoreErr maps common store errors to HTTP responses.
