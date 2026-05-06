@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -27,11 +28,19 @@ const orphanThreshold = 90 * time.Second
 const runDrainTimeout = 25 * time.Second
 
 // runDeadline is the upper bound on how long Spawn lets work run
-// before its context is force-cancelled. Picked to outlast the
-// largest realistic Kaniko build. The original spec called for this
-// (matching the app-deploy behaviour); the audit flagged that the
-// comment promised it but the code never set it.
-const runDeadline = 30 * time.Minute
+// before its context is force-cancelled. Defaults to 30 minutes —
+// long enough for realistic Kaniko builds — but operators with
+// genuinely long monorepo builds can override via the
+// COOKER_RUN_DEADLINE env var (Go duration string, e.g. "2h").
+// Setting 0 or a negative value falls back to the default.
+var runDeadline = func() time.Duration {
+	if v := os.Getenv("COOKER_RUN_DEADLINE"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 30 * time.Minute
+}()
 
 // RunCoordinator tracks in-flight pipeline-run goroutines so they can
 // be heart-beaten and drained on shutdown.

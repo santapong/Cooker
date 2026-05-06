@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/cooker-ci/cooker/internal/builder"
@@ -27,6 +28,22 @@ const stageLogCap = 1 << 20 // 1 MiB
 // own. Picked to be longer than realistic Kaniko builds (~30 min)
 // without being so long that a stuck stage pins resources for a day.
 const defaultStageTimeout = 30 * time.Minute
+
+// defaultMaxParallel caps how many stages within a single DAG level
+// execute concurrently. Picked to leave headroom for K8s API + one
+// registry; operators with bigger compute budgets can override via
+// COOKER_DAG_MAX_PARALLEL.
+const defaultMaxParallel = 16
+
+func dagMaxParallel() int {
+	if v := os.Getenv("COOKER_DAG_MAX_PARALLEL"); v != "" {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxParallel
+}
 
 // RunUpdater persists in-progress run state. Called by the executor
 // after every stage transition (start + finish) so a crash mid-run
@@ -139,7 +156,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 	run.Status = model.RunStatusRunning
 	run.StartedAt = &now
 
-	runner := dagrunner.NewRunner(dag, func(ctx context.Context, nodeID string) error {
+	runner := dagrunner.NewRunnerBounded(dag, func(ctx context.Context, nodeID string) error {
 		stage, ok := stageMap[nodeID]
 		if !ok || stage == nil {
 			return fmt.Errorf("stage %q not found in pipeline", nodeID)
@@ -231,7 +248,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		observability.ObserveStageDuration(string(stage.Type), "success", duration)
 		e.persistProgress(ctx, run)
 		return nil
-	})
+	}, dagMaxParallel())
 
 	// Drain status updates (in production, these go to WebSocket)
 	go func() {

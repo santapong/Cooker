@@ -21,24 +21,38 @@ type StatusUpdate struct {
 
 // Runner executes a DAG with parallel execution of independent nodes.
 type Runner struct {
-	dag      *DAG
-	taskFunc TaskFunc
-	updates  chan StatusUpdate
-	mu       sync.Mutex
-	statuses map[string]string
+	dag         *DAG
+	taskFunc    TaskFunc
+	updates     chan StatusUpdate
+	mu          sync.Mutex
+	statuses    map[string]string
+	maxParallel int // 0 means unbounded (legacy behaviour)
 }
 
-// NewRunner creates a new DAG runner.
+// NewRunner creates a new DAG runner with unbounded fan-out per
+// level. For pipelines with high fan-out (100+ stages in one
+// level), prefer NewRunnerBounded.
 func NewRunner(dag *DAG, taskFunc TaskFunc) *Runner {
+	return NewRunnerBounded(dag, taskFunc, 0)
+}
+
+// NewRunnerBounded caps the number of nodes the runner executes in
+// parallel within a single level via a semaphore. maxParallel<=0
+// means unbounded (matches the legacy NewRunner behaviour). A
+// realistic prod default is 16 — enough for typical pipelines, low
+// enough that 100 indep stages don't saturate the K8s API or burn
+// every registry rate-limit budget at once.
+func NewRunnerBounded(dag *DAG, taskFunc TaskFunc, maxParallel int) *Runner {
 	statuses := make(map[string]string)
 	for id := range dag.Nodes {
 		statuses[id] = "pending"
 	}
 	return &Runner{
-		dag:      dag,
-		taskFunc: taskFunc,
-		updates:  make(chan StatusUpdate, 100),
-		statuses: statuses,
+		dag:         dag,
+		taskFunc:    taskFunc,
+		updates:     make(chan StatusUpdate, 100),
+		statuses:    statuses,
+		maxParallel: maxParallel,
 	}
 }
 
@@ -71,10 +85,28 @@ func (r *Runner) Run(ctx context.Context) error {
 		carrier := propagation.MapCarrier{}
 		otel.GetTextMapPropagator().Inject(ctx, carrier)
 
+		// Semaphore for bounded fan-out. nil when maxParallel<=0
+		// preserves the legacy unbounded behaviour with a noop
+		// acquire/release.
+		var sem chan struct{}
+		if r.maxParallel > 0 {
+			sem = make(chan struct{}, r.maxParallel)
+		}
+
 		for _, nodeID := range level {
 			wg.Add(1)
 			go func(id string) {
 				defer wg.Done()
+				if sem != nil {
+					select {
+					case sem <- struct{}{}:
+						defer func() { <-sem }()
+					case <-ctx.Done():
+						r.emitStatus(id, "failed", ctx.Err())
+						errCh <- ctx.Err()
+						return
+					}
+				}
 				defer func() {
 					if rec := recover(); rec != nil {
 						err := fmt.Errorf("node %s panic: %v", id, rec)
