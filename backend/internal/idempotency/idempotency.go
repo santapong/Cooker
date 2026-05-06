@@ -31,10 +31,17 @@ type Store interface {
 
 // Memory is a per-process Store. It's adequate for single-replica
 // deployments and as a fallback when no Redis URL is configured.
+//
+// MaxBytes caps the resident set: when a Set would push us over,
+// the oldest entries are evicted until we're under the cap. 0
+// disables the cap (legacy behaviour). Picked at construction
+// time; mutating it post-NewMemory is unsafe.
 type Memory struct {
-	mu      sync.Mutex
-	entries map[string]memEntry
-	stopCh  chan struct{}
+	mu       sync.Mutex
+	entries  map[string]memEntry
+	stopCh   chan struct{}
+	maxBytes int
+	bytes    int // currently held
 }
 
 type memEntry struct {
@@ -45,10 +52,20 @@ type memEntry struct {
 // NewMemory builds a Memory store and starts a background sweeper
 // that evicts expired entries every gcInterval. Pass a positive
 // gcInterval; nil/zero disables the sweeper (test fixtures only).
+// Resident-set is uncapped — see NewMemoryBounded for production.
 func NewMemory(gcInterval time.Duration) *Memory {
+	return NewMemoryBounded(gcInterval, 0)
+}
+
+// NewMemoryBounded builds a Memory store with a resident-set cap.
+// On Set, if accepting the new entry would push past maxBytes,
+// the oldest entries (by expiry timestamp) are evicted first.
+// 0 disables the cap.
+func NewMemoryBounded(gcInterval time.Duration, maxBytes int) *Memory {
 	m := &Memory{
-		entries: make(map[string]memEntry),
-		stopCh:  make(chan struct{}),
+		entries:  make(map[string]memEntry),
+		stopCh:   make(chan struct{}),
+		maxBytes: maxBytes,
 	}
 	if gcInterval > 0 {
 		go m.gc(gcInterval)
@@ -77,8 +94,33 @@ func (m *Memory) Get(_ context.Context, key string) (Entry, bool) {
 func (m *Memory) Set(_ context.Context, key string, e Entry, ttl time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	newSize := len(key) + len(e.Body)
+	if existing, ok := m.entries[key]; ok {
+		m.bytes -= len(key) + len(existing.e.Body)
+	}
+	if m.maxBytes > 0 && m.bytes+newSize > m.maxBytes {
+		m.evictUntilLocked(m.maxBytes - newSize)
+	}
 	m.entries[key] = memEntry{e: e, expires: time.Now().Add(ttl)}
+	m.bytes += newSize
 	return nil
+}
+
+// evictUntilLocked drops the oldest-expiring entries until bytes
+// is below target. Caller must hold m.mu.
+func (m *Memory) evictUntilLocked(target int) {
+	for m.bytes > target && len(m.entries) > 0 {
+		var oldestKey string
+		var oldestExp time.Time
+		for k, v := range m.entries {
+			if oldestKey == "" || v.expires.Before(oldestExp) {
+				oldestKey, oldestExp = k, v.expires
+			}
+		}
+		ent := m.entries[oldestKey]
+		m.bytes -= len(oldestKey) + len(ent.e.Body)
+		delete(m.entries, oldestKey)
+	}
 }
 
 func (m *Memory) gc(interval time.Duration) {
@@ -92,6 +134,7 @@ func (m *Memory) gc(interval time.Duration) {
 			m.mu.Lock()
 			for k, e := range m.entries {
 				if now.After(e.expires) {
+					m.bytes -= len(k) + len(e.e.Body)
 					delete(m.entries, k)
 				}
 			}

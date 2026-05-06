@@ -187,10 +187,13 @@ func New(cfg *config.Config) (*Server, error) {
 
 	runs := NewRunCoordinator(st)
 
-	// Idempotency cache for mutating routes. In-memory only for now;
-	// a Redis-backed implementation would slot in here for multi-
-	// replica fleets.
-	idem := idempotency.NewMemory(5 * time.Minute)
+	// Idempotency cache for mutating routes. In-memory with a
+	// resident-set cap so a busy webhook integration can't pile
+	// up bodies until 24h-TTL expiry. Redis backend would slot in
+	// here for multi-replica fleets (chain-recheck "newly
+	// introduced #1").
+	const idempotencyMaxBytes = 32 << 20 // 32 MiB
+	idem := idempotency.NewMemoryBounded(5*time.Minute, idempotencyMaxBytes)
 	cleanups = append(cleanups, func() { idem.Close() })
 
 	h := handler.New(st, codec, secMgr)

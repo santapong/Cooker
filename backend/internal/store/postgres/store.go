@@ -167,24 +167,58 @@ func pingWithBackoff(ctx context.Context, db *sql.DB) error {
 	}
 }
 
+// migrationLockKey is the bigint key passed to pg_advisory_lock
+// while migrations run. Picked deterministically (any 64-bit
+// constant works) so two replicas booting simultaneously contend
+// on the same lock and serialise their migration loops. The lock
+// is session-scoped and released on connection close, which is
+// what we want: a crash mid-migration releases the lock cleanly.
+//
+// Value derived from "cooker-migration" via a fixed hash so it's
+// stable across builds — but operators on shared databases who
+// want to override it can recompute and patch this constant.
+const migrationLockKey int64 = 0x434f4f4b4552_4d49 // "COOKER_MI"
+
 // applyMigrations runs each embedded *.up.sql file that hasn't yet
 // been applied, recording each in the schema_migrations table so a
 // re-run is idempotent at the file granularity (rather than relying
 // on every CREATE TABLE IF NOT EXISTS to be perfectly idempotent).
+//
+// pg_advisory_lock serialises concurrent boots: only one replica
+// runs the migration body at a time, so non-idempotent DDL added
+// in a future migration won't fire twice in the same window.
 //
 // Down migrations are embedded too (*.down.sql) so a future
 // rollback CLI / test harness can call Rollback. They are not
 // invoked at boot — production rollbacks are an explicit operator
 // action.
 func applyMigrations(ctx context.Context, db *sql.DB) error {
-	if _, err := db.ExecContext(ctx, `
+	// Hold the migration lock on a single connection for the
+	// duration of the loop. database/sql may otherwise hand each
+	// Exec a different connection from the pool, defeating the
+	// session-scoped advisory lock.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("postgres: acquire migration conn: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+		return fmt.Errorf("postgres: pg_advisory_lock: %w", err)
+	}
+	defer func() {
+		// Best-effort unlock; the connection close will release
+		// it anyway, but explicit release lets a long-lived pool
+		// reuse the connection without holding the lock.
+		_, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, migrationLockKey)
+	}()
+	if _, err := conn.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version    TEXT PRIMARY KEY,
 			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`); err != nil {
 		return fmt.Errorf("postgres: create schema_migrations: %w", err)
 	}
-	applied, err := loadAppliedMigrations(ctx, db)
+	applied, err := loadAppliedMigrationsConn(ctx, conn)
 	if err != nil {
 		return err
 	}
@@ -203,8 +237,9 @@ func applyMigrations(ctx context.Context, db *sql.DB) error {
 		}
 		// Wrap each migration in a transaction so a partial failure
 		// can't half-apply the file and leave schema_migrations
-		// out of sync with the actual state.
-		tx, err := db.BeginTx(ctx, nil)
+		// out of sync with the actual state. The transaction runs
+		// on the same conn that holds the advisory lock.
+		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("postgres: begin %s: %w", name, err)
 		}
@@ -259,7 +294,16 @@ func rollbackMigration(ctx context.Context, db *sql.DB, version string) error {
 // loadAppliedMigrations returns the set of version strings already
 // recorded in schema_migrations.
 func loadAppliedMigrations(ctx context.Context, db *sql.DB) (map[string]bool, error) {
-	rows, err := db.QueryContext(ctx, `SELECT version FROM schema_migrations`)
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return loadAppliedMigrationsConn(ctx, conn)
+}
+
+func loadAppliedMigrationsConn(ctx context.Context, conn *sql.Conn) (map[string]bool, error) {
+	rows, err := conn.QueryContext(ctx, `SELECT version FROM schema_migrations`)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: read schema_migrations: %w", err)
 	}
