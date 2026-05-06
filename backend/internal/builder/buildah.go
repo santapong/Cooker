@@ -130,26 +130,45 @@ func (b *Buildah) Build(ctx context.Context, req Request) (Result, error) {
 	}, nil
 }
 
-// buildJob assembles the batch/v1.Job spec. The container shells out
-// to `buildah bud` and `buildah push` per tag.
+// buildahScript is the static shell script the Buildah Pod executes.
+// User-controllable values (Dockerfile path, context dir, storage
+// driver, build args, tags) flow in through environment variables
+// and positional args ($@), so a hostile pipeline definition can no
+// longer break out of the command line by injecting shell
+// metacharacters: the shell expands "$VAR" once, after lexing, and
+// the contents are preserved verbatim as a single word.
+//
+// $@ carries the --build-arg key=value flags in pre-quoted form;
+// $TAGS is a newline-separated list of destination refs (we set
+// IFS to newline so tags with embedded spaces — should they ever
+// appear in a malformed registry config — don't word-split).
+const buildahScript = `set -eu
+IFS=$'\n'
+buildah bud --storage-driver="$STORAGE_DRIVER" -f "$DOCKERFILE" -t cooker-build:current "$CONTEXT_DIR" "$@"
+for tag in $TAGS; do
+  buildah push --storage-driver="$STORAGE_DRIVER" cooker-build:current "docker://$tag"
+done
+buildah inspect --storage-driver="$STORAGE_DRIVER" --format '{{.FromImageDigest}}' cooker-build:current > /dev/termination-log
+`
+
+// buildJob assembles the batch/v1.Job spec. The container runs
+// /bin/sh against a static script (buildahScript); every
+// user-controllable value is passed as an env var or positional
+// argument, never interpolated into the command string.
 func (b *Buildah) buildJob(req Request) *batchv1.Job {
 	dockerfile := req.Dockerfile
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"
 	}
-	// Compose a single shell command so we can write the digest to
-	// the termination-log on success.
-	parts := []string{
-		fmt.Sprintf("buildah bud --storage-driver=%s -f %s -t cooker-build:current %s", b.cfg.StorageDriver, dockerfile, req.ContextDir),
-	}
+	// $@ carries one --build-arg=key=value flag per build arg.
+	// "key=value" lands in the buildah CLI as a single argument, so
+	// even if `value` contains spaces or quotes, buildah parses it
+	// correctly. The "=" form (vs "--build-arg" + "key=value" as
+	// two args) avoids any shell re-tokenisation.
+	args := make([]string, 0, len(req.BuildArgs))
 	for k, v := range req.BuildArgs {
-		parts[0] += fmt.Sprintf(" --build-arg %s=%s", k, v)
+		args = append(args, "--build-arg="+k+"="+v)
 	}
-	for _, t := range req.Tags {
-		parts = append(parts, fmt.Sprintf("buildah push --storage-driver=%s cooker-build:current docker://%s", b.cfg.StorageDriver, t))
-	}
-	parts = append(parts, fmt.Sprintf("buildah inspect --storage-driver=%s --format '{{.FromImageDigest}}' cooker-build:current > /dev/termination-log", b.cfg.StorageDriver))
-	cmd := strings.Join(parts, " && ")
 
 	jobName := fmt.Sprintf("cooker-buildah-%d", time.Now().UnixNano())
 	backoff := int32(0)
@@ -185,10 +204,18 @@ func (b *Buildah) buildJob(req Request) *batchv1.Job {
 					RestartPolicy:      corev1.RestartPolicyNever,
 					ServiceAccountName: b.cfg.ServiceAccount,
 					Containers: []corev1.Container{{
-						Name:    "buildah",
-						Image:   b.cfg.Image,
-						Command: []string{"/bin/sh", "-c"},
-						Args:    []string{cmd},
+						Name:  "buildah",
+						Image: b.cfg.Image,
+						// Command form: `/bin/sh -c <script> <argv0> <build-arg flags...>`.
+						// Inside the script, $0 is "buildah-job"
+						// and $@ is the list of --build-arg flags.
+						Command: append([]string{"/bin/sh", "-c", buildahScript, "buildah-job"}, args...),
+						Env: []corev1.EnvVar{
+							{Name: "STORAGE_DRIVER", Value: b.cfg.StorageDriver},
+							{Name: "DOCKERFILE", Value: dockerfile},
+							{Name: "CONTEXT_DIR", Value: req.ContextDir},
+							{Name: "TAGS", Value: strings.Join(req.Tags, "\n")},
+						},
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
 								corev1.ResourceCPU:    resource.MustParse("500m"),
