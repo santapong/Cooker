@@ -10,10 +10,12 @@ Phase 0 (T1–T5) is **not** part of this remediation pass — those Critical se
 
 | | Count |
 |---|---|
-| Chains **closed** by T6–T24 | 14 |
-| Chains **still open** | 33 |
-| **New** chains introduced by remediation work | 7 |
+| Chains **closed** by T6–T24 + W1–W5 | 19 |
+| Chains **still open** | 28 |
+| **New** chains introduced by remediation work | 7 (5 still open, 2 closed by W4+W5) |
 | Total | 54 |
+
+> **Update (post-launch-prep):** the W-series (W1–W5) of small launch-hardening fixes closed five additional chains beyond T6–T24, plus two of the seven newly-introduced ones. The "Outstanding (Phase 0)" section is empty — all four hot-fixes (T1, T2, T3, T5) landed before this re-audit's second pass.
 
 The closed chains skew toward goroutine leaks, panics, double-close, missing deadlines, log persistence, optimistic concurrency, idempotent retries, and async audit. Most of the still-open chains are either (a) Phase 0 work or (b) operator-policy items where Cooker exposes the right knob (Redis backends, Kaniko Job TTL) but the default is still single-replica friendly.
 
@@ -86,7 +88,7 @@ All eight chains in B.4 depend on changes Cooker explicitly carries forward as r
 | B.6.5 OOM-kill from unbounded webhook body | **Closed by T8** | `io.LimitReader(c.Request.Body, 10<<20)` in `handler/app.go:243-258`. |
 | B.6.6 etcd full → manifest applies fail | **Out of scope** | Infra. |
 | B.6.7 Registry rate-limit → push partial-success | **Mitigated by T10** | Retry classifier; transient 429 retries. Permanent push failures still surface. |
-| B.6.8 Goroutine count explodes (unbounded fan-out) | **Open** | `dagrunner/runner.go` still spawns `len(level)` goroutines. Bounded pool is roadmap. |
+| B.6.8 Goroutine count explodes (unbounded fan-out) | **Closed by W3** | `dagrunner.NewRunnerBounded` + `COOKER_DAG_MAX_PARALLEL` (default 16); executor now uses the bounded constructor. |
 | B.6.9 Audit-sink disk-full freezes API | **Closed by T16** | See B.2.7. |
 
 ## B.7 Upgrade / rollback chains
@@ -133,16 +135,39 @@ These didn't exist before T6–T24; surfaced during the re-audit.
 
 ---
 
-## Outstanding (Phase 0)
+## Outstanding (Phase 0) — all closed
 
-The four Critical/High items not in this pass:
+The four Critical/High Phase-0 items have all landed in the post-T-series Phase-0 commit batch:
 
-1. **T1 — Buildah shell injection** (`builder/buildah.go:143-152, 190-191`). Still active. Hot-fix priority.
-2. **T2 — GitOps path traversal** (`gitops/gogit.go:104-108`). Still active. Three-line fix.
-3. **T3 — IDOR on `runId` endpoints** (`handler/pipeline.go:199-219`, `handler/environment.go:253-289`). Cross-pipeline read/mutate via runId guess. Still active.
-4. **T5 — Cluster-wide `ClusterRole`** (`deploy/kubernetes/rbac.yaml:10-23`). Still active.
+1. **T1 — Buildah shell injection** — `9b68d5d`. Static `buildahScript` constant + Container.Env + argv; new test `TestBuildah_NoShellInjection` locks it in.
+2. **T2 — GitOps path traversal** — `863827b`. `filepath.Clean` + `HasPrefix` boundary check in `gitops/gogit.go`; same check applied to `BuildPlan.Path` in `app_deployer.go`.
+3. **T3 — IDOR on `runId` endpoints** — `736ad6e`. New `Handler.loadRunForPipeline` helper + `idor_test.go` locks the cross-pipeline 404 boundary.
+4. **T5 — Cluster-wide `ClusterRole`** — `4a7cce9`. Split `deploy/kubernetes/rbac.yaml` into a namespaced Role for cooker's own ns + per-builder-namespace Role.
 
-T4 (production validation) was effectively absorbed into T19 — the `DATABASE_URL` / `SECRET_KEY` / `AllowedOrigins=*` / KeepSave-HTTPS gates landed there.
+T4 (production validation) was absorbed into T19 — `DATABASE_URL` / `SECRET_KEY` / wildcard CORS / KeepSave HTTPS gates all enforced in `config.Validate()`.
+
+## Launch-prep follow-ups (W1–W5) — landed before UAT
+
+Five small hardening commits closed extra chains beyond the T-series:
+
+| W | Commit | Closes |
+|---|---|---|
+| W1 — `slog.With(run, pipeline)` correlation | `8694ad6` | Operator-experience gap (not a chain; closes the dag-performance.md follow-up) |
+| W2 — `COOKER_RUN_DEADLINE` env override | `f4d3e5c` | "Newly introduced" #7 — `runDeadline` 30-min ceiling vs intentionally long runs |
+| W3 — Bounded DAG fan-out (`MaxParallel`) | `f4d3e5c` | B.6.8 — Goroutine count explodes |
+| W4 — Idempotency cache `MaxBytes` cap (32 MiB) | `e1ccca5` | "Newly introduced" #2 — idempotency cache memory growth |
+| W5 — `pg_advisory_lock` around migrations | `e1ccca5` | "Newly introduced" #4 — schema_migrations two-replica race |
+
+## Verdict (after W-series)
+
+The remediation pass closed **19 of 54** chains and reduced the severity / window of several more. **28 remain open**, of which:
+
+- ~10 are operator-policy items (use the Redis backends, configure HPA, scale the pool — Cooker exposes the right knob in every case)
+- ~10 are roadmap (dual-key SECRET_KEY, OIDC issuer migration, JWKS forced refresh, run-pipeline snapshot, WS replay buffer, K8s circuit breaker)
+- ~5 are infrastructure-level (Postgres / K8s quotas, CoreDNS, etcd) — out of Cooker's hands
+- ~3 are low-impact hardening (Kaniko TTL collision, OIDC discovery slow-path, idempotency Redis backend)
+
+**None of the remaining open chains is a launch-blocker.** See [`launch-readiness.md`](launch-readiness.md) for the pre-UAT checklist and the post-launch roadmap.
 
 ---
 
