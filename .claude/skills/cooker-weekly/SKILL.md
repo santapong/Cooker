@@ -31,6 +31,8 @@ since="${last_tag:-7 days ago}"
 git log --since "$since" --oneline
 ```
 
+**Shortcut:** `.claude/skills/cooker-weekly/weekly-candidates.sh` prints a priority-ordered list of candidates (P1 issues → P2 open chains → P3 newly-introduced chains → P4 quick-win themes), plus the lookback window and recent commit summary. Run it first; pick the first item from the highest available bucket.
+
 ### 2. Pick exactly one item
 
 Selection priority (highest first):

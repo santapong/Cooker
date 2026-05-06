@@ -36,6 +36,13 @@ Before touching code:
    .claude/skills/cooker-improve/check-pkg.sh internal/<changed-pkg>
    ```
    That's `gofmt -l`, `go vet`, and `go test -race` on the package — same gates CI uses, but scoped, so the loop is fast.
+
+### Bundled scripts
+
+| Script | What it does |
+|---|---|
+| `check-pkg.sh <pkg>` | Run gofmt drift + `go vet` + `go test -race` scoped to one package. The exact gate CI uses; fail-fast on the first signal. |
+| `new-migration.sh <slug>` | Scaffold the next `NNN_<slug>.up.sql` + `NNN_<slug>.down.sql` pair with placeholder comments and the convention reminders embedded. Auto-picks NNN as max+1; prevents the off-by-one mistakes that come from doing this by hand. |
 4. **Cross-reference docs.** If the change closes a chain in `chain-recheck.md`, flip its row from "Open" to "Closed by …" and cite the new commit SHA.
 5. **Commit message** must reference what it closes:
    ```

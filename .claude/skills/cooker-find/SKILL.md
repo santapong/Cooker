@@ -48,11 +48,16 @@ Cooker is a Go-backend + React-frontend CI/CD platform. Single binary on port 80
 ## Workflow
 
 1. Identify the area (handler / service / store / adapter / config / ops).
-2. Check the right audit doc for known issues and citations.
-3. Use the table above to find the file.
-4. Use **ripgrep / grep** to find the symbol, not a filename.
-5. Use **Read**, never `cat`, to open the file.
-6. If the question is broad ("how does X work end-to-end"), spawn an Explore subagent with `subagent_type: Explore` rather than reading 10 files in the main context.
+2. **Run `.claude/skills/cooker-find/where-is.sh <noun>`** — resolves a domain word into the canonical file paths from the table below. Falls back to ripgrep when the noun isn't curated.
+3. Check the right audit doc for known issues and citations.
+4. Use **Read**, never `cat`, to open the file.
+5. If the question is broad ("how does X work end-to-end"), spawn an Explore subagent rather than reading 10 files in the main context.
+
+### Bundled scripts
+
+| Script | What it does |
+|---|---|
+| `where-is.sh <noun>` | Print the canonical file paths for a domain word (`pipeline`, `kaniko`, `oidc`, `migration`, `audits`, …). Use this **before** composing a `rg` invocation; the curated map is cheaper than searching. |
 
 ## Common ripgrep recipes
 
