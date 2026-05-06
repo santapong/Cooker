@@ -112,6 +112,14 @@ func NewExecutor(opts ...Option) *Executor {
 
 // Execute runs a pipeline and returns the completed PipelineRun.
 func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.PipelineRun) error {
+	// Bind run-id to the logger so every line emitted from this
+	// goroutine (and any goroutine that takes ctx) carries it.
+	// Operators tailing stderr can grep `run=<id>` instead of
+	// reverse-engineering which "stage X started" belongs to which
+	// run when the cluster has many in flight.
+	logger := slog.With("run", run.ID, "pipeline", p.ID)
+	ctx = withRunLogger(ctx, logger)
+
 	dag, err := BuildDAGFromPipeline(p)
 	if err != nil {
 		return fmt.Errorf("building DAG: %w", err)
@@ -161,8 +169,8 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		stageRun.Status = model.RunStatusRunning
 		e.persistProgress(ctx, run)
 
-		slog.Info("pipeline executing stage",
-			"pipeline", p.ID, "stage", stage.Name, "type", stage.Type, "timeout", timeout)
+		logger.Info("pipeline executing stage",
+			"stage", stage.Name, "type", stage.Type, "timeout", timeout)
 
 		// Wrap the type-specific dispatch with retry so transient
 		// adapter errors (registry 5xx, kube-API blip) don't fail
@@ -228,7 +236,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 	// Drain status updates (in production, these go to WebSocket)
 	go func() {
 		for update := range runner.Updates() {
-			slog.Info("pipeline stage transition", "pipeline", p.ID, "stage", update.NodeID, "status", update.Status)
+			logger.Info("pipeline stage transition", "stage", update.NodeID, "status", update.Status)
 		}
 	}()
 
