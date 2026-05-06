@@ -91,6 +91,10 @@ rg -n 'WHERE id=\$1 AND version=' backend/internal/store/postgres
 - Don't tail-search files — `rg` for the call expression instead.
 - Don't read the whole audit-doc set "for context"; pick the one section that matches the area.
 
+## When the question is "find a bug" not "where is X"
+
+Use **`cooker-audit`** instead. That skill bundles the anti-patterns from the audit series + a `audit-greps.sh` that runs the canonical investigative greps. `cooker-find` answers *known-target* questions; `cooker-audit` answers *find-the-target* questions.
+
 ## Escape hatch
 
 If the question is *"this used to work last week, where did it break?"*:
