@@ -265,6 +265,42 @@ resources:
     cpu: 500m
     memory: 512Mi
 
+# Liveness and readiness probe tuning. Defaults are deliberately
+# generous — Cooker performs an OIDC discovery + Postgres ping +
+# embedded migration on first boot and can take several seconds to
+# answer /health/ready under cold-cache conditions. Tighten these
+# in production once you've measured your own boot time.
+probes:
+  liveness:
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 5
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 5
+    successThreshold: 1
+
+# Horizontal Pod Autoscaler. Disabled by default; enable when
+# replicaCount > 1 and CPU is the right scaling signal for your
+# traffic shape. Anything that uses memory in-process state (the
+# in-memory rate limiter / WS ticket store) needs the redis
+# backends configured before HPA makes sense.
+hpa:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+# Pod Disruption Budget. Recommended whenever replicaCount > 1 so
+# kubectl drain / node maintenance can't evict every replica at
+# once. minAvailable is the floor the cluster must keep up.
+pdb:
+  enabled: false
+  minAvailable: 1
+
 # Pod-level + container-level security hardening. Defaults to the
 # strict profile that satisfies Kubernetes Pod Security Admission
 # "restricted" (runAsNonRoot, drop all caps, no privilege escalation,

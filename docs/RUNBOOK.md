@@ -215,4 +215,136 @@ groups:
         annotations:
           summary: "Cooker swept >5 orphaned runs in the last hour"
           runbook: "docs/RUNBOOK.md#recovery-after-restart"
+
+      - alert: CookerAuditEventsDropped
+        # T16's async file sink drops events when the queue fills
+        # (typically: disk full, or a sustained-slow disk). One drop
+        # is informational, sustained drops mean the audit trail is
+        # incomplete.
+        expr: increase(cooker_audit_events_dropped_total[10m]) > 0
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: "Cooker audit sink dropping events (disk full?)"
+          runbook: "docs/RUNBOOK.md#audit-sink-dropping-events"
+
+      - alert: CookerStageDurationHigh
+        # The histogram's p95 over 5m. Tune the threshold per stage
+        # type (build is naturally slower than push); 30 min here is
+        # a generous catch-all.
+        expr: histogram_quantile(0.95, sum by (le, type) (rate(cooker_pipeline_stage_duration_seconds_bucket[5m]))) > 1800
+        for: 15m
+        labels: { severity: warn }
+        annotations:
+          summary: "Pipeline stage p95 duration above 30 min"
+          runbook: "docs/RUNBOOK.md#stages-are-slow"
 ```
+
+---
+
+## Audit sink dropping events
+
+**Symptom:** `cooker_audit_events_dropped_total` is incrementing; logs include `audit: file sink overflow; events dropped`.
+
+**Cause:** T16 turned the audit file sink async with a bounded queue (1024) and drop-on-full so a slow / full disk can no longer freeze every authenticated request behind a held mutex. Dropped events are *gone*; the trade-off is operator-visible: prefer dropping a few events to wedging the API.
+
+**Mitigation:**
+
+1. Check disk usage on the audit volume (`COOKER_AUDIT_FILE_PATH`'s parent). The most common cause is the audit log filling the volume.
+2. Rotate the audit log (`logrotate(8)` with `copytruncate`) and ensure rotation is automated.
+3. If sustained, route audit to a remote sink (stdout → fluent-bit → SIEM) rather than a local file — `COOKER_AUDIT_DESTINATION=stdout`.
+
+---
+
+## Stages are slow
+
+**Symptom:** `cooker_pipeline_stage_duration_seconds` p95 is above the threshold for one or more stage types.
+
+**First checks:**
+
+- `kubectl describe job -n cooker-builders <jobname>` for Kaniko / Buildah Pods that are stuck.
+- Registry side: a slow `docker push` is the most common cause. Test from inside the cluster: `crane push small-image registry/$REPO:tt`.
+- Postgres / Redis latency from the readiness probe — if probes are slow, every status update is slow.
+
+**Mitigation:** stages now respect `Stage.Config.Timeout` (T10), so once a slow stage exceeds its timeout it fails cleanly and the run resumes / marks failed. If a customer wants more retries, raise `Stage.Config.Retries`.
+
+---
+
+## Backup, retention, restore
+
+Cooker keeps everything operationally significant in PostgreSQL: pipelines, runs, environments, apps, hosts, users, schema_migrations, and the embedded run history (JSONB on `pipeline_runs`). Lose the database and you lose history; the schema can be re-created from an empty database via the embedded migrations.
+
+### Backup
+
+The chart does **not** ship a backup operator. Pick one of:
+
+- **Bitnami's `postgresql` chart with `backup.enabled=true`** (uses `pg_basebackup` to S3-compatible storage). Simplest if Cooker's Postgres is co-installed.
+- **Velero** with the `csi-snapshotter` plugin — block-level snapshot of the PVC.
+- **External managed Postgres** (RDS, Cloud SQL, Aiven). All of them support point-in-time-restore via WAL; turn it on.
+
+For self-hosted: a daily `pg_dump --format=custom > /backups/cooker-$(date +%F).dump` with a 30-day retention is the minimum. Ship to off-site storage; do not keep backups on the same node.
+
+### Retention
+
+Without intervention, `pipeline_runs` grows without bound. Schedule a CronJob:
+
+```sql
+DELETE FROM pipeline_runs
+ WHERE status IN ('success','failed','cancelled')
+   AND finished_at < NOW() - INTERVAL '90 days';
+```
+
+`pipelines` cascades on delete to `pipeline_runs`, so deleting a pipeline already deletes its runs. Tune the 90-day window per the audit trail your environment requires.
+
+### Restore drill
+
+Practice restore at least quarterly. The drill:
+
+1. `kubectl scale deployment/cooker --replicas=0` in the target namespace (so no writes hit the new database while it's catching up).
+2. `pg_restore --clean --if-exists --no-owner -d "$DATABASE_URL" /backups/cooker-YYYY-MM-DD.dump`
+3. Run `cooker generate-key` if `COOKER_SECRET_KEY` was lost — environment secrets sealed under the old key cannot be opened. (T19's dual-key support is on the long-term roadmap; today, key loss = secrets loss.)
+4. `kubectl scale deployment/cooker --replicas=N` and verify `/health/ready` is green and `/version` reflects the running build.
+5. Smoke-test: list pipelines, fetch one run, trigger a no-op pipeline.
+
+If restore takes longer than 1 hour, your backup format is wrong (use `--format=custom`, not `--format=plain`).
+
+---
+
+## On-call escalation
+
+The page-worthy alerts above route to the platform on-call. Suggested escalation:
+
+| Tier | Time-to-engage | Owner |
+|------|----------------|-------|
+| L1 | 0–15 min | Platform on-call (PagerDuty rotation) |
+| L2 | 15–60 min | Cooker maintainer team (`#cooker-eng` Slack) |
+| L3 | 60+ min | Engineering leadership |
+
+For data-loss incidents (audit dropped events sustained > 1h, Postgres restore from backup, secret-key loss), engage the security / compliance team in parallel with L2 — those are usually reportable.
+
+---
+
+## Secrets-backend failure modes
+
+The configured `COOKER_SECRETS_BACKEND` decides what fails when secret retrieval errors:
+
+| Backend | Failure mode | Mitigation |
+|---------|--------------|------------|
+| `database` (default) | Cooker's own Postgres is the secret store. If Postgres is down, secret reveal returns 500. | Same Postgres recovery as the rest of the app. |
+| `keepsave` | KeepSave HTTPS endpoint unreachable → 5xx on reveal; `cooker_secrets_keepsave_errors_total` increments (if exposed). T19 ensures TLS is at least 1.2 and the URL is `https://`. | Confirm KeepSave server health; cooker doesn't fall back to a local copy. |
+| `vault` | Vault token expiry / sealed Vault → reveal fails. | Renew the AppRole token; check `vault status`. |
+| `aws` (Secrets Manager) | IAM role missing `secretsmanager:GetSecretValue` → 403. | Check the cooker pod's IRSA role and the secret's resource policy. |
+| `gcp` (Secret Manager) | Service-account JSON missing `secretmanager.secretAccessor` → 403. | Check Workload Identity binding and the GSA's secret-level IAM. |
+
+In every case the cooker pod logs the underlying error at `WARN`/`ERROR`; clients see a generic "secret backend error" (T20).
+
+---
+
+## Monitoring dashboards
+
+Pre-built dashboards live in `deploy/observability/dashboards/` (Grafana JSON, Prometheus rules). Key panels:
+
+- **HTTP request rate / latency** (`cooker_http_request_duration_seconds`) — split by route template.
+- **Stage duration** (`cooker_pipeline_stage_duration_seconds`, T18) — split by `type` and `status`.
+- **Resilience counters** — `cooker_db_connection_errors_total`, `cooker_redis_connection_errors_total`, `cooker_jwks_fetch_failures_total`, `cooker_audit_events_dropped_total`, `cooker_run_heartbeat_errors_total`, `cooker_pipeline_runs_orphaned_total`.
+- **Build SHA** — scrape `/version` into a `build_info` gauge per replica so the dashboard's title shows what's running.

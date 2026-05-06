@@ -311,12 +311,55 @@ func TestValidate_ProductionRequiresAllowedOrigins(t *testing.T) {
 func TestValidate_ProductionHappyPath(t *testing.T) {
 	cfg := &Config{
 		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
 		SecretKey:      validSecretKey,
 		AllowedOrigins: []string{"https://cooker.example.com"},
 		OIDC:           OIDCConfig{Enabled: true},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("production happy path should validate, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionRejectsDefaultDatabaseURL(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://cooker:cooker@localhost:5432/cooker?sslmode=disable",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected production to reject the dev-default DATABASE_URL")
+	} else if !strings.Contains(err.Error(), "dev default") {
+		t.Fatalf("error should mention dev default, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionRejectsWildcardOrigin(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"*"},
+		OIDC:           OIDCConfig{Enabled: true},
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "*") {
+		t.Fatalf("production should reject AllowedOrigins=[\"*\"], got: %v", err)
+	}
+}
+
+func TestValidate_ProductionRejectsHTTPKeepSave(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
+		SecretsBackend: "keepsave",
+		KeepSave:       KeepSaveConfig{URL: "http://keepsave:8080", ProjectID: "p", APIKey: "k"},
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "https://") {
+		t.Fatalf("production should reject http:// KeepSave URL, got: %v", err)
 	}
 }
 
@@ -407,6 +450,7 @@ func TestValidate_ProductionMultiReplicaRequiresRedisOrSticky(t *testing.T) {
 func TestValidate_ProductionMultiReplicaWithStickyOK(t *testing.T) {
 	cfg := &Config{
 		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
 		SecretKey:      validSecretKey,
 		AllowedOrigins: []string{"https://cooker.example.com"},
 		ReplicaCount:   3,
@@ -423,6 +467,7 @@ func TestValidate_ProductionMultiReplicaWithStickyOK(t *testing.T) {
 func TestValidate_ProductionMultiReplicaWithRedisOK(t *testing.T) {
 	cfg := &Config{
 		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
 		SecretKey:      validSecretKey,
 		AllowedOrigins: []string{"https://cooker.example.com"},
 		ReplicaCount:   3,

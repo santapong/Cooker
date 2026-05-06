@@ -134,7 +134,11 @@ spec:
                   name: {{ include "cooker.fullname" . }}-secret-key
                   key: key
                   {{- end }}
-                  optional: true
+                  # optional: false (default). Force the Pod to fail
+                  # creation if the Secret is missing, rather than
+                  # booting silently with COOKER_SECRET_KEY="" and
+                  # sidestepping production validation.
+                  optional: false
             - name: COOKER_OIDC_ENABLED
               value: {{ .Values.oidc.enabled | quote }}
             {{- if .Values.oidc.enabled }}
@@ -193,12 +197,19 @@ spec:
             httpGet:
               path: /health/live
               port: http
-            initialDelaySeconds: 60
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
           readinessProbe:
             httpGet:
               path: /health/ready
               port: http
-            initialDelaySeconds: 5
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+            successThreshold: {{ .Values.probes.readiness.successThreshold }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:

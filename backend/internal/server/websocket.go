@@ -4,8 +4,19 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+// WebSocket idle / ping-pong tunables. pongWait should be larger
+// than pingPeriod with a comfortable margin so a single dropped ping
+// doesn't immediately drop the client. writeWait caps how long a
+// single WriteMessage blocks before we treat the client as dead.
+const (
+	wsPongWait   = 60 * time.Second
+	wsPingPeriod = (wsPongWait * 9) / 10
+	wsWriteWait  = 10 * time.Second
 )
 
 // Client represents a single WebSocket connection.
@@ -14,6 +25,18 @@ type Client struct {
 	conn    *websocket.Conn
 	send    chan []byte
 	channel string
+	// closeOnce guards close(send) so it can fire from at most one
+	// path (broadcast-backpressure or unregister) without panicking.
+	closeOnce sync.Once
+}
+
+// closeSend is the single-path-safe close on the send channel.
+// Multiple callers may race (broadcast loop saw the channel full
+// and decided to drop the client; the hub also processes an
+// unregister from readPump/writePump exit) — sync.Once ensures
+// only one wins.
+func (c *Client) closeSend() {
+	c.closeOnce.Do(func() { close(c.send) })
 }
 
 // WebSocketHub manages all WebSocket connections and message broadcasting.
@@ -86,7 +109,7 @@ func (h *WebSocketHub) Run() {
 			if clients, ok := h.clients[client.channel]; ok {
 				if _, exists := clients[client]; exists {
 					delete(clients, client)
-					close(client.send)
+					client.closeSend()
 				}
 			}
 			h.mu.Unlock()
@@ -95,18 +118,32 @@ func (h *WebSocketHub) Run() {
 			if !ok {
 				return
 			}
+			// Two-pass to avoid mutating the map while iterating
+			// under RLock: collect victims first, then upgrade to
+			// Lock to delete + close. Go panics on concurrent
+			// map-write-during-iterate.
+			var dropped []*Client
 			h.mu.RLock()
 			if clients, ok := h.clients[msg.Channel]; ok {
 				for client := range clients {
 					select {
 					case client.send <- msg.Data:
 					default:
-						close(client.send)
-						delete(clients, client)
+						dropped = append(dropped, client)
 					}
 				}
 			}
 			h.mu.RUnlock()
+			if len(dropped) > 0 {
+				h.mu.Lock()
+				if clients, ok := h.clients[msg.Channel]; ok {
+					for _, client := range dropped {
+						delete(clients, client)
+						client.closeSend()
+					}
+				}
+				h.mu.Unlock()
+			}
 		}
 	}
 }
@@ -117,6 +154,16 @@ func (h *WebSocketHub) Broadcast(channel string, data []byte) {
 	if err := h.backend.Publish(BroadcastMessage{Channel: channel, Data: data}); err != nil {
 		slog.Warn("ws hub: publish failed", "err", err, "channel", channel)
 	}
+}
+
+// Close releases hub-backend resources. Closing the backend causes
+// its Subscribe() channel to close, which makes Run() return cleanly.
+// Safe to call multiple times.
+func (h *WebSocketHub) Close() error {
+	if h == nil || h.backend == nil {
+		return nil
+	}
+	return h.backend.Close()
 }
 
 // HandlePipelineRun handles WebSocket connections for pipeline run updates.
@@ -160,6 +207,14 @@ func (c *Client) readPump() {
 		c.hub.unregister <- c
 		c.conn.Close()
 	}()
+	// Stalled / silent connections (Slow-Loris pattern) can pin a
+	// goroutine and a file descriptor indefinitely. Set a read
+	// deadline that the pong handler refreshes; if no pong arrives
+	// within wsPongWait, ReadMessage returns and we unregister.
+	_ = c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	c.conn.SetPongHandler(func(string) error {
+		return c.conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
 	for {
 		_, _, err := c.conn.ReadMessage()
 		if err != nil {
@@ -169,10 +224,30 @@ func (c *Client) readPump() {
 }
 
 func (c *Client) writePump() {
-	defer c.conn.Close()
-	for msg := range c.send {
-		if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			break
+	ticker := time.NewTicker(wsPingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
+	for {
+		select {
+		case msg, ok := <-c.send:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if !ok {
+				// Hub closed our send channel — politely close the
+				// connection rather than letting the proxy time us
+				// out.
+				_ = c.conn.WriteMessage(websocket.CloseMessage, nil)
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
 }

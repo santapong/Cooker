@@ -73,7 +73,12 @@ func (b *BuildKit) Build(ctx context.Context, req Request) (Result, error) {
 		}},
 	}
 	statusCh := make(chan *client.SolveStatus, 8)
+	logsDone := make(chan struct{})
 	go func() {
+		defer close(logsDone)
+		// Drain status until BuildKit closes the channel, regardless
+		// of whether req.LogWriter is set — leaving messages
+		// undrained pins the Solve goroutine and leaks this one.
 		for st := range statusCh {
 			if req.LogWriter == nil {
 				continue
@@ -84,6 +89,9 @@ func (b *BuildKit) Build(ctx context.Context, req Request) (Result, error) {
 		}
 	}()
 	resp, err := c.Solve(ctx, nil, solveOpt, statusCh)
+	// Solve always closes statusCh on return (success or error); wait
+	// for our drainer so the goroutine can't leak past Build.
+	<-logsDone
 	if err != nil {
 		return Result{}, fmt.Errorf("buildkit: solve: %w", err)
 	}

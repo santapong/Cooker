@@ -45,6 +45,15 @@ FROM alpine:3.19
 # group_add so this user can still access the bind-mounted
 # /var/run/docker.sock; see docker-compose.uat.yml and Makefile.
 ARG KUBECTL_VERSION=v1.29.4
+# The alpine:3.19 base tag locks the apk package set. Pinning
+# individual apk versions on top of that is fragile because the
+# 3.19 line backports security fixes (so the -rN revision floats
+# within the same upstream version) — and a CI build in 6 months
+# would fail to find the exact -r revision pinned today. The
+# stronger reproducibility move is to pin the FROM tag to a
+# digest (alpine:3.19@sha256:...) which we'll do once we have a
+# digest-pinning workflow.
+#
 # Fetch kubectl and verify against the upstream-published SHA256 so a
 # compromised mirror or in-flight tampering cannot inject a malicious
 # binary that would run with docker.sock and kubeconfig access.

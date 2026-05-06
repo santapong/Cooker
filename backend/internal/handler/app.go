@@ -15,7 +15,25 @@ import (
 	"github.com/cooker-ci/cooker/internal/auth"
 	"github.com/cooker-ci/cooker/internal/model"
 	"github.com/cooker-ci/cooker/internal/source/github"
+	"github.com/cooker-ci/cooker/internal/validate"
 )
+
+// validateAppInput rejects malformed App payloads.
+func validateAppInput(a *model.App) error {
+	if err := validate.Name("name", a.Name); err != nil {
+		return err
+	}
+	if err := validate.Description("description", a.Description); err != nil {
+		return err
+	}
+	if err := validate.GitHubRepo(a.GitHubRepo); err != nil {
+		return err
+	}
+	if err := validate.GitRefName("branch", a.Branch); err != nil {
+		return err
+	}
+	return nil
+}
 
 // ListApps returns all apps with webhook secrets redacted.
 func (h *Handler) ListApps(c *gin.Context) {
@@ -44,8 +62,8 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if a.GitHubRepo == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "githubRepo is required"})
+	if err := validateAppInput(&a); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if a.Branch == "" {
@@ -71,6 +89,10 @@ func (h *Handler) UpdateApp(c *gin.Context) {
 	}
 	var a model.App
 	if err := c.ShouldBindJSON(&a); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validateAppInput(&a); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -239,9 +261,21 @@ func (h *Handler) GitHubWebhook(c *gin.Context) {
 	if !h.requireCodec(c) {
 		return
 	}
-	body, err := io.ReadAll(c.Request.Body)
+	// GitHub's documented webhook payload cap is 25 MiB; we set a
+	// hard 10 MiB limit because cooker only consumes push events
+	// where realistic payloads are much smaller (a hundred-commit
+	// push is around 200 KiB). Reading a 1 GiB body unbounded was
+	// the simplest path to OOM-killing the pod.
+	const maxWebhookBody = 10 << 20
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxWebhookBody+1))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "read body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "read body"})
+		return
+	}
+	if len(body) > maxWebhookBody {
+		c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{
+			"error": "payload exceeds limit",
+		})
 		return
 	}
 
@@ -261,6 +295,13 @@ func (h *Handler) GitHubWebhook(c *gin.Context) {
 	if branch == "" {
 		// Tag pushes etc. — ignore.
 		c.JSON(http.StatusOK, gin.H{"ignored": "non-branch push"})
+		return
+	}
+	if ev.IsBranchDelete() {
+		// Branch was deleted (`after` is all zeros / `deleted: true`).
+		// Nothing to deploy — and pushing through to GetByRepo would
+		// surface a misleading "deploy queued" response.
+		c.JSON(http.StatusOK, gin.H{"ignored": "branch delete"})
 		return
 	}
 

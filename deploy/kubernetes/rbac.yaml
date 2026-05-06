@@ -4,13 +4,30 @@ metadata:
   name: cooker
   namespace: cooker
 ---
+# Cooker's primary RBAC is namespaced. Cluster-wide reads are NOT
+# granted; the operator should have a dedicated kubeconfig (with
+# its own cluster-admin or restricted role) if they want Cooker to
+# manage workloads outside the cooker namespace, and feed it via
+# COOKER_KUBECONFIG.
+#
+# Inside the cooker namespace itself we need:
+#   - Pods/log to stream Kaniko/Buildah build output via the K8s
+#     API (when the deployer adapter is the in-cluster one).
+#   - Jobs (batch) to create the Kaniko/Buildah build Jobs.
+#   - ConfigMaps + Services + Deployments/StatefulSets so the
+#     deployer adapter can apply manifests landed by the user
+#     pipelines targetting the same namespace.
+# We deliberately omit cluster-wide get on Secrets — secrets that
+# cooker needs are mounted into the Pod via the Helm chart's own
+# secretKeyRef.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: cooker
+  namespace: cooker
 rules:
   - apiGroups: [""]
-    resources: ["namespaces", "pods", "pods/log", "services", "configmaps", "secrets"]
+    resources: ["pods", "pods/log", "services", "configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
@@ -23,13 +40,52 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: cooker
+  namespace: cooker
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: cooker
+subjects:
+  - kind: ServiceAccount
+    name: cooker
+    namespace: cooker
+---
+# Builder Jobs (Kaniko / Buildah) may be configured to run in a
+# separate namespace via builder.kaniko.namespace /
+# builder.buildah.namespace. When that's the case, we grant a
+# narrow Role there: only the verbs the builder adapters actually
+# use (Jobs.Create + Pods.list/get/watch + Pods/log streaming +
+# Jobs.Delete via background propagation). No cluster-wide
+# secrets / configmaps; no namespace verbs.
+#
+# Replace cooker-builders below with the namespace your operator
+# selected. Skip this block entirely when the builder runs in the
+# cooker namespace (the Role above already covers it).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cooker-builder
+  namespace: cooker-builders
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cooker-builder
+  namespace: cooker-builders
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cooker-builder
 subjects:
   - kind: ServiceAccount
     name: cooker

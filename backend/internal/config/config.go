@@ -355,10 +355,23 @@ func (c *Config) Validate() error {
 		return nil
 	}
 	var problems []string
-	switch c.SecretsBackend {
-	case "", "database":
+	// DATABASE_URL must not be empty or the dev default in production.
+	// The dev default points at localhost with throwaway credentials;
+	// allowing it through silently is a deployment-mistake amplifier.
+	if c.DatabaseURL == "" {
+		problems = append(problems, "DATABASE_URL is required in production")
+	} else if strings.Contains(c.DatabaseURL, "cooker:cooker@localhost") {
+		problems = append(problems, "DATABASE_URL still uses the dev default (cooker:cooker@localhost); set a real value")
+	}
+	// COOKER_SECRET_KEY is required whenever the active secrets backend
+	// will encrypt anything via crypto.Codec — that's database (always)
+	// and any other backend that fronts environment-secret reveal /
+	// app webhook decryption flows. Treat any non-keepsave backend as
+	// requiring the key in production.
+	requireSecretKey := c.SecretsBackend != "keepsave"
+	if requireSecretKey {
 		if c.SecretKey == "" {
-			problems = append(problems, "COOKER_SECRET_KEY is required in production with secrets backend=database")
+			problems = append(problems, "COOKER_SECRET_KEY is required in production")
 		} else {
 			decoded, err := base64.StdEncoding.DecodeString(c.SecretKey)
 			switch {
@@ -368,9 +381,15 @@ func (c *Config) Validate() error {
 				problems = append(problems, fmt.Sprintf("COOKER_SECRET_KEY decodes to %d bytes; need at least 32 (AES-256)", len(decoded)))
 			}
 		}
+	}
+	switch c.SecretsBackend {
+	case "", "database":
+		// Already covered by the requireSecretKey block above.
 	case "keepsave":
 		if c.KeepSave.URL == "" {
 			problems = append(problems, "COOKER_SECRETS_KEEPSAVE_URL is required when SecretsBackend=keepsave")
+		} else if !strings.HasPrefix(c.KeepSave.URL, "https://") {
+			problems = append(problems, "COOKER_SECRETS_KEEPSAVE_URL must use https:// in production")
 		}
 		if c.KeepSave.ProjectID == "" {
 			problems = append(problems, "COOKER_SECRETS_KEEPSAVE_PROJECT_ID is required when SecretsBackend=keepsave")
@@ -394,6 +413,8 @@ func (c *Config) Validate() error {
 	}
 	if len(c.AllowedOrigins) == 0 {
 		problems = append(problems, "COOKER_ALLOWED_ORIGINS is required in production (no permissive default)")
+	} else if len(c.AllowedOrigins) == 1 && c.AllowedOrigins[0] == "*" {
+		problems = append(problems, "COOKER_ALLOWED_ORIGINS=* is rejected in production; specify exact origins")
 	}
 	if !c.OIDC.Enabled && !c.LocalAuth.Enabled {
 		slog.Warn("OIDC and local auth both disabled in production; backend will inject dev admin user on every request")

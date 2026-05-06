@@ -73,5 +73,25 @@ func Clone(ctx context.Context, opts CloneOptions) (string, error) {
 		_ = os.RemoveAll(dir)
 		return "", fmt.Errorf("git clone: %w", err)
 	}
+	// Strip any hooks the cloned repo shipped. A malicious repo can
+	// stage hooks under .git/hooks that fire on subsequent git
+	// operations (commit, push, checkout) — and Cooker / its
+	// downstream builders may run those operations against the
+	// working tree. Clearing the directory is cheap and removes
+	// the entire class of hook-driven RCE vectors. Belt-and-braces:
+	// also point core.hooksPath to a non-existent path.
+	hooksDir := filepath.Join(dir, ".git", "hooks")
+	if err := os.RemoveAll(hooksDir); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", fmt.Errorf("git clone: strip hooks: %w", err)
+	}
+	if err := os.MkdirAll(hooksDir, 0o755); err == nil {
+		// Re-create empty so any later git op that reads the
+		// directory finds nothing.
+	}
+	disableHooks := exec.CommandContext(ctx, bin, "-C", dir, "config", "core.hooksPath", "/dev/null")
+	disableHooks.Stdout = io.Discard
+	disableHooks.Stderr = io.Discard
+	_ = disableHooks.Run()
 	return filepath.Clean(dir), nil
 }

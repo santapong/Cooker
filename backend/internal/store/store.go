@@ -13,6 +13,12 @@ import (
 // entity does not exist. Callers should use errors.Is to check.
 var ErrNotFound = errors.New("store: not found")
 
+// ErrConflict is returned by Update methods when the row's version
+// has moved since the caller fetched it (optimistic-concurrency
+// failure). Handlers should map this to HTTP 409 Conflict and ask
+// the client to refetch and retry.
+var ErrConflict = errors.New("store: version conflict")
+
 // PipelineStore manages pipeline persistence.
 type PipelineStore interface {
 	List(ctx context.Context) ([]*model.Pipeline, error)

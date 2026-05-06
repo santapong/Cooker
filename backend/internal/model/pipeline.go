@@ -12,6 +12,10 @@ type Pipeline struct {
 	Variables   map[string]string `json:"variables"`
 	CreatedAt   time.Time         `json:"createdAt" db:"created_at"`
 	UpdatedAt   time.Time         `json:"updatedAt" db:"updated_at"`
+	// Version is the optimistic-concurrency token. Incremented on
+	// every successful Update; clients echo it back on PUT/PATCH so
+	// concurrent edits are detected and rejected with 409.
+	Version int `json:"version" db:"version"`
 }
 
 // StageType identifies the kind of pipeline stage.

@@ -87,10 +87,19 @@ func (s *stdoutSink) Emit(e Event) {
 
 func (s *stdoutSink) Close() error { return nil }
 
-// NewFileSink opens path for append-write of JSON Lines. Each call to
-// Emit writes one JSON object followed by '\n'. Concurrent Emits are
-// serialised via a mutex; a buffered channel would lose events on
-// crash, so we accept the lock cost.
+// fileSinkBuffer is the queue depth for the async writer. Picked so
+// a brief disk hiccup (or a sink consumer that's mid-rotation) can
+// be absorbed without dropping events under typical load. On
+// overflow the sink drops events and bumps a counter the operator
+// can probe via observability.IncAuditDropped.
+const fileSinkBuffer = 1024
+
+// NewFileSink opens path for append-write of JSON Lines. Emit is
+// non-blocking: events are queued onto a bounded channel and a
+// single writer goroutine drains the queue. Drop-on-full means a
+// disk-full or slow-disk scenario can no longer pin every
+// authenticated request behind a held mutex (the failure mode
+// flagged in audit T16).
 func NewFileSink(path string) (Sink, error) {
 	if path == "" {
 		return nil, fmt.Errorf("audit: file sink: path is empty")
@@ -104,25 +113,70 @@ func NewFileSink(path string) (Sink, error) {
 	if err != nil {
 		return nil, fmt.Errorf("audit: file sink: open %s: %w", path, err)
 	}
-	return &fileSink{f: f}, nil
+	s := &fileSink{
+		f:    f,
+		ch:   make(chan Event, fileSinkBuffer),
+		done: make(chan struct{}),
+	}
+	go s.run()
+	return s, nil
 }
 
 type fileSink struct {
-	mu sync.Mutex
-	f  *os.File
+	f       *os.File
+	ch      chan Event
+	done    chan struct{}
+	mu      sync.Mutex // guards f.Write inside run() and Close
+	closed  bool
+	dropped uint64
 }
 
+// Emit queues the event for async writing. Non-blocking: under
+// backpressure the event is dropped and the dropped counter
+// increments. The caller's request thread never waits on disk.
 func (s *fileSink) Emit(e Event) {
-	b, err := json.Marshal(e)
-	if err != nil {
-		return
+	select {
+	case s.ch <- e:
+	default:
+		s.mu.Lock()
+		s.dropped++
+		dropped := s.dropped
+		s.mu.Unlock()
+		// Surface the first drop and then every 1000th to avoid
+		// hot-logging when the queue is sustained-full.
+		if dropped == 1 || dropped%1000 == 0 {
+			slog.Warn("audit: file sink overflow; events dropped", "dropped", dropped)
+		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, _ = s.f.Write(append(b, '\n'))
+}
+
+// run drains the queue until Close. It does not hold a mutex during
+// the queue receive so producers never block on a slow disk.
+func (s *fileSink) run() {
+	defer close(s.done)
+	for e := range s.ch {
+		b, err := json.Marshal(e)
+		if err != nil {
+			continue
+		}
+		s.mu.Lock()
+		if s.f != nil {
+			_, _ = s.f.Write(append(b, '\n'))
+		}
+		s.mu.Unlock()
+	}
 }
 
 func (s *fileSink) Close() error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	s.mu.Unlock()
+	close(s.ch)
+	<-s.done
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.f.Close()

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -216,6 +217,15 @@ func (k *Kaniko) buildJob(req Request) *batchv1.Job {
 								corev1.ResourceCPU:    resource.MustParse("500m"),
 								corev1.ResourceMemory: resource.MustParse("1Gi"),
 							},
+							// Limits cap the pathological case (a 5 GiB
+							// COPY context, a runaway image layer
+							// extraction) so a single bad Dockerfile
+							// can't OOM the node and take other Pods
+							// with it.
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("2"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							},
 						},
 						VolumeMounts: []corev1.VolumeMount{{
 							Name:      "build-context",
@@ -291,6 +301,17 @@ func (k *Kaniko) fetchDigest(ctx context.Context, jobName string) string {
 	return ""
 }
 
+// ansiCSIRe matches the common CSI escape sequences (colour, cursor)
+// that build tools emit on stdout. Strip these before they hit the
+// audit / WebSocket sinks: ANSI in cooker logs lets a malicious
+// Dockerfile inject terminal-control codes that confuse operators
+// reading the log stream.
+var ansiCSIRe = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[()][AB012]`)
+
+// stripANSI drops the escape sequences without rewriting the rest of
+// the line.
+func stripANSI(b []byte) []byte { return ansiCSIRe.ReplaceAll(b, nil) }
+
 // streamLogs follows the Kaniko pod's stdout once it exists, copying
 // to w until the pod terminates or ctx is cancelled. Best-effort: any
 // error here is logged and swallowed — the build itself is the source
@@ -321,7 +342,8 @@ func (k *Kaniko) streamLogs(ctx context.Context, jobName string, w io.Writer) {
 	defer stream.Close()
 	scanner := bufio.NewScanner(stream)
 	for scanner.Scan() {
-		if _, err := fmt.Fprintln(w, scanner.Text()); err != nil {
+		line := stripANSI(scanner.Bytes())
+		if _, err := w.Write(append(line, '\n')); err != nil {
 			return
 		}
 	}

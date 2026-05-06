@@ -23,7 +23,7 @@ func NewPipelineStore(db *sql.DB) *PipelineStore {
 
 func (s *PipelineStore) List(ctx context.Context) ([]*model.Pipeline, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, description, stages, edges, variables, created_at, updated_at FROM pipelines ORDER BY updated_at DESC`)
+		`SELECT id, name, description, stages, edges, variables, created_at, updated_at, version FROM pipelines ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing pipelines: %w", err)
 	}
@@ -42,7 +42,7 @@ func (s *PipelineStore) List(ctx context.Context) ([]*model.Pipeline, error) {
 
 func (s *PipelineStore) Get(ctx context.Context, id string) (*model.Pipeline, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, description, stages, edges, variables, created_at, updated_at FROM pipelines WHERE id = $1`, id)
+		`SELECT id, name, description, stages, edges, variables, created_at, updated_at, version FROM pipelines WHERE id = $1`, id)
 	p, err := scanPipeline(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("pipeline %s: %w", id, store.ErrNotFound)
@@ -86,16 +86,26 @@ func (s *PipelineStore) Update(ctx context.Context, p *model.Pipeline) error {
 	if err != nil {
 		return fmt.Errorf("marshal variables: %w", err)
 	}
+	// Optimistic concurrency: only update if version still matches
+	// what the caller saw on Get. RowsAffected=0 means either the row
+	// doesn't exist (ErrNotFound) or another writer raced (ErrConflict);
+	// the SELECT below disambiguates.
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE pipelines SET name=$2, description=$3, stages=$4, edges=$5, variables=$6, updated_at=$7 WHERE id=$1`,
-		p.ID, p.Name, p.Description, stagesJSON, edgesJSON, varsJSON, p.UpdatedAt)
+		`UPDATE pipelines SET name=$2, description=$3, stages=$4, edges=$5, variables=$6, updated_at=$7, version=version+1
+		 WHERE id=$1 AND version=$8`,
+		p.ID, p.Name, p.Description, stagesJSON, edgesJSON, varsJSON, p.UpdatedAt, p.Version)
 	if err != nil {
 		return fmt.Errorf("updating pipeline: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
+		var exists bool
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pipelines WHERE id=$1)`, p.ID).Scan(&exists); err == nil && exists {
+			return fmt.Errorf("pipeline %s: %w", p.ID, store.ErrConflict)
+		}
 		return fmt.Errorf("pipeline %s: %w", p.ID, store.ErrNotFound)
 	}
+	p.Version++
 	return nil
 }
 
@@ -118,7 +128,7 @@ type scannable interface {
 func scanPipeline(row scannable) (*model.Pipeline, error) {
 	p := &model.Pipeline{}
 	var stagesJSON, edgesJSON, varsJSON []byte
-	if err := row.Scan(&p.ID, &p.Name, &p.Description, &stagesJSON, &edgesJSON, &varsJSON, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Description, &stagesJSON, &edgesJSON, &varsJSON, &p.CreatedAt, &p.UpdatedAt, &p.Version); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(stagesJSON, &p.Stages); err != nil {

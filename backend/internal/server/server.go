@@ -15,6 +15,7 @@ import (
 	"github.com/cooker-ci/cooker/internal/crypto"
 	"github.com/cooker-ci/cooker/internal/deployer"
 	"github.com/cooker-ci/cooker/internal/handler"
+	"github.com/cooker-ci/cooker/internal/idempotency"
 	"github.com/cooker-ci/cooker/internal/observability"
 	"github.com/cooker-ci/cooker/internal/pusher"
 	"github.com/cooker-ci/cooker/internal/secrets"
@@ -45,6 +46,7 @@ type Server struct {
 	audit         audit.Sink
 	traceShutdown func(context.Context) error
 	runs          *RunCoordinator
+	idempotency   idempotency.Store
 }
 
 // New creates a new Server instance with all routes and middleware.
@@ -92,32 +94,47 @@ func New(cfg *config.Config) (*Server, error) {
 
 	router := gin.Default()
 
+	// Stack of cleanups to run if New() returns with err. The first
+	// item pushed runs last; matches the deferred-close pattern used
+	// by Server.Close itself. Without this, an error mid-construction
+	// would leak the redis client, the hub backend, or the audit
+	// sink.
+	var cleanups []func()
+	cleanup := func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i]()
+		}
+	}
+	cleanups = append(cleanups, func() { st.Close() })
+
 	var redisClient *redis.Client
 	if cfg.WSTicket.Backend == "redis" || cfg.RateLimit.Backend == "redis" || cfg.WSHub.Backend == "redis" {
 		opts, err := redis.ParseURL(cfg.RedisURL)
 		if err != nil {
-			st.Close()
+			cleanup()
 			return nil, fmt.Errorf("redis: parse url: %w", err)
 		}
 		redisClient = redis.NewClient(opts)
+		cleanups = append(cleanups, func() { _ = redisClient.Close() })
 	}
 
 	var wsHub *WebSocketHub
 	switch cfg.WSHub.Backend {
 	case "redis":
 		if redisClient == nil {
-			st.Close()
+			cleanup()
 			return nil, fmt.Errorf("ws hub backend=redis requires REDIS_URL")
 		}
 		backend, err := newRedisHubBackend(ctx, redisClient)
 		if err != nil {
-			st.Close()
+			cleanup()
 			return nil, fmt.Errorf("ws hub redis backend: %w", err)
 		}
 		wsHub = NewWebSocketHubWithBackend(cfg.AllowedOrigins, backend)
 	default:
 		wsHub = NewWebSocketHub(cfg.AllowedOrigins)
 	}
+	cleanups = append(cleanups, func() { _ = wsHub.Close() })
 
 	var wsTickets ticketStore
 	switch cfg.WSTicket.Backend {
@@ -136,19 +153,29 @@ func New(cfg *config.Config) (*Server, error) {
 		ServiceVersion: cfg.Observability.ServiceVersion,
 	})
 	if err != nil {
-		st.Close()
+		cleanup()
 		return nil, fmt.Errorf("observability: %w", err)
+	}
+	if traceShutdown != nil {
+		cleanups = append(cleanups, func() {
+			c, cancelTrace := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = traceShutdown(c)
+			cancelTrace()
+		})
 	}
 
 	auditSink, err := newAuditSink(cfg.Audit)
 	if err != nil {
-		st.Close()
+		cleanup()
 		return nil, fmt.Errorf("audit: %w", err)
+	}
+	if auditSink != nil {
+		cleanups = append(cleanups, func() { _ = auditSink.Close() })
 	}
 
 	bld, err := selectBuilder(cfg.BuilderBackend, cfg.Kubernetes)
 	if err != nil {
-		st.Close()
+		cleanup()
 		return nil, fmt.Errorf("builder: %w", err)
 	}
 	exec := service.NewExecutor(
@@ -159,6 +186,15 @@ func New(cfg *config.Config) (*Server, error) {
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 
 	runs := NewRunCoordinator(st)
+
+	// Idempotency cache for mutating routes. In-memory with a
+	// resident-set cap so a busy webhook integration can't pile
+	// up bodies until 24h-TTL expiry. Redis backend would slot in
+	// here for multi-replica fleets (chain-recheck "newly
+	// introduced #1").
+	const idempotencyMaxBytes = 32 << 20 // 32 MiB
+	idem := idempotency.NewMemoryBounded(5*time.Minute, idempotencyMaxBytes)
+	cleanups = append(cleanups, func() { idem.Close() })
 
 	h := handler.New(st, codec, secMgr)
 	h.AppDeployer = appDeployer
@@ -191,8 +227,10 @@ func New(cfg *config.Config) (*Server, error) {
 		traceShutdown: traceShutdown,
 		redisClient:   redisClient,
 		runs:          runs,
+		idempotency:   idem,
 	}
 
+	router.Use(securityHeadersMiddleware())
 	router.Use(corsMiddleware(cfg.AllowedOrigins))
 	if cfg.Observability.MetricsEnabled {
 		router.Use(observability.MetricsMiddleware())
@@ -210,6 +248,7 @@ func New(cfg *config.Config) (*Server, error) {
 	router.GET("/health", live)
 	router.GET("/health/live", live)
 	router.GET("/health/ready", ready)
+	router.GET("/version", versionHandler())
 
 	registerDeployTargets(cfg.DeployTargets)
 	s.registerRoutes()
@@ -258,6 +297,12 @@ func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
+	// Order matters. Tracing first so the rest of shutdown is captured
+	// in any final span; audit next so authenticated mutations flush
+	// before the file is closed; the WebSocket hub before its Redis
+	// transport so consume() exits cleanly; the shared Redis client
+	// after the hub since the hub publishes through it; the store last
+	// because anything above might want to record a final write.
 	if s.traceShutdown != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = s.traceShutdown(shutdownCtx)
@@ -265,6 +310,12 @@ func (s *Server) Close() error {
 	}
 	if s.audit != nil {
 		_ = s.audit.Close()
+	}
+	if s.wsHub != nil {
+		_ = s.wsHub.Close()
+	}
+	if s.redisClient != nil {
+		_ = s.redisClient.Close()
 	}
 	if s.store == nil {
 		return nil

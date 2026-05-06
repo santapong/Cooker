@@ -65,9 +65,14 @@ func (s *pipelines) Create(_ context.Context, p *model.Pipeline) error {
 func (s *pipelines) Update(_ context.Context, p *model.Pipeline) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.m[p.ID]; !ok {
+	cur, ok := s.m[p.ID]
+	if !ok {
 		return fmt.Errorf("pipeline %s: %w", p.ID, store.ErrNotFound)
 	}
+	if cur.Version != p.Version {
+		return fmt.Errorf("pipeline %s: %w", p.ID, store.ErrConflict)
+	}
+	p.Version++
 	s.m[p.ID] = p
 	return nil
 }
@@ -194,9 +199,14 @@ func (s *environments) Create(_ context.Context, e *model.Environment) error {
 func (s *environments) Update(_ context.Context, e *model.Environment) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.m[e.ID]; !ok {
+	cur, ok := s.m[e.ID]
+	if !ok {
 		return fmt.Errorf("environment %s: %w", e.ID, store.ErrNotFound)
 	}
+	if cur.Version != e.Version {
+		return fmt.Errorf("environment %s: %w", e.ID, store.ErrConflict)
+	}
+	e.Version++
 	s.m[e.ID] = e
 	return nil
 }
@@ -258,9 +268,14 @@ func (s *apps) Create(_ context.Context, a *model.App) error {
 func (s *apps) Update(_ context.Context, a *model.App) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.m[a.ID]; !ok {
+	cur, ok := s.m[a.ID]
+	if !ok {
 		return fmt.Errorf("app %s: %w", a.ID, store.ErrNotFound)
 	}
+	if cur.Version != a.Version {
+		return fmt.Errorf("app %s: %w", a.ID, store.ErrConflict)
+	}
+	a.Version++
 	s.m[a.ID] = a
 	return nil
 }
@@ -311,9 +326,14 @@ func (s *hosts) Create(_ context.Context, h *model.Host) error {
 func (s *hosts) Update(_ context.Context, h *model.Host) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.m[h.ID]; !ok {
+	cur, ok := s.m[h.ID]
+	if !ok {
 		return fmt.Errorf("host %s: %w", h.ID, store.ErrNotFound)
 	}
+	if cur.Version != h.Version {
+		return fmt.Errorf("host %s: %w", h.ID, store.ErrConflict)
+	}
+	h.Version++
 	s.m[h.ID] = h
 	return nil
 }

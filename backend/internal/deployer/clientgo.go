@@ -3,8 +3,10 @@ package deployer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,8 +33,12 @@ type ClientGo struct {
 
 	// dynamic, mapper, and discovery are lazy-initialised on first
 	// Deploy so constructing a ClientGo doesn't require cluster auth.
-	cli    dynamic.Interface
-	mapper *restmapper.DeferredDiscoveryRESTMapper
+	// initOnce serialises lazy init across concurrent Deploy calls;
+	// initErr captures the result of the one-shot init for callers.
+	initOnce sync.Once
+	initErr  error
+	cli      dynamic.Interface
+	mapper   *restmapper.DeferredDiscoveryRESTMapper
 }
 
 func NewClientGo(kubeconfig string) *ClientGo { return &ClientGo{Kubeconfig: kubeconfig} }
@@ -53,24 +59,26 @@ func (c *ClientGo) restConfig() (*rest.Config, error) {
 }
 
 func (c *ClientGo) ensureClients() error {
-	if c.cli != nil && c.mapper != nil {
-		return nil
-	}
-	cfg, err := c.restConfig()
-	if err != nil {
-		return fmt.Errorf("%w: rest config: %v", ErrUnavailable, err)
-	}
-	dyn, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("%w: dynamic client: %v", ErrUnavailable, err)
-	}
-	disc, err := discovery.NewDiscoveryClientForConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("%w: discovery: %v", ErrUnavailable, err)
-	}
-	c.cli = dyn
-	c.mapper = restmapper.NewDeferredDiscoveryRESTMapper(memcache.NewMemCacheClient(disc))
-	return nil
+	c.initOnce.Do(func() {
+		cfg, err := c.restConfig()
+		if err != nil {
+			c.initErr = fmt.Errorf("%w: rest config: %v", ErrUnavailable, err)
+			return
+		}
+		dyn, err := dynamic.NewForConfig(cfg)
+		if err != nil {
+			c.initErr = fmt.Errorf("%w: dynamic client: %v", ErrUnavailable, err)
+			return
+		}
+		disc, err := discovery.NewDiscoveryClientForConfig(cfg)
+		if err != nil {
+			c.initErr = fmt.Errorf("%w: discovery: %v", ErrUnavailable, err)
+			return
+		}
+		c.cli = dyn
+		c.mapper = restmapper.NewDeferredDiscoveryRESTMapper(memcache.NewMemCacheClient(disc))
+	})
+	return c.initErr
 }
 
 // Deploy applies the manifest in req. Server-side apply is used so
@@ -127,7 +135,26 @@ func (c *ClientGo) Deploy(ctx context.Context, req Request) (Result, error) {
 	return Result{AppliedResources: applied}, nil
 }
 
+// maxManifestBytes caps the total size of an inbound manifest
+// payload. K8s itself accepts up to a couple of MB per object;
+// 4 MiB across the entire multi-doc YAML is more than enough for
+// realistic apps and keeps "billion laughs" / nesting-bomb attacks
+// from hanging the parser.
+const maxManifestBytes = 4 << 20
+
+// maxManifestDocs caps the number of documents in a single payload.
+// A pathological YAML can include thousands of trivial documents to
+// inflate parse time even within the byte cap.
+const maxManifestDocs = 64
+
+// errManifestTooLarge is the error returned when a manifest exceeds
+// either the byte or document cap.
+var errManifestTooLarge = errors.New("deployer: manifest exceeds size or document limit")
+
 func splitManifest(b []byte) ([][]byte, error) {
+	if len(b) > maxManifestBytes {
+		return nil, errManifestTooLarge
+	}
 	r := utilyaml.NewYAMLReader(yamlBufReader(b))
 	var docs [][]byte
 	for {
@@ -142,6 +169,9 @@ func splitManifest(b []byte) ([][]byte, error) {
 			continue
 		}
 		docs = append(docs, raw)
+		if len(docs) > maxManifestDocs {
+			return nil, errManifestTooLarge
+		}
 	}
 	return docs, nil
 }

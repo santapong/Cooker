@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -101,7 +103,13 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, logW io.Writer
 func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag string) (*model.Pipeline, *model.PipelineRun) {
 	dockerfile := "Dockerfile"
 	if plan != nil && plan.Kind == model.BuildPlanDockerfile && plan.Path != "" {
-		dockerfile = plan.Path
+		// BuildPlan.Path is operator-supplied via App config; reject
+		// absolute paths or any "../" escape so a hostile config
+		// can't point Kaniko at /etc/shadow as the "Dockerfile".
+		clean := filepath.Clean(plan.Path)
+		if !filepath.IsAbs(clean) && clean != ".." && !strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			dockerfile = clean
+		}
 	}
 
 	stages := []model.Stage{

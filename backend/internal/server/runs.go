@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
+	"github.com/cooker-ci/cooker/internal/observability"
 	"github.com/cooker-ci/cooker/internal/store"
 )
 
@@ -24,6 +26,21 @@ const orphanThreshold = 90 * time.Second
 // after a shutdown ctx cancel. Stragglers beyond this get cut off and
 // will be flagged by the next boot's orphan sweep.
 const runDrainTimeout = 25 * time.Second
+
+// runDeadline is the upper bound on how long Spawn lets work run
+// before its context is force-cancelled. Defaults to 30 minutes —
+// long enough for realistic Kaniko builds — but operators with
+// genuinely long monorepo builds can override via the
+// COOKER_RUN_DEADLINE env var (Go duration string, e.g. "2h").
+// Setting 0 or a negative value falls back to the default.
+var runDeadline = func() time.Duration {
+	if v := os.Getenv("COOKER_RUN_DEADLINE"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 30 * time.Minute
+}()
 
 // RunCoordinator tracks in-flight pipeline-run goroutines so they can
 // be heart-beaten and drained on shutdown.
@@ -46,16 +63,23 @@ func (rc *RunCoordinator) Spawn(ctx context.Context, runID string, work func(con
 	rc.wg.Add(1)
 	go func() {
 		defer rc.wg.Done()
+		// Apply the documented 30-minute upper bound. Without this
+		// a stuck builder / kubectl / git push could hold the
+		// goroutine forever; the sweep wouldn't catch it because
+		// heartbeats keep firing.
+		workCtx, cancelWork := context.WithTimeout(ctx, runDeadline)
+		defer cancelWork()
 		ticker := time.NewTicker(heartbeatInterval)
 		defer ticker.Stop()
 		// First heartbeat, written synchronously, so a sweep that runs
 		// shortly after Spawn never declares a fresh run orphaned.
 		// Missing-row is tolerated silently so paths that create the
 		// row post-hoc (synthesised app-deploys) don't spam warnings.
-		rc.heartbeatBestEffort(ctx, runID, time.Now())
-		hbCtx, hbCancel := context.WithCancel(ctx)
-		defer hbCancel()
+		rc.heartbeatBestEffort(workCtx, runID, time.Now())
+		hbCtx, hbCancel := context.WithCancel(workCtx)
+		hbDone := make(chan struct{})
 		go func() {
+			defer close(hbDone)
 			for {
 				select {
 				case <-hbCtx.Done():
@@ -65,7 +89,15 @@ func (rc *RunCoordinator) Spawn(ctx context.Context, runID string, work func(con
 				}
 			}
 		}()
-		if err := work(ctx); err != nil {
+		// Run work, then deterministically tear down the heartbeat
+		// goroutine before this outer goroutine returns. Without the
+		// join the inner goroutine could outlive the WaitGroup-tracked
+		// outer one, missing the final heartbeat and producing a
+		// false-positive orphan on the next replica's boot sweep.
+		err := work(workCtx)
+		hbCancel()
+		<-hbDone
+		if err != nil {
 			slog.Warn("run coordinator: work returned error", "run", runID, "err", err)
 		}
 	}()
@@ -79,6 +111,7 @@ func (rc *RunCoordinator) heartbeatBestEffort(ctx context.Context, runID string,
 	if err == nil || errors.Is(err, store.ErrNotFound) {
 		return
 	}
+	observability.IncHeartbeatError()
 	slog.Warn("run coordinator: heartbeat failed", "run", runID, "err", err)
 }
 

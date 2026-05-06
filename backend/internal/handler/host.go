@@ -8,7 +8,24 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/cooker-ci/cooker/internal/validate"
 )
+
+func validateHostInput(h *model.Host) error {
+	if err := validate.Name("name", h.Name); err != nil {
+		return err
+	}
+	if err := validate.HostKind(h.Kind); err != nil {
+		return err
+	}
+	// Reachability is optional on Create (defaults to direct).
+	if h.Reachability != "" {
+		if err := validate.HostReachability(h.Reachability); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (h *Handler) ListHosts(c *gin.Context) {
 	hosts, err := h.Store.Hosts.List(c.Request.Context())
@@ -35,8 +52,8 @@ func (h *Handler) CreateHost(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if host.Kind == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "kind is required"})
+	if err := validateHostInput(&host); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if host.Reachability == "" {
@@ -60,6 +77,10 @@ func (h *Handler) UpdateHost(c *gin.Context) {
 	}
 	var host model.Host
 	if err := c.ShouldBindJSON(&host); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validateHostInput(&host); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

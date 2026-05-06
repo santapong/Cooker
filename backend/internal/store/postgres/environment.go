@@ -23,7 +23,7 @@ func NewEnvironmentStore(db *sql.DB) *EnvironmentStore {
 
 func (s *EnvironmentStore) List(ctx context.Context) ([]*model.Environment, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, sort_order, target, promotion, variables, secrets, created_at FROM environments ORDER BY sort_order ASC`)
+		`SELECT id, name, sort_order, target, promotion, variables, secrets, created_at, version FROM environments ORDER BY sort_order ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing environments: %w", err)
 	}
@@ -42,7 +42,7 @@ func (s *EnvironmentStore) List(ctx context.Context) ([]*model.Environment, erro
 
 func (s *EnvironmentStore) Get(ctx context.Context, id string) (*model.Environment, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, sort_order, target, promotion, variables, secrets, created_at FROM environments WHERE id = $1`, id)
+		`SELECT id, name, sort_order, target, promotion, variables, secrets, created_at, version FROM environments WHERE id = $1`, id)
 	e, err := scanEnvironment(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("environment %s: %w", id, store.ErrNotFound)
@@ -95,15 +95,21 @@ func (s *EnvironmentStore) Update(ctx context.Context, e *model.Environment) err
 		return fmt.Errorf("marshal secrets: %w", err)
 	}
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE environments SET name=$2, sort_order=$3, target=$4, promotion=$5, variables=$6, secrets=$7 WHERE id=$1`,
-		e.ID, e.Name, e.Order, targetJSON, promoJSON, varsJSON, secretsJSON)
+		`UPDATE environments SET name=$2, sort_order=$3, target=$4, promotion=$5, variables=$6, secrets=$7, version=version+1
+		 WHERE id=$1 AND version=$8`,
+		e.ID, e.Name, e.Order, targetJSON, promoJSON, varsJSON, secretsJSON, e.Version)
 	if err != nil {
 		return fmt.Errorf("updating environment: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
+		var exists bool
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM environments WHERE id=$1)`, e.ID).Scan(&exists); err == nil && exists {
+			return fmt.Errorf("environment %s: %w", e.ID, store.ErrConflict)
+		}
 		return fmt.Errorf("environment %s: %w", e.ID, store.ErrNotFound)
 	}
+	e.Version++
 	return nil
 }
 
@@ -122,7 +128,7 @@ func (s *EnvironmentStore) Delete(ctx context.Context, id string) error {
 func scanEnvironment(row scannable) (*model.Environment, error) {
 	e := &model.Environment{}
 	var targetJSON, promoJSON, varsJSON, secretsJSON []byte
-	if err := row.Scan(&e.ID, &e.Name, &e.Order, &targetJSON, &promoJSON, &varsJSON, &secretsJSON, &e.CreatedAt); err != nil {
+	if err := row.Scan(&e.ID, &e.Name, &e.Order, &targetJSON, &promoJSON, &varsJSON, &secretsJSON, &e.CreatedAt, &e.Version); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(targetJSON, &e.Target); err != nil {

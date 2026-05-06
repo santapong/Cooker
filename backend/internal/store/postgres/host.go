@@ -20,7 +20,7 @@ func NewHostStore(db *sql.DB) *HostStore { return &HostStore{db: db} }
 func (s *HostStore) List(ctx context.Context) ([]*model.Host, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, kind, reachability, docker_endpoint, kubeconfig_ref,
-		       tailnet_ip, created_at, updated_at
+		       tailnet_ip, created_at, updated_at, version
 		FROM hosts ORDER BY name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing hosts: %w", err)
@@ -41,7 +41,7 @@ func (s *HostStore) List(ctx context.Context) ([]*model.Host, error) {
 func (s *HostStore) Get(ctx context.Context, id string) (*model.Host, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, kind, reachability, docker_endpoint, kubeconfig_ref,
-		       tailnet_ip, created_at, updated_at
+		       tailnet_ip, created_at, updated_at, version
 		FROM hosts WHERE id=$1`, id)
 	h, err := scanHost(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -66,16 +66,21 @@ func (s *HostStore) Create(ctx context.Context, h *model.Host) error {
 func (s *HostStore) Update(ctx context.Context, h *model.Host) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE hosts SET name=$2, kind=$3, reachability=$4, docker_endpoint=$5,
-		                 kubeconfig_ref=$6, tailnet_ip=$7, updated_at=$8
-		WHERE id=$1`,
+		                 kubeconfig_ref=$6, tailnet_ip=$7, updated_at=$8, version=version+1
+		WHERE id=$1 AND version=$9`,
 		h.ID, h.Name, h.Kind, h.Reachability, h.DockerEndpoint, h.KubeconfigRef,
-		h.TailnetIP, h.UpdatedAt)
+		h.TailnetIP, h.UpdatedAt, h.Version)
 	if err != nil {
 		return fmt.Errorf("updating host: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
+		var exists bool
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM hosts WHERE id=$1)`, h.ID).Scan(&exists); err == nil && exists {
+			return fmt.Errorf("host %s: %w", h.ID, store.ErrConflict)
+		}
 		return fmt.Errorf("host %s: %w", h.ID, store.ErrNotFound)
 	}
+	h.Version++
 	return nil
 }
 
@@ -94,7 +99,7 @@ func scanHost(row scannable) (*model.Host, error) {
 	h := &model.Host{}
 	if err := row.Scan(
 		&h.ID, &h.Name, &h.Kind, &h.Reachability, &h.DockerEndpoint,
-		&h.KubeconfigRef, &h.TailnetIP, &h.CreatedAt, &h.UpdatedAt,
+		&h.KubeconfigRef, &h.TailnetIP, &h.CreatedAt, &h.UpdatedAt, &h.Version,
 	); err != nil {
 		return nil, err
 	}

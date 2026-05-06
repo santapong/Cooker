@@ -71,6 +71,16 @@ func TestApprovePromotion_ApproverAllowed_UsesClaimsEmail(t *testing.T) {
 	h := newTestHandler(t)
 	approver := &auth.Claims{Email: "approver@example.com", Roles: []string{string(auth.RoleApprover)}}
 
+	// The IDOR-hardened ApprovePromotion handler verifies that the
+	// runId belongs to the :id pipeline before responding. Pre-seed
+	// matching pipeline + run rows so the assertion passes.
+	if err := h.Store.Pipelines.Create(context.Background(), &model.Pipeline{ID: "p1", Name: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Store.Runs.Create(context.Background(), &model.PipelineRun{ID: "r1", PipelineID: "p1"}); err != nil {
+		t.Fatal(err)
+	}
+
 	r := gin.New()
 	r.POST("/pipelines/:id/runs/:runId/approve", withUser(h.ApprovePromotion, approver))
 

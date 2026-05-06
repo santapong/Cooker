@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/cooker-ci/cooker/internal/crypto"
+	"github.com/cooker-ci/cooker/internal/model"
 	"github.com/cooker-ci/cooker/internal/secrets"
 	"github.com/cooker-ci/cooker/internal/service"
 	"github.com/cooker-ci/cooker/internal/store"
@@ -50,6 +51,23 @@ func New(s *store.Store, codec *crypto.Codec, secs secrets.Manager) *Handler {
 	return &Handler{Store: s, Codec: codec, Secrets: secs}
 }
 
+// loadRunForPipeline fetches a run by runId and verifies it belongs
+// to the given pipelineID. Mismatches return 404 (rather than 403)
+// so we don't confirm to a probing caller whether a runId exists
+// under a different pipeline. Returns nil + false if a response
+// has already been written (caller should return immediately).
+func (h *Handler) loadRunForPipeline(c *gin.Context, runID, pipelineID string) (*model.PipelineRun, bool) {
+	run, err := h.Store.Runs.Get(c.Request.Context(), runID)
+	if abortStoreErr(c, err, "run not found") {
+		return nil, false
+	}
+	if run.PipelineID != pipelineID {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return nil, false
+	}
+	return run, true
+}
+
 // abortStoreErr maps common store errors to HTTP responses.
 func abortStoreErr(c *gin.Context, err error, notFoundMsg string) bool {
 	if err == nil {
@@ -57,6 +75,15 @@ func abortStoreErr(c *gin.Context, err error, notFoundMsg string) bool {
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": notFoundMsg})
+		return true
+	}
+	if errors.Is(err, store.ErrConflict) {
+		// Optimistic-concurrency miss: another writer moved the row's
+		// version since the caller fetched it. Tell the client to
+		// refetch and retry.
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "version conflict; refetch and retry",
+		})
 		return true
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

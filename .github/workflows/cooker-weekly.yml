@@ -1,0 +1,95 @@
+name: Cooker weekly bug hunt
+
+on:
+  schedule:
+    # Mondays at 09:00 UTC. Choose a slot when a maintainer is awake
+    # to review the resulting draft PR within a few hours.
+    - cron: '0 9 * * 1'
+  workflow_dispatch: {}
+
+# Concurrency guard: never let two weekly runs overlap. The second
+# one waits for the first to finish; if a manual run is in flight
+# when the schedule fires, the schedule run is skipped.
+concurrency:
+  group: cooker-weekly
+  cancel-in-progress: false
+
+jobs:
+  weekly:
+    name: Run cooker-weekly skill
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # push the new branch
+      pull-requests: write  # open the draft PR
+      issues: read          # enumerate recent activity
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need full history so the skill can find the previous
+          # T-weekly-* tag and diff against it.
+          fetch-depth: 0
+          # Required so the action's commits trigger downstream CI.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # ----- Run Claude Code with the cooker-weekly skill -----
+      #
+      # NOTE: This step is a STUB. Wire ANTHROPIC_API_KEY (or the
+      # OAuth alternative) into the repo's Actions secrets before
+      # enabling the schedule. Verify the action name + version
+      # against https://github.com/anthropics/claude-code-action
+      # at the time you turn this on; the published name has
+      # changed at least once.
+      #
+      # The skill body at .claude/skills/cooker-weekly/SKILL.md
+      # has the full routine. The action just kicks it off.
+      - name: Run cooker-weekly skill
+        if: ${{ vars.COOKER_WEEKLY_ENABLED == 'true' }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The slash-form invokes the skill explicitly. The skill
+          # description is also written to auto-trigger on phrases
+          # like "open issues" + "this week" so the routing is
+          # robust to wording drift in the prompt.
+          prompt: '/cooker-weekly'
+          # Cap turns so a misbehaving run can't burn the budget.
+          # Fifty turns is enough for read → pick → branch → fix →
+          # PR; bump if the routine grows.
+          max_turns: 50
+          # Allow the tools the skill actually uses. Don't expose
+          # destructive tools the skill doesn't need (no merging,
+          # no force-push).
+          allowed-tools: |
+            Read
+            Write
+            Edit
+            Bash
+            Grep
+            Agent
+            mcp__github__list_issues
+            mcp__github__list_pull_requests
+            mcp__github__create_pull_request
+            mcp__github__update_pull_request
+            mcp__github__add_issue_comment
+
+      # When COOKER_WEEKLY_ENABLED is unset (the default until the
+      # maintainer flips it), this job documents itself as a
+      # successful no-op. That lets the schedule run regularly
+      # without paging anyone, and lets the maintainer flip the
+      # variable to turn it on without editing the workflow.
+      - name: Skip (skill is gated by COOKER_WEEKLY_ENABLED variable)
+        if: ${{ vars.COOKER_WEEKLY_ENABLED != 'true' }}
+        run: |
+          echo "::notice::cooker-weekly is gated off."
+          echo "Set the repository variable COOKER_WEEKLY_ENABLED=true to enable."
+          echo "See .claude/skills/cooker-weekly/SKILL.md for the routine."

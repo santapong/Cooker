@@ -149,6 +149,10 @@ func (h *Handler) RevealSecret(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
 		return
 	}
+	// Strict no-store: a leaked browser cache or a forward proxy
+	// shouldn't be holding a copy of the plaintext value.
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private")
+	c.Header("Pragma", "no-cache")
 	if _, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id")); abortStoreErr(c, err, "environment not found") {
 		return
 	}
@@ -158,7 +162,9 @@ func (h *Handler) RevealSecret(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Generic message: the upstream secrets-manager error can leak
+		// Vault path / AWS ARN / KeepSave URL detail.
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "secret backend error"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "value": string(value)})
@@ -251,10 +257,13 @@ func (h *Handler) DeleteSecret(c *gin.Context) {
 }
 
 func (h *Handler) PromoteRun(c *gin.Context) {
-	runID := c.Param("runId")
+	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
+	if !ok {
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"message": "promotion initiated",
-		"runId":   runID,
+		"runId":   run.ID,
 	})
 }
 
@@ -270,7 +279,10 @@ func (h *Handler) ApprovePromotion(c *gin.Context) {
 		return
 	}
 
-	runID := c.Param("runId")
+	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
+	if !ok {
+		return
+	}
 	var req struct {
 		Note string `json:"note"`
 	}
@@ -278,16 +290,19 @@ func (h *Handler) ApprovePromotion(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "promotion approved",
-		"runId":      runID,
+		"runId":      run.ID,
 		"approvedBy": claims.Email,
 		"note":       req.Note,
 	})
 }
 
 func (h *Handler) GetEnvStatus(c *gin.Context) {
-	runID := c.Param("runId")
+	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
+	if !ok {
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"runId":    runID,
+		"runId":    run.ID,
 		"statuses": []model.EnvironmentStatus{},
 	})
 }
