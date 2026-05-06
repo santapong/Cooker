@@ -101,14 +101,27 @@ func (g *GoGit) Commit(ctx context.Context, req Request) (Result, error) {
 	if req.Image != "" {
 		content = bytes.ReplaceAll(content, []byte("${IMAGE}"), []byte(req.Image))
 	}
-	full := filepath.Join(dir, req.Path)
+	// Reject paths that try to escape the repo working tree.
+	// filepath.Join *cleans* the result (so "a/../b" becomes "b"),
+	// but it does NOT bound the result to dir — Join("/repo",
+	// "../../etc/foo") returns "/etc/foo". We bound it explicitly:
+	// reject absolute paths and paths whose cleaned form starts
+	// with "..", and verify the joined result stays under dir.
+	cleanRel := filepath.Clean(req.Path)
+	if filepath.IsAbs(cleanRel) || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
+		return Result{}, fmt.Errorf("gogit: path %q escapes repo", req.Path)
+	}
+	full := filepath.Join(dir, cleanRel)
+	if !strings.HasPrefix(full, dir+string(filepath.Separator)) && full != dir {
+		return Result{}, fmt.Errorf("gogit: path %q escapes repo", req.Path)
+	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return Result{}, err
 	}
 	if err := os.WriteFile(full, content, 0o644); err != nil {
 		return Result{}, err
 	}
-	if _, err := wt.Add(req.Path); err != nil {
+	if _, err := wt.Add(cleanRel); err != nil {
 		return Result{}, err
 	}
 	authorLine := req.Author
