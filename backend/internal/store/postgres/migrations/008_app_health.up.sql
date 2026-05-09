@@ -1,4 +1,5 @@
 -- Cooker app post-deploy health probe
+-- Requires Postgres >= 12 for cheap ADD COLUMN ... DEFAULT (avoids full table rewrite on PG11).
 -- Powers AppHealthChecker (Week 1 observability): a per-app
 -- background probe writes the latest readiness verdict so the UI
 -- can show whether the app is actually serving after a deploy.

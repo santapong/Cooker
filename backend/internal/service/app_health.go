@@ -135,7 +135,8 @@ func (c *AppHealthChecker) proberFor(kind model.DeployTargetKind) Prober {
 // tick runs one round of probes. Exposed as a method so tests can
 // drive it deterministically without sleeping. Errors from any one
 // probe or store write are logged and skipped; one bad app must not
-// block the rest.
+// block the rest. Each per-app probe call is wrapped in a recover so
+// a panicking cloud-SDK implementation cannot kill the checker goroutine.
 func (c *AppHealthChecker) tick(ctx context.Context) {
 	apps, err := c.apps.List(ctx)
 	if err != nil {
@@ -147,16 +148,26 @@ func (c *AppHealthChecker) tick(ctx context.Context) {
 		if a == nil {
 			continue
 		}
-		status, msg := c.proberFor(a.DeployTarget.Kind).Probe(ctx, a)
-		if err := c.apps.UpdateHealth(ctx, a.ID, status, msg, now); err != nil {
-			// ErrNotFound means the app was deleted between List and
-			// UpdateHealth — a benign race, log at debug.
-			if errors.Is(err, store.ErrNotFound) {
-				c.logger.Debug("app health: app deleted before write", "app", a.ID)
-				continue
+		func(app *model.App) {
+			defer func() {
+				if r := recover(); r != nil {
+					c.logger.Warn("app health: probe panicked",
+						"app", app.ID, "kind", app.DeployTarget.Kind, "panic", r)
+					_ = c.apps.UpdateHealth(ctx, app.ID,
+						model.AppHealthUnknown, "probe panicked", c.clock())
+				}
+			}()
+			status, msg := c.proberFor(app.DeployTarget.Kind).Probe(ctx, app)
+			if err := c.apps.UpdateHealth(ctx, app.ID, status, msg, now); err != nil {
+				// ErrNotFound means the app was deleted between List and
+				// UpdateHealth — a benign race, log at debug.
+				if errors.Is(err, store.ErrNotFound) {
+					c.logger.Debug("app health: app deleted before write", "app", app.ID)
+					return
+				}
+				c.logger.Warn("app health: write failed", "app", app.ID, "err", err)
 			}
-			c.logger.Warn("app health: write failed", "app", a.ID, "err", err)
-		}
+		}(a)
 	}
 }
 

@@ -150,6 +150,35 @@ func TestAppHealthChecker_RunRespectsContextCancellation(t *testing.T) {
 	}
 }
 
+func TestAppHealthChecker_ProberPanicRecovered(t *testing.T) {
+	apps := &fakeAppLister{
+		listResult: []*model.App{
+			{ID: "panic-app", Name: "p", DeployTarget: model.DeployTarget{Kind: model.DeployTargetKubernetes}},
+		},
+	}
+	checker := NewAppHealthChecker(apps,
+		WithProber(model.DeployTargetKubernetes, ProberFunc(func(_ context.Context, _ *model.App) (model.AppHealth, string) {
+			panic("flaky cloud SDK")
+		})),
+	)
+
+	// tick must return normally (no panic propagation).
+	checker.tick(context.Background())
+
+	// UpdateHealth must have been called once with AppHealthUnknown and a
+	// "panicked" message so operators can see why the badge is grey.
+	got := apps.snapshot()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 UpdateHealth write after panic recovery, got %d", len(got))
+	}
+	if got[0].status != model.AppHealthUnknown {
+		t.Errorf("status: got %q want %q", got[0].status, model.AppHealthUnknown)
+	}
+	if got[0].message != "probe panicked" {
+		t.Errorf("message: got %q want %q", got[0].message, "probe panicked")
+	}
+}
+
 func TestWithProber_NilUnregisters(t *testing.T) {
 	apps := &fakeAppLister{}
 	checker := NewAppHealthChecker(apps,

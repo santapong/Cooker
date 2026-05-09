@@ -29,8 +29,8 @@ func StageLogChannel(runID, stageID string) string {
 // finishes mid-line the leftover partial is dropped — the canonical
 // log is the StageRun.Logs append on disk, not the live stream.
 //
-// Not goroutine-safe. The executor only writes from a single goroutine
-// per stage (via the builder's LogWriter), so a mutex would be wasted.
+// Not goroutine-safe. The executor serialises Write calls per stage via
+// the builder's LogWriter; do not share a lineWriter across goroutines.
 type lineWriter struct {
 	broadcast LogBroadcaster
 	channel   string
@@ -48,7 +48,9 @@ func newLineWriter(broadcast LogBroadcaster, channel string) *lineWriter {
 // Write splits p on newlines and broadcasts each complete line. The
 // returned int is always len(p): the broadcast leg is best-effort, so
 // a Hub backpressure drop must not propagate as a write error to the
-// builder's stdio pipe.
+// builder's stdio pipe. This "always returns len(p)" invariant is
+// load-bearing: executeBuild wraps lineWriter in io.MultiWriter, which
+// aborts the entire write chain on a short-count return (W10-1).
 func (w *lineWriter) Write(p []byte) (int, error) {
 	if w == nil || w.broadcast == nil {
 		return len(p), nil

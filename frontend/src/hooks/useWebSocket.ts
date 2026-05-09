@@ -60,6 +60,13 @@ export function useWebSocket({
   };
 
   const connect = useCallback(async () => {
+    if (!url) {
+      // Defence-in-depth: do not attempt a connect with an empty URL.
+      // Today the autoConnect gate in useStageLogs prevents this from
+      // firing; the guard is here so future callers that drop the
+      // gate don't silently connect to the wrong endpoint.
+      return;
+    }
     closedByCallerRef.current = false;
     const ticket = await fetchWSTicket();
     if (!ticket) {

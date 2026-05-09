@@ -307,6 +307,8 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 	// at the hub drops on the far side, never on the executor goroutine.
 	var writer io.Writer = logs
 	var lw *lineWriter
+	// Production callers always pass non-empty runID + stage.ID; the gate
+	// keeps direct test callers (which may omit them) safe (W10-7).
 	if e.logBroadcast != nil && runID != "" && stage != nil && stage.ID != "" {
 		lw = newLineWriter(e.logBroadcast, StageLogChannel(runID, stage.ID))
 		writer = io.MultiWriter(logs, lw)
