@@ -64,6 +64,11 @@ type Config struct {
 	DeployTargets  DeployTargetsConfig
 	Audit          AuditConfig
 	Observability  ObservabilityConfig
+	// AppHealthInterval is how often the AppHealthChecker probes each
+	// App for readiness. Default 30s. Operators with large fleets may
+	// raise this to reduce backend pressure; setting 0 disables the
+	// checker entirely.
+	AppHealthInterval time.Duration
 }
 
 // WSHubConfig configures the WebSocket broadcast fan-out backend.
@@ -345,6 +350,7 @@ func Load() *Config {
 			ServiceName:    getEnv("COOKER_SERVICE_NAME", "cooker"),
 			ServiceVersion: getEnv("COOKER_SERVICE_VERSION", "dev"),
 		},
+		AppHealthInterval: getEnvDuration("COOKER_APP_HEALTH_INTERVAL", 30*time.Second),
 	}
 }
 
