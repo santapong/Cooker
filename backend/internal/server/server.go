@@ -182,6 +182,10 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithBuilder(bld),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
 		service.WithDeployer(selectDeployer(cfg.DeployerBackend, cfg.Kubernetes.Kubeconfig)),
+		// Stream stage logs to the WebSocket hub line-by-line on the
+		// canonical per-stage channel. The hub drops on backpressure,
+		// so this never blocks the executor goroutine.
+		service.WithLogBroadcaster(wsHub.Broadcast),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 
