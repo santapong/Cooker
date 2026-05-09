@@ -118,7 +118,8 @@ The Helm chart conditionally drops the `docker.sock` volume + mount when `builde
 
 - **CORS**: Configurable allowed origins via `COOKER_ALLOWED_ORIGINS`. Defaults to `localhost:5173,localhost:3000` for `COOKER_ENV=dev|uat`; defaults to **deny-all** for `COOKER_ENV=production` so missing config is loud, not silent.
 - **`Allow-Credentials`**: explicitly **off**. Cooker authenticates via `Authorization: Bearer <jwt>` headers, not cookies — credentials mode adds no value and would block wildcard reflection.
-- **WebSocket**: two-layer auth — same-origin policy via `gorilla/websocket` `CheckOrigin` (sharing the CORS allowlist) **and** a single-use ticket. Clients `POST /api/v1/ws-tickets` over the authenticated API to obtain a 60-second ticket and open `/ws/...` with `?ticket=<value>`. Tickets are consumed on first use; replay is rejected.
+- **WebSocket**: two-layer auth — same-origin policy via `gorilla/websocket` `CheckOrigin` (sharing the CORS allowlist) **and** a single-use ticket. Clients `POST /api/v1/ws-tickets` over the authenticated API to obtain a 60-second ticket and open `/ws/...` with `?ticket=<value>`. Tickets are consumed on first use; replay is rejected. The per-stage log channel `/ws/runs/:runId/stages/:stageId/logs` (added with the AppHealthChecker work) uses the same ticket gate; no new ingress.
+- **App health probe**: `AppHealthChecker` runs in-process inside the cooker pod and reads from each deploy target via the existing in-cluster credentials (kubeconfig / SDK clients). It does NOT add an inbound network surface; egress is to the same target-backend endpoints the executor already talks to.
 - **Ingress**: TLS termination recommended at the ingress controller level.
 - **Internal traffic**: Backend-to-database and backend-to-Redis communication should use encrypted connections in production.
 

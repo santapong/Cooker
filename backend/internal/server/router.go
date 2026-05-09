@@ -243,6 +243,9 @@ func (s *Server) registerRoutes() {
 		ws.GET("/docker/build/:buildId", func(c *gin.Context) {
 			s.wsHub.HandleDockerBuild(c.Writer, c.Request, c.Param("buildId"))
 		})
+		ws.GET("/runs/:runId/stages/:stageId/logs", func(c *gin.Context) {
+			s.wsHub.HandleStageLogs(c.Writer, c.Request, c.Param("runId"), c.Param("stageId"))
+		})
 		ws.GET("/kubernetes/watch", func(c *gin.Context) {
 			s.wsHub.HandleKubeWatch(c.Writer, c.Request, c.Query("namespace"), c.Query("resource"))
 		})

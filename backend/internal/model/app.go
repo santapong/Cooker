@@ -2,6 +2,20 @@ package model
 
 import "time"
 
+// AppHealth is the post-deploy health verdict observed by the
+// AppHealthChecker. "unknown" means no probe has run yet (or the
+// target kind has no probe wired); "healthy" means the deployed
+// workload is fully serving; "degraded" is partial readiness;
+// "failed" means the probe asserts the workload is not serving.
+type AppHealth string
+
+const (
+	AppHealthUnknown  AppHealth = "unknown"
+	AppHealthHealthy  AppHealth = "healthy"
+	AppHealthDegraded AppHealth = "degraded"
+	AppHealthFailed   AppHealth = "failed"
+)
+
 // BuildPlanKind identifies how an App's source should be turned
 // into a container image.
 type BuildPlanKind string
@@ -84,6 +98,15 @@ type App struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 	// Version powers optimistic concurrency on Update; see store.ErrConflict.
 	Version int `json:"version"`
+
+	// HealthStatus is the latest verdict from AppHealthChecker (Week 1
+	// observability batch). "unknown" until the first probe runs, or when
+	// the target kind has no probe wired. Updated via the dedicated
+	// AppStore.UpdateHealth method, never via Update — health is a side
+	// channel that should not bump Version or block on a stale row.
+	HealthStatus    AppHealth  `json:"healthStatus" db:"health_status"`
+	HealthCheckedAt *time.Time `json:"healthCheckedAt,omitempty" db:"health_checked_at"`
+	HealthMessage   string     `json:"healthMessage,omitempty" db:"health_message"`
 }
 
 // Redact returns a copy of a safe for client responses.

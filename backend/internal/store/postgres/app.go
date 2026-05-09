@@ -6,10 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/cooker-ci/cooker/internal/model"
 	"github.com/cooker-ci/cooker/internal/store"
 )
+
+// appColumns is the canonical SELECT-list for an App. Centralised so
+// List / Get / GetByRepo / scanApp stay in lock-step when a column
+// is added (e.g., the health_* trio added in Week 1).
+const appColumns = `id, name, description, github_repo, branch, build_plan, deploy_target,
+	registry_ref, environment_id, webhook_secret, auto_deploy,
+	created_at, updated_at, version,
+	COALESCE(health_status, 'unknown') AS health_status, health_checked_at, COALESCE(health_message, '') AS health_message`
 
 // AppStore implements store.AppStore using PostgreSQL. Webhook
 // secrets are stored as base64 in a separate column — encryption
@@ -22,9 +31,7 @@ func NewAppStore(db *sql.DB) *AppStore { return &AppStore{db: db} }
 
 func (s *AppStore) List(ctx context.Context) ([]*model.App, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, description, github_repo, branch, build_plan, deploy_target,
-		       registry_ref, environment_id, webhook_secret, auto_deploy,
-		       created_at, updated_at, version
+		SELECT `+appColumns+`
 		FROM apps ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing apps: %w", err)
@@ -44,9 +51,7 @@ func (s *AppStore) List(ctx context.Context) ([]*model.App, error) {
 
 func (s *AppStore) Get(ctx context.Context, id string) (*model.App, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, description, github_repo, branch, build_plan, deploy_target,
-		       registry_ref, environment_id, webhook_secret, auto_deploy,
-		       created_at, updated_at, version
+		SELECT `+appColumns+`
 		FROM apps WHERE id=$1`, id)
 	a, err := scanApp(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -57,9 +62,7 @@ func (s *AppStore) Get(ctx context.Context, id string) (*model.App, error) {
 
 func (s *AppStore) GetByRepo(ctx context.Context, repo, branch string) (*model.App, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, description, github_repo, branch, build_plan, deploy_target,
-		       registry_ref, environment_id, webhook_secret, auto_deploy,
-		       created_at, updated_at, version
+		SELECT `+appColumns+`
 		FROM apps WHERE github_repo=$1 AND branch=$2`, repo, branch)
 	a, err := scanApp(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -127,6 +130,23 @@ func (s *AppStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// UpdateHealth writes the latest probe verdict without touching
+// version. Health is observational, not user-visible config — a
+// concurrent Update from the user must not lose its race with a
+// background probe write.
+func (s *AppStore) UpdateHealth(ctx context.Context, id string, status model.AppHealth, msg string, at time.Time) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE apps SET health_status=$2, health_checked_at=$3, health_message=$4
+		WHERE id=$1`, id, string(status), at, msg)
+	if err != nil {
+		return fmt.Errorf("updating app health: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("app %s: %w", id, store.ErrNotFound)
+	}
+	return nil
+}
+
 func marshalAppJSON(a *model.App) (bp, dt []byte, err error) {
 	bp, err = json.Marshal(a.BuildPlan)
 	if err != nil {
@@ -143,13 +163,23 @@ func scanApp(row scannable) (*model.App, error) {
 	a := &model.App{}
 	var bp, dt []byte
 	var secretB64 string
+	var healthStatus string
+	var healthCheckedAt sql.NullTime
+	var healthMessage string
 	if err := row.Scan(
 		&a.ID, &a.Name, &a.Description, &a.GitHubRepo, &a.Branch,
 		&bp, &dt, &a.RegistryRef, &a.EnvironmentID, &secretB64, &a.AutoDeploy,
 		&a.CreatedAt, &a.UpdatedAt, &a.Version,
+		&healthStatus, &healthCheckedAt, &healthMessage,
 	); err != nil {
 		return nil, err
 	}
+	a.HealthStatus = model.AppHealth(healthStatus)
+	if healthCheckedAt.Valid {
+		t := healthCheckedAt.Time
+		a.HealthCheckedAt = &t
+	}
+	a.HealthMessage = healthMessage
 	if len(bp) > 0 && string(bp) != "null" {
 		if err := json.Unmarshal(bp, &a.BuildPlan); err != nil {
 			return nil, fmt.Errorf("unmarshal build_plan: %w", err)

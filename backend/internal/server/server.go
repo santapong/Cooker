@@ -47,6 +47,13 @@ type Server struct {
 	traceShutdown func(context.Context) error
 	runs          *RunCoordinator
 	idempotency   idempotency.Store
+	// healthCancel cancels the AppHealthChecker goroutine on shutdown.
+	// nil means the checker was disabled (interval <= 0) or boot
+	// failed before the checker started. healthDone is closed by the
+	// checker goroutine when it returns; RunContext waits on it
+	// before returning so the drain order is deterministic.
+	healthCancel context.CancelFunc
+	healthDone   chan struct{}
 }
 
 // New creates a new Server instance with all routes and middleware.
@@ -182,6 +189,10 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithBuilder(bld),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
 		service.WithDeployer(selectDeployer(cfg.DeployerBackend, cfg.Kubernetes.Kubeconfig)),
+		// Stream stage logs to the WebSocket hub line-by-line on the
+		// canonical per-stage channel. The hub drops on backpressure,
+		// so this never blocks the executor goroutine.
+		service.WithLogBroadcaster(wsHub.Broadcast),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 
@@ -214,6 +225,28 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	sweepCancel()
 
+	// AppHealthChecker — long-running background probe that writes
+	// per-app readiness verdicts. Runs in its own goroutine cancelled
+	// on shutdown via healthCancel; RunContext waits on healthDone
+	// before returning so the drain order stays deterministic.
+	// Setting AppHealthInterval to 0 (or below) disables the checker
+	// entirely — useful for unit tests and operators who'd rather poll
+	// from elsewhere.
+	var healthCancel context.CancelFunc
+	var healthDone chan struct{}
+	if cfg.AppHealthInterval > 0 {
+		healthCtx, cancel := context.WithCancel(context.Background())
+		healthCancel = cancel
+		healthDone = make(chan struct{})
+		checker := service.NewAppHealthChecker(st.Apps,
+			service.WithAppHealthInterval(cfg.AppHealthInterval),
+		)
+		go func() {
+			defer close(healthDone)
+			_ = checker.Run(healthCtx)
+		}()
+	}
+
 	s := &Server{
 		router:        router,
 		config:        cfg,
@@ -228,6 +261,8 @@ func New(cfg *config.Config) (*Server, error) {
 		redisClient:   redisClient,
 		runs:          runs,
 		idempotency:   idem,
+		healthCancel:  healthCancel,
+		healthDone:    healthDone,
 	}
 
 	router.Use(securityHeadersMiddleware())
@@ -288,6 +323,18 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 			runDrainCtx, runCancel := context.WithTimeout(context.Background(), runDrainTimeout)
 			s.runs.Wait(runDrainCtx)
 			runCancel()
+		}
+		if s.healthCancel != nil {
+			s.healthCancel()
+		}
+		if s.healthDone != nil {
+			// AppHealthChecker.Run returns ~immediately on cancel; cap
+			// the wait so a wedged probe doesn't block shutdown forever.
+			select {
+			case <-s.healthDone:
+			case <-time.After(5 * time.Second):
+				slog.Warn("shutdown: app health checker drain timed out")
+			}
 		}
 		return <-errCh
 	}

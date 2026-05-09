@@ -13,6 +13,8 @@ export interface AppDeployTarget {
   service?: string;
 }
 
+export type AppHealthStatus = 'unknown' | 'healthy' | 'degraded' | 'failed';
+
 export interface AppModel {
   id: string;
   name: string;
@@ -27,6 +29,12 @@ export interface AppModel {
   autoDeploy: boolean;
   createdAt: string;
   updatedAt: string;
+  // Post-deploy readiness verdict from the backend AppHealthChecker.
+  // "unknown" until the first probe runs or when the target kind has
+  // no probe wired in the registry.
+  healthStatus?: AppHealthStatus;
+  healthCheckedAt?: string;
+  healthMessage?: string;
 }
 
 export interface AppDeployResponse {

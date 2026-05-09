@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"time"
@@ -56,11 +57,12 @@ type RunUpdater func(ctx context.Context, run *model.PipelineRun) error
 // Production wiring injects real Builder/Pusher/Deployer; tests
 // inject mocks.
 type Executor struct {
-	builder    builder.Builder
-	pusher     pusher.Pusher
-	deployer   deployer.Deployer
-	gitops     gitops.Writer
-	runUpdater RunUpdater
+	builder      builder.Builder
+	pusher       pusher.Pusher
+	deployer     deployer.Deployer
+	gitops       gitops.Writer
+	runUpdater   RunUpdater
+	logBroadcast LogBroadcaster
 }
 
 // Option configures a new Executor. Use the With* constructors.
@@ -109,6 +111,16 @@ func WithGitOps(g gitops.Writer) Option {
 func WithRunUpdater(u RunUpdater) Option {
 	return func(e *Executor) {
 		e.runUpdater = u
+	}
+}
+
+// WithLogBroadcaster installs a per-line broadcaster the executor
+// uses to stream stage logs to the WebSocket hub in real time. Pass
+// nil (or skip the option) to keep the historical behaviour of only
+// persisting logs to StageRun.Logs at stage finish.
+func WithLogBroadcaster(b LogBroadcaster) Option {
+	return func(e *Executor) {
+		e.logBroadcast = b
 	}
 }
 
@@ -213,7 +225,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		stageErr := retry.Do(stageCtx, retryPolicy, func(ctx context.Context) error {
 			switch stage.Type {
 			case model.StageTypeBuild:
-				return e.executeBuild(ctx, stage, stageRun)
+				return e.executeBuild(ctx, run.ID, stage, stageRun)
 			case model.StageTypeTest:
 				return e.executeTest(ctx, stage)
 			case model.StageTypePush:
@@ -285,16 +297,33 @@ func (e *Executor) persistProgress(ctx context.Context, run *model.PipelineRun) 
 	}
 }
 
-func (e *Executor) executeBuild(ctx context.Context, stage *model.Stage, sr *model.StageRun) error {
+func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
 	logs := newCappedBuffer(stageLogCap)
-	defer func() { sr.Logs = logs.String() }()
+	// LogWriter receives the on-disk capture by default. When a
+	// broadcaster is wired (production wiring via WithLogBroadcaster),
+	// stream each \n-terminated line to the WebSocket hub on the
+	// per-stage channel as well so the run page can tail logs live
+	// instead of polling. The broadcaster is best-effort: backpressure
+	// at the hub drops on the far side, never on the executor goroutine.
+	var writer io.Writer = logs
+	var lw *lineWriter
+	if e.logBroadcast != nil && runID != "" && stage != nil && stage.ID != "" {
+		lw = newLineWriter(e.logBroadcast, StageLogChannel(runID, stage.ID))
+		writer = io.MultiWriter(logs, lw)
+	}
+	defer func() {
+		if lw != nil {
+			lw.flush()
+		}
+		sr.Logs = logs.String()
+	}()
 	req := builder.Request{
 		ContextDir: stage.Config.Context,
 		Dockerfile: stage.Config.Dockerfile,
 		Tags:       stage.Config.Tags,
 		BuildArgs:  stage.Config.BuildArgs,
 		Platforms:  stage.Config.Platforms,
-		LogWriter:  logs,
+		LogWriter:  writer,
 	}
 	res, err := e.builder.Build(ctx, req)
 	if err != nil {

@@ -245,8 +245,23 @@ func (h *Handler) CancelPipelineRun(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "cancelled", "runId": run.ID})
 }
 
+// GetStageLogs returns the on-disk log capture for a single stage of a
+// pipeline run. The frontend uses this for backfill on first paint;
+// live tail comes from the per-stage WebSocket channel exposed by
+// /ws/runs/:runId/stages/:stageId/logs (see internal/server/router.go).
 func (h *Handler) GetStageLogs(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"logs": ""})
+	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
+	if !ok {
+		return
+	}
+	stageID := c.Param("stageId")
+	for i := range run.StageRuns {
+		if run.StageRuns[i].StageID == stageID {
+			c.JSON(http.StatusOK, gin.H{"logs": run.StageRuns[i].Logs})
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "stage not found"})
 }
 
 // validateDAG checks for cycles and unresolved references.

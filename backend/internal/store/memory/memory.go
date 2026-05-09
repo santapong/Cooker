@@ -290,6 +290,24 @@ func (s *apps) Delete(_ context.Context, id string) error {
 	return nil
 }
 
+// UpdateHealth writes the latest probe verdict in place. Does NOT
+// bump Version — health is observational state, not user-visible
+// configuration, so a probe write should never block a concurrent
+// Update via optimistic-concurrency conflict.
+func (s *apps) UpdateHealth(_ context.Context, id string, status model.AppHealth, msg string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.m[id]
+	if !ok {
+		return fmt.Errorf("app %s: %w", id, store.ErrNotFound)
+	}
+	cur.HealthStatus = status
+	cur.HealthMessage = msg
+	tt := at
+	cur.HealthCheckedAt = &tt
+	return nil
+}
+
 type hosts struct {
 	mu sync.RWMutex
 	m  map[string]*model.Host
