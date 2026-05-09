@@ -29,12 +29,29 @@ export default function AppDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    appsApi
-      .get(id)
-      .then(setApp)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const refetch = () => {
+      appsApi
+        .get(id)
+        .then((next) => {
+          if (!cancelled) setApp(next);
+        })
+        .catch((e) => {
+          if (!cancelled) setError((e as Error).message);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
+    refetch();
+    // Refresh every 30s so the post-deploy health badge moves
+    // unknown -> healthy / degraded / failed as the backend
+    // AppHealthChecker writes new verdicts. Cheap: one GET / 30s
+    // per open AppDetailPage instance.
+    const tick = window.setInterval(refetch, 30_000);
     return () => {
+      cancelled = true;
+      window.clearInterval(tick);
       wsRef.current?.close();
     };
   }, [id]);
@@ -139,6 +156,7 @@ export default function AppDetailPage() {
           <>
             target: <strong style={{ color: t.text }}>{app.deployTarget.kind}</strong>
             {app.deployTarget.namespace ? ` · ns/${app.deployTarget.namespace}` : ''}
+            <HealthBadge app={app} />
           </>
         }
         actions={
@@ -259,5 +277,35 @@ export default function AppDetailPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+// HealthBadge renders the post-deploy readiness verdict written by
+// the backend AppHealthChecker. "unknown" is the default until the
+// first probe runs (or when the target kind has no probe wired) —
+// shown as a muted neutral pill so operators learn the page state
+// without being alarmed.
+function HealthBadge({ app }: { app: AppModel }) {
+  const status = app.healthStatus ?? 'unknown';
+  const tone: 'good' | 'bad' | 'warn' | 'neutral' =
+    status === 'healthy'
+      ? 'good'
+      : status === 'failed'
+        ? 'bad'
+        : status === 'degraded'
+          ? 'warn'
+          : 'neutral';
+  const label =
+    status === 'healthy'
+      ? 'healthy'
+      : status === 'failed'
+        ? 'unhealthy'
+        : status === 'degraded'
+          ? 'degraded'
+          : 'health unknown';
+  return (
+    <span style={{ marginLeft: 10, display: 'inline-flex', verticalAlign: 'middle' }} title={app.healthMessage ?? ''}>
+      <Pill tone={tone}>{label}</Pill>
+    </span>
   );
 }

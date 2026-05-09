@@ -17,6 +17,7 @@ import {
 } from '../components/ui/atoms';
 import { Icon } from '../components/ui/Icon';
 import { useToastStore } from '../stores/toastStore';
+import { useStageLogs } from '../hooks/useStageLogs';
 
 export default function RunPage() {
   const t = useTheme();
@@ -28,10 +29,22 @@ export default function RunPage() {
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
   const [envStatuses, setEnvStatuses] = useState<EnvironmentStatus[]>([]);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
-  const [stageLogs, setStageLogs] = useState<string>('');
-  const [logsLoading, setLogsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+
+  // Live stage-log stream. Backend B1 broadcasts each line on
+  //   stage-logs:<runId>:<stageId>
+  // useStageLogs handles REST backfill on first paint plus live tail
+  // through the existing 60s ws-ticket flow. Drops the previous 3s
+  // polling loop entirely.
+  const stageLogStream = useStageLogs({
+    pipelineId: id ?? '',
+    runId: runId ?? '',
+    stageId: selectedStageId ?? '',
+    enabled: !!(id && runId && selectedStageId),
+  });
+  const stageLogs = useMemo(() => stageLogStream.lines.join('\n'), [stageLogStream.lines]);
+  const logsLoading = !!selectedStageId && !stageLogStream.backfillLoaded;
 
   // Fetch run + pipeline + env status. Refresh env status every 5s
   // to pick up promotions/approvals while you're watching.
@@ -72,41 +85,8 @@ export default function RunPage() {
     };
   }, [id, runId]);
 
-  // Fetch logs for the selected stage. Stage selection is the user's
-  // signal for which stage's logs to show; the WebSocket stream is a
-  // future follow-up — for now we re-fetch every 3s while the run is
-  // live.
-  useEffect(() => {
-    if (!id || !runId || !selectedStageId) {
-      setStageLogs('');
-      return;
-    }
-    let cancelled = false;
-    setLogsLoading(true);
-    const fetchLogs = () => {
-      pipelineApi
-        .getStageLogs(id, runId, selectedStageId)
-        .then((r) => {
-          if (!cancelled) setStageLogs(r.logs ?? '');
-        })
-        .catch(() => {
-          if (!cancelled) setStageLogs('');
-        })
-        .finally(() => {
-          if (!cancelled) setLogsLoading(false);
-        });
-    };
-    fetchLogs();
-    const isLive = run?.status === 'running';
-    if (!isLive) return () => {
-      cancelled = true;
-    };
-    const t = window.setInterval(fetchLogs, 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(t);
-    };
-  }, [id, runId, selectedStageId, run?.status]);
+  // Logs are now driven by the useStageLogs hook above (WebSocket
+  // stream + REST backfill). The previous 3s-polling loop is gone.
 
   const cancel = async () => {
     if (!id || !runId) return;
