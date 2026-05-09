@@ -61,6 +61,12 @@ type AppStore interface {
 	Create(ctx context.Context, a *model.App) error
 	Update(ctx context.Context, a *model.App) error
 	Delete(ctx context.Context, id string) error
+	// UpdateHealth writes the latest probe verdict for an App without
+	// touching Version or any other field. Called from
+	// service.AppHealthChecker on its periodic tick. Returns
+	// ErrNotFound if the App is gone (probe lost the race with a
+	// delete) — callers should log and skip rather than retry.
+	UpdateHealth(ctx context.Context, id string, status model.AppHealth, msg string, at time.Time) error
 }
 
 // HostStore manages managed-host persistence (Phase 4).
