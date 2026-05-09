@@ -245,6 +245,22 @@ func New(cfg *config.Config) (*Server, error) {
 			defer close(healthDone)
 			_ = checker.Run(healthCtx)
 		}()
+		// Register a cleanup immediately after the goroutine spawns so
+		// any subsequent error return in New() cancels and drains it.
+		// Without this, an early return leaves healthCancel unwired and
+		// the goroutine leaks (W10-12).
+		cleanups = append(cleanups, func() {
+			if healthCancel != nil {
+				healthCancel()
+			}
+			if healthDone != nil {
+				// Cap so a wedged probe doesn't block the cleanup loop.
+				select {
+				case <-healthDone:
+				case <-time.After(2 * time.Second):
+				}
+			}
+		})
 	}
 
 	s := &Server{
@@ -313,6 +329,8 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
+		// Shutdown drain order (W10-13):
+		// 1. HTTP drain → 2. run coordinator drain → 3. health checker cancel + 5s wait → 4. return.
 		slog.Info("shutdown: draining HTTP server", "timeout", shutdownTimeout.String())
 		drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
@@ -330,9 +348,13 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 		if s.healthDone != nil {
 			// AppHealthChecker.Run returns ~immediately on cancel; cap
 			// the wait so a wedged probe doesn't block shutdown forever.
+			// Use NewTimer so we can Stop it when healthDone wins the
+			// race — time.After leaks the underlying timer (W10-14).
+			t := time.NewTimer(5 * time.Second)
+			defer t.Stop()
 			select {
 			case <-s.healthDone:
-			case <-time.After(5 * time.Second):
+			case <-t.C:
 				slog.Warn("shutdown: app health checker drain timed out")
 			}
 		}

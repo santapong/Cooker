@@ -18,7 +18,7 @@ import (
 const appColumns = `id, name, description, github_repo, branch, build_plan, deploy_target,
 	registry_ref, environment_id, webhook_secret, auto_deploy,
 	created_at, updated_at, version,
-	COALESCE(health_status, 'unknown') AS health_status, health_checked_at, COALESCE(health_message, '') AS health_message`
+	health_status, health_checked_at, health_message`
 
 // AppStore implements store.AppStore using PostgreSQL. Webhook
 // secrets are stored as base64 in a separate column — encryption
@@ -133,7 +133,9 @@ func (s *AppStore) Delete(ctx context.Context, id string) error {
 // UpdateHealth writes the latest probe verdict without touching
 // version. Health is observational, not user-visible config — a
 // concurrent Update from the user must not lose its race with a
-// background probe write.
+// background probe write. Runs outside a transaction; concurrent
+// user-driven Updates are safe because Update's column-set doesn't
+// include health_*, so MVCC isolation keeps both writes clean (W10-16).
 func (s *AppStore) UpdateHealth(ctx context.Context, id string, status model.AppHealth, msg string, at time.Time) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE apps SET health_status=$2, health_checked_at=$3, health_message=$4
