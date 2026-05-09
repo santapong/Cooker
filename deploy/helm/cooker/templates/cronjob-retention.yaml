@@ -1,0 +1,53 @@
+{{- if and .Values.retention.enabled .Values.database.host }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "cooker.fullname" . }}-retention
+  labels:
+    {{- include "cooker.labels" . | nindent 4 }}
+    app.kubernetes.io/component: retention
+spec:
+  schedule: {{ .Values.retention.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.retention.successfulJobsHistoryLimit | default 1 }}
+  failedJobsHistoryLimit: {{ .Values.retention.failedJobsHistoryLimit | default 3 }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.retention.backoffLimit | default 2 }}
+      template:
+        metadata:
+          labels:
+            {{- include "cooker.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: retention
+        spec:
+          restartPolicy: Never
+          {{- if .Values.securityContext.enabled }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: {{ .Values.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.securityContext.runAsGroup }}
+            fsGroup: {{ .Values.securityContext.fsGroup }}
+            seccompProfile:
+              type: RuntimeDefault
+          {{- end }}
+          containers:
+            - name: retention
+              image: "{{ .Values.retention.image.repository }}:{{ .Values.retention.image.tag }}"
+              imagePullPolicy: {{ .Values.retention.image.pullPolicy }}
+              {{- if .Values.securityContext.enabled }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              {{- end }}
+              env:
+                {{- include "cooker.databaseUrlEnv" . | nindent 16 }}
+              command: ["/bin/sh", "-c"]
+              args:
+                - >-
+                  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c
+                  "DELETE FROM pipeline_runs WHERE finished_at IS NOT NULL AND finished_at < NOW() - INTERVAL '{{ .Values.retention.daysToKeep | int }} days'"
+              resources:
+                {{- toYaml .Values.retention.resources | nindent 16 }}
+{{- end }}

@@ -216,6 +216,50 @@ jobs:
             echo "ERROR: cooker-kaniko-builder RBAC leaked into buildah render" >&2
             exit 1
           fi
+      - name: helm template (retention disabled by default)
+        run: |
+          helm template cooker deploy/helm/cooker \
+            --set database.host=postgres.example.com \
+            --set database.passwordSecretRef.name=cooker-db \
+            > /tmp/retention-off.yaml
+          # CronJob must be absent by default.
+          if grep -q 'kind: CronJob' /tmp/retention-off.yaml; then
+            echo "ERROR: retention CronJob rendered when retention.enabled=false" >&2
+            exit 1
+          fi
+      - name: helm template (retention enabled)
+        run: |
+          helm template cooker deploy/helm/cooker \
+            --set retention.enabled=true \
+            --set retention.daysToKeep=30 \
+            --set retention.schedule='15 3 * * *' \
+            --set database.host=postgres.example.com \
+            --set database.passwordSecretRef.name=cooker-db \
+            > /tmp/retention-on.yaml
+          grep -q 'kind: CronJob' /tmp/retention-on.yaml || {
+            echo "ERROR: retention CronJob not rendered when enabled" >&2; exit 1; }
+          grep -q 'cooker-retention' /tmp/retention-on.yaml || {
+            echo "ERROR: retention CronJob name not present" >&2; exit 1; }
+          grep -q "schedule: \"15 3 \* \* \*\"" /tmp/retention-on.yaml || {
+            echo "ERROR: retention.schedule not interpolated" >&2; exit 1; }
+          grep -q "INTERVAL '30 days'" /tmp/retention-on.yaml || {
+            echo "ERROR: retention.daysToKeep not interpolated into SQL" >&2; exit 1; }
+          # Hardening: pod must run non-root with caps dropped.
+          grep -q 'runAsNonRoot: true' /tmp/retention-on.yaml || {
+            echo "ERROR: retention pod missing runAsNonRoot" >&2; exit 1; }
+          grep -q 'drop:' /tmp/retention-on.yaml || {
+            echo "ERROR: retention pod missing capability drops" >&2; exit 1; }
+      - name: helm template (retention enabled without database.host renders nothing)
+        run: |
+          helm template cooker deploy/helm/cooker \
+            --set retention.enabled=true \
+            > /tmp/retention-no-db.yaml
+          # Without database.host the chart can't render DATABASE_URL,
+          # so the CronJob must skip itself rather than render a broken Job.
+          if grep -q 'kind: CronJob' /tmp/retention-no-db.yaml; then
+            echo "ERROR: retention CronJob rendered without database.host" >&2
+            exit 1
+          fi
       - name: helm template (keepsave secrets backend)
         run: |
           helm template cooker deploy/helm/cooker \

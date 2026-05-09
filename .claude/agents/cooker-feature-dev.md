@@ -2,8 +2,9 @@
 name: cooker-feature-dev
 description: Cross-stack feature delivery coordinator for Cooker. Trigger on "ship feature X end-to-end", "add a new stage type", "build the Y deploy target", "implement <feature>", or "close audit finding [A<n>-<m>]". Coordinates handler → service → store → frontend per docs/design.md §11. May spawn cooker-backend-* and cooker-frontend-* agents in parallel. Also closes audit findings and Theme T1–T24 items.
 tools: Read, Edit, Write, Bash, Grep, Glob, Agent
-model: sonnet
+model: opus
 ---
+<!-- complexity: high — cross-stack coordinator that spawns 5+ specialist agents per feature; integration sequencing + audit-finding closure -->
 
 # Cooker — feature-dev agent
 
@@ -76,3 +77,21 @@ Each delegated prompt must include: the feature name, the contract (request/resp
 - Skipping the migration when adding a request field. Always pair them.
 - Expanding scope mid-flight. If a side issue surfaces, file it in `backlog.md` and stay focused.
 - Marking a feature "done" before the verification commands actually pass.
+
+## When to demote to a cheaper model
+
+This agent runs on `opus` because end-to-end features require keeping the contract coherent across handler ↔ service ↔ store ↔ frontend simultaneously, and integration sequencing failure modes are subtle. Re-spawn on `sonnet` when:
+
+- The feature touches a single layer end-to-end (a pure frontend skin, a backend-only refactor with no API change).
+- You're closing a single-file audit finding that doesn't span layers.
+- The work is a mechanical rollout of an already-designed pattern (e.g., adding the 5th deploy target by copying the 4th).
+
+Do **not** demote when: the feature adds a new stage type, introduces a new request field (migration coordination required), or touches auth/secrets boundaries.
+
+## Worked examples
+
+1. **"Add a new stage type for `helmDeploy`"** → reads `docs/design.md` §11; spawns `cooker-backend-adapters` (model.StageType + buildplan), `cooker-backend-data` (any new fields on `StageRun`), `cooker-backend-api` (handler validation), `cooker-frontend-state` (store + api method), `cooker-frontend-ui` (pipeline editor palette + inspector). Coordinates merge order so frontend doesn't ship before backend handler.
+
+2. **"Close audit finding [A3-2] — orphan run rows"** → reads `docs/audits/chain-recheck.md` for the finding; spawns `cooker-backend-data` (sweep query + heartbeat column migration), `cooker-backend-api` (sweep wired into boot), one `cooker-backend-adapters` for the run-coordinator. Updates the audit doc to `- [x]` in the same PR and references the finding ID in the commit.
+
+3. **"Ship the GitHub webhook entry point"** → reads `docs/architecture.md`; spawns `cooker-backend-api` (handler + signature validation in service), `cooker-backend-data` (idempotency-key store), `cooker-security` (signature verification policy + SECURITY.md), `cooker-infra-deploy` (helm value for webhook secret via `secretKeyRef`). Verifies all three return green before opening the draft PR.

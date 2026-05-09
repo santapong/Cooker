@@ -245,7 +245,12 @@ the `--cache-to` registry wiring); ~half day for the CLI shell-out.
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), and the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch):
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), and the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob):
+
+### `claude/plan-weekly-features-WoB0S` — weekly feature batch
+
+- ✅ **Per-role complexity + model frontmatter on the 10 cooker-* subagents** — every `.claude/agents/cooker-*.md` now declares an explicit `model:` (sonnet for templated layer work, opus for cross-stack coordinators and the security curator), an inline `<!-- complexity: ... -->` rationale, a "When to escalate / demote" subsection with role-specific triggers, and a "Worked examples" subsection sized 2–3 examples per role. `cooker-feature-dev` and `cooker-security` move from sonnet → opus; the other eight reaffirm sonnet.
+- ✅ **Postgres retention CronJob (Helm)** — closes the launch-readiness "pipeline_runs grows without bound" bullet. New `deploy/helm/cooker/templates/cronjob-retention.yaml` gated on `retention.enabled && database.host`, defaults to a 90-day cutoff at 02:00 UTC daily. Reuses the new `cooker.databaseUrlEnv` named template so deployment.yaml and the CronJob share the same `DATABASE_URL` construction. Pod runs as UID 65532 with caps dropped + readOnlyRootFilesystem when `securityContext.enabled=true`. Three new helm-template CI matrix rows assert (a) CronJob absent by default, (b) interpolation of `daysToKeep` + `schedule` + hardening on render, (c) Job is skipped when `database.host` is empty.
 
 ### `claude/review-production-rollout-MT3YO` — P0 follow-up batch (operator-independent)
 

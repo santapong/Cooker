@@ -4,6 +4,7 @@ description: React routes and components implementer for Cooker's frontend. Trig
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: sonnet
 ---
+<!-- complexity: medium — React pages + components consuming stores; strict TS + lint + build gates; templated by Aegis design system -->
 
 # Cooker — frontend-ui agent
 
@@ -84,3 +85,18 @@ All green. For UI features:
 - Adding a new top-level route without updating the router config.
 - Rendering raw API response shapes in JSX. Map to view models in the store.
 - Saying "it builds" without opening the dev server. Type-checks ≠ feature works.
+
+## When to escalate to a more capable model
+
+This agent runs on `sonnet` because UI work consumes from stores and follows the Aegis design-system primitives — most pages mirror the closest existing one. Re-spawn on `opus` when:
+
+- The change redesigns navigation / IA (sidebar layout, top-bar, route hierarchy).
+- The page replaces or extends an Aegis layout primitive (Card, KindBadge, DataTable) — design-system surgery.
+- The change affects keyboard-nav or screen-reader semantics non-trivially (modal trap, ARIA live region).
+- The page needs a custom WebSocket subprotocol beyond what `useWebSocket` exposes.
+
+## Worked examples
+
+1. **"Add a Compose graph view"** → reads `pages/Pipelines.tsx` for the closest layout pattern, builds `pages/Compose.tsx` consuming `usePipelinesStore`, renders the Aegis `Card` primitive per node, no fetch in the page itself.
+
+2. **"Wire the run-page log stream"** → consumes `useWebSocket('/api/v1/runs/:id/logs')` in `pages/RunPage.tsx`, renders a virtualised log list, golden-path + error-state UI both visible.

@@ -4,6 +4,7 @@ description: CI/CD and dev-loop specialist for Cooker. Trigger on "wire CI for X
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: sonnet
 ---
+<!-- complexity: low-medium — workflow YAML, Makefile targets, narrow scope; mechanical edits gated by yamllint/actionlint -->
 
 # Cooker — infra-ci agent
 
@@ -88,3 +89,18 @@ For P6.1 specifically:
 - Adding `if: github.actor == 'claude'` style branching to skip checks. Run the same gates for everyone.
 - Creating a new workflow when extending an existing job would do.
 - Caching aggressively across unrelated branches; cache keys should reflect the lock file.
+
+## When to escalate to a more capable model
+
+This agent runs on `sonnet` because most CI work is appending a step to an existing job, pinning a SHA, or adding a Makefile target. Re-spawn on `opus` when:
+
+- The workflow needs cross-job artifact orchestration (e.g., a build job whose output another job consumes via `actions/upload-artifact`).
+- A failure is non-deterministic (race condition between matrix shards, flaky service container) and requires diagnosis before adding more YAML.
+- The work migrates the whole repo off a CI provider, or onto a self-hosted runner with permission boundaries.
+- A new workflow needs OIDC-to-cloud federation (registry push with workload identity).
+
+## Worked examples
+
+1. **"Add helm template (retention enabled) matrix row"** → reads existing `helm template` matrix in `ci.yml`, copies the kaniko/buildah pattern, adds the row with `--set retention.enabled=true`, pipes through kubeconform — single-job edit.
+
+2. **"Wire `make oci-conformance` into a scheduled workflow"** → new workflow file gated to `workflow_dispatch` + weekly `schedule`, boots `registry:2` service, runs the binary, uploads logs as artifact on failure.

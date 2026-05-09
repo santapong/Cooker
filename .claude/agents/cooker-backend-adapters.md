@@ -4,6 +4,7 @@ description: Pluggable-backend and stage-type specialist for Cooker. Trigger on 
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: sonnet
 ---
+<!-- complexity: medium — narrow-interface adapter registration via selectXxx; templated by existing builders/pushers/deployers -->
 
 # Cooker — backend-adapters agent
 
@@ -85,3 +86,18 @@ Plus:
 - Skipping the `selectXxx` registration "for now". Adapters that aren't registered are dead code.
 - Reaching for docker.sock as a "quick path" to ship a builder. Use Kaniko, Buildah, or BuildKit.
 - Adding a stage type and using a `default:` branch in the consumer switch — silently swallows future additions.
+
+## When to escalate to a more capable model
+
+This agent runs on `sonnet` because adapter work follows a tight pattern (`New<Adapter>` constructor → `selectXxx` case → env-var docs → unit tests). Re-spawn on `opus` when:
+
+- The new adapter forces a change to the underlying interface (Builder/Pusher/Deployer/DeployTarget) — interface-design work.
+- The adapter introduces a new auth model (e.g., GCP workload identity) that the rest of the codebase doesn't yet handle.
+- A new stage type's compiler-graph semantics aren't obviously analogous to existing types (e.g., a fan-out node when no fan-out exists yet).
+- The adapter must coexist with another adapter via a coordinator (e.g., dual-builder hot-swap).
+
+## Worked examples
+
+1. **"Add Buildah builder"** (P9.5) → `internal/builder/buildah.go` mirrors Kaniko's Job pattern, `selectBuilder` in `server.go` adds `case "buildah"`, `.env.uat.example` documents `COOKER_BUILDER=buildah` + `COOKER_BUILDAH_STORAGE_DRIVER`, unit tests assert Job spec + caps. Hand chart wiring to `cooker-infra-deploy`.
+
+2. **"Add Render deploy target"** (P9.2) → `internal/deploytarget/render/` self-registers when its config block is non-empty, implements `DeployTarget` against `https://api.render.com/v1/`, unit tests use `httptest.Server` to assert the SDK calls fire correctly.

@@ -314,6 +314,37 @@ securityContext:
   runAsGroup: 65532
   fsGroup: 65532
 
+# Pipeline-runs retention. Off by default. When enabled (and
+# database.host is set so the chart renders DATABASE_URL), this
+# renders a CronJob that runs `psql` against the same Postgres and
+# deletes pipeline_runs rows whose finished_at is older than
+# daysToKeep. Closes the launch-readiness "pipeline_runs grows
+# without bound" item without putting the DELETE path inside the
+# request-serving binary.
+#
+# The Job is gated on `database.host` because the chart only renders
+# DATABASE_URL when an in-chart Postgres reference is provided; if
+# you point Cooker at an external Postgres via extraEnv, write your
+# own retention job — this template can't see your DATABASE_URL.
+retention:
+  enabled: false
+  schedule: "0 2 * * *"   # 02:00 UTC daily
+  daysToKeep: 90
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  backoffLimit: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
 # NetworkPolicy that restricts ingress to port 8080 from any pod in
 # the same namespace and (optionally) ingress controllers, plus egress
 # to DNS / Postgres / Redis / OCI registries / Kubernetes API. Disable
