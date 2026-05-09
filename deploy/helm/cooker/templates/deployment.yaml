@@ -94,19 +94,7 @@ spec:
             - name: COOKER_BUILDAH_STORAGE_DRIVER
               value: {{ .Values.builder.buildah.storageDriver | default "vfs" | quote }}
             {{- end }}
-            {{- if .Values.database.host }}
-            # DB_PASSWORD must be declared before DATABASE_URL so
-            # Kubernetes' $(VAR) interpolation resolves it. The chart
-            # only renders this block when database.host is set;
-            # otherwise operators provide DATABASE_URL themselves.
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.database.passwordSecretRef.name | quote }}
-                  key: {{ .Values.database.passwordSecretRef.key | quote }}
-            - name: DATABASE_URL
-              value: "postgres://{{ .Values.database.username }}:$(DB_PASSWORD)@{{ .Values.database.host }}:{{ .Values.database.port }}/{{ .Values.database.name }}?sslmode={{ .Values.postgresql.sslMode }}"
-            {{- end }}
+            {{- include "cooker.databaseUrlEnv" . | nindent 12 }}
             {{- if .Values.oidc.allowedOrigins }}
             - name: COOKER_ALLOWED_ORIGINS
               value: {{ join "," .Values.oidc.allowedOrigins | quote }}

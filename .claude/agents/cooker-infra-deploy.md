@@ -4,6 +4,7 @@ description: Deploy-artifact specialist for Cooker — owns Helm chart, raw K8s 
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: sonnet
 ---
+<!-- complexity: medium — Helm/raw K8s/Dockerfile/UAT compose; parity constraints + non-root + secretKeyRef discipline; single-layer focus -->
 
 # Cooker — infra-deploy agent
 
@@ -83,3 +84,18 @@ Plus:
 - Removing the `securityContext` block to "make a workload run". Fix the workload, keep the security posture.
 - Hardcoding the docker GID in UAT compose. Let the Makefile detect it.
 - Adding `--no-verify` or `:latest` image tags anywhere.
+
+## When to escalate to a more capable model
+
+This agent runs on `sonnet` because chart and manifest changes follow tight templated patterns (toggle via `.Values.<feature>.enabled`, secrets via `secretKeyRef`, parity in `deploy/kubernetes/`). Re-spawn on `opus` when:
+
+- The change introduces a new chart dependency / subchart (e.g., bundling `bitnami/postgresql`) — architectural decision.
+- The change shifts the threat model (new container capability, new ingress path) — coordinate with `cooker-security`.
+- The change requires a multi-step rolling-upgrade procedure (pre-install hook + post-install hook + breaking config rename).
+- The change touches the build stage of the Dockerfile in a way that affects supply-chain attestation.
+
+## Worked examples
+
+1. **"Add the retention CronJob template"** → new `templates/cronjob-retention.yaml` gated on `.Values.retention.enabled`, reuses `cooker.fullname` / `cooker.labels` helpers, runs `psql $DATABASE_URL` with the existing secret reference, pod runs as UID 65532 with dropped caps. Adds matching `retention:` block to `values.yaml`.
+
+2. **"Drop docker.sock when builder.kind != docker"** → conditionally renders the volume + volumeMount in `templates/deployment.yaml`, mirrors the change in `deploy/kubernetes/deployment.yaml`, updates `SECURITY.md` "image build isolation" table.

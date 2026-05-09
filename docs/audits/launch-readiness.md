@@ -81,7 +81,7 @@ After deploy:
 
 - [ ] Postgres has WAL archiving / point-in-time-restore enabled. Cooker's chart does NOT ship a backup operator (T23 in `RUNBOOK.md`).
 - [ ] You've run a restore drill in a separate cluster. The drill recipe is in `RUNBOOK.md` § Backup, retention, restore.
-- [ ] Retention policy in place — `pipeline_runs` grows without bound otherwise. Suggested: `DELETE FROM pipeline_runs WHERE finished_at < NOW() - INTERVAL '90 days'`.
+- [ ] Retention policy in place — `pipeline_runs` grows without bound otherwise. Set `retention.enabled: true` in chart values; defaults to a 90-day cutoff at 02:00 UTC daily via the `*-retention` CronJob (`deploy/helm/cooker/templates/cronjob-retention.yaml`). Tune `retention.daysToKeep` and `retention.schedule` to your needs. The Job only renders when `database.host` is also set (so the chart can render `DATABASE_URL`); operators using an external Postgres via `extraEnv` should run their own retention SQL.
 
 ---
 

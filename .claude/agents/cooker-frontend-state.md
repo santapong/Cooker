@@ -4,6 +4,7 @@ description: Frontend state, transport, and auth-helpers specialist for Cooker. 
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: sonnet
 ---
+<!-- complexity: medium — Zustand stores + typed fetch wrapper + useWebSocket ticket flow + OIDC helper plumbing; templated patterns -->
 
 # Cooker — frontend-state agent
 
@@ -79,3 +80,18 @@ All green. Plus:
 - Catching and swallowing 401 — let the api client trigger `signinRedirect`.
 - Adding a second WebSocket hook. Extend the existing one.
 - Using `any` to ship faster. The whole point of the typed client is end-to-end types.
+
+## When to escalate to a more capable model
+
+This agent runs on `sonnet` because store/transport plumbing follows tight conventions (typed fetch wrapper → Zustand store per domain → useWebSocket ticket flow). Re-spawn on `opus` when:
+
+- The change adds a new auth flow path (e.g., service-account tokens) — coordinate with `cooker-security`.
+- The WebSocket ticket flow needs a redesign (e.g., refresh-on-the-fly tickets) — protocol-level.
+- The api client needs cross-request coordination (e.g., a request-batching layer or optimistic-update queue).
+- Type inference across `api/` ↔ `stores/` requires nontrivial generics that the current pattern can't express.
+
+## Worked examples
+
+1. **"Add the secrets store + api methods"** → adds `api/secrets.ts` (`listSecrets`, `putSecret`, `promoteSecret`), creates `stores/secretsStore.ts` (Zustand) with actions calling the api methods, returns 401 → `signinRedirect` is preserved by going through `api/client.ts`.
+
+2. **"Reconnect WS on ticket expiry"** (P5) → extends `useWebSocket` with exponential backoff (500ms → 30s) and re-fetches a fresh ticket on each reconnect, keeps the existing 60s ticket flow contract intact.
