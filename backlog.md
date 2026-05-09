@@ -243,6 +243,49 @@ the `--cache-to` registry wiring); ~half day for the CLI shell-out.
 
 ---
 
+## Discovered via user-journey W11
+
+These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-journeys.md`. Each one cites the persona who hit the friction so reviewers can re-read the original walkthrough. Tier guesses are conservative — promote / demote in a future planning round.
+
+### P1 — high-leverage cross-persona
+
+- [ ] **In-product audit-log viewer.** Filter by user / route / date / app. Reads from existing `audit.Sink`. Surfaced by SaaS team (SOC 2 Lite) + Enterprise SRE (SOC 2 / ISO 27001). W11 §SaaS step 6 + §Enterprise step 6.
+- [ ] **Tenant scoping** — design-doc gate first. Either data-scoped (`owner_team_id` on every Pipeline / App / Environment) or namespace-scoped (a "Cooker namespace" wrapping a slice of resources visible to a subset of OIDC groups). Multi-week feature; needs an ADR before code. Surfaced by Enterprise SRE. W11 §Enterprise step 4.
+- [ ] **Per-Pipeline / per-App `runDeadline` override.** Cluster-level `COOKER_RUN_DEADLINE` is too coarse. Promote to a per-resource setting on `model.Pipeline` and `model.App`. Surfaced by AI/ML engineer; also helps large-monorepo Go shops. W11 §ML step 5.
+- [ ] **Build-cache plumbing.** Surface Kaniko `--cache=true --cache-repo=...` (and Buildah equivalents) as Pipeline / App config. Massive ROI for ML and any iterative-build workload. Surfaced by AI/ML engineer. W11 §ML step 4 + step 9.
+
+### P2 — single-persona high-value
+
+- [ ] **First-run empty-state CTAs** on Apps / Pipelines / Environments. Narrate the "create deploy target → import app → see deploy" sequence. Surfaced by Indie hacker (acute) + SaaS team (less acute). W11 §Indie step 2.
+- [ ] **Build-recipe auto-detect** on `NewAppWizard`. Read `package.json` / `go.mod` / `pyproject.toml` / `Dockerfile` from the connected repo and pre-select Step 3. Surfaced by Indie hacker. W11 §Indie step 3.
+- [ ] **Webhook URL surfaced on `AppDetailPage`** next to the AutoDeploy toggle, with a copy button. Surfaced by Indie hacker. W11 §Indie step 5.
+- [ ] **Surface deployed `URL` on `AppDetailPage`** after a successful deploy (read from `DeployTarget.Status.URL`). Surfaced by Indie hacker. W11 §Indie step 6.
+- [ ] **Bulk import** "import all repos from this GitHub org as Apps". Surfaced by SaaS team. W11 §SaaS step 4.
+- [ ] **Per-environment secret diff view** (`Staging vs Prod`). Same UX shape as `git diff` for env-vars. Surfaced by SaaS team. W11 §SaaS step 7.
+- [ ] **Approver pre-warning** for step-up MFA. Show a badge before they click "approve" so the 403 → re-auth round-trip isn't a surprise. Surfaced by SaaS team. W11 §SaaS step 3.
+- [ ] **Production-readiness checklist surfaced in-product** on first boot (read from `launch-readiness.md` or hardcoded). Surfaced by Enterprise SRE. W11 §Enterprise step 1.
+- [ ] **Per-team RBAC.** Extend `groupRoleMap` to allow scoped grants like `auth-admin: admin in tenant=auth-team`. Depends on the Tenant Scoping P1 above. Surfaced by Enterprise SRE. W11 §Enterprise step 4.
+- [ ] **"Test secrets backend connectivity" page** (`/settings/secrets/test`) — calls Vault / KeepSave / AWS / GCP and shows green/red. Surfaced by Enterprise SRE. W11 §Enterprise step 2.
+- [ ] **Surface "deployed to cluster X (namespace Y)"** prominently on AppDetailPage and Run page header. Surfaced by Enterprise SRE. W11 §Enterprise step 5.
+- [ ] **Append-only / write-once audit-log adapter.** Eg. AWS CloudWatch with no-delete IAM policy, or a write-once S3 backend. New `audit.Sink` impl. Surfaced by Enterprise SRE. W11 §Enterprise step 6.
+- [ ] **Kaniko / Buildah Job `nodeSelector` + `tolerations`** chart values, threaded through to the Job spec. Surfaced by AI/ML engineer. W11 §ML step 6.
+- [ ] **`DeployTarget.NodeSelector` + `DeployTarget.Tolerations` model fields,** written through to Kubernetes deployer's Deployment spec. Surfaced by AI/ML engineer. W11 §ML step 7.
+
+### P3 — speculative / low-leverage
+
+- [ ] **"Use the bundled k3s" easy-button** on the New App wizard / Hosts page. Auto-wires Cooker's own cluster as a deploy target without operator setup. Surfaced by Indie hacker.
+- [ ] **PR-preview environments.** Per-PR ephemeral environments with unique subdomains. Multi-week feature; needs design doc. Surfaced by Indie hacker.
+- [ ] **Bulk webhook-secret rotation** across N selected apps. Surfaced by SaaS team.
+- [ ] **Helm `groupRoleMap` schema validation** — refuse boot with typo'd role names. Surfaced by SaaS team.
+- [ ] **Reduce conceptual cost of Apps-vs-Pipelines** for "I just want a per-repo pipeline" cases. A `make-pipeline-for-app` button on AppDetailPage. Surfaced by SaaS team.
+- [ ] **SAML auth method** alongside the existing OIDC. Some legacy enterprise IdPs are SAML-only. Surfaced by Enterprise SRE.
+- [ ] **`/me/admins` dashboard** listing every user with admin role today (sourced from OIDC groups + `groupRoleMap`). Surfaced by Enterprise SRE.
+- [ ] **Document the `/health/ready` rate-limiting decision** in `SECURITY.md` to short-circuit pen-test reports. Surfaced by Enterprise SRE.
+- [ ] **First-class ML stage type** (`StageTypeMLPull`?) with `dvc` / `huggingface` provider plugins. Surfaced by AI/ML engineer; gate on real demand.
+- [ ] **Document the GitHub clone → PVC staging path** end-to-end in `docs/architecture.md`. Surfaced by AI/ML engineer.
+
+---
+
 ## Closed (recent)
 
 Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), and the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch):
