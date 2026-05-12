@@ -18,35 +18,6 @@ Deprecation verdict: the raw manifests are not beyond redemption, but they are a
 
 ## Class 1 — Values the chart sets that the raw manifests don't
 
-### F-01 — Health-probe paths and probe tuning differ (CRITICAL)
-
-**Severity**: Critical — pod restarts in production before OIDC discovery + migrations complete.
-
-| Dimension | Chart (`templates/deployment.yaml`) | Raw (`kubernetes/deployment.yaml`) |
-|-----------|-------------------------------------|------------------------------------|
-| Liveness path | `/health/live` | `/health` |
-| Readiness path | `/health/ready` | `/health` |
-| Liveness `initialDelaySeconds` | 60 | 10 |
-| Liveness `periodSeconds` | 30 | 30 |
-| Liveness `timeoutSeconds` | 5 | absent |
-| Liveness `failureThreshold` | 5 | absent |
-| Readiness `initialDelaySeconds` | 5 | 5 |
-| Readiness `timeoutSeconds` | 5 | absent |
-| Readiness `failureThreshold` | 5 | absent |
-| Readiness `successThreshold` | 1 | absent |
-| Port reference | named `http` | hardcoded `8080` |
-
-**Chart side**: `deploy/helm/cooker/templates/deployment.yaml:184-200`, `values.yaml:274-284`.
-**Raw side**: `deploy/kubernetes/deployment.yaml:61-70`.
-
-**Effect**: The raw-manifest path hits `/health` (not `/health/live` or `/health/ready`) with a 10s initial delay. On a cold boot — OIDC discovery round-trip + Postgres migration — the app takes 20–60s to serve. Kubernetes will kill the pod after 10+30+30+30 = 100s in the raw-manifest config — just barely survivable, but with no `timeoutSeconds` the probe is unbounded and `failureThreshold` defaults to 3, not 5. More importantly, if `/health` does not exist as a route (the backend registers `/health/live` and `/health/ready` per SECURITY.md and CLAUDE.md architecture), every raw-path deployment will be permanently crash-looping.
-
-**Fix**: Update `deploy/kubernetes/deployment.yaml` probe paths to `/health/live` and `/health/ready`; copy liveness `initialDelaySeconds: 60`, `failureThreshold: 5`, `timeoutSeconds: 5`; add `readinessProbe.successThreshold: 1`, `failureThreshold: 5`, `timeoutSeconds: 5`; use port name `http` not `8080`.
-
-**Effort**: 15 min.
-
----
-
 ### F-02 — Missing env-vars: COOKER_ENV, COOKER_REPLICA_COUNT, COOKER_STICKY_SESSIONS (HIGH)
 
 **Severity**: High — production-mode strict CORS and `Config.Validate()` never activate; multi-replica safety check bypassed.
@@ -234,16 +205,28 @@ Given that CLAUDE.md explicitly advertises `deploy/kubernetes/` as the "raw mani
 
 ## Finding Index
 
-| ID | Title | Severity | Effort |
-|----|-------|----------|--------|
-| F-01 | Health-probe paths and tuning differ | Critical | 15 min |
-| F-02 | COOKER_ENV, COOKER_REPLICA_COUNT, WS/rate-limit backends absent | High | 10 min |
-| F-03 | Entire OIDC env-var block absent | High | 20 min |
-| F-04 | COOKER_SECRET_KEY not in raw manifest | Critical | 5 min |
-| F-05 | COOKER_BUILDER and builder config absent | Medium | 10 min |
-| F-06 | COOKER_SECRETS_BACKEND absent | Medium | 5 min |
-| F-07 | terminationGracePeriodSeconds absent (30s vs 60s) | Medium | 2 min |
-| F-08 | Nginx proxy annotations only in raw ingress | Low | 10 min |
-| F-09 | DATABASE_URL sslmode not enforced in raw path | Low | 5 min |
+| ID | Title | Severity | Effort | Status |
+|----|-------|----------|--------|--------|
+| F-01 | Health-probe paths and tuning differ | Critical | 15 min | **Closed** — PR `claude/w2-f01-raw-k8s-probes` |
+| F-02 | COOKER_ENV, COOKER_REPLICA_COUNT, WS/rate-limit backends absent | High | 10 min | Open |
+| F-03 | Entire OIDC env-var block absent | High | 20 min | Open |
+| F-04 | COOKER_SECRET_KEY not in raw manifest | Critical | 5 min | Open |
+| F-05 | COOKER_BUILDER and builder config absent | Medium | 10 min | Open |
+| F-06 | COOKER_SECRETS_BACKEND absent | Medium | 5 min | Open |
+| F-07 | terminationGracePeriodSeconds absent (30s vs 60s) | Medium | 2 min | Open |
+| F-08 | Nginx proxy annotations only in raw ingress | Low | 10 min | Open |
+| F-09 | DATABASE_URL sslmode not enforced in raw path | Low | 5 min | Open |
 
-Total remediation effort for F-01 through F-07: approximately 1 hour.
+Total remediation effort for F-02 through F-07: approximately 45 min remaining.
+
+---
+
+## Closed
+
+### F-01 — Health-probe paths and probe tuning differ (CRITICAL) — Closed
+
+**Closed by**: PR `claude/w2-f01-raw-k8s-probes` — `fix(deploy/kubernetes): use /health/live + /health/ready probes`
+
+**Was**: `deploy/kubernetes/deployment.yaml` probed `/health` (a non-existent route) with `initialDelaySeconds: 10`, no `timeoutSeconds`, no `failureThreshold`. The named port was hardcoded to `8080` instead of the symbolic `http`.
+
+**Now**: Paths updated to `/health/live` (liveness) and `/health/ready` (readiness), matching the chart. `initialDelaySeconds: 60` for liveness, `timeoutSeconds: 5`, `failureThreshold: 5` on both probes, `successThreshold: 1` on readiness, port reference changed to `http`. Fully in parity with `deploy/helm/cooker/templates/deployment.yaml:184-200` and `values.yaml:282-293`.
