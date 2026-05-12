@@ -7,6 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — May 2026 W1 batch (PRs #31, #32, #33, #35, #36, #37, #38, #39, #40)
+
+**First week of execution against the May-2026 30-day plan.** Three primary code PRs landed (CI, security, frontend perf); seven research audit docs landed and surfaced four production-shape bugs for fast-track in W2+.
+
+#### Primary code (production-shape)
+
+- **CI critical path → ~3 min on warm cache** (PR #35). Parallel `go test -race ./...` in one invocation (P26-05-34); drop `needs: [backend, frontend, helm]` serialisation on the docker job (P26-05-38); `docker/setup-buildx-action@v3` + `docker/build-push-action@v6` with `cache-from: type=gha`, `cache-to: type=gha,mode=max` (P26-05-39); `actions/cache@v4` for `~/.cache/go-build` keyed on `hashFiles('backend/go.sum')` (P26-05-35 bonus).
+- **Frontend bundle split — entry chunk 490 KB → 59 KB (88% cut)** (PR #38). Route-level `React.lazy` + `<Suspense fallback={<SkeletonStack />}>` for all non-landing routes; Vite `manualChunks` splits `react`, `@xyflow/react`, `oidc-client-ts`, `zustand` into independent vendor chunks. `@xyflow/react` (~150 KB) only loads on canvas routes (PipelineEditor, RunPage, ComposePage). Closes P26-05-24 + P26-05-28.
+- **S26-05 security quick wins (six fixes)** (PR #39).
+  - **S26-05-04** — drop `/var/run/docker.sock` volume + volumeMount from `deploy/kubernetes/deployment.yaml`; inline warning comment.
+  - **S26-05-13** — drop `postgresql.auth.password: cooker` default from `values.yaml`; `required`-guard `database.passwordSecretRef.name` in `_helpers.tpl`.
+  - **S26-05-10** — `net/url`-based `sslmode` enforcement in `Config.Validate()`: non-localhost hosts must use `require` / `verify-ca` / `verify-full` in production. Four new tests.
+  - **S26-05-01** — replace five reflected-error sites in `internal/auth/oidc.go` with generic `authentication failed` / `provider unavailable`; detail at `slog.Warn`/`slog.Error` server-side. `TestMiddleware_TamperedLocalTokenReturnsGenericBody` pins the contract.
+  - **S26-05-19** — RBAC / rate-limiting / CORS wording updates in `SECURITY.md`; flip Postgres-SSL checklist line to checked.
+  - **S26-05-23** — env-configurable `orphanThreshold` via `COOKER_ORPHAN_SWEEP_INTERVAL` (default 60s, rejects values ≤ `heartbeatInterval`). `TestOrphanThreshold_DefaultIsSafe` added. Note: the SQL-parameterisation half of S26-05-23 is **still open**.
+
+#### Research audits (W1 idle-lane output)
+
+Each lands as a doc only; the actionable findings are summarised inline.
+
+- **`docs/audits/W11-followup-2026-05.md`** (PR #31, `cooker-planner`). 31/31 W11 gaps cross-reference clean. Two follow-ups: silent P1→P2 demotion of Kaniko/Buildah `nodeSelector` + `tolerations` (W11 §ML step 6), and single-persona tagging on first-run onboarding.
+- **`docs/audits/2026-05-adapter-wiring.md`** (PR #32, `cooker-backend-adapters`). Five findings. **F-02 (High)**: missing `COOKER_PUSHER=docker` production gate in `Config.Validate` — silent regression of the existing `COOKER_BUILDER=docker` guard. F-01 (High): `selectBuilder` / `selectPusher` / `selectDeployer` default-fall-through to `Noop{}` on unknown values. Plus three Lower-severity findings.
+- **`docs/audits/2026-05-deploy-parity.md`** + **`2026-05-store-parity.md`** (PR #33, `cooker-infra-deploy` + `cooker-backend-data`, stacked on one branch due to sandbox shared-cwd contamination). **F-01 (Production)**: raw-K8s manifests probe `/health` (10 s initial delay); chart probes `/health/live` + `/health/ready` (60 s). Raw-manifest install path → `CrashLoopBackOff`. **F-07 (Production)**: `RunCoordinator.Spawn` for app-deploy writes heartbeats to a row that doesn't exist yet (`handler/app.go:179-184`); OOM-killed pod leaves no orphan row for `SweepOrphans` → run lost silently.
+- **`docs/audits/2026-05-frontend-hygiene.md`** (PR #40, replaces #34 after extracting unique file from contaminated commit). Seven findings. **FH-03 (High)**: `useWebSocket.connect()` races with `disconnect()` during the ticket fetch; rapid unmounts leak WebSocket connections up to the browser's 256-per-origin limit. One-line fix recommended.
+- **`docs/audits/2026-05-half-shipped.md`** (PR #36, `cooker-feature-dev`). Five trust-of-tool gaps where UI claims success but backend does nothing. **HS26-05-01**: promotion + approval flow is theatre (handlers synthesise success). **HS26-05-02**: GitHub webhook deploy returns 202 but never enqueues. HS26-05-03 already closed by T1 (DAG plan). HS26-05-04: settings registry/cluster CRUD persists nothing. HS26-05-05: `/kubernetes/*` fully stubbed.
+- **`docs/audits/2026-05-handler-layering.md`** (PR #37, `cooker-backend-api`). Three High findings. F1: duplicate DAG validator in `handler/pipeline.go:267-324` (57-line reimplementation of `service.ValidatePipelineDAG`). F2: run-status finalisation rule embedded in the `RunPipeline` goroutine closure. F3: compose-file parsing + graph construction (~200 LOC) in the docker handler.
+
+#### Sandbox-isolation lesson
+
+The W1 parallel-spawn run (10 background agents sharing one cwd) produced cross-branch contamination: PR #34's head commit bundled three audits, only one its own; PR #33's branch stacked three audits in sequence. PR #34 was closed and replaced by PR #40 (the unique frontend-hygiene file salvaged onto a fresh branch). W2+ spawns use `isolation: "worktree"` per the team plan.
+
+### Added — `claude/project-audit-security-GKXzQ` (PR #29) — May 2026 audit week
+
+**Seven-workstream audit run. Four waves of consolidation. No production code changes — this PR ships the planning + research surface that the 30-day execution plan runs against.** Detailed scope and decisions in [`docs/pm-brief-2026-05.md`](docs/pm-brief-2026-05.md).
+
+#### Wave 1 — fresh audits
+
+- **`docs/audits/2026-05-security-review.md`** (407 lines). Full-repo line-cited security pass against post-PR-#21 HEAD. Auth, secrets, container & supply chain, network, data, API surface, threat-model drift.
+- **`docs/audits/2026-05-perf-and-optimization.md`** (445 lines). Allocations, latency, throughput, footprint, startup time.
+- **`docs/audits/dag-performance.md`** (177 lines). Cache, job-queue/concurrency, fault tolerance, per-stage logging behaviour for `backend/pkg/dagrunner` + `internal/service` + `internal/builder` + `internal/deployer`.
+- **`docs/shipping-go.md`**. Research: how mature OSS Go products release and operate; 0–180 day Cooker adoption plan. Gates the marketing launch.
+
+#### Wave 2 — strategic planning
+
+- **`docs/roadmap-2026.md`** (205 lines). 2026 themes + top-30. Strategic frame: between "Jenkins-is-too-much" and "GitHub-Actions-YAML-is-too-little".
+- **`docs/protocols.md`** (699 lines). §3 **CKR-LOG/1** (length-prefixed binary log-stream framing). §4 **CKR-DSL** (pipeline DSL design surface, recommended syntax YAML — needs decision B).
+- **`docs/marketing/strategy.md`**. OSS-adoption strategy, 90-day horizon. Blocked on `shipping-go.md` deliverables.
+
+#### Wave 3 — user guide
+
+34 files across `docs/user-guide/` — `index.md`, `concepts/`, `getting-started/`, `guides/`, `operations/`, `reference/`, `troubleshooting/`, `faq.md`. ~4,908 lines.
+
+#### Wave 4 — PM brief + DAG plan
+
+- **`docs/pm-brief-2026-05.md`** (183 lines). 15-item 90-day plan (Block 1), eight open decisions A–H, agent-delegation map.
+- **`docs/dag-adaptation-2026.md`** (649 lines). Research from Jenkins / Dokploy / Dagger / Airflow. Output: **5 DAG primitives ranked**, **5 tidy-first refactors T1–T5**, **4 ADRs DR-1..DR-4**, **20-week implementation calendar**.
+
+#### CI fix
+
+- `fix(ci): unblock backend gofmt step — drop trailing blank lines` (commit `ed0a212`).
+
+---
+
+### Added — bridge entries (PRs #21, #23, #24, #25, #26, #27, #28)
+
+Catching CHANGELOG up to where commits already landed. Each block summarises a merged PR; authoritative narrative is in `backlog.md` "Closed (recent)".
+
+#### `claude/identify-failure-point-Duy02` (PR #21) — SPOF closeout
+
+- **Graceful HTTP shutdown** on SIGTERM/SIGINT (30s drain). `terminationGracePeriodSeconds: 60` in chart.
+- **Postgres reconnect-with-backoff at boot** — jittered exponential (500ms→30s, 5min budget). `livenessProbe.initialDelaySeconds: 60`.
+- **`/health/live` + `/health/ready` split** with per-check breakdown. `/health` kept as back-compat alias.
+- **Lazy OIDC discovery + JWKS-age signal** — atomic `verifier *atomic.Pointer[oidc.IDTokenVerifier]` with double-checked init.
+- **`RunCoordinator` heartbeat + orphan sweep** — `internal/server/runs.go` tracks goroutines, drains 25s on shutdown. Migration `006_run_heartbeat.up.sql` adds `heartbeat_at` partial index.
+- **`Config.Validate` multi-replica + builder guards** — refuses production `COOKER_BUILDER=docker`; refuses `replicaCount>1` + memory state without `COOKER_STICKY_SESSIONS=true`.
+- **Helm defaults flipped to multi-replica safe** — kaniko + Redis WS hub + Redis WS tickets + Redis rate limit.
+- **Redis pub/sub WS hub** — length-prefixed binary frame across replicas; jittered subscriber reconnect.
+- **Resilience Prometheus counters** — `cooker_db_connection_errors_total`, `cooker_redis_connection_errors_total`, `cooker_jwks_fetch_failures_total`, `cooker_pipeline_runs_orphaned_total`. Alertmanager rules in `RUNBOOK.md`.
+- **OCI distribution-spec conformance CI** — `registry:2` sidecar + upstream conformance binary.
+- **Aegis "Workshop" frontend redesign** — full port: paper/coal/rust theme, shared atoms, Simple ⇄ Pro mode, every page re-laid.
+- **`docs/ROLLOUT.md`** — operator UAT→production cutover playbook.
+
+#### `claude/review-production-rollout-MT3YO` — P0 follow-up batch
+
+- **P0.1** — OIDC lock-free fast path via `atomic.Pointer[oidc.IDTokenVerifier]`.
+- **P0.2** — Redis WS hub subscriber resubscribe with backoff + 5s `Receive` timeout.
+- **P0.3** — `time.NewTimer` + `Stop()` in DB backoff (replaces `time.After`).
+- **P0.4** — parallel readiness checks via `errgroup`.
+- **P0.5** — binary WS broadcast framing (~74 → 2 bytes of framing).
+- **P0.6** — OCI conformance scope flipped to `workflow_dispatch` / `schedule` only.
+- **P0.7** — OCI image-spec v1.1 structural schema validation.
+- **P7** — `make uat-up-with-keycloak` (pre-seeded `cooker` realm) + `make test-e2e`.
+- **P9.5 follow-up** — Buildah Helm chart wiring; CI matrix asserts docker-socket absent + buildah RBAC renders.
+
+#### `claude/plan-weekly-features-WoB0S` (PR #25)
+
+- **Per-role complexity + model frontmatter on `cooker-*` subagents.** Three Opus (planner, security, feature-dev), seven Sonnet.
+- **Postgres retention CronJob (Helm)** — 90-day cutoff at 02:00 UTC daily; runs as UID 65532 with caps dropped; reuses `cooker.databaseUrlEnv` named template.
+
+#### `claude/observability-week-1` (PR #26)
+
+- **Per-stage live logs** — `model.Stage.Logs` populated by the executor, streamed over WebSocket.
+- **App health** — `AppDetailPage` reads real status from `DeployTarget.Status`; deploy adapter surfaces `URL` on success.
+
+#### `claude/docs-w10-w11` (PR #27) + bundled fixes (PR #28)
+
+- **`docs/audits/W10-bug-and-chain-recheck.md`** — third pass at the bug + chain re-audit.
+- **`docs/audits/W11-user-journeys.md`** (195 lines) — four-persona walkthrough; populated the "Discovered via user-journey W11" section in `backlog.md`.
+- PR #28 ships bundled small fixes from the W10 audit.
+
+#### Skills + agents harness
+
+- `cooker-audit`, `cooker-find`, `cooker-improve`, `cooker-weekly`, `cooker-ci-debug`, `cooker-fix-bug`, `cooker-new-feature` skills under `.claude/skills/`.
+- Per-role `cooker-*` subagents under `.claude/agents/` (planner, backend-api, backend-data, backend-adapters, frontend-ui, frontend-state, infra-ci, infra-deploy, security, feature-dev).
+
+---
+
 ### Added — `claude/finish-backlog-priority-psf4D` (PR #19)
 
 #### Toolchain (P6)
