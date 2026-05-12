@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,5 +94,40 @@ func TestMiddleware_NonLocalNonOIDCRejected(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 when OIDC disabled and token is not local; got %d", rec.Code)
+	}
+}
+
+// S26-05-01: confirm the verify-failure body does not echo upstream
+// library detail. Any drift here would re-introduce the oracle the
+// audit closed.
+func TestMiddleware_TamperedLocalTokenReturnsGenericBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	m, _ := NewMiddleware(context.Background(), config.OIDCConfig{Enabled: false})
+	key := make([]byte, 32)
+	issuer, _ := local.NewIssuer(key, time.Minute)
+	m.EnableLocalAuth(issuer)
+
+	tok, _, _ := issuer.Issue("u", "e@x.com", "n", "viewer")
+
+	r := gin.New()
+	r.GET("/whoami", m.Handler(), func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodGet, "/whoami", nil)
+	req.Header.Set("Authorization", "Bearer "+tok+"extra")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401; got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "authentication failed") {
+		t.Fatalf("expected generic body, got: %s", body)
+	}
+	// Should NOT contain library diagnostic strings.
+	for _, bad := range []string{"signature", "malformed", "kid", "iss", "aud"} {
+		if strings.Contains(strings.ToLower(body), bad) {
+			t.Fatalf("body leaks upstream diagnostic %q: %s", bad, body)
+		}
 	}
 }

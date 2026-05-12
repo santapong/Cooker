@@ -13,14 +13,30 @@ import (
 )
 
 // heartbeatInterval is how often a tracked goroutine writes
-// heartbeat_at to its run row. Must be < orphanThreshold / 2 so the
+// heartbeat_at to its run row. Must be < orphanThreshold so the
 // boot-time sweep doesn't false-positive on healthy runs.
 const heartbeatInterval = 30 * time.Second
 
-// orphanThreshold is the staleness past which a heartbeat declares a
-// run orphaned. Set deliberately above 2*heartbeatInterval to absorb
-// one missed tick.
-const orphanThreshold = 90 * time.Second
+// defaultOrphanSweepInterval is the staleness past which a heartbeat
+// declares a run orphaned at boot. Operators can override via
+// COOKER_ORPHAN_SWEEP_INTERVAL (Go duration string) when their
+// workload tolerates a different staleness window. Default 60s
+// (must remain > heartbeatInterval to avoid false-positives on
+// healthy runs that miss a single tick).
+const defaultOrphanSweepInterval = 60 * time.Second
+
+// orphanThreshold is the staleness used by the boot-time sweep.
+// Initialised from COOKER_ORPHAN_SWEEP_INTERVAL; falls back to the
+// default when unset, malformed, or <= heartbeatInterval (a smaller
+// value would reap healthy in-flight runs).
+var orphanThreshold = func() time.Duration {
+	if v := os.Getenv("COOKER_ORPHAN_SWEEP_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > heartbeatInterval {
+			return d
+		}
+	}
+	return defaultOrphanSweepInterval
+}()
 
 // runDrainTimeout caps how long the coordinator's Wait will block
 // after a shutdown ctx cancel. Stragglers beyond this get cut off and

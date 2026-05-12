@@ -349,6 +349,69 @@ func TestValidate_ProductionRejectsWildcardOrigin(t *testing.T) {
 	}
 }
 
+func TestValidate_ProductionRejectsSSLModeDisable(t *testing.T) {
+	// S26-05-10: real DATABASE_URL with sslmode=disable must fail.
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:realpw@db.cooker.svc.cluster.local:5432/cooker?sslmode=disable",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "sslmode") {
+		t.Fatalf("expected sslmode rejection, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionRejectsMissingSSLMode(t *testing.T) {
+	// S26-05-10: a non-localhost DATABASE_URL with no sslmode query
+	// parameter at all is equivalent to disable for the purposes of
+	// this guard.
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:realpw@db.cooker.svc.cluster.local:5432/cooker",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "sslmode") {
+		t.Fatalf("expected sslmode rejection for missing query param, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionAcceptsVerifyFull(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:realpw@db.example.com:5432/cooker?sslmode=verify-full",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("sslmode=verify-full should be accepted, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionAllowsLocalhostWithoutSSL(t *testing.T) {
+	// The sslmode guard only applies to non-localhost hosts: a
+	// loopback DATABASE_URL is dev-only-shaped and already covered by
+	// the dev-default-rejection check. We don't want to false-positive
+	// here for operators who happen to run an in-pod Postgres on
+	// localhost.
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:realpw@localhost:5432/cooker?sslmode=disable",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("localhost DATABASE_URL should not trigger sslmode guard, got: %v", err)
+	}
+}
+
 func TestValidate_ProductionRejectsHTTPKeepSave(t *testing.T) {
 	cfg := &Config{
 		Env:            EnvProduction,

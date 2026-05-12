@@ -34,6 +34,7 @@ Cooker offers two authentication paths. Operators can enable either or both:
 - **Token validation**: JWT access tokens validated server-side using the OIDC provider's JWKS endpoint
 - **Session management**: Short-lived access tokens with refresh token rotation
 - **Supported providers**: Keycloak, Okta, Azure AD, Google, GitHub
+- **Generic verify-failure response** (S26-05-01): on a verify error the API returns `{"error":"authentication failed"}` with `401`, and `{"error":"provider unavailable"}` with `503 + Retry-After` when the IdP itself is unreachable. The upstream library's diagnostic detail (`iss mismatch`, `kid not found`, signature parse errors, etc.) is logged at `slog.Warn` / `slog.Error` server-side only — clients do not get an oracle for crafting valid-shaped tokens or fingerprinting JWKS rotation cadence.
 
 > **Default in local & UAT:** OIDC is **disabled** (`COOKER_OIDC_ENABLED=false`) and the backend injects a dev admin user so contributors and testers can exercise the API without an IdP. Production deployments should enable OIDC — see the checklist below and [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) for how to wire Google or another provider.
 
@@ -94,7 +95,7 @@ The frontend API client recognises this response and re-issues the OIDC sign-in 
 
 - **In-cluster**: Uses Kubernetes service account tokens with least-privilege RBAC
 - **External**: Kubeconfig-based access with configurable contexts
-- **RBAC**: Cooker's service account ClusterRole is scoped to required resources only (deployments, pods, services, configmaps, secrets, namespaces)
+- **RBAC** (S26-05-19): Cooker's ServiceAccount holds a Role *or* ClusterRole, chart-selectable via `rbac.clusterWide`. The chart default is **cluster-wide** for compatibility with the v0.1 raw manifests (`deploy/kubernetes/rbac.yaml`); namespace-scoped is encouraged once your deploy targets are confined. The chart-rendered ClusterRole is scoped to the resources Cooker needs (deployments, pods, services, configmaps, secrets, namespaces) — but "scoped to resources" is not the same as "scoped to a namespace", which is the property operators reading this section usually care about.
 
 ### Image build isolation
 
@@ -105,18 +106,19 @@ Cooker ships four image-build strategies; pick via `COOKER_BUILDER` (chart: `bui
 - **`docker`**: shells out to the local Docker daemon via the bind-mounted host socket. Convenient on single-node test clusters; gives the Cooker container root-equivalent access to the host's Docker. An RCE in Cooker → full host control. Only use this on isolated dev hosts.
 - **`buildkit`**: stub; not yet wired (backlog P9.1).
 
-The Helm chart conditionally drops the `docker.sock` volume + mount when `builder.kind != "docker"`, so any of `kaniko` / `buildah` / `buildkit` carries no leftover host paths.
+The Helm chart conditionally drops the `docker.sock` volume + mount when `builder.kind != "docker"`, so any of `kaniko` / `buildah` / `buildkit` carries no leftover host paths. The **raw-Kubernetes parity manifest** at `deploy/kubernetes/deployment.yaml` does **not** mount the host docker socket either (S26-05-04, closed on `claude/sec-quickwins-2026-05`); operators who legitimately need the socket must author a deliberate variant and accept the RCE-to-host gap explicitly.
 
 ### Data Security
 
 - **Database**: Pipeline definitions, run history, and environment configs stored in PostgreSQL
-- **Secrets**: Database passwords, OIDC client secrets, and registry credentials should be managed via Kubernetes Secrets or an external secret manager (e.g., HashiCorp Vault, AWS Secrets Manager)
+- **Secrets**: Database passwords, OIDC client secrets, and registry credentials should be managed via Kubernetes Secrets or an external secret manager (e.g., HashiCorp Vault, AWS Secrets Manager). The Helm chart **does not ship a default Postgres password** (S26-05-13); operators must pre-create a Secret and point `database.passwordSecretRef.name` at it. The chart `required`-guards this so a `helm install` without an override fails at render time rather than shipping a publicly-documented credential.
+- **Postgres TLS** (S26-05-10): `Config.Validate()` rejects boot in production when `DATABASE_URL` points at a non-localhost host with `sslmode=disable` (or no `sslmode` parameter at all). The minimum acceptable value is `require`; `verify-ca` / `verify-full` are preferred when a CA bundle is mounted into the pod.
 - **Environment variables**: Sensitive configuration injected at runtime, never baked into images
 - **No secrets in pipelines**: Pipeline variable values are stored in the database; sensitive values should use secret references rather than plaintext
 
 ### Network Security
 
-- **CORS**: Configurable allowed origins via `COOKER_ALLOWED_ORIGINS`. Defaults to `localhost:5173,localhost:3000` for `COOKER_ENV=dev|uat`; defaults to **deny-all** for `COOKER_ENV=production` so missing config is loud, not silent.
+- **CORS**: Configurable allowed origins via `COOKER_ALLOWED_ORIGINS`. Defaults to `localhost:5173,localhost:3000` for `COOKER_ENV=dev|uat`; defaults to **deny-all** for `COOKER_ENV=production` so missing config is loud, not silent. Boot **refuses to start** if `COOKER_ALLOWED_ORIGINS` is empty in production (`Config.Validate` — `backend/internal/config/config.go`); a wildcard `*` is also rejected (S26-05-19).
 - **`Allow-Credentials`**: explicitly **off**. Cooker authenticates via `Authorization: Bearer <jwt>` headers, not cookies — credentials mode adds no value and would block wildcard reflection.
 - **WebSocket**: two-layer auth — same-origin policy via `gorilla/websocket` `CheckOrigin` (sharing the CORS allowlist) **and** a single-use ticket. Clients `POST /api/v1/ws-tickets` over the authenticated API to obtain a 60-second ticket and open `/ws/...` with `?ticket=<value>`. Tickets are consumed on first use; replay is rejected. The per-stage log channel `/ws/runs/:runId/stages/:stageId/logs` (added with the AppHealthChecker work) uses the same ticket gate; no new ingress.
 - **App health probe**: `AppHealthChecker` runs in-process inside the cooker pod and reads from each deploy target via the existing in-cluster credentials (kubeconfig / SDK clients). It does NOT add an inbound network surface; egress is to the same target-backend endpoints the executor already talks to.
@@ -135,7 +137,13 @@ Cooker emits a structured audit event for every authenticated mutating call (POS
 
 ### Rate limiting
 
-Cooker applies a **per-user, in-memory rate limit** to the most expensive endpoints (pipeline runs, Docker image builds, App deploys) so a single user cannot accidentally fork-bomb builds. Defaults: 10 requests/minute, burst 3, keyed on the OIDC subject claim.
+Cooker applies a **per-user, in-memory rate limit** to **three** specific endpoints (S26-05-19) so a single user cannot accidentally fork-bomb builds. Defaults: 10 requests/minute, burst 3, keyed on the OIDC subject claim. The covered routes are exactly:
+
+- `POST /api/v1/pipelines/:id/run`
+- `POST /api/v1/docker/images/build`
+- `POST /api/v1/apps/:id/deploy`
+
+**Every other route in `/api/v1` — including environment / app / pipeline CRUD, webhook secret rotation, `POST /api/v1/environments/:id/secrets/promote`, and the unauthenticated `/webhooks/github` receiver and `/api/v1/auth/local/{signup,signin}` paths — is unbounded at the application layer.** Operators must enforce edge rate-limiting (NGINX `limit_req`, Traefik middleware, Cloudflare, AWS WAF) for those.
 
 - Tunable via `COOKER_RATE_LIMIT_ENABLED` (default `true`), `COOKER_RATE_LIMIT_PER_MINUTE` (default `10`), `COOKER_RATE_LIMIT_BURST` (default `3`).
 - **Multi-replica deployments must disable** this (`COOKER_RATE_LIMIT_ENABLED=false`) — the limiter is per-process and won't share state across replicas. Use ingress / WAF rate limiting instead.
@@ -181,7 +189,7 @@ Referrer-Policy: strict-origin-when-cross-origin
 - [ ] Use Kubernetes Secrets for database passwords and OIDC credentials
 - [ ] Scope Cooker's ClusterRole to required namespaces if possible
 - [ ] Use Kaniko instead of Docker socket for image builds *(set `builder.kind=kaniko` and `builder.kaniko.contextPVC=<your PVC>` in the chart, or `COOKER_BUILDER=kaniko` for non-Helm deploys)*
-- [ ] Enable PostgreSQL SSL connections
+- [x] Enable PostgreSQL SSL connections *(enforced by `Config.Validate()` in production for non-localhost hosts — S26-05-10)*
 - [x] Set up audit logging *(on by default when `COOKER_ENV=production`; emits one JSON event per mutating API call. Destination via `COOKER_AUDIT_DESTINATION`. See "Audit logging" above.)*
 - [x] Run the container as non-root *(image runs as UID 65532 by default)*
 - [x] Enable network policies to restrict pod-to-pod traffic *(NetworkPolicy ships with the Helm chart, gated by `networkPolicy.enabled`; raw manifest at `deploy/kubernetes/network-policy.yaml`)*

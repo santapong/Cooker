@@ -232,10 +232,19 @@ database:
 
 postgresql:
   enabled: true
+  # NOTE: no default `auth.password` is shipped (S26-05-13). The
+  # previous default was the literal string "cooker"; operators who
+  # `helm install`d without an override inherited a publicly-documented
+  # credential. Operators must now provision a Kubernetes Secret and
+  # reference it via `database.passwordSecretRef.name` (see the
+  # `database:` block above) — the chart fails closed via a `required`
+  # guard in `templates/_helpers.tpl` if `database.host` is set without
+  # a password reference. The `auth.{database,username}` keys are kept
+  # for forward-compatibility with a future bundled bitnami/postgresql
+  # subchart; `password` is intentionally absent.
   auth:
     database: cooker
     username: cooker
-    password: cooker
   # SSL/TLS to PostgreSQL. The chart appends ?sslmode=<value> to the
   # DATABASE_URL it constructs from the database.* block above.
   # Production should use "require" at minimum; "verify-full" when a
