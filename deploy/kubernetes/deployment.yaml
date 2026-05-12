@@ -46,9 +46,14 @@ spec:
               value: "redis://cooker-redis:6379"
             - name: COOKER_K8S_IN_CLUSTER
               value: "true"
+          # NOTE: This raw manifest deliberately does NOT mount the host
+          # /var/run/docker.sock. The Helm chart only mounts it when
+          # `builder.kind == "docker"`; this parity path defaults to
+          # Kaniko / Buildah (one-shot Jobs, no host paths) — see
+          # SECURITY.md "Image build isolation" and audit S26-05-04.
+          # Operators who legitimately need the docker socket should
+          # author a deliberate variant; do not re-add the mount here.
           volumeMounts:
-            - name: docker-socket
-              mountPath: /var/run/docker.sock
             # Writable scratch for git clones / temp files since
             # readOnlyRootFilesystem makes everything else read-only.
             - name: tmp
@@ -73,9 +78,5 @@ spec:
               cpu: 500m
               memory: 512Mi
       volumes:
-        - name: docker-socket
-          hostPath:
-            path: /var/run/docker.sock
-            type: Socket
         - name: tmp
           emptyDir: {}

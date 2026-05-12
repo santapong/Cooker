@@ -405,3 +405,16 @@ The audit series has done real work. The following defences are intact at HEAD a
   - `S26-05-03` → `launch-readiness.md` R3 (RBAC live reload).
   - `S26-05-09` → `backlog.md` "Tenant scoping" P1 (under W11 user-journeys section).
   - `S26-05-14`, `S26-05-15` → `backlog.md` P1.5 (Renovate enablement).
+
+---
+
+### Closed in `claude/sec-quickwins-2026-05`
+
+The following six findings shipped as one PR on `claude/sec-quickwins-2026-05`. The original section text above is preserved verbatim; the status lines below mark them as closed and point at the fix.
+
+- **`S26-05-01` — CLOSED.** OIDC verify-failure body is now generic (`authentication failed` / `provider unavailable`). Upstream library diagnostic is logged at `slog.Warn`/`slog.Error` server-side only. See `backend/internal/auth/oidc.go` and `TestMiddleware_TamperedLocalTokenReturnsGenericBody` in `backend/internal/auth/local_middleware_test.go`. `SECURITY.md` §"Path 1: OpenID Connect" updated.
+- **`S26-05-04` — CLOSED.** `deploy/kubernetes/deployment.yaml` no longer mounts `/var/run/docker.sock`. The volume + volumeMount block is removed and an inline comment warns future editors. Parity with the Helm chart's `builder.kind != "docker"` default. `SECURITY.md` §"Image build isolation" updated.
+- **`S26-05-10` — CLOSED.** `Config.Validate()` now refuses to start in production when `DATABASE_URL` points at a non-localhost host with `sslmode=disable` or no `sslmode` parameter. Acceptable values: `require`, `verify-ca`, `verify-full`. See `backend/internal/config/config.go` and the four new `TestValidate_Production*SSL*` cases. `SECURITY.md` §"Data Security" updated; production checklist line flipped to checked.
+- **`S26-05-13` — CLOSED.** The chart default `postgresql.auth.password: cooker` is removed. `templates/_helpers.tpl` now `required`-guards `database.passwordSecretRef.name` when `database.host` is set, so a `helm install` without an explicit Secret reference fails at render time. `SECURITY.md` §"Data Security" updated.
+- **`S26-05-19` — CLOSED.** Three wording edits applied to `SECURITY.md`: (a) RBAC `clusterWide` default called out explicitly; (b) the exact three rate-limited routes listed, with a statement that everything else is unbounded at the app layer; (c) `Config.Validate()`-refuses-empty-`COOKER_ALLOWED_ORIGINS` sentence added.
+- **`S26-05-23` — CLOSED.** `internal/server/runs.go` `orphanThreshold` is now configurable via `COOKER_ORPHAN_SWEEP_INTERVAL` (Go duration string, default 60s, must be > `heartbeatInterval`=30s; invalid values fall back to the default). Documented in `.env.uat.example`. (Note: the original audit text discussed parameterising the SQL `fmt.Sprintf` in `store/postgres/run.go:142-143`; that hardening is still tracked separately — this PR closes the operator-tunability side of the same finding ID per the quick-wins plan and leaves the SQL parameterisation for a follow-up.)

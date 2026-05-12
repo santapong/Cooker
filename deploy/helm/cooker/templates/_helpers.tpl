@@ -34,7 +34,12 @@ CronJob so both go through the same secret reference and sslmode wiring.
 - name: DB_PASSWORD
   valueFrom:
     secretKeyRef:
-      name: {{ .Values.database.passwordSecretRef.name | quote }}
+      {{- /*
+        S26-05-13: refuse to render with an empty passwordSecretRef.
+        The previous default ("cooker") was a publicly-documented
+        credential. Operators must point at a pre-created Secret.
+      */}}
+      name: {{ required "database.passwordSecretRef.name is required when database.host is set (S26-05-13): create a Secret and set database.passwordSecretRef.name" .Values.database.passwordSecretRef.name | quote }}
       key: {{ .Values.database.passwordSecretRef.key | quote }}
 - name: DATABASE_URL
   value: "postgres://{{ .Values.database.username }}:$(DB_PASSWORD)@{{ .Values.database.host }}:{{ .Values.database.port }}/{{ .Values.database.name }}?sslmode={{ .Values.postgresql.sslMode }}"

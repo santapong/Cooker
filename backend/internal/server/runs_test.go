@@ -43,6 +43,22 @@ func TestRunCoordinator_HeartbeatsRunRow(t *testing.T) {
 	}
 }
 
+// S26-05-23 follow-up: orphan threshold is configurable via env.
+// We can't easily re-init the package var post-load, but we can lock
+// the invariants the loader cares about: the default exceeds the
+// heartbeat (so a single missed tick doesn't false-positive) and
+// matches the documented 60s default.
+func TestOrphanThreshold_DefaultIsSafe(t *testing.T) {
+	if orphanThreshold != defaultOrphanSweepInterval {
+		t.Errorf("orphanThreshold=%s; expected default %s (env override leaking in test environment?)",
+			orphanThreshold, defaultOrphanSweepInterval)
+	}
+	if orphanThreshold <= heartbeatInterval {
+		t.Fatalf("orphanThreshold=%s must exceed heartbeatInterval=%s",
+			orphanThreshold, heartbeatInterval)
+	}
+}
+
 func TestRunCoordinator_DrainsOnWait(t *testing.T) {
 	st := memory.New()
 	rc := NewRunCoordinator(st)

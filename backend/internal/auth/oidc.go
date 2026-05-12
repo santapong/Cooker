@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -157,8 +158,12 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 		if m.localIssuer != nil && local.LooksLikeLocalToken(token) {
 			claims, err := m.localIssuer.Verify(token)
 			if err != nil {
+				// S26-05-01: keep upstream-library detail server-side
+				// only; the response stays generic so an attacker
+				// can't oracle the verifier's failure modes.
+				slog.Warn("auth: local token verify failed", "err", err)
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-					"error": "invalid token: " + err.Error(),
+					"error": "authentication failed",
 				})
 				return
 			}
@@ -177,30 +182,44 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 			return
 		}
 		if !m.cfg.Enabled {
+			// S26-05-01: do not disclose which auth paths are wired.
+			slog.Warn("auth: rejected non-local token while OIDC disabled")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "OIDC disabled and token is not a local-auth token",
+				"error": "authentication failed",
 			})
 			return
 		}
 		if err := m.ensureProvider(c.Request.Context()); err != nil {
+			// S26-05-01: log the discovery error (issuer URL etc.)
+			// server-side; the client gets a generic 503 with
+			// Retry-After so it knows to back off without learning
+			// anything about the upstream IdP.
+			slog.Error("auth: oidc provider discovery failed", "err", err)
 			c.Header("Retry-After", "30")
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"error": "oidc: " + err.Error(),
+				"error": "provider unavailable",
 			})
 			return
 		}
 		verifier := m.verifier.Load()
 		if verifier == nil {
+			slog.Warn("auth: oidc verifier not ready")
 			c.Header("Retry-After", "30")
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"error": "oidc: verifier not ready",
+				"error": "provider unavailable",
 			})
 			return
 		}
 		idToken, err := verifier.Verify(c.Request.Context(), token)
 		if err != nil {
+			// S26-05-01: keep go-oidc's diagnostic ("iss mismatch",
+			// "kid not found", signature parse details, etc.)
+			// server-side only. Reflecting it gave attackers a
+			// high-fidelity oracle for crafting valid-shaped tokens
+			// and for fingerprinting JWKS rotation cadence.
+			slog.Warn("auth: oidc token verify failed", "err", err)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "invalid token: " + err.Error(),
+				"error": "authentication failed",
 			})
 			return
 		}
@@ -214,8 +233,9 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 			AMR     []string `json:"amr"`
 		}
 		if err := idToken.Claims(&raw); err != nil {
+			slog.Warn("auth: oidc claim parse failed", "err", err)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "cannot parse token claims: " + err.Error(),
+				"error": "authentication failed",
 			})
 			return
 		}

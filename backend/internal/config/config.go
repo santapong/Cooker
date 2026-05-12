@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -368,6 +369,24 @@ func (c *Config) Validate() error {
 		problems = append(problems, "DATABASE_URL is required in production")
 	} else if strings.Contains(c.DatabaseURL, "cooker:cooker@localhost") {
 		problems = append(problems, "DATABASE_URL still uses the dev default (cooker:cooker@localhost); set a real value")
+	} else if u, err := url.Parse(c.DatabaseURL); err == nil && u.Host != "" {
+		// S26-05-10: enforce sslmode=require (or stronger) when the
+		// DATABASE_URL points at a non-localhost host. The dev default
+		// is already caught above; for real hosts a missing or
+		// `disable` sslmode means secrets traverse the cluster in
+		// cleartext. The chart's postgresql.sslMode default is
+		// "require", but operators who set DATABASE_URL via extraEnv
+		// or point at external Postgres can bypass it — this
+		// Validate() check is the runtime backstop.
+		host := u.Hostname()
+		if host != "" && host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			switch u.Query().Get("sslmode") {
+			case "require", "verify-ca", "verify-full":
+				// acceptable
+			default:
+				problems = append(problems, "DATABASE_URL requires sslmode=require (or verify-ca/verify-full) in production when host is not localhost")
+			}
+		}
 	}
 	// COOKER_SECRET_KEY is required whenever the active secrets backend
 	// will encrypt anything via crypto.Codec — that's database (always)
