@@ -104,4 +104,3 @@ func (w *lineWriter) flush() {
 	w.broadcast(w.channel, out)
 	w.partial = w.partial[:0]
 }
-

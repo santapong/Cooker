@@ -189,4 +189,3 @@ func (c *AppHealthChecker) Run(ctx context.Context) error {
 		}
 	}
 }
-
