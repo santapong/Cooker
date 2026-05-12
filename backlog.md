@@ -288,7 +288,12 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), and the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob):
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), and the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks):
+
+### `claude/frontend-bundle-split` — frontend bundle performance
+
+- ✅ **P26-05-24 — Route-level code splitting via `React.lazy` + `Suspense`** — `frontend/src/App.tsx` now lazy-loads every non-landing route. `AppsPage`, `AppDetailPage`, `SignInPage`, `SignUpPage`, and `Callback` remain eager (fast first paint). All other routes (`PipelineEditorPage`, `RunPage`, `ComposePage`, `NewAppWizard`, `PipelinesPage`, `DockerPage`, `KubernetesPage`, `EnvironmentsPage`, `HostsPage`, `SettingsPage`, `RegistryPage`) load on-demand. A single `<Suspense fallback={<SkeletonStack />}>` boundary at the route layer shows the shimmer skeleton while chunks download.
+- ✅ **P26-05-28 — Vite `build.rollupOptions.output.manualChunks` for vendor splitting** — `frontend/vite.config.ts` splits vendors into stable, independently-cacheable chunks: `react` (react + react-dom + react-router-dom), `xyflow` (@xyflow/react), `oidc` (oidc-client-ts), `zustand`. The `xyflow` chunk is only downloaded when the user navigates to `PipelineEditorPage`, `RunPage`, or `ComposePage` — `PipelinesPage` (the list) does not pull it.
 
 ### `claude/plan-weekly-features-WoB0S` — weekly feature batch
 

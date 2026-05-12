@@ -16,6 +16,23 @@ export default defineConfig({
     // build environment to opt back in for short-lived debug
     // builds.
     sourcemap: process.env.VITE_SOURCEMAP === 'true',
+    rollupOptions: {
+      output: {
+        // Split vendor libraries into stable, independently-cacheable
+        // chunks so that a patch to one dep doesn't bust the cache for
+        // the others.  @xyflow/react goes into its own chunk so that
+        // PipelinesPage (the list, which doesn't render a canvas) never
+        // pulls the ~150 KB canvas library.  Only PipelineEditorPage,
+        // RunPage, and ComposePage import the canvas components and will
+        // therefore pull this chunk lazily.
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          xyflow: ['@xyflow/react'],
+          oidc: ['oidc-client-ts'],
+          zustand: ['zustand'],
+        },
+      },
+    },
   },
   server: {
     port: 5173,
