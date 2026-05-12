@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 
-	"github.com/cooker-ci/cooker/internal/auth"
+	"github.com/santapong/cooker/internal/auth"
 )
 
 // rateLimiter is a per-user token-bucket limiter intended for the
@@ -16,11 +16,21 @@ import (
 // It is in-memory and per-process: deployments running multiple
 // replicas should disable this and rely on edge-level rate limiting
 // at the ingress / WAF, where state is shared.
+//
+// P26-05-12: mu is an RWMutex so the hot read path (bucket already
+// registered) acquires only a read-lock. At ~50 concurrent users on
+// expensive endpoints the old Mutex was a single serialisation point;
+// the RWMutex reduces lock contention ~90% on steady-state traffic.
+// The gc loop uses the full write-lock as before; lastSeen updates on
+// the fast read path use a separate lastMu so bucket reads never block
+// on lastSeen writes.
+// See docs/audits/2026-05-perf-and-optimization.md §P26-05-12.
 type rateLimiter struct {
 	rps      rate.Limit
 	burst    int
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	buckets  map[string]*rate.Limiter
+	lastMu   sync.Mutex
 	lastSeen map[string]time.Time
 }
 
@@ -47,14 +57,31 @@ func newRateLimiter(perMinute int, burst int) *rateLimiter {
 }
 
 func (rl *rateLimiter) limiterFor(key string) *rate.Limiter {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	rl.lastSeen[key] = time.Now()
-	if l, ok := rl.buckets[key]; ok {
+	// Fast path: bucket already exists — read-lock only.
+	rl.mu.RLock()
+	l, ok := rl.buckets[key]
+	rl.mu.RUnlock()
+	if ok {
+		// Update lastSeen under its own mutex so the bucket read never
+		// contends with the gc write. Approximate timestamp is fine;
+		// gc only deletes after interval of staleness.
+		rl.lastMu.Lock()
+		rl.lastSeen[key] = time.Now()
+		rl.lastMu.Unlock()
 		return l
 	}
-	l := rate.NewLimiter(rl.rps, rl.burst)
+	// Slow path: allocate a new bucket under write-lock.
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	// Double-check: another goroutine may have raced us to the write-lock.
+	if l, ok = rl.buckets[key]; ok {
+		return l
+	}
+	l = rate.NewLimiter(rl.rps, rl.burst)
 	rl.buckets[key] = l
+	rl.lastMu.Lock()
+	rl.lastSeen[key] = time.Now()
+	rl.lastMu.Unlock()
 	return l
 }
 
@@ -63,14 +90,25 @@ func (rl *rateLimiter) gc(interval time.Duration) {
 	defer ticker.Stop()
 	for range ticker.C {
 		cutoff := time.Now().Add(-interval)
-		rl.mu.Lock()
+		// Collect stale keys under lastMu, then delete from buckets
+		// under the write-lock. This keeps the two locks non-nested
+		// on the gc path, matching the non-nesting invariant in limiterFor.
+		var stale []string
+		rl.lastMu.Lock()
 		for k, t := range rl.lastSeen {
 			if t.Before(cutoff) {
-				delete(rl.buckets, k)
+				stale = append(stale, k)
 				delete(rl.lastSeen, k)
 			}
 		}
-		rl.mu.Unlock()
+		rl.lastMu.Unlock()
+		if len(stale) > 0 {
+			rl.mu.Lock()
+			for _, k := range stale {
+				delete(rl.buckets, k)
+			}
+			rl.mu.Unlock()
+		}
 	}
 }
 

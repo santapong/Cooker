@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/observability"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/observability"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // heartbeatInterval is how often a tracked goroutine writes
@@ -89,8 +89,10 @@ func (rc *RunCoordinator) Spawn(ctx context.Context, runID string, work func(con
 		defer ticker.Stop()
 		// First heartbeat, written synchronously, so a sweep that runs
 		// shortly after Spawn never declares a fresh run orphaned.
-		// Missing-row is tolerated silently so paths that create the
-		// row post-hoc (synthesised app-deploys) don't spam warnings.
+		// Missing-row is still tolerated silently as a defensive measure;
+		// the app-deploy path (handler/app.go F-07 fix) now creates the
+		// stub row before calling Spawn so this no-op path should no
+		// longer be exercised in normal operation.
 		rc.heartbeatBestEffort(workCtx, runID, time.Now())
 		hbCtx, hbCancel := context.WithCancel(workCtx)
 		hbDone := make(chan struct{})
