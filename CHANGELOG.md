@@ -7,6 +7,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `claude/project-audit-security-GKXzQ` (PR #29) — May 2026 audit week
+
+**Seven-workstream audit run. Four waves of consolidation. No production code changes — this PR ships the planning + research surface that the next 90 days execute against.** Detailed scope and decisions in [`docs/pm-brief-2026-05.md`](docs/pm-brief-2026-05.md).
+
+#### Wave 1 — fresh audits
+
+- **`docs/audits/2026-05-security-review.md`** (407 lines). Full-repo line-cited security pass against post-PR-#21 HEAD. Covers auth, secrets, container & supply chain, network, data, API surface, threat-model drift. Builds on (does not duplicate) the prior `vulnerabilities-and-chains.md` + `chain-recheck.md` series.
+- **`docs/audits/2026-05-perf-and-optimization.md`** (445 lines). Allocations, latency, throughput, footprint, startup time. `file:line` citations across `backend/`, `frontend/`, `deploy/`, `.github/workflows/`.
+- **`docs/audits/dag-performance.md`** (177 lines). Cache, job-queue/concurrency, fault tolerance, and per-stage logging behaviour for `backend/pkg/dagrunner` + `internal/service` + `internal/builder` + `internal/deployer`. Verdict: functional for small/single-replica; gaps at scale (unbounded fan-out partially addressed, no retry yet, no cache reuse, per-stage logs wired at the model layer but only populated by the new W1 work).
+- **`docs/shipping-go.md`**. Research: how mature OSS Go products release and operate (GoReleaser, signed releases, published Helm charts, `--version`); 0–180 day Cooker adoption plan. Gates the marketing launch.
+
+#### Wave 2 — strategic planning
+
+- **`docs/roadmap-2026.md`** (205 lines). 2026 themes + top-30. Strategic frame: "between Jenkins-is-too-much and GitHub-Actions-YAML-is-too-little." Three theme groups: Core (C1–Cn), Diff (D1–Dn), and OSS/Marketing.
+- **`docs/protocols.md`** (699 lines). Custom Cooker protocols proposal. §3 specifies **CKR-LOG/1**, a length-prefixed binary log-stream framing format (replaces the current JSON-over-WS for per-stage logs). §4 specifies **CKR-DSL**, a pipeline DSL design surface (syntax candidate: YAML; needs decision B in pm-brief §4 Q2).
+- **`docs/marketing/strategy.md`**. OSS-adoption strategy, 90-day horizon. Blocked on `shipping-go.md` deliverables (binaries, signed releases, Helm chart publication).
+
+#### Wave 3 — user guide
+
+- **`docs/user-guide/index.md`** — landing page + 60-second pitch.
+- **`docs/user-guide/getting-started/`** — `quickstart.md`, `helm-install.md`, `configuration.md`, `upgrading.md`.
+- **`docs/user-guide/concepts/`** — `pipelines.md`, `apps.md`, `stages.md`, `runs.md`, `environments.md`, `hosts-and-targets.md`.
+- **`docs/user-guide/guides/`** — `first-pipeline.md`, `kubernetes-deploy.md`, `registries.md`, `secrets.md`, `promotions.md`, `github-webhooks.md`, `notifications.md`, `self-hosting-tips.md`.
+- **`docs/user-guide/operations/`** — `architecture.md`, `auth-and-rbac.md`, `docker-builds.md`, `postgres.md`, `observability.md`, `troubleshooting.md`.
+- **`docs/user-guide/reference/`** — `api.md`, `cli.md`, `env-vars.md`, `webhooks.md`.
+- **`docs/user-guide/troubleshooting/`** — `builds-stuck.md`, `login-loop.md`, `pg-migration-errors.md`, `ws-disconnects.md`.
+- **`docs/user-guide/faq.md`**.
+
+#### Wave 4 — PM brief + DAG plan
+
+- **`docs/pm-brief-2026-05.md`** (183 lines). Consolidated PM brief: the seven-workstream summary, the 15-item 90-day plan (Block 1), eight open decisions (A–H) that gate work, and §5 the agent-delegation map.
+- **`docs/dag-adaptation-2026.md`** (649 lines). Research from Jenkins / Dokploy / Dagger / Airflow, applied to Cooker. Output: **5 DAG primitives ranked** (Primitive #1 Retry policies → #5 Conditional gating), **5 tidy-first refactors T1–T5**, **4 ADRs DR-1..DR-4**, and a **20-week implementation calendar** (§10). Pairs with `docs/protocols.md` §4 for CKR-DSL weeks 18–20.
+
+#### CI
+
+- `fix(ci): unblock backend gofmt step — drop trailing blank lines` (commit `ed0a212`).
+
+#### Open decisions blocking downstream work
+
+A–H in `docs/pm-brief-2026-05.md` §4. Most-blocking: **A** (Hosted Cooker Cloud yes/no — gates roadmap C1/C2/C3 multi-tenancy ADR), **B** (CKR-DSL syntax — gates dag-adaptation weeks 18–20), **C** (trigger-rule language for Primitive #2 — gates week-6 start).
+
+---
+
+### Added — bridge entries for unlogged PRs (PR #21 through PR #28)
+
+Catching CHANGELOG up to where commits already landed. Each block summarises a merged PR; the authoritative narrative is in `backlog.md` "Closed (recent)".
+
+#### `claude/identify-failure-point-Duy02` (PR #21) — SPOF closeout
+
+Production-readiness gates the prior CHANGELOG section announced as "ready" actually became enforceable here.
+
+- **Graceful HTTP shutdown** on SIGTERM/SIGINT — 30s drain via `Server.RunContext`; `terminationGracePeriodSeconds: 60` in chart. `internal/server/server_shutdown_test.go`.
+- **Postgres reconnect-with-backoff at boot** — jittered exponential backoff (500ms→30s, 5min budget) in `internal/store/postgres/store.go` `pingWithBackoff`.
+- **`/health/live` + `/health/ready` split** — `/health/ready` returns 503 with per-check breakdown (DB ping + Redis ping + JWKS age). `/health` kept as back-compat alias.
+- **Lazy OIDC discovery + JWKS-age signal** — `NewMiddleware` no longer dials the IdP at construction; first authenticated request triggers discovery with a 30s retry-after cool-down. Atomic `verifier *atomic.Pointer[oidc.IDTokenVerifier]` with double-checked init keeps the hot path lock-free.
+- **`RunCoordinator` heartbeat + orphan sweep** — `internal/server/runs.go` tracks goroutines and drains for 25s on shutdown. Migration `006_run_heartbeat.up.sql` adds `heartbeat_at` with a partial index. `SweepOrphans` runs at boot and marks rows with stale heartbeats as failed. Closed a latent correctness gap: `RunPipeline` previously created a `pending` row and never spawned the executor.
+- **`Config.Validate` multi-replica + builder guards** — refuses production boot with `COOKER_BUILDER=docker`; refuses `replicaCount>1` + memory-backed state without `COOKER_STICKY_SESSIONS=true`.
+- **Helm defaults flipped to multi-replica safe** — `builder.kind=kaniko`, `wsHub.backend=redis`, `wsTicket.backend=redis`, `rateLimit.backend=redis`. `templates/deployment.yaml` renders the new env vars + `REDIS_URL`.
+- **Redis pub/sub WS hub** — new `HubBackend` interface; broadcasts cross replicas via `cooker:ws:broadcast` with length-prefixed binary framing; jittered subscriber reconnect; `cooker_redis_connection_errors_total` increments on every reconnect.
+- **Resilience Prometheus counters** — `cooker_db_connection_errors_total`, `cooker_redis_connection_errors_total`, `cooker_jwks_fetch_failures_total`, `cooker_pipeline_runs_orphaned_total`. Alertmanager rules shipped in `RUNBOOK.md`.
+- **OCI distribution-spec conformance CI** — `.github/workflows/oci-conformance.yml` boots `registry:2`, pushes via `pusher.NewCrane`, runs the upstream conformance binary. `make oci-conformance` mirrors locally.
+- **Aegis "Workshop" frontend redesign** — full port of the Claude-Design Aegis bundle into `frontend/src/`: paper/coal/rust theme tokens, Fraunces + Inter Tight + JetBrains Mono fonts, shared atoms (`Pill`, `StatusDot`, `Btn`, `Card`, `KindBadge`, `Toggle`, `HealthBar`, `DataTable`), Simple ⇄ Pro mode toggle persisted in `uiStore`, every page re-laid.
+- **`docs/ROLLOUT.md`** — operator rollout playbook (closes P0.8).
+
+#### `claude/review-production-rollout-MT3YO` — P0 follow-up batch
+
+- **P0.1** — OIDC lock-free fast path. `Middleware.verifier` is now `atomic.Pointer[oidc.IDTokenVerifier]` with double-checked init; mutex only serialises slow-path provider discovery. Concurrency test under `-race` exercises 32 writers + 32 readers.
+- **P0.2** — Redis WS hub subscriber resubscribe with backoff. `consume()` re-subscribes with jittered exponential backoff (500ms → 30s) on disconnect; bounded 5s `Receive` timeout to handle half-open TCP. `IncRedisConnectionError()` feeds the counter.
+- **P0.3** — `time.NewTimer` + `Stop()` in DB backoff (replaces `time.After`).
+- **P0.4** — parallel readiness checks. DB and Redis pings run concurrently via `errgroup.WithContext` against the shared 1s deadline.
+- **P0.5** — binary WS broadcast encoding (`[channel-len: uint16 BE][channel][data]`); ~74 bytes of JSON framing replaced with 2.
+- **P0.6** — OCI conformance workflow scope. `pull_request:` trigger removed; conformance treated as tracked-but-non-blocking.
+- **P0.7** — OCI image-spec v1.1 structural schema validation in `internal/pusher/conformance_test.go`.
+- **P7** — `make uat-up-with-keycloak` (Keycloak compose overlay + pre-seeded `cooker` realm with alice/admin and bob/viewer); `make test-e2e` (boots UAT, runs a single-stage no-op pipeline via the API, asserts `success`).
+- **P9.5 follow-up** — Buildah Helm chart wiring (`builder.buildah.{image,namespace,serviceAccount,contextPVC,storageDriver}` in `values.yaml`; `templates/rbac.yaml` gate extended; CI matrix asserts docker-socket absent + buildah RBAC renders + kaniko doesn't leak).
+
+#### `claude/plan-weekly-features-WoB0S` (PR #25) — weekly feature batch
+
+- **Per-role complexity + model frontmatter on `cooker-*` subagents** — every `.claude/agents/cooker-*.md` declares an explicit `model:` (sonnet for templated layer work, opus for cross-stack coordinators and the security curator), inline `<!-- complexity: ... -->` rationale, "When to escalate / demote" subsections, and "Worked examples" (2–3 per role). `cooker-feature-dev` and `cooker-security` move sonnet → opus.
+- **Postgres retention CronJob (Helm)** — `deploy/helm/cooker/templates/cronjob-retention.yaml` gated on `retention.enabled && database.host`. Defaults: 90-day cutoff, 02:00 UTC daily. Reuses the new `cooker.databaseUrlEnv` named template so deployment.yaml and the CronJob share `DATABASE_URL` construction. Pod runs as UID 65532 with caps dropped + readOnlyRootFilesystem.
+
+#### `claude/observability-week-1` (PR #26) — per-stage live logs + app health
+
+- **Per-stage live logs.** `model.Stage.Logs` is now populated by the executor and streamed over WebSocket; previously wired at the model layer but never written. Feeds the new RunPage step-rail + logs view from the Aegis redesign.
+- **App health.** `AppDetailPage` now reads a real status from `DeployTarget.Status` instead of a placeholder; the deploy adapter surfaces `URL` on success.
+
+#### `claude/docs-w10-w11` (PR #27) — outside-in audits
+
+- **`docs/audits/W10-bug-and-chain-recheck.md`** — third pass at the bug + chain re-audit; only new failure modes flagged.
+- **`docs/audits/W11-user-journeys.md`** (195 lines) — four-persona walkthrough (Indie hacker, SaaS team, Enterprise SRE, AI/ML engineer). Each persona's friction tagged with a P-tier guess; populated the "Discovered via user-journey W11" section in `backlog.md`.
+
+#### `claude/audit-w10-bundled-fixes` (PR #28)
+
+- Bundled small fixes from the W10 audit (handler hygiene, log-line consistency, dead-link cleanups in `docs/`).
+
+#### Skills + agents harness
+
+- `cooker-audit`, `cooker-find`, `cooker-improve`, `cooker-weekly`, `cooker-ci-debug`, `cooker-fix-bug`, `cooker-new-feature` skills under `.claude/skills/`.
+- Per-role `cooker-*` subagents under `.claude/agents/` (planner, backend-api, backend-data, backend-adapters, frontend-ui, frontend-state, infra-ci, infra-deploy, security, feature-dev).
+
+---
+
 ### Added — `claude/finish-backlog-priority-psf4D` (PR #19)
 
 #### Toolchain (P6)

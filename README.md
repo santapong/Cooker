@@ -1,6 +1,8 @@
 # Cooker
 
-A web-based CI/CD management tool with a **graph-based UI** for visually building and executing pipelines that build **OCI-compliant** Docker images, push to registries, and deploy to **Kubernetes** across Dev, Staging, and Production environments.
+A web-based CI/CD management tool with a **graph-based UI** for visually building and executing pipelines that build **OCI-compliant** Docker images, push to registries, and deploy to **Kubernetes** (and Cloud Run / ECS / Fly / Render) across Dev, Staging, and Production environments.
+
+> **Status (May 2026)**: production-quality on single-replica or multi-replica (Redis-backed) shapes. `Config.Validate` refuses unsafe boots (docker.sock builder in production, multi-replica + memory backends without sticky sessions, missing TLS for OIDC). See [`backlog.md`](backlog.md#production-readiness-summary) for the deployment-shape readiness matrix and [`docs/ROLLOUT.md`](docs/ROLLOUT.md) for the UAT→production cutover playbook.
 
 ## Architecture
 
@@ -29,12 +31,14 @@ A web-based CI/CD management tool with a **graph-based UI** for visually buildin
 - **Frontend**: React + TypeScript + React Flow (visual DAG editor) + Zustand
 - **Backend**: Go + Gin + Docker SDK + client-go + go-containerregistry
 - **Database**: PostgreSQL + Redis
-- **Auth**: OIDC/OAuth 2.0 with PKCE (Keycloak, Okta, Azure AD, Google, GitHub) — disabled by default in local/UAT (the backend injects a dev admin user); see [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) to enable. Group-to-role mapping is operator-configurable via `COOKER_OIDC_GROUP_MAP`; step-up MFA on destructive admin routes is opt-in via `COOKER_OIDC_MFA_ACR_VALUES`.
+- **Auth**: OIDC/OAuth 2.0 with PKCE (Keycloak, Okta, Azure AD, Google, GitHub) — disabled by default in local/UAT (the backend injects a dev admin user); see [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) to enable. RBAC roles: **admin / operator / approver / viewer**. Group-to-role mapping is operator-configurable via `COOKER_OIDC_GROUP_MAP`; step-up MFA on destructive admin routes (DELETE pipelines/envs/apps/hosts, secret reveal/put/delete/promote, app webhook rotation) is opt-in via `COOKER_OIDC_MFA_ACR_VALUES`.
 - **Secrets**: pluggable backends — AES-GCM at rest in Postgres (default), delegated to a [KeepSave](https://github.com/santapong/keepsave) server, HashiCorp Vault, AWS Secrets Manager, or GCP Secret Manager. See [Secrets backends](#secrets-backends).
-- **Observability**: optional Prometheus `/metrics` and OpenTelemetry/OTLP traces. Off by default; opt in via `COOKER_METRICS_ENABLED` / `COOKER_TRACING_ENABLED`. Structured `log/slog` JSON logs throughout.
-- **Multi-replica state**: rate limiter and WebSocket ticket store back onto Redis when `COOKER_RATE_LIMIT_BACKEND=redis` / `COOKER_WS_TICKET_BACKEND=redis`. See [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md).
-- **Builders**: `docker` (host socket — dev only), `kaniko` (in-cluster Job), `buildah` (in-cluster Job, full Dockerfile parity), or `buildkit` (gRPC against an external buildkitd). Selectable via `COOKER_BUILDER`.
+- **Observability**: optional Prometheus `/metrics` and OpenTelemetry/OTLP traces (opt in via `COOKER_METRICS_ENABLED` / `COOKER_TRACING_ENABLED`). Structured `log/slog` JSON logs throughout. **`/health/live` + `/health/ready`** split with per-check breakdown (DB ping, Redis ping, JWKS age). Per-stage live build logs stream over WebSocket. Resilience counters (`cooker_db_connection_errors_total`, `cooker_redis_connection_errors_total`, `cooker_jwks_fetch_failures_total`, `cooker_pipeline_runs_orphaned_total`) ship recommended Alertmanager rules in [docs/RUNBOOK.md](docs/RUNBOOK.md).
+- **Audit log**: per-route slog audit trail, on by default in production. Destination configurable (`stdout` or `file`) via `COOKER_AUDIT_DESTINATION` / `COOKER_AUDIT_FILE_PATH`.
+- **Multi-replica state**: rate limiter, WebSocket ticket store, and WebSocket broadcast hub back onto Redis when `COOKER_RATE_LIMIT_BACKEND=redis` / `COOKER_WS_TICKET_BACKEND=redis` / `COOKER_WS_HUB_BACKEND=redis` (chart defaults to all three). See [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md).
+- **Builders**: `docker` (host socket — dev only; refused at boot in production), `kaniko` (in-cluster Job, default), `buildah` (in-cluster Job, full Dockerfile parity), or `buildkit` (gRPC against an external buildkitd). Selectable via `COOKER_BUILDER`.
 - **Deploy targets**: Kubernetes, Cloud Run, AWS ECS / Fargate, Fly.io, Render. See [Cloud deploy targets](#cloud-deploy-targets).
+- **Retention**: optional Helm-rendered CronJob prunes `pipeline_runs` older than `retention.daysToKeep` (default 90 days) at 02:00 UTC daily; gated on `retention.enabled && database.host`.
 
 See [docs/architecture.md](docs/architecture.md) for the full architecture document and [docs/adr/](docs/adr/) for the structural decisions and their rationale.
 
@@ -53,25 +57,42 @@ All operations follow the three OCI (Open Container Initiative) specifications:
 ## Quick Start
 
 ```bash
-# Local development
+# Local development (frontend + backend + Postgres + Redis)
 docker compose up
 
 # Frontend: http://localhost:5173
 # Backend:  http://localhost:8080
 # API:      http://localhost:8080/api/v1
+
+# UAT stack (single binary serving the SPA on :8080, OIDC off)
+make uat-up
+
+# UAT + pre-seeded Keycloak realm (alice/admin, bob/viewer)
+make uat-up-with-keycloak
+
+# UAT + tecnativa/docker-socket-proxy (drops host socket bind mount)
+make uat-up-socketproxy
+
+# End-to-end smoke (boots UAT, runs one no-op pipeline, asserts success)
+make test-e2e
 ```
+
+New users: start at [docs/user-guide/index.md](docs/user-guide/index.md). Operators heading to production: [docs/ROLLOUT.md](docs/ROLLOUT.md).
 
 ## Features
 
-- **Visual Pipeline Builder** - Drag-and-drop graph editor with React Flow, 6 node types (Build, Test, Deploy, Push, Approval, Custom)
-- **Multi-Environment Deployment** - Dev → Staging → Production with configurable auto/manual promotion and approval gates
-- **Docker Management** - Build, list, inspect OCI images and manage containers with manifest details
-- **OCI Registry Integration** - Push/pull via distribution-spec, browse tags, inspect manifests, referrers API for supply chain metadata
-- **Kubernetes Dashboard** - Manage workloads, scale, restart, view logs across clusters and namespaces
-- **SSO Authentication** - OpenID Connect with PKCE, RBAC (admin, operator, viewer roles)
-- **Pluggable secrets backend** - AES-GCM in Postgres or delegated to a [KeepSave](https://github.com/santapong/keepsave) server (per-project API keys, AES-256-GCM at rest, key rotation, env-to-env promotion)
-- **Live Execution** - WebSocket-powered real-time pipeline status, build logs, and K8s event streaming
-- **Environment Swim Lanes** - Visual grouping of pipeline stages by deployment environment
+- **Visual Pipeline Builder** — drag-and-drop graph editor (React Flow); six node types (Build, Test, Deploy, Push, Approval, Custom); Simple ⇄ Pro mode toggle.
+- **Apps** — higher-level shortcut: point at a GitHub repo, pick a deploy target, click Deploy. Cooker synthesises a Clone → Build → Push → Deploy run. AutoDeploy via per-app webhook secret.
+- **Multi-Environment Deployment** — Dev → Staging → Production with configurable auto/manual promotion and approval gates; approver-role-gated approvals.
+- **Docker Management** — build, list, inspect OCI images and manage containers with manifest details.
+- **OCI Registry Integration** — push/pull via distribution-spec v1.1, browse tags, inspect manifests, referrers API for supply chain metadata. Pusher path exercised against the [upstream OCI distribution-spec conformance suite](https://github.com/opencontainers/distribution-spec/tree/main/conformance) in CI.
+- **Kubernetes Dashboard** — manage workloads, scale, restart, view logs across clusters and namespaces.
+- **SSO Authentication** — OpenID Connect with PKCE, RBAC (admin / operator / approver / viewer), configurable group-to-role mapping, optional step-up MFA on destructive admin routes.
+- **Pluggable secrets backend** — AES-GCM in Postgres, [KeepSave](https://github.com/santapong/keepsave), HashiCorp Vault, AWS Secrets Manager, or GCP Secret Manager (per-project API keys, key rotation, env-to-env promotion).
+- **GitOps commits** — `internal/gitops/gogit.go` writes manifests back to a git repo (`go-git/v5`, SSH-key / ssh-agent / HTTPS-basic auth chain).
+- **Live Execution** — WebSocket-powered real-time pipeline status, per-stage build logs, and K8s event streaming. Redis pub/sub WS hub so broadcasts cross replicas.
+- **Environment Swim Lanes** — visual grouping of pipeline stages by deployment environment.
+- **Resilient by default** — SIGTERM-aware graceful shutdown (30s drain), Postgres reconnect-with-backoff at boot, lazy OIDC discovery, run-coordinator heartbeat + orphan sweep on every boot.
 
 ## Multi-Environment Pipeline
 
@@ -117,19 +138,33 @@ Base path: `/api/v1`
 │       ├── types/         TypeScript types (pipeline, Docker, K8s, OCI)
 │       └── pages/         Pipelines, Editor, Docker, K8s, Environments
 ├── backend/               Go API server
-│   ├── cmd/cooker/        Entry point
+│   ├── cmd/cooker/        Entry point (slog handler install, signal handling, server.RunContext)
 │   ├── internal/
-│   │   ├── server/        HTTP server, router, WebSocket hub
-│   │   ├── auth/          OIDC middleware, RBAC
-│   │   ├── handler/       HTTP handlers (pipeline, Docker, K8s, registry, env)
-│   │   ├── service/       Business logic (executor, promoter)
-│   │   ├── secrets/       Secrets manager interface + adapters (database, keepsave)
-│   │   ├── deploytarget/  Deploy target interface + adapters (cloudrun, ...)
+│   │   ├── server/        HTTP server, router, WS hub (memory/redis), ticket store, rate limiter, RunCoordinator, health probes
+│   │   ├── auth/          OIDC middleware (lazy discovery, atomic verifier), RBAC, RequireMFA
+│   │   ├── handler/       HTTP handlers (pipeline, app, run, env, secret, docker, k8s, registry, webhook)
+│   │   ├── service/       Business logic (executor, promoter, app deployer)
+│   │   ├── audit/         Audit log sink (stdout / file) + middleware
+│   │   ├── observability/ Prometheus /metrics + OpenTelemetry OTLP/gRPC setup
+│   │   ├── secrets/       Secrets manager interface + adapters (database, keepsave, vault, awsm, gcpsm)
+│   │   ├── builder/       Image builder strategy + adapters (docker, kaniko, buildah, buildkit)
+│   │   ├── pusher/        Image push strategy + crane adapter
+│   │   ├── deployer/      K8s deployer strategy + client-go adapter
+│   │   ├── deploytarget/  Deploy target interface + adapters (kubernetes, cloudrun, ecs, flyio, render)
+│   │   ├── gitops/        GitOpsCommit (go-git/v5)
+│   │   ├── transport/     Optional transports (tsnet, build-tagged)
+│   │   ├── crypto/        AES-GCM codec for app webhook secrets
+│   │   ├── retry/         Bounded retry helpers
+│   │   ├── idempotency/   Run-launch dedupe + pg_advisory_lock
+│   │   ├── buildplan/     Clone→Build→Push→Deploy run synthesis from App
+│   │   ├── source/        Repo clone helpers
+│   │   ├── validate/      Cross-cutting validation
 │   │   ├── model/         Domain types
 │   │   ├── oci/           OCI image-spec types, media types, validation
-│   │   └── store/         PostgreSQL persistence + migrations
+│   │   ├── config/        Env-var loading + production Validate()
+│   │   └── store/         Store interfaces + memory + PostgreSQL (with migrations)
 │   └── pkg/
-│       ├── dagrunner/     Reusable DAG execution engine
+│       ├── dagrunner/     Reusable DAG execution engine (bounded fan-out, runDeadline)
 │       └── ociutil/       OCI descriptor utilities
 ├── deploy/
 │   ├── docker/            Dockerfiles (multi-stage, dev frontend, dev backend)
@@ -334,10 +369,10 @@ Logs: structured JSON via `log/slog` — every line carries `time`, `level`, `ms
 
 ## Multi-replica deployments
 
-Two cooker-internal pieces of state are per-process by default and need shared state to survive replica scaling: the rate limiter and the WebSocket ticket store. Either:
+Three cooker-internal pieces of state are per-process by default and need shared state to survive replica scaling: the **rate limiter**, the **WebSocket ticket store**, and the **WebSocket broadcast hub**. Either:
 
-- **Sticky sessions at ingress** (simpler — works for typical workloads). See [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md) for NGINX / ALB / Traefik / HAProxy / Envoy snippets.
-- **Redis-backed state** (proper HA). Set `COOKER_RATE_LIMIT_BACKEND=redis` and `COOKER_WS_TICKET_BACKEND=redis`; both consume the existing `REDIS_URL`. Rate limiting uses GCRA via `go-redis/redis_rate/v10`; WS tickets use atomic `GETDEL` so a single ticket can never be redeemed twice across replicas.
+- **Sticky sessions at ingress** (simpler — works for typical workloads). See [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md) for NGINX / ALB / Traefik / HAProxy / Envoy snippets. Requires `COOKER_STICKY_SESSIONS=true` for `Config.Validate` to permit multi-replica boots with memory backends.
+- **Redis-backed state** (proper HA, chart default). Set `COOKER_RATE_LIMIT_BACKEND=redis`, `COOKER_WS_TICKET_BACKEND=redis`, and `COOKER_WS_HUB_BACKEND=redis`; all three consume the existing `REDIS_URL`. Rate limiting uses GCRA via `go-redis/redis_rate/v10`; WS tickets use atomic `GETDEL` so a single ticket can never be redeemed twice across replicas; broadcasts cross replicas via the `cooker:ws:broadcast` Redis pub/sub channel with a length-prefixed binary frame and jittered subscriber reconnect.
 
 ## Operations
 
@@ -354,19 +389,50 @@ Two cooker-internal pieces of state are per-process by default and need shared s
 
 ## Documentation
 
+### For users
+
+| Document | Description |
+|----------|-------------|
+| [docs/user-guide/index.md](docs/user-guide/index.md) | User-guide landing — concepts, getting started, guides, operations, reference, troubleshooting, FAQ |
+| [docs/user-guide/getting-started/](docs/user-guide/getting-started/) | Quickstart, Helm install, configuration, upgrading |
+| [docs/user-guide/concepts/](docs/user-guide/concepts/) | Pipelines, Apps, Stages, Runs, Environments, Hosts & Targets |
+| [docs/user-guide/guides/](docs/user-guide/guides/) | First pipeline, K8s deploy, registries, secrets, promotions, GitHub webhooks, notifications, self-hosting |
+| [docs/user-guide/operations/](docs/user-guide/operations/) | Architecture, auth/RBAC, Docker builds, Postgres, observability, troubleshooting |
+| [docs/user-guide/reference/](docs/user-guide/reference/) | API, CLI, env vars, webhooks |
+
+### For operators
+
+| Document | Description |
+|----------|-------------|
+| [docs/ROLLOUT.md](docs/ROLLOUT.md) | UAT → production cutover playbook (single source of truth for cutovers) |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | Incident response: symptom → checks → cause → mitigation; Alertmanager rules |
+| [docs/UAT.md](docs/UAT.md) | UAT runbook + how to enable OIDC sign-in for testers |
+| [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md) | Sticky-session + Redis-shared-state guidance for multi-replica deploys |
+| [SECURITY.md](SECURITY.md) | Security policy, auth architecture, production hardening checklist |
+| [backlog.md](backlog.md) | Open work, sequencing, effort estimates; deployment-shape readiness matrix |
+
+### For contributors
+
 | Document | Description |
 |----------|-------------|
 | [docs/architecture.md](docs/architecture.md) | System architecture, component map, data flow, OCI integration |
-| [docs/design.md](docs/design.md) | Design patterns, conventions, auth flow, testing strategy, contributor checklist |
-| [docs/UAT.md](docs/UAT.md) | UAT runbook and how to enable OIDC sign-in for testers |
-| [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md) | Sticky-session + Redis-shared-state guidance for multi-replica deploys |
-| [docs/RUNBOOK.md](docs/RUNBOOK.md) | Incident response: symptom → checks → cause → mitigation |
+| [docs/design.md](docs/design.md) | Design patterns, conventions, auth flow, testing strategy, contributor checklist (§11) |
 | [docs/adr/](docs/adr/) | Architecture decision records (strategy interfaces, secrets manager, JSONB) |
 | [docs/openapi.yaml](docs/openapi.yaml) | Hand-curated OpenAPI 3.1 sketch |
 | `backend/docs/api/swagger.yaml` | Generated OpenAPI from `swag` annotations — regenerate with `make swagger` |
 | [CHANGELOG.md](CHANGELOG.md) | Version history following Keep a Changelog format |
-| [SECURITY.md](SECURITY.md) | Security policy, auth architecture, production hardening checklist |
-| [backlog.md](backlog.md) | Open work, sequencing, effort estimates |
+
+### Planning + research (May 2026 audit week)
+
+| Document | Description |
+|----------|-------------|
+| [docs/roadmap-2026.md](docs/roadmap-2026.md) | 2026 themes and top-30 — strategic frame for the year |
+| [docs/pm-brief-2026-05.md](docs/pm-brief-2026-05.md) | 15-item 90-day plan + 8 open decisions gating work |
+| [docs/dag-adaptation-2026.md](docs/dag-adaptation-2026.md) | 20-week DAG-primitives plan (5 primitives, 5 tidy-first refactors T1–T5, 4 ADRs) |
+| [docs/protocols.md](docs/protocols.md) | Custom Cooker protocols proposal — CKR-LOG/1 (binary log stream) + CKR-DSL (pipeline DSL) |
+| [docs/shipping-go.md](docs/shipping-go.md) | Research: how mature OSS Go products release and operate, applied to Cooker |
+| [docs/marketing/strategy.md](docs/marketing/strategy.md) | OSS adoption marketing strategy (90-day post-launch horizon) |
+| [docs/audits/](docs/audits/) | Audit series: security review, perf/optimization, dag-performance, W11 user journeys, launch-readiness, chain-recheck, SPOF |
 
 ## Contributing
 
