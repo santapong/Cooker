@@ -116,41 +116,6 @@ so it doesn't depend on the call-site wrap.
 
 ---
 
-## Finding 4 — `Config.Validate` does not gate `COOKER_PUSHER=docker` in production
-
-**Severity: High**
-
-**File/lines:**
-- `backend/internal/config/config.go:452-454` — builder docker gate
-- `backend/internal/config/config.go:359-479` — full `Validate` body
-- `backend/internal/pusher/docker.go` — `DockerSock` pusher
-
-**Description.**
-`Config.Validate` (line 452) already refuses `COOKER_BUILDER=docker` in production with
-the message "COOKER_BUILDER=docker is unsafe in production (host docker.sock RCE-to-host)".
-This guard exists because the builder bind-mounts `/var/run/docker.sock`. The pusher's
-`DockerSock` implementation (`pusher/docker.go`) also shells out to the `docker` CLI,
-which implicitly uses the mounted socket for `docker push`. An operator who reads the
-builder warning, switches to `COOKER_BUILDER=kaniko`, but leaves `COOKER_PUSHER=docker`
-still pushes through the host daemon's socket without any boot-time warning. The
-RCE-to-host socket path is still open via the pusher even after the builder guard passes.
-
-`Config.Validate` has no corresponding check for `COOKER_PUSHER=docker`, so a production
-deployment that uses Kaniko to build but Docker to push boots cleanly, exposing the same
-docker.sock surface the builder guard was meant to close.
-
-**Recommended fix.**
-Add to `Config.Validate`:
-```go
-if c.PusherBackend == "docker" {
-    problems = append(problems, "COOKER_PUSHER=docker is unsafe in production "+
-        "(host docker.sock); use crane instead")
-}
-```
-Mirror the wording and placement of the existing builder check at `config.go:452-454`.
-
----
-
 ## Finding 5 — `deploytargets.go` registration failures are non-fatal and silently swallowed
 
 **Severity: Low**
@@ -195,13 +160,13 @@ if err := registerDeployTargets(cfg.DeployTargets); err != nil {
 
 ## Severity summary
 
-| # | Issue | Severity | File:lines |
-|---|---|---|---|
-| 1 | Silent `default` in `selectBuilder`, `selectPusher`, `selectDeployer` — typo boots with noop | **High** | `server.go:444-494` |
-| 2 | `Config.Validate` has no `COOKER_PUSHER=docker` production guard (peer to the builder guard) | **High** | `config.go:452-454` |
-| 3 | Silent `default` in wsHub, wsTickets, rate-limiter backend pickers — typo silently uses memory | **Medium** | `server.go:129-152`, `router.go:55-63` |
-| 4 | Inconsistent error-wrapping style inside `selectSecretsManager` | **Low** | `server.go:501-547` |
-| 5 | `registerDeployTargets` swallows non-duplicate registration errors | **Low** | `deploytargets.go:19-28` |
+| # | Issue | Severity | File:lines | Status |
+|---|---|---|---|---|
+| 1 | Silent `default` in `selectBuilder`, `selectPusher`, `selectDeployer` — typo boots with noop | **High** | `server.go:444-494` | Open |
+| 2 (F-02) | `Config.Validate` has no `COOKER_PUSHER=docker` production guard (peer to the builder guard) | **High** | `config.go:452-454` | **Closed** |
+| 3 | Silent `default` in wsHub, wsTickets, rate-limiter backend pickers — typo silently uses memory | **Medium** | `server.go:129-152`, `router.go:55-63` | Open |
+| 4 | Inconsistent error-wrapping style inside `selectSecretsManager` | **Low** | `server.go:501-547` | Open |
+| 5 | `registerDeployTargets` swallows non-duplicate registration errors | **Low** | `deploytargets.go:19-28` | Open |
 
 ---
 
@@ -211,7 +176,7 @@ if err := registerDeployTargets(cfg.DeployTargets); err != nil {
 |---|---|---|
 | `COOKER_BUILDER=docker` | Yes — `config.go:452` | Refuses in production |
 | `COOKER_BUILDER=kaniko/buildah` | No | PVC / namespace absence is a runtime error only |
-| `COOKER_PUSHER=docker` | **No** | Finding 4 above — peer gap to builder guard |
+| `COOKER_PUSHER=docker` | **Yes** | F-02 closed — `config.go` refuses in production; use crane |
 | `COOKER_DEPLOYER=kubectl/clientgo` | No | Kubeconfig absence surfaces at runtime |
 | `COOKER_SECRETS_BACKEND=keepsave` | Yes — `config.go:395-405` | URL must be https:// |
 | `COOKER_SECRETS_BACKEND=vault` | Partial — `config.go:407-409` | Addr checked; Token not validated |
@@ -222,3 +187,28 @@ if err := registerDeployTargets(cfg.DeployTargets); err != nil {
 **See also:** [`dag-performance.md`](dag-performance.md),
 [`vulnerabilities-and-chains.md`](vulnerabilities-and-chains.md), and
 [`launch-readiness.md`](launch-readiness.md) for related stability and security findings.
+
+---
+
+## Closed findings
+
+### F-02 — `Config.Validate` does not gate `COOKER_PUSHER=docker` in production
+
+**Severity: High** | **Closed by:** PR `fix(config): refuse COOKER_PUSHER=docker in production (F-02)` on branch `claude/w2-f02-pusher-gate`
+
+**Original description.**
+`Config.Validate` refused `COOKER_BUILDER=docker` in production but had no peer check for
+`COOKER_PUSHER=docker`. The `DockerSock` pusher shells out to the Docker CLI which uses the
+same bind-mounted host docker.sock. An operator who correctly switched `COOKER_BUILDER=kaniko`
+but left `COOKER_PUSHER=docker` would boot cleanly in production while still exposing the
+docker.sock RCE-to-host surface via the push path.
+
+**Fix applied.**
+Added to `Config.Validate` immediately below the builder guard (`backend/internal/config/config.go`):
+```go
+if c.PusherBackend == "docker" {
+    problems = append(problems, "COOKER_PUSHER=docker is forbidden in production (docker.sock RCE-to-host risk); use crane")
+}
+```
+Test `TestValidate_ProductionRefusesDockerPusher` added to `config_test.go`.
+`SECURITY.md` "Image build isolation" section updated to document the pusher gate.
