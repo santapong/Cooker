@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // New returns an in-memory aggregate store. Safe for concurrent use.

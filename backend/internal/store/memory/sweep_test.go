@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/model"
 )
 
 func TestSweepOrphans_FlagsStaleAndMissingHeartbeats(t *testing.T) {

@@ -4,7 +4,7 @@
 // @version         0.1
 // @description     REST API for Cooker pipelines, environments, secrets, and apps.
 // @contact.name    Cooker maintainers
-// @contact.url     https://github.com/cooker-ci/cooker
+// @contact.url     https://github.com/santapong/Cooker
 // @license.name    Apache-2.0
 // @license.url     https://www.apache.org/licenses/LICENSE-2.0
 // @host            localhost:8080
@@ -18,17 +18,44 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/cooker-ci/cooker/internal/config"
-	"github.com/cooker-ci/cooker/internal/server"
+	"github.com/santapong/cooker/internal/config"
+	"github.com/santapong/cooker/internal/server"
+)
+
+// Build-time metadata. Populated by the Makefile and GoReleaser via:
+//
+//	-ldflags "-X main.version=v0.1.0 -X main.commit=$(git rev-parse HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+//
+// Defaults are "dev" so the binary still reports something useful
+// when built without ldflags (e.g. `go run ./cmd/cooker`).
+var (
+	version = "v0.1.0-dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 func main() {
+	printVersion := flag.Bool("version", false, "print build version and exit")
+	flag.Parse()
+
+	if *printVersion {
+		fmt.Printf("version: %s\ncommit:  %s\ndate:    %s\n", version, commit, date)
+		os.Exit(0)
+	}
+
+	// Propagate build metadata into the server package so the
+	// /api/v1/version endpoint reflects real release information.
+	server.BuildVersion = version
+	server.BuildSHA = commit
+	server.BuildTime = date
+
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 
 	cfg := config.Load()

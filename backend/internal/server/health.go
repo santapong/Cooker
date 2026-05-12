@@ -9,7 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/store"
 )
 
 const readinessProbeTimeout = 1 * time.Second

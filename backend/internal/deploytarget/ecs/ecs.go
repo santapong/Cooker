@@ -17,8 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
-	"github.com/cooker-ci/cooker/internal/deploytarget"
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/deploytarget"
+	"github.com/santapong/cooker/internal/model"
 )
 
 // Target is the ECS adapter.

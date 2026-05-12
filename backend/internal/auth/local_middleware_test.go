@@ -10,8 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/cooker-ci/cooker/internal/auth/local"
-	"github.com/cooker-ci/cooker/internal/config"
+	"github.com/santapong/cooker/internal/auth/local"
+	"github.com/santapong/cooker/internal/config"
 )
 
 func TestMiddleware_AcceptsLocalToken(t *testing.T) {

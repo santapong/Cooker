@@ -14,9 +14,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/cooker-ci/cooker/internal/buildplan"
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/source/github"
+	"github.com/santapong/cooker/internal/buildplan"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/source/github"
 )
 
 // AppDeployer orchestrates a real "Deploy" button click. It clones

@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/model"
 )
 
 func makeEnvironments() []*model.Environment {

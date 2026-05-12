@@ -16,7 +16,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/model"
 )
 
 // ErrUnavailable is returned when a target backend has no

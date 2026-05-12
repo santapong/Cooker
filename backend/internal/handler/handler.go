@@ -10,11 +10,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/cooker-ci/cooker/internal/crypto"
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/secrets"
-	"github.com/cooker-ci/cooker/internal/service"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/crypto"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/secrets"
+	"github.com/santapong/cooker/internal/service"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // RunSpawner is a narrow interface implemented by server.RunCoordinator.

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // UserStore implements store.UserStore using PostgreSQL.

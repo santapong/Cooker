@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/model"
 )
 
 func TestStageType(t *testing.T) {

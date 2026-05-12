@@ -31,7 +31,12 @@ WORKDIR /app/backend
 COPY backend/go.mod backend/go.sum* ./
 RUN go mod download
 COPY backend/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -o /cooker ./cmd/cooker/
+ARG VERSION=v0.1.0-dev
+ARG COMMIT=none
+ARG BUILD_DATE=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_DATE}" \
+    -o /cooker ./cmd/cooker/
 
 # --- Final image ---
 FROM alpine:3.19
@@ -80,7 +85,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 LABEL org.opencontainers.image.title="Cooker"
 LABEL org.opencontainers.image.description="CI/CD Management Tool for Docker & Kubernetes"
-LABEL org.opencontainers.image.source="https://github.com/cooker-ci/cooker"
+LABEL org.opencontainers.image.source="https://github.com/santapong/Cooker"
 
 USER 65532:65532
 ENTRYPOINT ["cooker"]

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/cooker-ci/cooker/internal/oci"
+	"github.com/santapong/cooker/internal/oci"
 )
 
 func TestParseManifest_Valid(t *testing.T) {

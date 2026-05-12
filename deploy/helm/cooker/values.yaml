@@ -44,7 +44,7 @@ secrets:
       existingSecretKey: "api-key"
 
 image:
-  repository: ghcr.io/cooker-ci/cooker
+  repository: ghcr.io/santapong/cooker
   tag: latest
   pullPolicy: IfNotPresent
 

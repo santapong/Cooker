@@ -10,8 +10,8 @@ import (
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
 
-	"github.com/cooker-ci/cooker/internal/deploytarget"
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/deploytarget"
+	"github.com/santapong/cooker/internal/model"
 )
 
 // Target is the Cloud Run adapter. Project + Region are required.

@@ -13,7 +13,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/model"
 )
 
 // Length caps. Aligned with reasonable PG TEXT usage and avoid

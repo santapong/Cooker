@@ -18,8 +18,8 @@ import (
 
 	_ "github.com/lib/pq"
 
-	"github.com/cooker-ci/cooker/internal/observability"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/observability"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // osEnvGetter is an indirection so envLookup can be stubbed in tests.

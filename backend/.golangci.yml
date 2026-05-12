@@ -39,7 +39,7 @@ linters:
         - (*database/sql.Rows).Close
         - (*database/sql.DB).Close
         - (*github.com/gorilla/websocket.Conn).Close
-        - (*github.com/cooker-ci/cooker/internal/store.Store).Close
+        - (*github.com/santapong/cooker/internal/store.Store).Close
         - (*github.com/moby/buildkit/client.Client).Close
         - (*cloud.google.com/go/run/apiv2.ServicesClient).Close
         - (*cloud.google.com/go/run/apiv2.RevisionsClient).Close

@@ -17,7 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	smtypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 
-	"github.com/cooker-ci/cooker/internal/secrets"
+	"github.com/santapong/cooker/internal/secrets"
 )
 
 // Manager satisfies secrets.Manager against AWS Secrets Manager.

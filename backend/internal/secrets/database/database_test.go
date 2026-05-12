@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cooker-ci/cooker/internal/crypto"
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/secrets"
-	"github.com/cooker-ci/cooker/internal/store/memory"
+	"github.com/santapong/cooker/internal/crypto"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/secrets"
+	"github.com/santapong/cooker/internal/store/memory"
 )
 
 func newTestManager(t *testing.T) *Manager {

@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/cooker-ci/cooker/internal/auth"
+	"github.com/santapong/cooker/internal/auth"
 )
 
 func init() {
