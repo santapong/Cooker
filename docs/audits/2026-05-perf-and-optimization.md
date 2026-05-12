@@ -443,3 +443,13 @@ Things that look like wins on paper but aren't worth the effort:
 - `docs/audits/crash-and-service-quality.md` Part B.2 (audit-sink async, mwWriter mutex, wsLogSink alloc, decodeBroadcast alloc).
 - `docs/audits/W10-bug-and-chain-recheck.md` W10-2, W10-4, W10-20.
 - `backlog.md` — closed items (P0.5 binary WS framing, T16 audit sink async, W3 DAG fan-out cap) are referenced where they overlap.
+
+---
+
+## Closed findings
+
+Findings moved here once the fix lands on `main`.
+
+- **P26-05-34** — Backend test loop serialised packages one at a time. Fixed in `claude/ci-critical-path-3min`: replaced `for pkg in $(go list ./...); do go test -race ...; done` with a single `go test -race -timeout 120s ./...` invocation so Go's native cross-package parallelism applies. Expected: backend job ~90s → ~20s.
+- **P26-05-38** — Docker job had `needs: [backend, frontend, helm]`, serialising it after the full test suite. Fixed in `claude/ci-critical-path-3min`: dropped `needs:` so all four jobs run in parallel. The docker job has no genuine data dependency on test output. Expected: critical-path CI ~8 min → ~3-5 min (docker build and tests run concurrently).
+- **P26-05-39** — Docker build had no buildx layer cache. Fixed in `claude/ci-critical-path-3min`: added `docker/setup-buildx-action@v3` + `docker/build-push-action@v6` with `cache-from: type=gha` and `cache-to: type=gha,mode=max`. Expected: docker job ~4 min → ~1 min on warm cache.

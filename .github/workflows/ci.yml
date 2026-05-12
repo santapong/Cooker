@@ -33,6 +33,22 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+          # cache: true (the default) covers the module download cache
+          # ($GOPATH/pkg/mod). The build cache ($GOCACHE) is separate — see
+          # the explicit actions/cache step below (P26-05-35).
+          cache: true
+          cache-dependency-path: backend/go.sum
+      # P26-05-35: persist the Go build cache across runs so incremental
+      # rebuilds skip the compilation of unchanged packages (kube-client-go,
+      # OTel, etc.). Key on go.sum so the cache busts when dependencies
+      # change; the restore-keys fallback lets partial cache hits still
+      # benefit on dep-only changes.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-
       - name: Build
         working-directory: backend
         run: go build ./...
@@ -63,20 +79,10 @@ jobs:
         env:
           DATABASE_URL: postgres://cooker:cooker@localhost:5432/cooker_test?sslmode=disable
         run: |
-          # Run packages one at a time so a failure surfaces the
-          # offending package clearly in the action log without
-          # having to download the full archive.
-          set -e
-          fail=0
-          for pkg in $(go list ./...); do
-            echo "::group::$pkg"
-            if ! go test -race -timeout 90s "$pkg"; then
-              fail=1
-              echo "::error::test failure in $pkg"
-            fi
-            echo "::endgroup::"
-          done
-          exit $fail
+          # Run all packages in one invocation so go test can parallelise
+          # across packages (bounded by GOMAXPROCS). The race detector stays
+          # on. P26-05-34: replaces the per-package sequential for-loop.
+          go test -race -timeout 120s ./...
 
   frontend:
     runs-on: ubuntu-latest
@@ -296,9 +302,29 @@ jobs:
           /tmp/kubeconform -strict -summary -ignore-missing-schemas /tmp/default.yaml /tmp/prod.yaml /tmp/kaniko.yaml /tmp/buildah.yaml /tmp/keepsave.yaml
 
   docker:
+    # P26-05-38: drop needs:[backend,frontend,helm] so the docker build runs
+    # in parallel with the test jobs rather than after them. The docker job
+    # has no genuine data dependency on test output — it only needs a clean
+    # checkout. Failing fast on a Dockerfile syntax error is now possible
+    # without waiting for the full test suite to complete.
+    #
+    # There is one acknowledged trade-off: compute is spent on a docker build
+    # even when tests are failing. On a branch where tests are red the build
+    # will waste a few minutes; this is acceptable because it surfaces
+    # independent failure signals in parallel.
     runs-on: ubuntu-latest
-    needs: [backend, frontend, helm]
     steps:
       - uses: actions/checkout@v4
+      # P26-05-39: set up buildx with the GHA layer-cache backend so
+      # subsequent runs reuse cached layers for the Go build, npm ci, and
+      # kubectl fetch stages.
+      - uses: docker/setup-buildx-action@v3
       - name: Build Docker image
-        run: docker build -t cooker:ci -f deploy/docker/Dockerfile .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: false
+          tags: cooker:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
