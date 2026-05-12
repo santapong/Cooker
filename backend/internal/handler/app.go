@@ -175,6 +175,32 @@ func (h *Handler) DeployApp(c *gin.Context) {
 	runID := uuid.New().String()
 	channel := "app-run:" + runID
 
+	// F-07 (store-parity audit): create a stub run row with
+	// status=running *before* calling Spawn so that:
+	//  (a) RunCoordinator.Spawn's first heartbeat (runs.go:78) finds
+	//      the row and succeeds instead of silently no-oping against a
+	//      missing row (runs.go:111).
+	//  (b) If the process crashes mid-deploy the boot-time orphan sweep
+	//      (SweepOrphans) can see and reap the stale row instead of
+	//      silently losing the run.
+	// The row is Updated with the final status at the end of
+	// runAppDeployCtx. Mirrors the pipeline-run path in RunPipeline.
+	// See docs/audits/2026-05-store-parity.md §F-07 and
+	// internal/server/runs.go:78 (first heartbeat) and :111 (silent swallow).
+	if h.Runs != nil && h.Store != nil {
+		now := time.Now()
+		stub := &model.PipelineRun{
+			ID:         runID,
+			PipelineID: a.ID,
+			Status:     model.RunStatusRunning,
+			StartedAt:  &now,
+		}
+		if createErr := h.Store.Runs.Create(c.Request.Context(), stub); createErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "create run: " + createErr.Error()})
+			return
+		}
+	}
+
 	if h.Runs != nil {
 		h.Runs.Spawn(context.Background(), runID, func(ctx context.Context) error {
 			h.runAppDeployCtx(ctx, a, runID, channel)
@@ -219,14 +245,11 @@ func (h *Handler) runAppDeployCtx(ctx context.Context, a *model.App, runID, chan
 		sink.writef("[error] %v\n", err)
 	}
 	if run != nil {
-		// Coordinator-spawned runs have already had a row Created via
-		// the synthesised PipelineRun returned by the deployer, so we
-		// Update if it exists or fall back to Create. Use Update first
-		// to preserve heartbeats written by the coordinator.
+		// The stub run row was Created before Spawn (F-07 fix), so
+		// Update is always valid here and preserves any heartbeats
+		// written by the coordinator during the deploy.
 		if updateErr := h.Store.Runs.Update(deployCtx, run); updateErr != nil {
-			if persistErr := h.Store.Runs.Create(deployCtx, run); persistErr != nil {
-				sink.writef("[warn] persist run: %v\n", persistErr)
-			}
+			sink.writef("[warn] persist run: %v\n", updateErr)
 		}
 		sink.writef("[final] status=%s\n", run.Status)
 	}
