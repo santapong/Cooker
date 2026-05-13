@@ -69,6 +69,7 @@ export function useWebSocket({
     }
     closedByCallerRef.current = false;
     const ticket = await fetchWSTicket();
+    if (closedByCallerRef.current) return; // FH-03: guard against unmount during ticket fetch
     if (!ticket) {
       // Auth failed — schedule a retry with backoff so an expired
       // token that gets refreshed in the background eventually
