@@ -154,7 +154,7 @@
 | 7 | No panic recovery in stage goroutine | **Medium** (process crash) | `runner.go:66-78` |
 | 8 | "30-minute deadline" missing from `Spawn` | **Medium** | `runs.go:41-45` |
 | 9 | Rate limiter is per-replica, no Redis backend | **Medium** | `ratelimit.go:14-18` |
-| 10 | No mid-run progress persistence | **Medium** (orphan-sweep recovers state but loses partial progress). Note: the `runner.Updates()` drain goroutine that was the intended hook for this was removed in `claude/w3-t1-t3-handler-f1` (§6 T3) — a debounced replacement will land in T5 (W4). | `executor.go`, `store/postgres/run.go:85-113` |
+| 10 | ~~No mid-run progress persistence~~ | ~~**Medium**~~ **Closed** — a debounced drain goroutine over `runner.Updates()` now writes at most once per `min(500ms, 10 transitions)` with eager flush on terminal status; landed in `claude/w4-t5-batched-persistprogress`. | `executor.go` |
 | 11 | No deploy event / kubectl status capture | **Low/Medium** | `internal/deployer/clientgo.go` |
 | 12 | No log-level config / no `run_id` correlation | **Low** | `cmd/cooker/main.go:31` |
 

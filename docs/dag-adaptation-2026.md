@@ -304,13 +304,13 @@ These land in weeks 1–3 — before any primitive. They close audit findings, s
 
 **Effort.** ~1 hour.
 
-### T5 — Batched persistProgress via Updates channel
+### T5 — Batched persistProgress via Updates channel ✅ CLOSED (`claude/w4-t5-batched-persistprogress`)
 
 **Problem.** `executor.go:199, 255, 261` call `persistProgress` three times per stage. Each is a full `UPDATE pipeline_runs SET stage_runs = ..., ...` rewriting the entire JSONB column. A 50-stage pipeline pays ~100+ writes.
 
-**Fix.** Replace the explicit calls with a single drain goroutine that consumes `runner.Updates()` and writes at most once per `min(500ms, 10 transitions)`. The drain goroutine is what T3 cleared the way for. Acceptable to flush eagerly on `Status == "failed"` or `Status == "success"` (run completion) — the latency of a final write is invisible.
+**Fix.** Replace the explicit calls with a single drain goroutine that consumes `runner.Updates()` and writes at most once per `min(500ms, 10 transitions)`. The drain goroutine is what T3 cleared the way for. Terminal status (`"failed"` / `"success"`) flushes eagerly — no debounce lag on the final outcome.
 
-**Effort.** ~1 day (the debounce logic + tests).
+**Landed.** Two new tests: `TestExecutor_T5_BatchedWritesDebounce` (asserts fewer writes than the pre-T5 per-call count for a 12-stage pipeline) and `TestExecutor_T5_EagerFlushOnTerminal` (asserts ≥1 write on terminal failure before Execute returns). Both pass under `-race`. Closes dag-performance.md Medium #10.
 
 **Required before:** Primitives #1 (retry attempts each emit a status transition — without batching, the write rate triples), #2 (skip emits a transition), #5 (post-hooks emit transitions).
 
