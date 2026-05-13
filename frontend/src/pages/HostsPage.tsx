@@ -68,13 +68,35 @@ export default function HostsPage() {
           {loading ? (
             <div style={{ padding: 40, color: t.textMute, textAlign: 'center' }}>Loading…</div>
           ) : hosts.length === 0 ? (
+            // Empty-state two-CTA — W11 §Indie step 2 (PR #66).
             <EmptyState
               title="No hosts registered yet."
               body="Add a Docker daemon endpoint or a Kubernetes cluster to start deploying."
               action={
-                <Btn kind="primary" icon="plus" onClick={() => setCreating(true)}>
-                  Add the first host
-                </Btn>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <Btn kind="primary" icon="plus" onClick={() => setCreating(true)}>
+                    Add your first Host
+                  </Btn>
+                  <a
+                    href="https://github.com/santapong/Cooker/blob/main/docs/user-guide/concepts/hosts-and-targets.md"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '8px 16px',
+                      border: '1px solid currentColor',
+                      borderRadius: 7,
+                      fontSize: 13.5,
+                      color: 'inherit',
+                      textDecoration: 'none',
+                      opacity: 0.7,
+                    }}
+                  >
+                    Hosts &amp; targets guide ↗
+                  </a>
+                </div>
               }
             />
           ) : (

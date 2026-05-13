@@ -123,6 +123,7 @@ export default function RegistryPage() {
           {loading ? (
             <div style={{ padding: 40, color: t.textMute, textAlign: 'center' }}>Loading…</div>
           ) : filtered.length === 0 ? (
+            // Empty-state two-CTA — W11 §Indie step 2 (PR #66).
             <EmptyState
               title={search ? 'No matches.' : 'No repositories yet.'}
               body={
@@ -130,6 +131,34 @@ export default function RegistryPage() {
                   <>Try a different filter, or clear it to see everything.</>
                 ) : (
                   <>Push your first image — pipelines do this automatically once you wire one up.</>
+                )
+              }
+              action={
+                search ? undefined : (
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <Btn kind="primary" icon="layers">
+                      Connect a registry
+                    </Btn>
+                    <a
+                      href="https://github.com/santapong/Cooker/blob/main/docs/user-guide/guides/registries.md"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '8px 16px',
+                        border: '1px solid currentColor',
+                        borderRadius: 7,
+                        fontSize: 13.5,
+                        color: 'inherit',
+                        textDecoration: 'none',
+                        opacity: 0.7,
+                      }}
+                    >
+                      Registry guide ↗
+                    </a>
+                  </div>
                 )
               }
             />
