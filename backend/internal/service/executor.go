@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -154,8 +155,25 @@ func NewExecutor(opts ...Option) *Executor {
 	return e
 }
 
-// Execute runs a pipeline and returns the completed PipelineRun.
-func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.PipelineRun) error {
+// Execute runs a pipeline and returns the terminal RunResult plus
+// any error from the DAG runner. The returned RunResult.Status is
+// guaranteed terminal — RunStatusSuccess, RunStatusFailed, or
+// RunStatusCancelled — and matches the run.Status field Execute
+// also writes on the in-memory PipelineRun.
+//
+// Cancellation semantics (F2):
+//   - If the caller has already advanced run.Status to
+//     RunStatusCancelled (e.g. CancelPipelineRun ran concurrently),
+//     Execute preserves that status on return regardless of whether
+//     the DAG runner reports an error or a clean shutdown. This is
+//     the silent-flip lock-in flagged by handler-layering audit
+//     Finding 2 (see docs/audits/2026-05-handler-layering.md).
+//   - If the DAG runner returns a context-cancelled error and the
+//     run was NOT pre-marked Cancelled, Execute reports
+//     RunStatusCancelled (operator-driven cancellation via ctx).
+//   - Any other runner error → RunStatusFailed.
+//   - Clean return → RunStatusSuccess.
+func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.PipelineRun) (model.RunResult, error) {
 	// Bind run-id to the logger so every line emitted from this
 	// goroutine (and any goroutine that takes ctx) carries it.
 	// Operators tailing stderr can grep `run=<id>` instead of
@@ -166,7 +184,11 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 
 	dag, err := BuildDAGFromPipeline(p)
 	if err != nil {
-		return fmt.Errorf("building DAG: %w", err)
+		// DAG construction failure is a Failed terminal — the run never
+		// started executing stages. Stamp run.Status + FinishedAt so the
+		// handler closure can persist verbatim without re-deriving state.
+		wrapped := fmt.Errorf("building DAG: %w", err)
+		return e.finalize(run, wrapped, run.Status == model.RunStatusCancelled), wrapped
 	}
 
 	stageMap := make(map[string]*model.Stage)
@@ -178,6 +200,15 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 	for i := range run.StageRuns {
 		stageRunMap[run.StageRuns[i].StageID] = &run.StageRuns[i]
 	}
+
+	// F2 cancellation lock-in: snapshot whether the caller pre-marked
+	// the run Cancelled (e.g. a CancelPipelineRun call that landed on
+	// the row before Spawn-ed work started). We stamp Running below
+	// regardless so observers see the run is in flight, but finalize()
+	// uses this flag to refuse the Running→Success transition when the
+	// terminal intent was Cancelled. See
+	// docs/audits/2026-05-handler-layering.md Finding 2.
+	startedCancelled := run.Status == model.RunStatusCancelled
 
 	now := time.Now()
 	run.Status = model.RunStatusRunning
@@ -354,17 +385,50 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 	// we set the terminal run.Status / run.FinishedAt below.
 	<-drainDone
 
+	return e.finalize(run, err, startedCancelled), err
+}
+
+// finalize stamps the terminal run.Status / FinishedAt / Error onto
+// run and returns the matching RunResult. F2 contract: on return,
+// run.Status is one of Success / Failed / Cancelled — never
+// RunStatusRunning, never RunStatusPending. The handler's
+// post-Execute closure used to re-derive these from run.Status; it
+// now just persists the RunResult verbatim. See
+// docs/audits/2026-05-handler-layering.md Finding 2.
+//
+// Cancellation precedence:
+//  1. If run.Status was Cancelled at entry (startedCancelled) OR was
+//     externally re-set to Cancelled between Run start and finalize,
+//     preserve Cancelled. This is the silent-flip lock-in.
+//  2. If runErr is a context-cancellation error, report Cancelled.
+//  3. Any other runErr → Failed.
+//  4. No error → Success.
+func (e *Executor) finalize(run *model.PipelineRun, runErr error, startedCancelled bool) model.RunResult {
 	finishTime := time.Now()
 	run.FinishedAt = &finishTime
 
-	if err != nil {
+	switch {
+	case startedCancelled || run.Status == model.RunStatusCancelled:
+		// Caller pre-marked the run cancelled — do not flip to
+		// Success or Failed. Preserve any existing Error verbatim
+		// (CancelPipelineRun does not set one, but a future caller
+		// might want to attribute the cancellation).
+		run.Status = model.RunStatusCancelled
+	case runErr != nil && errors.Is(runErr, context.Canceled):
+		run.Status = model.RunStatusCancelled
+		if run.Error == "" {
+			run.Error = runErr.Error()
+		}
+	case runErr != nil:
 		run.Status = model.RunStatusFailed
-		run.Error = err.Error()
-		return err
+		if run.Error == "" {
+			run.Error = runErr.Error()
+		}
+	default:
+		run.Status = model.RunStatusSuccess
 	}
 
-	run.Status = model.RunStatusSuccess
-	return nil
+	return model.RunResult{Status: run.Status, FinishedAt: finishTime}
 }
 
 // persistProgress invokes the registered RunUpdater (if any) so the

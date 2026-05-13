@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/santapong/cooker/internal/builder"
 	"github.com/santapong/cooker/internal/deployer"
@@ -141,9 +142,12 @@ func TestExecutor_ExecuteSimplePipeline(t *testing.T) {
 	}
 
 	executor := NewExecutor()
-	err := executor.Execute(context.Background(), p, run)
+	result, err := executor.Execute(context.Background(), p, run)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != model.RunStatusSuccess {
+		t.Errorf("expected result status success, got %s", result.Status)
 	}
 
 	if run.Status != model.RunStatusSuccess {
@@ -200,7 +204,7 @@ func TestExecutor_ImplementedStageTypes(t *testing.T) {
 	}
 
 	executor := NewExecutor()
-	err := executor.Execute(context.Background(), p, run)
+	_, err := executor.Execute(context.Background(), p, run)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -238,7 +242,7 @@ func TestExecutor_StubStagesFail(t *testing.T) {
 			}
 
 			exec := NewExecutor()
-			err := exec.Execute(context.Background(), p, run)
+			_, err := exec.Execute(context.Background(), p, run)
 			if err == nil {
 				t.Fatalf("stage type %q should return an error (not implemented), got nil", st)
 			}
@@ -271,7 +275,7 @@ func TestExecutor_UnknownStageType(t *testing.T) {
 	}
 
 	executor := NewExecutor()
-	err := executor.Execute(context.Background(), p, run)
+	_, err := executor.Execute(context.Background(), p, run)
 	if err == nil {
 		t.Fatal("expected error for unknown stage type")
 	}
@@ -305,7 +309,7 @@ func TestExecutor_InvalidDAG(t *testing.T) {
 	}
 
 	executor := NewExecutor()
-	err := executor.Execute(context.Background(), p, run)
+	_, err := executor.Execute(context.Background(), p, run)
 	if err == nil {
 		t.Fatal("expected error for cyclic DAG")
 	}
@@ -337,7 +341,7 @@ func TestExecutor_ContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately
 
 	executor := NewExecutor()
-	err := executor.Execute(ctx, p, run)
+	_, err := executor.Execute(ctx, p, run)
 	if err == nil {
 		t.Fatal("expected error from cancelled context")
 	}
@@ -368,7 +372,7 @@ func TestExecutor_BuildStage_DispatchesToBuilder(t *testing.T) {
 	}
 
 	exec := NewExecutor(WithBuilder(mb))
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -423,7 +427,7 @@ func TestExecutor_BuildStage_BuilderErrorFailsStage(t *testing.T) {
 	}
 
 	exec := NewExecutor(WithBuilder(mb))
-	err := exec.Execute(context.Background(), p, run)
+	_, err := exec.Execute(context.Background(), p, run)
 	if err == nil {
 		t.Fatal("expected error from failed builder")
 	}
@@ -457,7 +461,7 @@ func TestExecutor_DefaultBuilderIsNoop(t *testing.T) {
 	}
 
 	exec := NewExecutor()
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if run.Status != model.RunStatusSuccess {
@@ -489,7 +493,7 @@ func TestExecutor_PushStage_DispatchesToPusher(t *testing.T) {
 	}
 
 	exec := NewExecutor(WithPusher(mp))
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -527,7 +531,7 @@ func TestExecutor_PushStage_SkipsRegistryPrefixWhenAlreadyQualified(t *testing.T
 		Status:     model.RunStatusPending,
 		StageRuns:  []model.StageRun{{StageID: "p", Status: model.RunStatusPending}},
 	}
-	if err := NewExecutor(WithPusher(mp)).Execute(context.Background(), p, run); err != nil {
+	if _, err := NewExecutor(WithPusher(mp)).Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if mp.calls[0].Target != "ghcr.io/org/app:v1" {
@@ -555,7 +559,7 @@ func TestExecutor_DeployStage_DispatchesToDeployer(t *testing.T) {
 	}
 
 	exec := NewExecutor(WithDeployer(md))
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(md.calls) != 1 {
@@ -587,7 +591,7 @@ func TestExecutor_DeployStage_RequiresManifestOrHelm(t *testing.T) {
 		Status:     model.RunStatusPending,
 		StageRuns:  []model.StageRun{{StageID: "d", Status: model.RunStatusPending}},
 	}
-	err := NewExecutor().Execute(context.Background(), p, run)
+	_, err := NewExecutor().Execute(context.Background(), p, run)
 	if err == nil {
 		t.Fatal("expected error for deploy stage missing manifest and helm")
 	}
@@ -616,7 +620,7 @@ func TestExecutor_GitOpsCommit_DispatchesToWriter(t *testing.T) {
 	}
 
 	exec := NewExecutor(WithGitOps(mg))
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(mg.calls) != 1 {
@@ -644,7 +648,7 @@ func TestExecutor_GitOpsCommit_RequiresRepoAndPath(t *testing.T) {
 		Status:     model.RunStatusPending,
 		StageRuns:  []model.StageRun{{StageID: "g", Status: model.RunStatusPending}},
 	}
-	if err := NewExecutor().Execute(context.Background(), p, run); err == nil {
+	if _, err := NewExecutor().Execute(context.Background(), p, run); err == nil {
 		t.Fatal("expected validation error")
 	}
 }
@@ -702,7 +706,7 @@ func TestExecutor_T5_BatchedWritesDebounce(t *testing.T) {
 	updater := &fakeRunUpdater{}
 	exec := NewExecutor(WithRunUpdater(updater.update))
 
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if run.Status != model.RunStatusSuccess {
@@ -764,7 +768,7 @@ func TestExecutor_T5_EagerFlushOnTerminal(t *testing.T) {
 	)
 
 	// Execute must return an error (builder always errors).
-	if execErr := exec.Execute(context.Background(), p, run); execErr == nil {
+	if _, execErr := exec.Execute(context.Background(), p, run); execErr == nil {
 		t.Fatal("expected error from failed builder, got nil")
 	}
 	if run.Status != model.RunStatusFailed {
@@ -787,5 +791,233 @@ func TestExecutor_T5_EagerFlushOnTerminal(t *testing.T) {
 	}
 	if run.StageRuns[0].Error == "" {
 		t.Error("stage run should record the error string")
+	}
+}
+
+// TestExecutor_F2_RunResult locks in the terminal-RunResult contract
+// introduced by F2 (docs/audits/2026-05-handler-layering.md Finding 2).
+// Execute now returns (model.RunResult, error) and owns the terminal-
+// status state machine that previously lived in the handler closure
+// at handler/pipeline.go:191–210. The handler persists the result
+// verbatim — no Cancelled→Success flip, no Failed→Failed double-set.
+//
+// The four cases cover every terminal axis the handler used to derive:
+//   - all-success
+//   - one stage failed
+//   - context cancelled (must NOT flip Cancelled→Success — this is
+//     the silent-flip lock-in the audit flagged)
+//   - empty pipeline (zero stages, no error)
+func TestExecutor_F2_RunResult(t *testing.T) {
+	tests := []struct {
+		name        string
+		buildPlan   func() (*model.Pipeline, *model.PipelineRun)
+		ctxFn       func() (context.Context, context.CancelFunc)
+		wantStatus  model.RunStatus
+		wantErrText string // substring expected in err.Error(); empty → expect nil error
+	}{
+		{
+			name: "all stages success",
+			buildPlan: func() (*model.Pipeline, *model.PipelineRun) {
+				p := &model.Pipeline{
+					ID: "pipe-f2-success",
+					Stages: []model.Stage{
+						{ID: "b", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{Context: ".", Tags: []string{"app:v1"}}},
+						{ID: "p", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{Image: "app:v1", Repository: "registry.example.com/app:v1"}},
+					},
+					Edges: []model.Edge{{ID: "e1", Source: "b", Target: "p"}},
+				}
+				run := &model.PipelineRun{
+					ID:         "run-f2-success",
+					PipelineID: p.ID,
+					Status:     model.RunStatusPending,
+					StageRuns: []model.StageRun{
+						{StageID: "b", Status: model.RunStatusPending},
+						{StageID: "p", Status: model.RunStatusPending},
+					},
+				}
+				return p, run
+			},
+			ctxFn:      func() (context.Context, context.CancelFunc) { return context.Background(), func() {} },
+			wantStatus: model.RunStatusSuccess,
+		},
+		{
+			name: "one stage fails",
+			buildPlan: func() (*model.Pipeline, *model.PipelineRun) {
+				// Use a deploy stage missing both ManifestPath and HelmChart —
+				// deterministic validation failure with no concurrent goroutine.
+				p := &model.Pipeline{
+					ID: "pipe-f2-fail",
+					Stages: []model.Stage{
+						{ID: "d", Name: "Deploy", Type: model.StageTypeDeploy, Config: model.StageConfig{Namespace: "prod"}},
+					},
+					Edges: []model.Edge{},
+				}
+				run := &model.PipelineRun{
+					ID:         "run-f2-fail",
+					PipelineID: p.ID,
+					Status:     model.RunStatusPending,
+					StageRuns:  []model.StageRun{{StageID: "d", Status: model.RunStatusPending}},
+				}
+				return p, run
+			},
+			ctxFn:       func() (context.Context, context.CancelFunc) { return context.Background(), func() {} },
+			wantStatus:  model.RunStatusFailed,
+			wantErrText: "deploy",
+		},
+		{
+			// F2 silent-flip lock-in: the pre-F2 handler closure did
+			// `else if runCopy.Status == model.RunStatusRunning {
+			// runCopy.Status = RunStatusSuccess }` which would have
+			// correctly NOT overwritten Cancelled — but it would have
+			// missed the case where the executor returns nil error
+			// because the runner saw context.Canceled and recorded it
+			// some other way. Lock the contract at the executor: a
+			// context-cancelled run reports Cancelled (NOT Failed,
+			// NOT Success).
+			name: "context cancelled",
+			buildPlan: func() (*model.Pipeline, *model.PipelineRun) {
+				p := &model.Pipeline{
+					ID: "pipe-f2-cancel",
+					Stages: []model.Stage{
+						{ID: "b", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{Context: ".", Tags: []string{"app:v1"}}},
+					},
+					Edges: []model.Edge{},
+				}
+				run := &model.PipelineRun{
+					ID:         "run-f2-cancel",
+					PipelineID: p.ID,
+					Status:     model.RunStatusPending,
+					StageRuns:  []model.StageRun{{StageID: "b", Status: model.RunStatusPending}},
+				}
+				return p, run
+			},
+			ctxFn: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel() // pre-cancelled — runner.Run returns immediately
+				return ctx, func() {}
+			},
+			wantStatus: model.RunStatusCancelled,
+			// Runner surfaces context.Canceled; the executor returns it
+			// AND stamps Status=Cancelled. The handler discards the err
+			// (Status drives the persisted row); the lock-in is the
+			// terminal status, not the err shape.
+			wantErrText: "context canceled",
+		},
+		{
+			name: "empty pipeline",
+			buildPlan: func() (*model.Pipeline, *model.PipelineRun) {
+				p := &model.Pipeline{
+					ID:     "pipe-f2-empty",
+					Stages: []model.Stage{},
+					Edges:  []model.Edge{},
+				}
+				run := &model.PipelineRun{
+					ID:         "run-f2-empty",
+					PipelineID: p.ID,
+					Status:     model.RunStatusPending,
+					StageRuns:  []model.StageRun{},
+				}
+				return p, run
+			},
+			ctxFn:      func() (context.Context, context.CancelFunc) { return context.Background(), func() {} },
+			wantStatus: model.RunStatusSuccess,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			p, run := tt.buildPlan()
+			ctx, cancel := tt.ctxFn()
+			defer cancel()
+
+			before := time.Now()
+			result, err := NewExecutor().Execute(ctx, p, run)
+			after := time.Now()
+
+			// Error expectation.
+			switch {
+			case tt.wantErrText == "" && err != nil:
+				t.Fatalf("expected nil error, got %v", err)
+			case tt.wantErrText != "" && err == nil:
+				t.Fatalf("expected error containing %q, got nil", tt.wantErrText)
+			}
+
+			// Terminal status: matches on the RunResult AND on run.Status.
+			// Both must agree — F2 guarantees the in-memory PipelineRun
+			// reflects the same terminal value the result carries.
+			if result.Status != tt.wantStatus {
+				t.Errorf("result.Status: want %q, got %q", tt.wantStatus, result.Status)
+			}
+			if run.Status != tt.wantStatus {
+				t.Errorf("run.Status: want %q, got %q (executor must stamp the run too)", tt.wantStatus, run.Status)
+			}
+
+			// FinishedAt non-zero. The exact instant is unobservable, but
+			// it MUST be in [before, after] so we can rule out the
+			// default-zero or in-the-past programmer error.
+			if result.FinishedAt.IsZero() {
+				t.Error("result.FinishedAt must not be zero on a terminal RunResult")
+			}
+			if result.FinishedAt.Before(before) || result.FinishedAt.After(after) {
+				t.Errorf("result.FinishedAt %v not in [%v, %v]", result.FinishedAt, before, after)
+			}
+
+			// run.FinishedAt must also be stamped — the handler closure
+			// used to do this and now relies on the executor.
+			if run.FinishedAt == nil {
+				t.Error("run.FinishedAt must be set on a terminal run")
+			} else if !run.FinishedAt.Equal(result.FinishedAt) {
+				t.Errorf("run.FinishedAt %v != result.FinishedAt %v (should be the same instant)",
+					*run.FinishedAt, result.FinishedAt)
+			}
+		})
+	}
+}
+
+// TestExecutor_F2_CancelledStaysCancelled is the explicit silent-flip
+// lock-in flagged in PR #55 / handler-layering audit Finding 2:
+// the pre-F2 handler closure flipped run.Status to Success whenever
+// Execute returned nil error and the run was still "Running".
+// If a future code path concurrently sets run.Status = Cancelled
+// (e.g. CancelPipelineRun race), Execute must NOT overwrite that
+// terminal status to Success.
+//
+// We simulate the race by setting run.Status = Cancelled BEFORE
+// calling Execute — equivalent to a cancellation that lands on the
+// row while the executor is mid-flight. Even though every stage in
+// the pipeline completes successfully and Execute returns nil error,
+// the terminal status must remain Cancelled.
+func TestExecutor_F2_CancelledStaysCancelled(t *testing.T) {
+	p := &model.Pipeline{
+		ID: "pipe-f2-cancelled-locked",
+		Stages: []model.Stage{
+			{ID: "b", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{
+				Context: ".",
+				Tags:    []string{"app:v1"},
+			}},
+		},
+		Edges: []model.Edge{},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-f2-cancelled-locked",
+		PipelineID: p.ID,
+		// Pre-set Cancelled — emulating CancelPipelineRun racing with
+		// the executor. The pre-F2 handler closure would have flipped
+		// this to Success once Execute returned nil; F2 forbids that.
+		Status:    model.RunStatusCancelled,
+		StageRuns: []model.StageRun{{StageID: "b", Status: model.RunStatusPending}},
+	}
+
+	result, err := NewExecutor().Execute(context.Background(), p, run)
+	if err != nil {
+		t.Fatalf("expected nil error (all stages succeed), got %v", err)
+	}
+
+	if result.Status != model.RunStatusCancelled {
+		t.Errorf("result.Status: want Cancelled (lock-in), got %q — F2 silent-flip regression", result.Status)
+	}
+	if run.Status != model.RunStatusCancelled {
+		t.Errorf("run.Status: want Cancelled (lock-in), got %q — F2 silent-flip regression", run.Status)
 	}
 }

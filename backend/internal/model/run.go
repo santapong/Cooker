@@ -13,6 +13,24 @@ const (
 	RunStatusCancelled RunStatus = "cancelled"
 )
 
+// RunResult is the terminal outcome the Executor reports back to its
+// caller. F2 (docs/audits/2026-05-handler-layering.md Finding 2) moved
+// run-status finalisation out of the HTTP handler closure and into
+// Execute itself; the handler now persists the result verbatim
+// instead of re-deriving terminal state from run.Status.
+//
+// Status is always terminal — one of RunStatusSuccess,
+// RunStatusFailed, or RunStatusCancelled. A non-terminal value on
+// return is a programmer error in the executor.
+//
+// FinishedAt is the wall-clock time at which Execute observed the
+// terminal transition. The handler stamps this onto run.FinishedAt
+// before persisting; callers should not derive it themselves.
+type RunResult struct {
+	Status     RunStatus
+	FinishedAt time.Time
+}
+
 // PipelineRun is a concrete execution of a pipeline definition.
 type PipelineRun struct {
 	ID                  string              `json:"id" db:"id"`

@@ -196,24 +196,18 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 	// 202 immediately with the pending run; the caller polls / streams
 	// status. Without an Executor or RunSpawner the run stays pending
 	// (matches the old behaviour for tests that don't wire either).
+	//
+	// F2 (docs/audits/2026-05-handler-layering.md Finding 2): the
+	// terminal-status state machine lives inside Executor.Execute now;
+	// the handler's job is to persist the run as Execute returned it.
+	// Do NOT re-derive run.Status from runCopy.Status here — Execute
+	// guarantees a terminal value and Cancelled stays Cancelled.
 	if h.Runs != nil && h.Executor != nil {
 		// Use a fresh background context so the run survives the
 		// completion of the HTTP request that started it.
 		h.Runs.Spawn(context.Background(), run.ID, func(ctx context.Context) error {
 			runCopy := run
-			execErr := h.Executor.Execute(ctx, p, runCopy)
-			finished := time.Now()
-			runCopy.FinishedAt = &finished
-			if execErr != nil {
-				if runCopy.Status != model.RunStatusFailed {
-					runCopy.Status = model.RunStatusFailed
-				}
-				if runCopy.Error == "" {
-					runCopy.Error = execErr.Error()
-				}
-			} else if runCopy.Status == model.RunStatusRunning {
-				runCopy.Status = model.RunStatusSuccess
-			}
+			_, execErr := h.Executor.Execute(ctx, p, runCopy)
 			if err := h.Store.Runs.Update(ctx, runCopy); err != nil {
 				return err
 			}

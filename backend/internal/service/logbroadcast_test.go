@@ -90,7 +90,7 @@ func TestExecutor_BuildStage_BroadcastsLogLines(t *testing.T) {
 		WithBuilder(sb),
 		WithLogBroadcaster(rec.record),
 	)
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -142,7 +142,7 @@ func TestExecutor_BuildStage_NoBroadcasterIsNoOp(t *testing.T) {
 	}
 
 	exec := NewExecutor(WithBuilder(sb))
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := run.StageRuns[0].Logs; got != "line1\nline2\n" {

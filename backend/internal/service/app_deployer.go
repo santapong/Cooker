@@ -90,7 +90,11 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, logW io.Writer
 
 	// Hand the run to the executor. Log output from each stage is
 	// available via the stage runs' Logs field after Execute returns.
-	if err := d.Executor.Execute(ctx, p, run); err != nil {
+	// F2: Execute returns a terminal RunResult; the run argument also
+	// reflects it. We use run.Status (and the [done] log line below)
+	// rather than the RunResult so callers that inspect run see the
+	// same terminal value.
+	if _, err := d.Executor.Execute(ctx, p, run); err != nil {
 		return run, fmt.Errorf("execute: %w", err)
 	}
 	fmt.Fprintf(logW, "[done] run=%s status=%s\n", run.ID, run.Status)
