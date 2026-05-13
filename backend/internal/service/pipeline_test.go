@@ -206,3 +206,45 @@ func TestBuildDAGFromPipeline_ParallelStages(t *testing.T) {
 		t.Errorf("expected 2 parallel nodes at level 0, got %d", len(levels[0]))
 	}
 }
+
+// TestValidatePipelineDAG_EdgeCondition verifies the T4 forward-compat
+// refusal of non-success Edge.Condition values per dag-adaptation §6 T4.
+// Primitive #2 (W6) replaces this refusal with real evaluation per DR-4.
+func TestValidatePipelineDAG_EdgeCondition(t *testing.T) {
+	mkPipeline := func(cond string) *model.Pipeline {
+		return &model.Pipeline{
+			Stages: []model.Stage{
+				{ID: "build"},
+				{ID: "deploy"},
+			},
+			Edges: []model.Edge{
+				{ID: "e1", Source: "build", Target: "deploy", Condition: cond},
+			},
+		}
+	}
+
+	t.Run("empty condition allowed", func(t *testing.T) {
+		errs := ValidatePipelineDAG(mkPipeline(""))
+		if len(errs) != 0 {
+			t.Fatalf("expected no errors, got %v", errs)
+		}
+	})
+
+	t.Run("success condition allowed", func(t *testing.T) {
+		errs := ValidatePipelineDAG(mkPipeline("success"))
+		if len(errs) != 0 {
+			t.Fatalf("expected no errors, got %v", errs)
+		}
+	})
+
+	t.Run("failure condition rejected", func(t *testing.T) {
+		errs := ValidatePipelineDAG(mkPipeline("failure"))
+		if len(errs) != 1 {
+			t.Fatalf("expected exactly 1 error, got %d: %v", len(errs), errs)
+		}
+		want := `service: edge build->deploy: condition "failure" not yet supported (only "success" or empty)`
+		if errs[0] != want {
+			t.Errorf("got %q, want %q", errs[0], want)
+		}
+	})
+}

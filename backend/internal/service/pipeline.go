@@ -36,6 +36,15 @@ func ValidatePipelineDAG(p *model.Pipeline) []string {
 		if !stageIDs[e.Target] {
 			errs = append(errs, "edge references unknown target: "+e.Target)
 		}
+		// T4: refuse non-success Edge.Condition until Primitive #2 (W6)
+		// implements real trigger-rule evaluation per dag-adaptation §6 T4.
+		// Empty Condition is treated as "success" by the executor.
+		if e.Condition != "" && e.Condition != "success" {
+			errs = append(errs, fmt.Sprintf(
+				"service: edge %s->%s: condition %q not yet supported (only \"success\" or empty)",
+				e.Source, e.Target, e.Condition,
+			))
+		}
 		deps[e.Target] = append(deps[e.Target], e.Source)
 	}
 
