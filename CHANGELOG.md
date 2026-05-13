@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — May 2026 W3 batch (PRs #55, #56, #57, #58, #59, #60, #62, #64)
+
+**Third week of execution against the May-2026 30-day plan.** Ships the `v0.1.0` release engine end-to-end (the single highest-leverage item per pm-brief §2.1), the cross-stack AppDetailPage refresh (W11 quickwins + raw-WS migration + deployedURL plumbing), three small code fixes closing W1+W2 findings, and four forward-looking research docs that feed W4+ work.
+
+#### Release engineering — v0.1.0 publish (PR #60)
+
+- **`.goreleaser.yaml`** — full `dockers` block (linux/amd64 + linux/arm64), `docker_manifests` stitching, `signs` (cosign keyless on `checksums.txt`), `docker_signs` (cosign keyless on manifest digests), `snapshot` config.
+- **`.github/workflows/release.yml`** — tag-triggered (`v*.*.*`); permissions exactly `contents: write, id-token: write, packages: write`; pipeline checks out → goes through `goreleaser/goreleaser-action` → packages + pushes Helm OCI chart to `oci://ghcr.io/santapong/charts/cooker`. All 8 third-party actions pinned to 40-char SHAs.
+- **`Makefile`** — `VERSION` / `COMMIT` / `BUILD_DATE` vars; `build-backend` uses `-ldflags "$(GO_LDFLAGS)"`; new `make release-snapshot` and `make release` targets.
+- **`docs/RELEASING.md`** — release runbook (prerequisites, pre-flight, tag-and-push, observation, verification, troubleshooting, patch-release flow).
+- **`docs/SECURITY-RELEASE-VERIFY.md`** (PR #56) — 6-section publish-time verification checklist; highest-risk single item is `permissions:` block correctness (closes `S26-05-15`).
+- **`SECURITY.md`** — new "Supply chain and release signing (v0.1.0+)" section.
+- **`docs/user-guide/getting-started/helm-install.md`** — OCI install snippet (`helm install cooker oci://ghcr.io/santapong/charts/cooker --version 0.1.0`).
+- **Reviewer-time gates** before tagging `v0.1.0`: (a) verify 8 action SHAs against upstream release pages, (b) set Settings → Actions → Workflow permissions to "Read and write", (c) `goreleaser check`.
+
+#### Cross-stack — AppDetailPage refresh (PR #62)
+
+- **Lazy-load `AppDetailPage`** — own 7.7 KB chunk; entry bundle drops a further ~7.7 KB.
+- **Raw `new WebSocket(url)` migrated to `useWebSocket`** — closes a pre-existing CLAUDE.md hard-rule violation that **bypassed the FH-03 fix** from PR #49.
+- **Webhook URL panel + copy** on AppDetailPage (W11 §Indie step 5).
+- **Last-deploy summary card + Visit link** (W11 §Indie step 6) — surfaces `app.deployedURL`.
+- **Backend schema change** to plumb `deployedURL`: migration `009_app_deployed_url.up.sql` adds `apps.deployed_url`; `model.App.DeployedURL` exposed via `GET /apps/:id`; `Prober` interface extended to return `(AppHealth, msg, url)`; `AppLister.UpdateHealth` extended with `deployedURL` (empty preserves prior via `CASE WHEN $5 <> '' THEN $5 ELSE deployed_url END`); memory + Postgres impls updated.
+- **`EmptyState` two-CTA pattern** rolled to `AppsPage` + `PipelinesPage` + `EnvironmentsPage` (W11 §Indie step 2).
+
+#### Backend fixes — T1 + T3 + handler F1 (PR #64, replaces #63)
+
+- **T1** (`dag-adaptation` §6 T1) — `executeTest`/`executeApproval`/`executeCustom` now return `fmt.Errorf("stage type %q not implemented", ...)` instead of silently returning `nil`. Closes `dag-performance.md` Critical #1. Side-effect: pipelines using these stage types now fail loudly — they were silently broken before.
+- **T3** (`dag-adaptation` §6 T3) — redundant status-drain goroutine in `executor.go:266-270` deleted. T5 in W4 will put a proper drain in.
+- **Handler F1** (`docs/audits/2026-05-handler-layering.md` Finding 1) — `handler/pipeline.go`'s 57-line `validateDAG` deleted; both call sites delegate to `service.ValidatePipelineDAG`, which was extended with duplicate-stage-ID + dangling-edge checks.
+- 4 test fixtures updated to use `push` instead of `test` for the loud-fail side-effect; 3 new tests pin the new contracts.
+
+#### Frontend perf — P26-05-29 WS onMessage ref (PR #57)
+
+- **Stable `onMessageRef`** in `useWebSocket.ts`. `useCallback` dep array trimmed from `[url, onMessage]` to `[url]`. Closes the reconnect storm that fired every time a caller (e.g. `useStageLogs`) passed a fresh arrow callback.
+- Closes `P26-05-29` (deferred from W2 PR #52).
+
+#### Research audits (W3 idle lane)
+
+- **`docs/audits/2026-05-handler-f2-f3-extraction.md`** (PR #55) — service-layer extraction sketch for F2 (RunResult contract for terminal-status guarantee) + F3 (`service.ParseComposeGraph` extracting ~200 LOC from `handler/docker.go`). Sequence F2 first (smaller, mechanical, pattern-setting). Total ~1.5 engineering-days.
+- **`docs/audits/2026-05-deploytarget-walk.md`** (PR #59) — **three real production bugs**:
+  - **E-2** (High/Critical) — ECS `UpdateService` errors other than "service not found" silently fall through to `CreateService`, leaving ghost Fargate services.
+  - **F-2 + F-3** (High) — Fly.io accumulates machines on every deploy (`Deploy` always creates, never updates); `Rollback` calls a non-existent URL (404 silently).
+  - **R-2** (High) — Render `Status.URL` always empty because the Go JSON struct tag `"serviceDetails.url"` is treated as a literal key, not a dot-path.
+- **`docs/audits/2026-05-p3-jsonb-cap-design.md`** (PR #58) — JSONB-cap enforcement for P#3 outputs. Recommendation: service-layer `ApplyOutputCap` in `internal/buildplan/outputcap.go`, mirroring the existing 1 MiB log cap pattern at `executor.go:344-373`.
+- **`docs/audits/2026-05-tseries-w4-coordination.md`** (PR #61) — W4 T-series sequencing recommendation: **T4 → T2 → T5**. T2 and T5 are file-disjoint but should NOT parallelize on a single engineer. T5 is the prerequisite for Primitive #1 in W5. Flags 2-line drift in `dag-adaptation-2026.md` §6 T2 file:line citations (stale after T1's stub replacement shifted lines).
+
 ### Added — May 2026 W2 batch (PRs #42, #43, #44, #45, #46, #47, #48, #49, #50, #52, #53)
 
 **Second week of execution against the May-2026 30-day plan.** W1 surfaced four production-shape bugs and one trust-of-tool category; W2 closes the production bugs as code PRs, ships v0.1.0 release scaffolding, drafts the multi-tenancy ADR, and produces six forward-looking research audits.
