@@ -288,7 +288,7 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), the `claude/w3-t1-t3-handler-f1` PR, the `claude/w4-t4-edge-condition-refuse` PR, the `claude/w4-f04-created-at` PR, the `claude/w4-t2-logwriter-push-deploy` PR, the `claude/w5-ci-cache-mode-min` PR, the `claude/w5-adr-0004-finalize` PR, and the `claude/w5-f3-parse-compose-graph` PR:
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), the `claude/w3-t1-t3-handler-f1` PR, the `claude/w4-t4-edge-condition-refuse` PR, the `claude/w4-f04-created-at` PR, the `claude/w4-t2-logwriter-push-deploy` PR, the `claude/w5-ci-cache-mode-min` PR, the `claude/w5-adr-0004-finalize` PR, the `claude/w5-f3-parse-compose-graph` PR, and the `claude/w5-security-drift-bundle` PR:
 
 ### `claude/w5-adr-0004-finalize` — ADR-0004 multi-tenancy Proposed → Accepted (A3-defer)
 
@@ -301,6 +301,16 @@ Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cook
 ### `claude/w5-ci-cache-mode-min` — docker buildx cache-to mode=min
 
 - ✅ **CI cache quota fix** — `cache-to: type=gha,mode=max` replaced with `cache-to: type=gha,mode=min` in the docker job of `.github/workflows/ci.yml`. `mode=max` was storing all intermediate build layers (~2–4 GB per push), crowding out the go-build and npm caches within GHA's 10 GB per-repo quota. `mode=min` stores only the final stage (~50 MB). Identified as the next quick win in `docs/audits/2026-05-ci-baseline.md` §6.
+
+### `claude/w5-security-drift-bundle` — close 6 drift findings from W4 SECURITY.md walk
+
+- ✅ **§1.2 RBAC table now lists four roles (MEDIUM)** — `SECURITY.md` "Authorization (RBAC)" rewritten as a four-row table (admin / operator / approver / viewer) keyed to `backend/internal/auth/rbac.go:12-17`. The operator row no longer claims promotion-approval rights — `CanApprovePromotion` (`rbac.go:92-102`) accepts only `admin` and `approver`.
+- ✅ **§2.1 Secrets adapter inventory complete (LOW)** — `SECURITY.md` "Data Security" → "Secrets" replaced the `e.g.` hint with a five-row table listing every adapter that ships (`database` / `keepsave` / `vault` / `aws` / `gcp`).
+- ✅ **§4.2 Multi-replica Redis triad documented (INFO)** — `SECURITY.md` enumerates all three per-process backends — `COOKER_RATE_LIMIT_BACKEND`, `COOKER_WS_TICKET_BACKEND`, `COOKER_WS_HUB_BACKEND` — each with the failure mode that flips when it isn't pointed at Redis.
+- ✅ **§6.2 `S26-05-15` closure scope honest (MEDIUM)** — `SECURITY.md` "Pinned action SHAs" reworded to describe the release-workflow half as fully pinned (cosign trust chain) and introduce a "Known gap — non-release workflows" sub-paragraph naming `ci.yml`, `cooker-weekly.yml`, `oci-conformance.yml`.
+- ✅ **§6.4 `SECURITY-RELEASE-VERIFY` cross-linked (MEDIUM)** — `SECURITY.md` "Verifying a release" now links to `docs/SECURITY-RELEASE-VERIFY.md`; `docs/RELEASING.md` "Step 4" carries a matching blockquote callout.
+- ✅ **CLAUDE.md KeepSave drift corrected (INFO)** — bottom-of-file note rewritten from "parked pending walkthrough" to an accurate status: adapter ships at HEAD.
+- ✅ **Audit doc resolution log** — all six findings in `docs/audits/2026-05-security-walk-post-w3.md` moved to a new "Closed" section.
 
 ### `claude/w4-t4-edge-condition-refuse` — T4 edge condition forward-compat guard
 

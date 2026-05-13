@@ -115,6 +115,8 @@ Expected duration: 8–15 minutes (dominated by the arm64 Docker build under QEM
 
 ## Step 4 — Verify the release artifacts
 
+> See also [`SECURITY-RELEASE-VERIFY.md`](SECURITY-RELEASE-VERIFY.md) for the security-side post-publish checklist (Rekor inspection, identity drift checks, expected workflow subjects). The commands below are the operator how-to; the checklist over there is what the security curator runs after every publish.
+
 ### Binary signature
 
 Verify the checksum file signature using cosign keyless:

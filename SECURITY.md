@@ -62,15 +62,16 @@ This path is intentionally minimal — it's the homelab / single-user / OIDC-isn
 
 ### Authorization (RBAC)
 
-Role-based access control with three tiers:
+Role-based access control with four tiers (`backend/internal/auth/rbac.go:12-17`):
 
 | Role | Permissions |
 |------|-------------|
-| **admin** | Full access: manage pipelines, deploy to all environments, configure settings, manage users |
-| **operator** | Run pipelines, approve environment promotions, manage environments, view all resources |
+| **admin** | Full access: manage pipelines, deploy to all environments, configure settings, manage users; can reveal secret values |
+| **operator** | Run pipelines, manage environments, view all resources. **Cannot** approve environment promotions — that's gated to admin and approver only (`CanApprovePromotion`, `rbac.go:92-102`). |
+| **approver** | Narrow role dedicated to environment promotion approval. No other write rights beyond the approval action itself. |
 | **viewer** | Read-only access to all resources, view pipeline runs and logs |
 
-Roles are mapped from OIDC group claims. The mapping is configurable via `COOKER_OIDC_GROUP_MAP` (CSV of `group:role` pairs) or the Helm chart value `oidc.groupRoleMap`. Empty falls back to the built-in `cooker-admins → admin`, `cooker-operators → operator`, etc.
+Roles are mapped from OIDC group claims. The mapping is configurable via `COOKER_OIDC_GROUP_MAP` (CSV of `group:role` pairs) or the Helm chart value `oidc.groupRoleMap`. Empty falls back to the built-in `cooker-admins → admin`, `cooker-operators → operator`, `cooker-approvers → approver`, `cooker-viewers → viewer` (`DefaultGroupRoleMap`, `rbac.go:120-125`).
 
 #### Step-up MFA on destructive admin routes
 
@@ -104,11 +105,13 @@ Cooker releases are signed using **cosign keyless signing** via the Sigstore / R
 
 #### Pinned action SHAs
 
-All third-party actions in `.github/workflows/release.yml` are pinned to 40-character SHAs per the supply-chain policy. The SHA comments in the workflow file record the action version at the time of pinning; reviewers must verify these SHAs against upstream release tags before merging updates.
+`.github/workflows/release.yml` is the release workflow that feeds the cosign trust chain, and every third-party `uses:` in it is pinned to a 40-character SHA per the supply-chain policy. The SHA comments in the workflow file record the action version at the time of pinning; reviewers must verify these SHAs against upstream release tags before merging updates.
+
+**Known gap — non-release workflows.** `.github/workflows/ci.yml`, `.github/workflows/cooker-weekly.yml`, and `.github/workflows/oci-conformance.yml` collectively contain 17 `uses:` entries that still reference floating major-version tags. Closure is tracked separately under follow-up `S26-05-15` and enumerated in [`docs/audits/2026-05-action-pinning.md`](docs/audits/2026-05-action-pinning.md). The highest-write-permission unpinned action in that set is `anthropics/claude-code-action@v1` in `cooker-weekly.yml`, which runs with `contents: write` + `pull-requests: write`; readers reasoning about the supply-chain blast radius should treat that workflow's trust boundary accordingly until it is SHA-pinned.
 
 #### Verifying a release
 
-See [`docs/RELEASING.md`](RELEASING.md#step-4--verify-the-release-artifacts) for the exact `cosign verify-blob` and `cosign verify` commands.
+See [`docs/RELEASING.md`](RELEASING.md#step-4--verify-the-release-artifacts) for the exact `cosign verify-blob` and `cosign verify` commands. For the security-side post-publish checklist (Rekor lookup, identity drift checks, expected workflow subjects), see [`docs/SECURITY-RELEASE-VERIFY.md`](docs/SECURITY-RELEASE-VERIFY.md).
 
 ### OCI Registry Security
 
@@ -140,7 +143,17 @@ The Helm chart conditionally drops the `docker.sock` volume + mount when `builde
 ### Data Security
 
 - **Database**: Pipeline definitions, run history, and environment configs stored in PostgreSQL
-- **Secrets**: Database passwords, OIDC client secrets, and registry credentials should be managed via Kubernetes Secrets or an external secret manager (e.g., HashiCorp Vault, AWS Secrets Manager). The Helm chart **does not ship a default Postgres password** (S26-05-13); operators must pre-create a Secret and point `database.passwordSecretRef.name` at it. The chart `required`-guards this so a `helm install` without an override fails at render time rather than shipping a publicly-documented credential.
+- **Secrets**: Database passwords, OIDC client secrets, and registry credentials should be managed via Kubernetes Secrets or an external secret manager. Cooker ships **five** secret-backend adapters, selected via `COOKER_SECRETS_BACKEND` (chart: `secrets.backend`); `Config.Validate()` (`backend/internal/config/config.go:411-433`) enforces the per-backend required env vars before boot:
+
+    | `COOKER_SECRETS_BACKEND` | Adapter | Required env vars (in production) |
+    |---|---|---|
+    | `database` *(default)* | `internal/secrets/database` — envelope-encrypted rows in Postgres | `COOKER_SECRET_KEY` (≥ 32 bytes, base64) |
+    | `keepsave` | `internal/secrets/keepsave` — KeepSave HTTPS API | `COOKER_SECRETS_KEEPSAVE_URL` (https://), `COOKER_SECRETS_KEEPSAVE_PROJECT_ID`, `COOKER_SECRETS_KEEPSAVE_API_KEY` |
+    | `vault` | `internal/secrets/vault` — HashiCorp Vault KV v2 | `COOKER_SECRETS_VAULT_ADDR` |
+    | `aws` | `internal/secrets/awsm` — AWS Secrets Manager | region auto-discovered from instance metadata if unset |
+    | `gcp` | `internal/secrets/gcpsm` — GCP Secret Manager | `COOKER_SECRETS_GCP_PROJECT_ID` |
+
+    The Helm chart **does not ship a default Postgres password** (S26-05-13); operators must pre-create a Secret and point `database.passwordSecretRef.name` at it. The chart `required`-guards this so a `helm install` without an override fails at render time rather than shipping a publicly-documented credential.
 - **Postgres TLS** (S26-05-10): `Config.Validate()` rejects boot in production when `DATABASE_URL` points at a non-localhost host with `sslmode=disable` (or no `sslmode` parameter at all). The minimum acceptable value is `require`; `verify-ca` / `verify-full` are preferred when a CA bundle is mounted into the pod.
 - **Environment variables**: Sensitive configuration injected at runtime, never baked into images
 - **No secrets in pipelines**: Pipeline variable values are stored in the database; sensitive values should use secret references rather than plaintext
@@ -175,7 +188,12 @@ Cooker applies a **per-user, in-memory rate limit** to **three** specific endpoi
 **Every other route in `/api/v1` — including environment / app / pipeline CRUD, webhook secret rotation, `POST /api/v1/environments/:id/secrets/promote`, and the unauthenticated `/webhooks/github` receiver and `/api/v1/auth/local/{signup,signin}` paths — is unbounded at the application layer.** Operators must enforce edge rate-limiting (NGINX `limit_req`, Traefik middleware, Cloudflare, AWS WAF) for those.
 
 - Tunable via `COOKER_RATE_LIMIT_ENABLED` (default `true`), `COOKER_RATE_LIMIT_PER_MINUTE` (default `10`), `COOKER_RATE_LIMIT_BURST` (default `3`).
-- **Multi-replica deployments must disable** this (`COOKER_RATE_LIMIT_ENABLED=false`) — the limiter is per-process and won't share state across replicas. Use ingress / WAF rate limiting instead.
+- **Multi-replica deployments must back per-process state with Redis** — or pin clients with sticky sessions. `Config.Validate()` (`backend/internal/config/config.go:482-499`) refuses to boot in production when `COOKER_REPLICA_COUNT > 1 && COOKER_STICKY_SESSIONS=false` unless **all three** of the per-process subsystems are pointed at Redis:
+    - `COOKER_RATE_LIMIT_BACKEND=redis` — otherwise a user can exhaust their quota on one replica and a fresh burst lands on the next.
+    - `COOKER_WS_TICKET_BACKEND=redis` — otherwise a ticket minted on replica A is invisible to replica B and the WS upgrade is rejected.
+    - `COOKER_WS_HUB_BACKEND=redis` — otherwise a broadcast emitted on replica A never reaches a client connected to replica B.
+
+  Set all three to `redis` (and provide `REDIS_URL`), or set `COOKER_STICKY_SESSIONS=true` so the load balancer pins each client to one replica. Disabling the rate limiter entirely (`COOKER_RATE_LIMIT_ENABLED=false`) still leaves the WS-ticket and WS-hub backends to address.
 - This middleware is **defense in depth**, not a substitute for edge limiting. Operators are still expected to configure IP-based rate limiting at the ingress controller (nginx-ingress, Traefik) or the cloud edge (Cloudflare, AWS WAF, GCP Cloud Armor) for unauthenticated paths and overall traffic shaping.
 
 ### CSRF
