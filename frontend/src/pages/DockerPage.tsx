@@ -4,7 +4,7 @@ import { dockerApi } from '../api/docker';
 import type { DockerNetwork, DockerVolume } from '../types/infra';
 import { useTheme } from '../theme/ThemeProvider';
 import { hexA } from '../theme/tokens';
-import { Btn, Card, Input, Label, PageHeader, Pill, Select, StatusDot } from '../components/ui/atoms';
+import { Btn, Card, EmptyState, Input, Label, PageHeader, Pill, Select, StatusDot } from '../components/ui/atoms';
 import { DataTable } from '../components/ui/DataTable';
 import { useToastStore } from '../stores/toastStore';
 
@@ -77,6 +77,39 @@ export default function DockerPage() {
       {tab === 'images' && (
         <Card pad={0}>
           <SectionHeader title="Images" count={images.length} />
+          {/* Empty-state two-CTA — W11 §Indie step 2 (PR #66). */}
+          {!loading && images.length === 0 ? (
+            <EmptyState
+              title="No images cached locally."
+              body="Make sure the Docker daemon is running and Cooker's host transport is configured."
+              action={
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <Btn kind="primary" icon="play">
+                    Start the Docker daemon
+                  </Btn>
+                  <a
+                    href="https://github.com/santapong/Cooker/blob/main/docs/user-guide/operations/docker-builds.md"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '8px 16px',
+                      border: '1px solid currentColor',
+                      borderRadius: 7,
+                      fontSize: 13.5,
+                      color: 'inherit',
+                      textDecoration: 'none',
+                      opacity: 0.7,
+                    }}
+                  >
+                    Docker builds guide ↗
+                  </a>
+                </div>
+              }
+            />
+          ) : (
           <DataTable
             rows={images}
             rowKey={(img) => img.id}
@@ -122,6 +155,7 @@ export default function DockerPage() {
               },
             ]}
           />
+          )}
         </Card>
       )}
 

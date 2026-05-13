@@ -4,7 +4,7 @@ import ComposeCanvas from '../components/compose/ComposeCanvas';
 import ServiceConfigPanel from '../components/compose/panels/ServiceConfigPanel';
 import { useComposeStore } from '../stores/composeStore';
 import { useTheme } from '../theme/ThemeProvider';
-import { Btn, Pill } from '../components/ui/atoms';
+import { Btn, EmptyState, Pill } from '../components/ui/atoms';
 
 export default function ComposePage() {
   const t = useTheme();
@@ -44,6 +44,44 @@ export default function ComposePage() {
         }}
       >
         {error}
+      </div>
+    );
+  }
+
+  // Empty-state two-CTA — W11 §Indie step 2 (PR #66).
+  if (!graph || graph.services.length === 0) {
+    return (
+      <div style={{ padding: '40px 28px' }}>
+        <EmptyState
+          title="No Compose file loaded."
+          body="Point Cooker at a docker-compose.yml to visualise the service graph and manage services here."
+          action={
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Btn kind="primary" icon="layers" onClick={() => fetchComposeGraph()}>
+                Open a Compose file
+              </Btn>
+              <a
+                href="https://github.com/santapong/Cooker/blob/main/docs/user-guide/concepts/pipelines.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 16px',
+                  border: '1px solid currentColor',
+                  borderRadius: 7,
+                  fontSize: 13.5,
+                  color: 'inherit',
+                  textDecoration: 'none',
+                  opacity: 0.7,
+                }}
+              >
+                Pipelines &amp; Compose guide ↗
+              </a>
+            </div>
+          }
+        />
       </div>
     );
   }

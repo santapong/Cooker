@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useKubernetesStore } from '../stores/kubernetesStore';
 import { useTheme } from '../theme/ThemeProvider';
-import { Btn, Card, HealthBar, PageHeader, Pill, Select, StatusDot, statusTone } from '../components/ui/atoms';
+import { Btn, Card, EmptyState, HealthBar, PageHeader, Pill, Select, StatusDot, statusTone } from '../components/ui/atoms';
 import { DataTable } from '../components/ui/DataTable';
 
 export default function KubernetesPage() {
@@ -50,6 +50,39 @@ export default function KubernetesPage() {
       />
 
       <Card pad={0}>
+        {/* Empty-state two-CTA — W11 §Indie step 2 (PR #66). */}
+        {!loading && workloads.length === 0 ? (
+          <EmptyState
+            title="No workloads found."
+            body="Point Cooker at a kubeconfig to see Deployments, StatefulSets, and DaemonSets live."
+            action={
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <Btn kind="primary" icon="layers">
+                  Pick a kubeconfig
+                </Btn>
+                <a
+                  href="https://github.com/santapong/Cooker/blob/main/docs/user-guide/operations/architecture.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '8px 16px',
+                    border: '1px solid currentColor',
+                    borderRadius: 7,
+                    fontSize: 13.5,
+                    color: 'inherit',
+                    textDecoration: 'none',
+                    opacity: 0.7,
+                  }}
+                >
+                  Architecture guide ↗
+                </a>
+              </div>
+            }
+          />
+        ) : (
         <DataTable
           rows={workloads}
           rowKey={(w) => `${w.namespace}-${w.kind}-${w.name}`}
@@ -117,6 +150,7 @@ export default function KubernetesPage() {
             },
           ]}
         />
+        )}
       </Card>
     </div>
   );
