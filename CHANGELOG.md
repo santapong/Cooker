@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — May 2026 W4 batch (PRs #66, #67, #69, #70, #71, #72, #73, #75)
+
+**Fourth week of execution.** Closes the **T-series tidy sprint** (T1+T3+F1 in W3, T4+T5+T2 in W4) — `dag-adaptation-2026.md` §6 is now fully resolved. Ships F-04 (final store-parity finding), the multi-cloud bug bundle (three production bugs across ECS/Fly.io/Render), the empty-state roll-out across five list pages, four forward-looking research audits, and the F2+F3 ready-to-fire prompts for W5.
+
+#### T-series closure
+
+- **T4 — `Edge.Condition` forward-compat refusal** (squashed into #75 as a stacked commit from the worktree sandbox; tracked as `claude/w4-t4-edge-condition-refuse`) — `ValidatePipelineDAG` rejects any edge whose `Condition` is non-empty and not `"success"`. Primitive #2 (W6, DR-4) replaces this refusal with real evaluation per `dag-adaptation-2026.md §7.2`. Three new sub-tests.
+- **T5 — Batched `persistProgress` via drain goroutine** (squashed into #75 as a stacked commit; tracked as `claude/w4-t5-batched-persistprogress`) — `internal/service/executor.go` now drains `runner.Updates()` in a goroutine with `min(500ms, 10 transitions)` debounce. **Eager flush on terminal `failed`/`success`** preserves the final-outcome guarantee. Closes `dag-performance.md` Medium #10. **Prerequisite for Primitive #1 in W5** — without T5, P#1's retry attempts triple the JSONB write rate per stage.
+- **T2 — LogWriter wired for push + deploy** (#73) — `pusher.Request` and `deployer.Request` expose `LogWriter io.Writer`. `executePush` and `executeDeploy` mirror `executeBuild`'s `cappedBuffer + io.MultiWriter + lineWriter` wiring. Every shipped adapter writes canonical lines: `Pushed image to <ref>` (Crane/Docker/Noop) and `Applied <kind>/<name>` (ClientGo/Kubectl/Noop). `RunPage`'s `LogsPanel` is already stage-agnostic — no frontend change needed. Closes `dag-performance.md` §4 High #2. **Unblocks Primitive #4 cache-flag visibility** — Kaniko's `5/10 layers cached` lines now reach RunPage.
+
+#### Production bug bundle (#75)
+
+Three real bugs from PR #59's deploytarget walk, in one PR:
+
+- **E-2** — ECS: `errors.As(uerr, &ecstypes.ServiceNotFoundException{})` gating before `CreateService` fallthrough. Closes ghost-Fargate-service leak.
+- **F-2 + F-3** — Fly.io: new `listMachines(ctx, appID)` reads existing machines so `Deploy` updates in place via `POST /apps/<id>/machines/<id>` (no more linear billing growth); `Rollback` calls the real per-machine restart URL via the same listing path.
+- **R-2** — Render: replaced flat `json:"serviceDetails.url"` (which Go treats as a literal key) with a nested `ServiceDetails struct { URL string \`json:"url"\` }`. `TestRender_StatusURLDecodes` locks the JSON shape.
+
+#### F-04 — pipeline_runs.created_at (#70)
+
+Final closure of store-parity audit. `model.PipelineRun.CreatedAt time.Time` (`json:"createdAt"`) added; Postgres `Create` uses `RETURNING created_at`; memory `Create` stamps `time.Now()` when zero; both `List`s sort newest-first. Two new tests in `internal/store/memory/run_created_at_test.go`. **No new migration** — column pre-existed in `001_initial.up.sql`.
+
+#### Empty-state roll-out (#67)
+
+W11 §Indie step 2 (empty-state CTAs) extended from PR #62's Apps/Pipelines/Environments to **HostsPage, RegistryPage, KubernetesPage, DockerPage, ComposePage**. Per-page primary `Btn` + ghost user-guide anchor. `RegistryPage`'s CTA is **conditional** — empty-because-no-filter shows CTA; filtered-empty shows the existing "Try a different filter" text only.
+
+#### Research audits (W4 idle lane)
+
+- **`docs/audits/2026-05-f2-f3-prompts.md`** (#66) — Two ready-to-fire `cooker-feature-dev` delegation prompts for F2 (Executor → `(RunResult, error)`) and F3 (`service.ParseComposeGraph`). Confidence F2 lands cleanly in W5: **HIGH** (T4/T5 disjoint from F2's surface; T5's drain ordering is the one reviewer caveat).
+- **`docs/audits/2026-05-ci-baseline.md`** (#69) — Static-analysis of the 4-job parallel CI structure. Theoretical warm-cache critical path: **~2–2.5 min** (under W1's ~3 min target). Live measurement deferred (`gh` unavailable in spawn sandbox). **Next quick win: change `cache-to: type=gha,mode=max` → `mode=min` in docker job.** 1-line, no logic risk, lands W5.
+- **`docs/audits/2026-05-security-walk-post-w3.md`** (#71) — 6 drift findings (3 MEDIUM, 1 LOW, 2 INFO), **all documentation-only**: RBAC table omits `approver` role; `S26-05-15` action-pinning scope narrower than `SECURITY.md` implies (17 unpinned in `ci.yml`/`cooker-weekly.yml`/`oci-conformance.yml`); `docs/SECURITY-RELEASE-VERIFY.md` is orphaned (no link from `SECURITY.md`/`RELEASING.md`); secrets adapter inventory understates (5 backends, doc names only 2); multi-replica Redis triad mentions only rate-limit; CLAUDE.md KeepSave drift. **Zero code/threat-model regressions.** Bundle into a small `docs(security)` PR in W5 (~30 min).
+- **`docs/audits/2026-05-reconnect-redis-failover.md`** (#72) — Audit of `useWebSocket` against four Redis-failover scenarios. **Zero real bugs found.** All four modes recover correctly. One MEDIUM UX-only improvement opportunity: `http.Server.Shutdown()` doesn't drain Gorilla WebSocket connections, so pod terminations send TCP RST instead of graceful close frame 1001. Reconnect loop recovers; UX is hard disconnect during rolling updates.
+
 ### Added — May 2026 W3 batch (PRs #55, #56, #57, #58, #59, #60, #62, #64)
 
 **Third week of execution against the May-2026 30-day plan.** Ships the `v0.1.0` release engine end-to-end (the single highest-leverage item per pm-brief §2.1), the cross-stack AppDetailPage refresh (W11 quickwins + raw-WS migration + deployedURL plumbing), three small code fixes closing W1+W2 findings, and four forward-looking research docs that feed W4+ work.
