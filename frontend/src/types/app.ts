@@ -35,6 +35,10 @@ export interface AppModel {
   healthStatus?: AppHealthStatus;
   healthCheckedAt?: string;
   healthMessage?: string;
+  // deployedURL is the public ingress URL written by AppHealthChecker after
+  // a successful probe (W11 Indie step 6). Empty for targets that don't
+  // expose an ingress (docker-host, plain kubernetes).
+  deployedURL?: string;
 }
 
 export interface AppDeployResponse {
@@ -45,4 +49,8 @@ export interface AppDeployResponse {
   stream: string;
   repo: string;
   branch: string;
+  // url is the public ingress URL for the deployed service (Indie step 6,
+  // W11-A2). Optional: docker-host targets without an ingress do not set
+  // this field. The backend surfaces it from DeployTarget.Status.URL.
+  url?: string;
 }

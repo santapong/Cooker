@@ -21,25 +21,30 @@ const defaultAppHealthInterval = 30 * time.Second
 // full store.AppStore surface.
 type AppLister interface {
 	List(ctx context.Context) ([]*model.App, error)
-	UpdateHealth(ctx context.Context, id string, status model.AppHealth, msg string, at time.Time) error
+	// UpdateHealth writes the latest probe verdict. deployedURL may be
+	// empty for targets that don't expose an ingress; an empty string
+	// leaves a previously-written URL intact in the store.
+	UpdateHealth(ctx context.Context, id string, status model.AppHealth, msg string, at time.Time, deployedURL string) error
 }
 
-// Prober probes a single App and returns its readiness verdict.
-// Implementations are per-target-kind; a registry maps DeployTarget
-// kinds to their Prober. Return AppHealthUnknown + a short message
-// when the target backend can't be reached or the app is missing
-// upstream — never panic.
+// Prober probes a single App and returns its readiness verdict and
+// the public ingress URL of the deployed workload (if the target
+// exposes one). Implementations are per-target-kind; a registry maps
+// DeployTarget kinds to their Prober. Return AppHealthUnknown + a
+// short message when the target backend can't be reached or the app
+// is missing upstream — never panic. Return an empty string for url
+// when the target does not expose an ingress.
 type Prober interface {
-	Probe(ctx context.Context, app *model.App) (model.AppHealth, string)
+	Probe(ctx context.Context, app *model.App) (health model.AppHealth, msg string, url string)
 }
 
 // ProberFunc adapts a function value to the Prober interface so a
 // constructor can register a closure without declaring a dedicated
 // struct.
-type ProberFunc func(ctx context.Context, app *model.App) (model.AppHealth, string)
+type ProberFunc func(ctx context.Context, app *model.App) (model.AppHealth, string, string)
 
 // Probe implements Prober for ProberFunc.
-func (f ProberFunc) Probe(ctx context.Context, app *model.App) (model.AppHealth, string) {
+func (f ProberFunc) Probe(ctx context.Context, app *model.App) (model.AppHealth, string, string) {
 	return f(ctx, app)
 }
 
@@ -47,8 +52,8 @@ func (f ProberFunc) Probe(ctx context.Context, app *model.App) (model.AppHealth,
 // probe (e.g. docker-host in dev, or a future kind that hasn't been
 // wired). It writes "unknown" with a short hint so operators see why
 // an App's health badge stays grey.
-var unknownProber ProberFunc = func(_ context.Context, app *model.App) (model.AppHealth, string) {
-	return model.AppHealthUnknown, "no health probe registered for target kind " + string(app.DeployTarget.Kind)
+var unknownProber ProberFunc = func(_ context.Context, app *model.App) (model.AppHealth, string, string) {
+	return model.AppHealthUnknown, "no health probe registered for target kind " + string(app.DeployTarget.Kind), ""
 }
 
 // AppHealthChecker is a periodic background service. On each tick it
@@ -154,11 +159,11 @@ func (c *AppHealthChecker) tick(ctx context.Context) {
 					c.logger.Warn("app health: probe panicked",
 						"app", app.ID, "kind", app.DeployTarget.Kind, "panic", r)
 					_ = c.apps.UpdateHealth(ctx, app.ID,
-						model.AppHealthUnknown, "probe panicked", c.clock())
+						model.AppHealthUnknown, "probe panicked", c.clock(), "")
 				}
 			}()
-			status, msg := c.proberFor(app.DeployTarget.Kind).Probe(ctx, app)
-			if err := c.apps.UpdateHealth(ctx, app.ID, status, msg, now); err != nil {
+			status, msg, deployedURL := c.proberFor(app.DeployTarget.Kind).Probe(ctx, app)
+			if err := c.apps.UpdateHealth(ctx, app.ID, status, msg, now, deployedURL); err != nil {
 				// ErrNotFound means the app was deleted between List and
 				// UpdateHealth — a benign race, log at debug.
 				if errors.Is(err, store.ErrNotFound) {

@@ -107,6 +107,11 @@ type App struct {
 	HealthStatus    AppHealth  `json:"healthStatus" db:"health_status"`
 	HealthCheckedAt *time.Time `json:"healthCheckedAt,omitempty" db:"health_checked_at"`
 	HealthMessage   string     `json:"healthMessage,omitempty" db:"health_message"`
+
+	// DeployedURL is the public ingress URL written by AppHealthChecker
+	// alongside health_status after each successful probe (W11 Indie step 6).
+	// Empty for targets that don't expose an ingress (docker-host, plain k8s).
+	DeployedURL string `json:"deployedURL,omitempty" db:"deployed_url"`
 }
 
 // Redact returns a copy of a safe for client responses.

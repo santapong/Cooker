@@ -49,13 +49,35 @@ export default function PipelinesPage() {
           <SkeletonStack rows={4} />
         </Card>
       ) : pipelines.length === 0 ? (
+        // Empty-state CTA — Indie step 2 (W11-A3, PR #50).
         <EmptyState
           title="No pipelines yet."
-          body="Create your first CI/CD pipeline with the visual graph editor."
+          body="Draw your CI/CD graph visually — drag nodes, wire steps, watch each run stream live."
           action={
-            <Btn kind="primary" icon="plus" onClick={createPipeline}>
-              Create pipeline
-            </Btn>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Btn kind="primary" icon="plus" onClick={createPipeline}>
+                Create your first Pipeline
+              </Btn>
+              <a
+                href="https://github.com/santapong/Cooker/blob/main/docs/user-guide/README.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 16px',
+                  border: `1px solid currentColor`,
+                  borderRadius: 7,
+                  fontSize: 13.5,
+                  color: 'inherit',
+                  textDecoration: 'none',
+                  opacity: 0.7,
+                }}
+              >
+                Read the user guide ↗
+              </a>
+            </div>
           }
         />
       ) : (

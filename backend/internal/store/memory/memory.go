@@ -294,7 +294,8 @@ func (s *apps) Delete(_ context.Context, id string) error {
 // bump Version — health is observational state, not user-visible
 // configuration, so a probe write should never block a concurrent
 // Update via optimistic-concurrency conflict.
-func (s *apps) UpdateHealth(_ context.Context, id string, status model.AppHealth, msg string, at time.Time) error {
+// deployedURL may be empty; an empty string leaves the existing value intact.
+func (s *apps) UpdateHealth(_ context.Context, id string, status model.AppHealth, msg string, at time.Time, deployedURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, ok := s.m[id]
@@ -305,6 +306,9 @@ func (s *apps) UpdateHealth(_ context.Context, id string, status model.AppHealth
 	cur.HealthMessage = msg
 	tt := at
 	cur.HealthCheckedAt = &tt
+	if deployedURL != "" {
+		cur.DeployedURL = deployedURL
+	}
 	return nil
 }
 

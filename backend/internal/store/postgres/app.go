@@ -14,11 +14,11 @@ import (
 
 // appColumns is the canonical SELECT-list for an App. Centralised so
 // List / Get / GetByRepo / scanApp stay in lock-step when a column
-// is added (e.g., the health_* trio added in Week 1).
+// is added (e.g., the health_* trio added in Week 1; deployed_url in W11).
 const appColumns = `id, name, description, github_repo, branch, build_plan, deploy_target,
 	registry_ref, environment_id, webhook_secret, auto_deploy,
 	created_at, updated_at, version,
-	health_status, health_checked_at, health_message`
+	health_status, health_checked_at, health_message, deployed_url`
 
 // AppStore implements store.AppStore using PostgreSQL. Webhook
 // secrets are stored as base64 in a separate column — encryption
@@ -136,10 +136,14 @@ func (s *AppStore) Delete(ctx context.Context, id string) error {
 // background probe write. Runs outside a transaction; concurrent
 // user-driven Updates are safe because Update's column-set doesn't
 // include health_*, so MVCC isolation keeps both writes clean (W10-16).
-func (s *AppStore) UpdateHealth(ctx context.Context, id string, status model.AppHealth, msg string, at time.Time) error {
+// deployedURL may be empty for targets that don't expose an ingress;
+// passing an empty string leaves the column unchanged when it was
+// already set by an earlier successful probe.
+func (s *AppStore) UpdateHealth(ctx context.Context, id string, status model.AppHealth, msg string, at time.Time, deployedURL string) error {
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE apps SET health_status=$2, health_checked_at=$3, health_message=$4
-		WHERE id=$1`, id, string(status), at, msg)
+		UPDATE apps SET health_status=$2, health_checked_at=$3, health_message=$4,
+		                deployed_url=CASE WHEN $5 <> '' THEN $5 ELSE deployed_url END
+		WHERE id=$1`, id, string(status), at, msg, deployedURL)
 	if err != nil {
 		return fmt.Errorf("updating app health: %w", err)
 	}
@@ -168,11 +172,12 @@ func scanApp(row scannable) (*model.App, error) {
 	var healthStatus string
 	var healthCheckedAt sql.NullTime
 	var healthMessage string
+	var deployedURL string
 	if err := row.Scan(
 		&a.ID, &a.Name, &a.Description, &a.GitHubRepo, &a.Branch,
 		&bp, &dt, &a.RegistryRef, &a.EnvironmentID, &secretB64, &a.AutoDeploy,
 		&a.CreatedAt, &a.UpdatedAt, &a.Version,
-		&healthStatus, &healthCheckedAt, &healthMessage,
+		&healthStatus, &healthCheckedAt, &healthMessage, &deployedURL,
 	); err != nil {
 		return nil, err
 	}
@@ -182,6 +187,7 @@ func scanApp(row scannable) (*model.App, error) {
 		a.HealthCheckedAt = &t
 	}
 	a.HealthMessage = healthMessage
+	a.DeployedURL = deployedURL
 	if len(bp) > 0 && string(bp) != "null" {
 		if err := json.Unmarshal(bp, &a.BuildPlan); err != nil {
 			return nil, fmt.Errorf("unmarshal build_plan: %w", err)

@@ -30,7 +30,7 @@ func TestUpdateHealth_WritesAndReadsBack(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := st.Apps.UpdateHealth(ctx, "app-1", model.AppHealthDegraded, "1/2 replicas ready", at); err != nil {
+	if err := st.Apps.UpdateHealth(ctx, "app-1", model.AppHealthDegraded, "1/2 replicas ready", at, ""); err != nil {
 		t.Fatalf("UpdateHealth: %v", err)
 	}
 
@@ -53,9 +53,52 @@ func TestUpdateHealth_WritesAndReadsBack(t *testing.T) {
 	}
 }
 
+func TestUpdateHealth_SetsDeployedURL(t *testing.T) {
+	st := New()
+	ctx := context.Background()
+	a := &model.App{ID: "app-url", Name: "fly-app", GitHubRepo: "acme/fly-app", Branch: "main"}
+	if err := st.Apps.Create(ctx, a); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := st.Apps.UpdateHealth(ctx, "app-url", model.AppHealthHealthy, "ok", time.Now(), "https://fly-app.fly.dev"); err != nil {
+		t.Fatalf("UpdateHealth: %v", err)
+	}
+	got, err := st.Apps.Get(ctx, "app-url")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.DeployedURL != "https://fly-app.fly.dev" {
+		t.Errorf("DeployedURL: got %q want %q", got.DeployedURL, "https://fly-app.fly.dev")
+	}
+}
+
+func TestUpdateHealth_EmptyURLPreservesExisting(t *testing.T) {
+	st := New()
+	ctx := context.Background()
+	a := &model.App{ID: "app-preserve", Name: "svc", GitHubRepo: "acme/svc", Branch: "main"}
+	if err := st.Apps.Create(ctx, a); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// First call sets a URL.
+	if err := st.Apps.UpdateHealth(ctx, "app-preserve", model.AppHealthHealthy, "ok", time.Now(), "https://example.com"); err != nil {
+		t.Fatalf("first UpdateHealth: %v", err)
+	}
+	// Second call with empty URL should not overwrite.
+	if err := st.Apps.UpdateHealth(ctx, "app-preserve", model.AppHealthDegraded, "slow", time.Now(), ""); err != nil {
+		t.Fatalf("second UpdateHealth: %v", err)
+	}
+	got, err := st.Apps.Get(ctx, "app-preserve")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.DeployedURL != "https://example.com" {
+		t.Errorf("DeployedURL was wiped: got %q want %q", got.DeployedURL, "https://example.com")
+	}
+}
+
 func TestUpdateHealth_UnknownAppReturnsNotFound(t *testing.T) {
 	st := New()
-	err := st.Apps.UpdateHealth(context.Background(), "missing", model.AppHealthHealthy, "", time.Now())
+	err := st.Apps.UpdateHealth(context.Background(), "missing", model.AppHealthHealthy, "", time.Now(), "")
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}

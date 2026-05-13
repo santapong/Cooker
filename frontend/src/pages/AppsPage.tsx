@@ -8,6 +8,7 @@ import { hexA } from '../theme/tokens';
 import {
   Btn,
   Card,
+  EmptyState,
   HealthBar,
   PageHeader,
   Pill,
@@ -240,7 +241,38 @@ export default function AppsPage() {
               <SkeletonStack rows={4} />
             </div>
           ) : filtered.length === 0 ? (
-            <EmptyServices onCreate={() => navigate('/apps/new')} />
+            // Empty-state CTA — Indie step 2 (W11-A3, PR #50).
+            // Replaces local EmptyServices component with the shared EmptyState atom.
+            <EmptyState
+              title="Nothing cooking yet."
+              body="Connect Cooker to a GitHub repo and we'll handle build → ship → run end to end."
+              action={
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <Btn kind="primary" icon="plus" onClick={() => navigate('/apps/new')}>
+                    Create your first App
+                  </Btn>
+                  <a
+                    href="https://github.com/santapong/Cooker/blob/main/docs/user-guide/README.md"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '8px 16px',
+                      border: `1px solid currentColor`,
+                      borderRadius: 7,
+                      fontSize: 13.5,
+                      color: 'inherit',
+                      textDecoration: 'none',
+                      opacity: 0.7,
+                    }}
+                  >
+                    Read the user guide ↗
+                  </a>
+                </div>
+              }
+            />
           ) : (
             <div>
               <div style={rowGrid(mode, true)}>
@@ -461,33 +493,6 @@ function ActivityFeed({ apps }: { apps: AppModel[] }) {
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-function EmptyServices({ onCreate }: { onCreate: () => void }) {
-  const t = useTheme();
-  return (
-    <div style={{ padding: '40px 28px', textAlign: 'center' }}>
-      <div
-        style={{
-          fontFamily: t.serif,
-          fontSize: 22,
-          fontWeight: 500,
-          color: t.text,
-          letterSpacing: -0.3,
-        }}
-      >
-        Nothing in the kitchen yet.
-      </div>
-      <div style={{ color: t.textSoft, marginTop: 10, fontSize: 13.5, lineHeight: 1.6 }}>
-        Point Cooker at a GitHub repo and we'll handle build → ship → run end to end.
-      </div>
-      <div style={{ marginTop: 22 }}>
-        <Btn kind="primary" icon="plus" onClick={onCreate}>
-          Connect a repo
-        </Btn>
-      </div>
     </div>
   );
 }

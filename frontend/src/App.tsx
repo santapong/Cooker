@@ -8,14 +8,16 @@ import { SkeletonStack } from './components/Skeleton'
 
 // Landing-page routes stay eager so first paint is fast.
 import AppsPage from './pages/AppsPage'
-import AppDetailPage from './pages/AppDetailPage'
 import SignInPage from './pages/SignInPage'
 import SignUpPage from './pages/SignUpPage'
 import Callback from './auth/Callback'
 import ProtectedRoute from './auth/ProtectedRoute'
 
-// All other routes are lazy-loaded so their JS (including @xyflow/react)
-// is only downloaded when the user actually navigates to them.
+// All other routes are lazy-loaded so their JS is only downloaded when
+// the user actually navigates to them.
+// AppDetailPage is lazy because it is never a first-paint route — it is
+// always reached by clicking a row in AppsPage (PR #50, W11 B3.1).
+const AppDetailPage = lazy(() => import('./pages/AppDetailPage'))
 const NewAppWizard = lazy(() => import('./pages/NewAppWizard'))
 const PipelinesPage = lazy(() => import('./pages/PipelinesPage'))
 const PipelineEditorPage = lazy(() => import('./pages/PipelineEditorPage'))

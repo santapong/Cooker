@@ -170,7 +170,7 @@ No additional splitting is warranted. The four chunks cover the four large indep
 
 | Item | Source | Status |
 |---|---|---|
-| A1 — Webhook URL CTA | W11 §Indie step 5 | Wireframe complete; no backend change needed |
-| A2 — Deployed URL "Visit" link | W11 §Indie step 6 | Wireframe complete; requires `url` on `AppDeployResponse` or `AppModel` |
-| A3 — Empty-state CTAs (Apps / Pipelines / Envs) | W11 §Indie step 2 | Wireframe complete; `EmptyState` atom already sufficient |
-| B — PR #38 drift | `App.tsx`, `vite.config.ts` | No drift. Most surprising: `AppDetailPage` is eager + uses raw `new WebSocket(...)` |
+| A1 — Webhook URL CTA | W11 §Indie step 5 | **Closed — PR #54** (`claude/w3-appdetailpage-refresh`) |
+| A2 — Deployed URL "Visit" link | W11 §Indie step 6 | **Closed — PR #54**; `deployed_url` column added (migration 009); `AppModel.deployedURL` via 30s polling; `lastDeploy.url` on deploy response |
+| A3 — Empty-state CTAs (Apps / Pipelines / Envs) | W11 §Indie step 2 | **Closed — PR #54**; `EmptyServices` replaced with `EmptyState`; secondary user-guide anchors added to Pipelines + Environments |
+| B — PR #38 drift | `App.tsx`, `vite.config.ts` | **Closed — PR #54**; `AppDetailPage` lazy-loaded (entry −7.7 kB); raw `new WebSocket()` migrated to `useWebSocket` (FH-03 guard now covers deploy log streams) |
