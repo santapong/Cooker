@@ -9,6 +9,7 @@ package ecs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -109,13 +110,21 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 	if desired == 0 {
 		desired = 1
 	}
-	// Try update; if the service doesn't exist, create.
+	// Try update; fall through to CreateService only on ServiceNotFoundException.
+	// Any other error (IAM denied, throttling, wrong cluster ARN) is returned
+	// immediately — silently falling through would create a ghost Fargate service.
 	if _, uerr := c.UpdateService(ctx, &ecs.UpdateServiceInput{
 		Cluster:        aws.String(t.Cluster),
 		Service:        aws.String(spec.AppID),
 		TaskDefinition: aws.String(tdArn),
 		DesiredCount:   aws.Int32(desired),
-	}); uerr == nil {
+	}); uerr != nil {
+		var notFound *ecstypes.ServiceNotFoundException
+		if !errors.As(uerr, &notFound) {
+			return fmt.Errorf("ecs: update service: %w", uerr)
+		}
+		// Service does not exist yet — fall through to create.
+	} else {
 		return nil
 	}
 	_, err = c.CreateService(ctx, &ecs.CreateServiceInput{

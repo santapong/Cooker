@@ -84,6 +84,17 @@ type renderService struct {
 	Name string `json:"name"`
 }
 
+// renderServiceDetail is the full Render service object returned by
+// GET /services/<id>. ServiceDetails is a nested object; using a
+// dot in a Go JSON tag (e.g. `json:"serviceDetails.url"`) is treated
+// as a literal key, not a dot-path — hence the nested struct (R-2 fix).
+type renderServiceDetail struct {
+	Suspended      string `json:"suspended"`
+	ServiceDetails struct {
+		URL string `json:"url"`
+	} `json:"serviceDetails"`
+}
+
 func (t *Target) findServiceID(ctx context.Context, name string) (string, error) {
 	var resp []struct {
 		Service renderService `json:"service"`
@@ -141,17 +152,14 @@ func (t *Target) Status(ctx context.Context, appID string) (deploytarget.Status,
 		return deploytarget.Status{}, fmt.Errorf("render: service %q not found", appID)
 	}
 	var resp struct {
-		Service struct {
-			Suspended  string `json:"suspended"`
-			ServiceURL string `json:"serviceDetails.url"`
-		} `json:"service"`
+		Service renderServiceDetail `json:"service"`
 	}
 	if _, err := t.do(ctx, http.MethodGet, "/services/"+id, nil, &resp); err != nil {
 		return deploytarget.Status{}, err
 	}
 	return deploytarget.Status{
 		Healthy: resp.Service.Suspended != "suspended",
-		URL:     resp.Service.ServiceURL,
+		URL:     resp.Service.ServiceDetails.URL,
 	}, nil
 }
 

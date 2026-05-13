@@ -288,19 +288,7 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 
 ## Closed (recent)
 
-<<<<<<< Updated upstream
 Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), and the `claude/w3-t1-t3-handler-f1` PR (executor stubs + drain goroutine + DAG validator dedup):
-=======
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), the `claude/w3-t1-t3-handler-f1` PR (executor stubs + drain goroutine + DAG validator dedup), the `claude/w4-t4-edge-condition-refuse` PR (T4 forward-compat Edge.Condition refusal), and the `claude/w4-t5-batched-persistprogress` PR (T5 batched persistProgress via Updates drain):
-
-### `claude/w4-t5-batched-persistprogress` — T5 batched persistProgress via Updates drain
-
-- ✅ **§6 T5 — Batched `persistProgress` via `runner.Updates()` drain** — the three explicit `persistProgress` calls inside the executor's stage `taskFunc` (at start, failure, and success) are replaced by a single drain goroutine that consumes `runner.Updates()` and writes at most once per `min(500ms, 10 transitions)`. Terminal stage transitions (`"failed"` or `"success"`) trigger an immediate eager flush so the final outcome surfaces without debounce lag. The drain goroutine is started before `runner.Run` (avoiding the T3 race) and joined after `runner.Run` returns so `run.Status` / `run.FinishedAt` are set only after all updates are flushed. A 50-stage pipeline that previously paid up to 100+ full JSONB rewrites now pays ≤ceil(100/10) = 10 writes under normal load. Absorbs the write-rate increase from Primitive #1 (retry policies). Two new tests: `TestExecutor_T5_BatchedWritesDebounce` (asserts fewer writes than the pre-T5 per-call count) and `TestExecutor_T5_EagerFlushOnTerminal` (asserts ≥1 write on terminal failure before Execute returns). Closes dag-performance.md Medium #10. Prerequisite for W5 Primitive #1. Refs: dag-adaptation-2026.md §6 T5; docs/audits/2026-05-p1-context-pack.md.
-
-### `claude/w4-t4-edge-condition-refuse` — T4 edge condition forward-compat guard
-
-- ✅ **§6 T4 — `Edge.Condition` unsupported values refused at validation** — `ValidatePipelineDAG` in `internal/service/pipeline.go` now appends an error for any edge whose `Condition` is non-empty and not `"success"`. A pipeline imported from YAML or a CKR-DSL round-trip with `condition: failure` will fail at validation time with `service: edge X->Y: condition "failure" not yet supported (only "success" or empty)` rather than silently running as success. Empty-string and `"success"` conditions are unchanged (allowed). Primitive #2 (W6, DR-4) replaces this refusal with real evaluation per `dag-adaptation-2026.md §7.2`. Three new sub-tests in `TestValidatePipelineDAG_EdgeCondition`.
->>>>>>> Stashed changes
 
 ### `claude/w3-t1-t3-handler-f1` — executor stubs + drain race + DAG validator dedup
 
