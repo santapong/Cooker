@@ -1,7 +1,9 @@
 package pusher
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -12,6 +14,30 @@ func TestNoop(t *testing.T) {
 	}
 	if res.Digest == "" {
 		t.Error("Noop should return a non-empty Digest")
+	}
+}
+
+// TestNoop_WritesLogLine locks the LogWriter contract: every Pusher
+// implementation, including the no-op, writes the canonical "Pushed
+// image to <ref>" line so the run page renders something for the
+// stage. Closes dag-performance.md §4 High #2 (push half).
+func TestNoop_WritesLogLine(t *testing.T) {
+	var buf bytes.Buffer
+	_, err := Noop{}.Push(context.Background(), Request{Target: "r/app:v1", LogWriter: &buf})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, "Pushed image to r/app:v1") {
+		t.Errorf("Noop LogWriter output = %q, want it to contain 'Pushed image to r/app:v1'", got)
+	}
+}
+
+// TestNoop_NilLogWriterIsSafe — adapters must tolerate a nil
+// LogWriter (tests, direct callers).
+func TestNoop_NilLogWriterIsSafe(t *testing.T) {
+	_, err := Noop{}.Push(context.Background(), Request{Target: "r/app:v1"})
+	if err != nil {
+		t.Fatalf("nil LogWriter must not error: %v", err)
 	}
 }
 

@@ -274,13 +274,19 @@ These land in weeks 1–3 — before any primitive. They close audit findings, s
 
 ### T2 — Wire LogWriter for push and deploy
 
-**Problem.** `executor.go:383-402` and `404-441` construct Pusher/Deployer requests with no `LogWriter`. `dag-performance.md` §4 High finding #2.
+**Status.** **Closed** in `claude/w4-t2-logwriter-push-deploy`. `pusher.Request` and `deployer.Request` now expose `LogWriter io.Writer`; `executor.executePush` / `executor.executeDeploy` build the `cappedBuffer + io.MultiWriter + lineWriter` tee exactly like `executeBuild`, with `defer sr.Logs = logs.String()` so the captured stream persists with the stage run. Every shipped adapter — `pusher.{Crane,DockerSock,Noop}` and `deployer.{ClientGo,Kubectl,Noop}` — writes the canonical lines (`Pushed image to <ref>`, `Applied <kind>/<name>`). Closes `dag-performance.md` §4 High #2 for the push + deploy halves; the build half was already closed.
 
-**Fix.** Mirror the build wiring at `executor.go:300-321`:
-1. Add `LogWriter io.Writer` to `pusher.Request` (likely already there? — check `backend/internal/pusher/`) and `deployer.Request`.
+**Problem (original).** `executor.go:383-402` and `404-441` construct Pusher/Deployer requests with no `LogWriter`. `dag-performance.md` §4 High finding #2.
+
+**Fix (delivered).** Mirror the build wiring at `executor.go:300-321`:
+1. Add `LogWriter io.Writer` to `pusher.Request` and `deployer.Request`. (Was *not* already there — the audit guessed; it was a fresh field on both structs.)
 2. In `executePush` and `executeDeploy`, build a `cappedBuffer + io.MultiWriter + lineWriter` exactly like `executeBuild`.
 3. Defer `sr.Logs = logs.String()`.
 4. Make sure each Pusher and Deployer adapter writes to the LogWriter — at minimum a "Pushed image to <ref>" line and a "Applied <kind>/<name>" line per resource.
+
+**Drift note (per PR #61).** The `executor.go:383-402` / `404-441` line citations in the original problem statement drifted after T1's stub-replacement landed; on current `main` the relevant functions are at `executePush` and `executeDeploy` near the bottom of `executor.go` and the build wiring lives at `executeBuild` (one capped buffer + tee block). The pattern is the same; only the line numbers moved.
+
+**Frontend.** No delta required — `RunPage`'s `LogsPanel` is stage-agnostic (renders whatever `useStageLogs` returns for the selected `stageId`). Verified during this PR.
 
 **Effort.** ~half a day. Mechanical, no new types beyond optional interface-field additions.
 
@@ -609,7 +615,7 @@ Total: 20 weeks. Each primitive PR is independently reviewable and revertable. T
 - **`docs/protocols.md` §3 (CKR-LOG/1).** Independent of this doc. The log protocol replaces the WS payload shape; this doc replaces the DAG primitive shape. They share zero code.
 - **`docs/protocols.md` §4 (CKR-DSL).** This doc's destination. The DSL absorbs the stable surface of the five primitives in weeks 18–20.
 - **`docs/audits/dag-performance.md` #1 (Critical, stub stages).** Closed by T1.
-- **`docs/audits/dag-performance.md` #2 (High, LogWriter unwired).** Build half already closed by current code; push + deploy halves closed by T2.
+- **`docs/audits/dag-performance.md` #2 (High, LogWriter unwired).** **Closed** — build half by prior wiring; push + deploy halves by T2 in `claude/w4-t2-logwriter-push-deploy`.
 - **`docs/audits/dag-performance.md` #7 (Medium, panic recovery).** Already closed by `runner.go:110-116`.
 - **`docs/audits/dag-performance.md` #10 (Medium, mid-run progress).** Already partially closed by `executor.go:199, 255, 261`; fully closed by T5.
 - **`docs/audits/W11-user-journeys.md` §Indie step 7 (PR-preview environments).** Not addressed in this doc — multi-week effort, deferred per W11.

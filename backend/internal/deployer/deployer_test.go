@@ -1,8 +1,10 @@
 package deployer
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -10,6 +12,28 @@ func TestNoop(t *testing.T) {
 	_, err := Noop{}.Deploy(context.Background(), Request{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestNoop_WritesLogLine locks the LogWriter contract for the deploy
+// half of T2: every Deployer implementation, including the no-op,
+// writes a canonical "Applied ..." line. Closes
+// dag-performance.md §4 High #2 (deploy half).
+func TestNoop_WritesLogLine(t *testing.T) {
+	var buf bytes.Buffer
+	_, err := Noop{}.Deploy(context.Background(), Request{Kind: KindManifest, LogWriter: &buf})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, "Applied") {
+		t.Errorf("Noop LogWriter output = %q, want it to contain 'Applied'", got)
+	}
+}
+
+func TestNoop_NilLogWriterIsSafe(t *testing.T) {
+	_, err := Noop{}.Deploy(context.Background(), Request{Kind: KindManifest})
+	if err != nil {
+		t.Fatalf("nil LogWriter must not error: %v", err)
 	}
 }
 

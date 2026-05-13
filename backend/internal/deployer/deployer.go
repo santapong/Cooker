@@ -6,6 +6,7 @@ package deployer
 import (
 	"context"
 	"errors"
+	"io"
 )
 
 // ErrUnavailable is returned when the deployment backend is not
@@ -38,6 +39,15 @@ type Request struct {
 	// the container image ref. Convention: ${IMAGE} placeholder in
 	// manifests, or .image.repository/tag keys in Helm values.
 	Image string
+	// LogWriter, when non-nil, receives a stream of human-readable
+	// progress lines from the adapter. At minimum each implementation
+	// writes one "Applied <kind>/<name>" line per applied resource so
+	// users watching a run on RunPage see what landed. The executor
+	// wires this to a capped buffer (persisted to StageRun.Logs) and,
+	// when a broadcaster is configured, to the per-stage WebSocket
+	// channel for live tailing. Implementations must tolerate a nil
+	// LogWriter — callers in tests omit it.
+	LogWriter io.Writer
 }
 
 // Result reports the outcome of a successful apply.

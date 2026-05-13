@@ -35,6 +35,7 @@ func (d *DockerSock) Push(ctx context.Context, req Request) (Result, error) {
 	}
 
 	if req.Source != "" && req.Source != req.Target {
+		logf(req.LogWriter, "docker tag %s %s\n", req.Source, req.Target)
 		tag := exec.CommandContext(ctx, bin, "tag", req.Source, req.Target)
 		tag.Stdout, tag.Stderr = io.Discard, io.Discard
 		if err := tag.Run(); err != nil {
@@ -44,12 +45,27 @@ func (d *DockerSock) Push(ctx context.Context, req Request) (Result, error) {
 
 	var buf bytes.Buffer
 	push := exec.CommandContext(ctx, bin, "push", req.Target)
-	push.Stdout = io.MultiWriter(&buf)
-	push.Stderr = io.MultiWriter(&buf)
+	// Tee docker's stdout/stderr to the caller's LogWriter when wired so
+	// the run page sees live "Pushing repo..." / "digest: sha256:..."
+	// progress lines as the daemon emits them, while still buffering the
+	// full output for digest parsing.
+	if req.LogWriter != nil {
+		push.Stdout = io.MultiWriter(&buf, req.LogWriter)
+		push.Stderr = io.MultiWriter(&buf, req.LogWriter)
+	} else {
+		push.Stdout = io.MultiWriter(&buf)
+		push.Stderr = io.MultiWriter(&buf)
+	}
 	if err := push.Run(); err != nil {
 		return Result{}, fmt.Errorf("docker push: %w", err)
 	}
-	return Result{Digest: parseDigest(buf.String())}, nil
+	digest := parseDigest(buf.String())
+	if digest != "" {
+		logf(req.LogWriter, "Pushed image to %s@%s\n", req.Target, digest)
+	} else {
+		logf(req.LogWriter, "Pushed image to %s\n", req.Target)
+	}
+	return Result{Digest: digest}, nil
 }
 
 // docker push emits lines like: "v1: digest: sha256:abcd... size: 1234"
