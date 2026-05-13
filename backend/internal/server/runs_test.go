@@ -59,6 +59,61 @@ func TestOrphanThreshold_DefaultIsSafe(t *testing.T) {
 	}
 }
 
+// TestRunCoordinator_F07_HeartbeatSucceedsWhenRowCreatedBeforeSpawn asserts
+// the F-07 fix (docs/audits/2026-05-store-parity.md §F-07): the heartbeat
+// written by Spawn's first tick must succeed when the row exists before Spawn
+// is called. Prior to the fix, app-deploy runs never created the row first,
+// so heartbeatBestEffort silently swallowed ErrNotFound on every tick.
+// This test creates the stub row *before* Spawn (matching the fixed
+// handler/app.go behaviour) and verifies that the heartbeat_at column is
+// populated — confirming that ErrNotFound no longer occurs on this path.
+func TestRunCoordinator_F07_HeartbeatSucceedsWhenRowCreatedBeforeSpawn(t *testing.T) {
+	t.Parallel()
+	st := memory.New()
+	ctx := context.Background()
+
+	// Simulate the app's synthetic pipelineID and the stub run row that
+	// handler/app.go now creates before calling Spawn (F-07 fix).
+	appID := "app-f07"
+	runID := "run-f07"
+	now := time.Now()
+	stub := &model.PipelineRun{
+		ID:         runID,
+		PipelineID: appID,
+		Status:     model.RunStatusRunning,
+		StartedAt:  &now,
+	}
+	if err := st.Runs.Create(ctx, stub); err != nil {
+		t.Fatalf("create stub run: %v", err)
+	}
+
+	rc := NewRunCoordinator(st)
+	// heartbeatBestEffort is called synchronously by Spawn before work
+	// starts. Give the test goroutine a moment, then return.
+	done := make(chan struct{})
+	rc.Spawn(ctx, runID, func(ctx context.Context) error {
+		time.Sleep(20 * time.Millisecond)
+		close(done)
+		return nil
+	})
+	<-done
+	rc.Wait(context.Background())
+
+	got, err := st.Runs.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	// If F-07 regression reappears (row missing at heartbeat time) this
+	// assertion fails because heartbeatBestEffort silently discards the
+	// ErrNotFound and heartbeat_at stays nil.
+	if got.HeartbeatAt == nil {
+		t.Fatal("F-07: heartbeat_at is nil; row was not found when the coordinator wrote its first heartbeat — stub row must be created before Spawn")
+	}
+	if time.Since(*got.HeartbeatAt) > 5*time.Second {
+		t.Fatalf("F-07: heartbeat_at is suspiciously stale (%s ago)", time.Since(*got.HeartbeatAt))
+	}
+}
+
 func TestRunCoordinator_DrainsOnWait(t *testing.T) {
 	st := memory.New()
 	rc := NewRunCoordinator(st)

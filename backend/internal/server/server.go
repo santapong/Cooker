@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/cooker-ci/cooker/internal/audit"
 	"github.com/cooker-ci/cooker/internal/auth"
 	"github.com/cooker-ci/cooker/internal/auth/local"
@@ -28,8 +30,6 @@ import (
 	"github.com/cooker-ci/cooker/internal/store"
 	"github.com/cooker-ci/cooker/internal/store/memory"
 	"github.com/cooker-ci/cooker/internal/store/postgres"
-	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 )
 
 // Server holds the HTTP server and all dependencies.
@@ -99,7 +99,17 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("secrets: %w", err)
 	}
 
-	router := gin.Default()
+	// P26-05-01: switch to release mode outside dev to suppress Gin's
+	// verbose per-route registration banner and its duplicative colour
+	// request logger (observability.MetricsMiddleware already records
+	// per-request stats structurally). Expected win: ~5-10% CPU on hot
+	// HTTP paths; cleaner production logs; ~50 ms off boot output.
+	// See docs/audits/2026-05-perf-and-optimization.md §P26-05-01.
+	if cfg.Env != config.EnvDev {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	router := gin.New()
+	router.Use(gin.Recovery())
 
 	// Stack of cleanups to run if New() returns with err. The first
 	// item pushed runs last; matches the deferred-close pattern used

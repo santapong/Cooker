@@ -152,3 +152,11 @@ A user clicks Deploy on an App; if the deploy runs longer than 90 seconds and th
 
 **3. F-01 — `UserStore.Create` duplicate-email error is not `store.ErrConflict` in either impl.**
 Memory returns a raw string; Postgres surfaces a `pq.Error` code `23505`. The Signup handler pre-flights with `GetByEmail` to work around this, but that introduces a TOCTOU race: two concurrent signups with the same email can both pass the guard and race to `Create`. Any future caller that checks `errors.Is(err, store.ErrConflict)` will silently mishandle the duplicate case. Blast radius: signup under concurrent load, and any service code added later that calls `UserStore.Create` directly.
+
+---
+
+## Closed findings
+
+Findings moved here once the fix lands on `main`.
+
+- **F-07** — App-deploy synthesised run row was never created before `RunCoordinator.Spawn`, so the coordinator's first heartbeat (`runs.go:78`) silently no-oped (`runs.go:111`) and a crash mid-deploy left no orphan row for the boot-sweep to reap. Fixed in `claude/w2-backend-perf-and-f07`: `handler/app.go:DeployApp` now creates a stub `PipelineRun` row (`Status=running`, `StartedAt=now`) before calling `Spawn`; `runAppDeployCtx` drops the `Create`-fallback and only calls `Update` at the end. A conformance test `TestRunCoordinator_F07_HeartbeatSucceedsWhenRowCreatedBeforeSpawn` in `internal/server/runs_test.go` asserts that `heartbeat_at` is populated when the row pre-exists Spawn.
