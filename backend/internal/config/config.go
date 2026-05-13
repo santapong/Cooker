@@ -471,6 +471,13 @@ func (c *Config) Validate() error {
 	if c.BuilderBackend == "docker" {
 		problems = append(problems, "COOKER_BUILDER=docker is unsafe in production (host docker.sock RCE-to-host); use kaniko, buildah, or buildkit")
 	}
+	// Pusher safety: the docker pusher shells out to the Docker CLI which
+	// uses the same bind-mounted host docker.sock. An operator who switches
+	// the builder to kaniko but leaves the pusher as docker still exposes
+	// the same RCE-to-host surface via the push path. Refuse in prod.
+	if c.PusherBackend == "docker" {
+		problems = append(problems, "COOKER_PUSHER=docker is forbidden in production (docker.sock RCE-to-host risk); use crane")
+	}
 	// Multi-replica safety: per-process state must be either shared via
 	// Redis or pinned via sticky sessions. Otherwise a request lands on
 	// a different replica than the one that issued the WS ticket / saw

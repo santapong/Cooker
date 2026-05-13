@@ -106,7 +106,9 @@ Cooker ships four image-build strategies; pick via `COOKER_BUILDER` (chart: `bui
 - **`docker`**: shells out to the local Docker daemon via the bind-mounted host socket. Convenient on single-node test clusters; gives the Cooker container root-equivalent access to the host's Docker. An RCE in Cooker → full host control. Only use this on isolated dev hosts.
 - **`buildkit`**: stub; not yet wired (backlog P9.1).
 
-The Helm chart conditionally drops the `docker.sock` volume + mount when `builder.kind != "docker"`, so any of `kaniko` / `buildah` / `buildkit` carries no leftover host paths. The **raw-Kubernetes parity manifest** at `deploy/kubernetes/deployment.yaml` does **not** mount the host docker socket either (S26-05-04, closed on `claude/sec-quickwins-2026-05`); operators who legitimately need the socket must author a deliberate variant and accept the RCE-to-host gap explicitly.
+The Helm chart conditionally drops the `docker.sock` volume + mount when `builder.kind != "docker"`, so any of `kaniko` / `buildah` / `buildkit` carries no leftover host paths.
+
+**Pusher gate (F-02):** The `COOKER_PUSHER=docker` adapter shells out to the Docker CLI for `docker push`, which uses the same bind-mounted host socket as the `docker` builder. `Config.Validate()` now refuses to boot in production when `COOKER_PUSHER=docker` is set, closing the gap where an operator who correctly switches `COOKER_BUILDER=kaniko` but leaves `COOKER_PUSHER=docker` would still expose the docker.sock surface via the push path. Use `COOKER_PUSHER=crane` in production. The **raw-Kubernetes parity manifest** at `deploy/kubernetes/deployment.yaml` does **not** mount the host docker socket either (S26-05-04, closed on `claude/sec-quickwins-2026-05`); operators who legitimately need the socket must author a deliberate variant and accept the RCE-to-host gap explicitly.
 
 ### Data Security
 
@@ -188,7 +190,7 @@ Referrer-Policy: strict-origin-when-cross-origin
 - [ ] Restrict CORS origins to your domain
 - [ ] Use Kubernetes Secrets for database passwords and OIDC credentials
 - [ ] Scope Cooker's ClusterRole to required namespaces if possible
-- [ ] Use Kaniko instead of Docker socket for image builds *(set `builder.kind=kaniko` and `builder.kaniko.contextPVC=<your PVC>` in the chart, or `COOKER_BUILDER=kaniko` for non-Helm deploys)*
+- [ ] Use Kaniko instead of Docker socket for image builds *(set `builder.kind=kaniko` and `builder.kaniko.contextPVC=<your PVC>` in the chart, or `COOKER_BUILDER=kaniko` for non-Helm deploys)*; also set `COOKER_PUSHER=crane` — `Config.Validate()` refuses `COOKER_PUSHER=docker` in production (F-02)*
 - [x] Enable PostgreSQL SSL connections *(enforced by `Config.Validate()` in production for non-localhost hosts — S26-05-10)*
 - [x] Set up audit logging *(on by default when `COOKER_ENV=production`; emits one JSON event per mutating API call. Destination via `COOKER_AUDIT_DESTINATION`. See "Audit logging" above.)*
 - [x] Run the container as non-root *(image runs as UID 65532 by default)*

@@ -489,6 +489,19 @@ func TestValidate_ProductionRefusesDockerBuilder(t *testing.T) {
 	}
 }
 
+func TestValidate_ProductionRefusesDockerPusher(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		PusherBackend:  "docker",
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "COOKER_PUSHER=docker") {
+		t.Fatalf("expected docker-pusher rejection, got: %v", err)
+	}
+}
+
 func TestValidate_ProductionMultiReplicaRequiresRedisOrSticky(t *testing.T) {
 	cfg := &Config{
 		Env:            EnvProduction,
