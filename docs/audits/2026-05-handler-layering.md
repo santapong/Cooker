@@ -57,17 +57,21 @@ This is a domain rule ("if the executor returned an error and the status was not
 
 ---
 
-### Finding 3 — HIGH — Compose File Parsing and Graph Construction in `docker.go`
+### ~~Finding 3 — HIGH~~ Finding 3 — CLOSED — Compose File Parsing and Graph Construction in `docker.go`
 
-**File:** `backend/internal/handler/docker.go:150–352`
+**CLOSED in `claude/w5-f3-parse-compose-graph`.**
 
-**Current behaviour:** `ParseComposeFile` (lines 150–248) reads a YAML file from disk, unmarshals it, walks the services to build a `model.ComposeGraph` complete with dependency edges inferred from `depends_on` and environment variable cross-references. Four private helper functions (`parseEnvToMap`, `parseDependsOn`, `parseCommand`, `parseBuild`) support the construction. This is ~200 lines of domain logic — YAML ingestion, graph building, edge inference — inside a handler file.
+**What was done:**
+- `service.ParseComposeGraph(data []byte) (*model.ComposeGraph, error)` added at `backend/internal/service/compose_graph.go`. Owns YAML unmarshal, the `composeFile` / `composeServiceDef` intermediate structs, the four helpers (`parseEnvToMap`, `parseDependsOn`, `parseCommand`, `parseBuild`), and the `connSet` dedup loop.
+- Typed `service.ErrInvalidComposeYAML` exposed for callers that need to distinguish parser failure from future validation errors; the handler maps it to a generic 400 verbatim ("invalid YAML") so no parser detail leaks to clients.
+- Handler `ParseComposeFile` (`backend/internal/handler/docker.go`) shrinks to: bind `composePath` from body, call `resolveComposePath`, `os.ReadFile`, `service.ParseComposeGraph`, write the result. `resolveComposePath` and the generic 400 error strings ("invalid compose filename", "cannot read compose file", "invalid YAML") are byte-preserved per the F3 prompt.
+- `connSet` key format `src->dst:type` byte-preserved (PR #66 emphasis). New `TestParseComposeGraph_ConnSetKeyFormat` and case 11 in `TestParseComposeGraph` lock the format in so any future "improvement" to `→` or `.` separators fails CI immediately — they would silently break dedup otherwise.
+- `backend/internal/service/compose_graph_test.go` ships an 11-case table-driven corpus (two-service depends_on, diamond depends_on, array/string command, build-as-string, build-as-map with dockerfile + args, env as map, env as array with bare-key entry, empty file, invalid YAML, multi-env dedup) plus the focused key-format lock-in and a networks/volumes aggregate test.
+- `internal/handler/docker_test.go` left intact — the existing `TestResolveComposePath_*` cases pin the allowlist guard, which stayed in the handler.
 
-**Impact:** The logic is untestable without standing up an HTTP request. The file-path sanitisation (`resolveComposePath`) is correct and belongs in the handler; the graph construction does not.
+~~**File:** `backend/internal/handler/docker.go:150–352`~~
 
-**Recommended fix:** Extract a `service.ParseComposeGraph(data []byte) (*model.ComposeGraph, error)` function containing the unmarshal + graph-build loop. Move the four parse helpers there. The handler retains: read and size-limit the path, call `service.ParseComposeGraph`, write the response.
-
-**Effort:** M (extract ~180 lines into a new service function; add a unit test).
+~~**Current behaviour:** `ParseComposeFile` (lines 150–248) reads a YAML file from disk, unmarshals it, walks the services to build a `model.ComposeGraph` complete with dependency edges inferred from `depends_on` and environment variable cross-references. Four private helper functions (`parseEnvToMap`, `parseDependsOn`, `parseCommand`, `parseBuild`) support the construction. This is ~200 lines of domain logic — YAML ingestion, graph building, edge inference — inside a handler file.~~
 
 ---
 
@@ -171,7 +175,7 @@ The following are too small to warrant individual backlog items but are recorded
 |---|---------|----------|-----------|
 | 1 | ~~Duplicate DAG validator — 57 LoC of cycle-detection in handler~~ | ~~**High**~~ **Closed** in `claude/w3-t1-t3-handler-f1` | `handler/pipeline.go` |
 | 2 | Run-status finalisation logic in `RunPipeline` closure | **High** | `handler/pipeline.go:191–210` |
-| 3 | Compose file parsing + graph construction in handler (~200 LoC) | **High** | `handler/docker.go:150–352` |
+| 3 | ~~Compose file parsing + graph construction in handler (~200 LoC)~~ | ~~**High**~~ **Closed** in `claude/w5-f3-parse-compose-graph` | `handler/docker.go:150–352` |
 | 4 | `bootstrapRole` business rule in auth handler | **Medium** | `handler/auth_local.go:197–209` |
 | 5 | Variables/PlainVars normalisation in Create/UpdateEnvironment | **Medium** | `handler/environment.go:44–57, 75–80` |
 | 6 | Upsert logic (Update→Create fallback) in `runAppDeployCtx` | **Medium** | `handler/app.go:222–231` |
