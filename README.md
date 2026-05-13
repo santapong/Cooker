@@ -437,7 +437,9 @@ Three cooker-internal pieces of state are per-process by default and need shared
 | [docs/protocols.md](docs/protocols.md) | Custom Cooker protocols proposal — CKR-LOG/1 (binary log stream) + CKR-DSL (pipeline DSL) |
 | [docs/shipping-go.md](docs/shipping-go.md) | Research: how mature OSS Go products release and operate, applied to Cooker |
 | [docs/marketing/strategy.md](docs/marketing/strategy.md) | OSS adoption marketing strategy (90-day post-launch horizon) |
-| [docs/audits/](docs/audits/) | Audit series. May 2026: security review, perf/optimization, dag-performance, W11 personas, W11 follow-up, adapter-wiring, handler-layering, store-parity, deploy-parity, frontend-hygiene, half-shipped, **action-pinning (W2)**, **cache-plumb sketch (W2)**, **P#1 unmarshaller corpus (W2)**, **P#1 context-pack (W2)**, **W11 quickwin wireframes (W2)** |
+| [docs/audits/](docs/audits/) | Audit series. May 2026: security review, perf/optimization, dag-performance, W11 personas, W11 follow-up, adapter-wiring, handler-layering, store-parity, deploy-parity, frontend-hygiene, half-shipped (W1); action-pinning, cache-plumb sketch, P#1 unmarshaller corpus, P#1 context-pack, W11 quickwin wireframes (W2); **handler-F2+F3 extraction sketch (W3)**, **deploytarget walk (W3)**, **P#3 JSONB-cap design (W3)**, **T-series W4 coordination (W3)** |
+| [docs/RELEASING.md](docs/RELEASING.md) | Release cutting playbook — tag → workflow → verify (added W3) |
+| [docs/SECURITY-RELEASE-VERIFY.md](docs/SECURITY-RELEASE-VERIFY.md) | Publish-time verification checklist (cosign + permissions + non-root + port surface) (added W3) |
 
 ## Contributing
 
