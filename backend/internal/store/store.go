@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/model"
 )
 
 // ErrNotFound is returned by store implementations when a requested

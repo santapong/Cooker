@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/store/memory"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/store/memory"
 )
 
 func TestRunCoordinator_HeartbeatsRunRow(t *testing.T) {

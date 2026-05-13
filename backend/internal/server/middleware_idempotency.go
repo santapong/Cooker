@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/cooker-ci/cooker/internal/idempotency"
+	"github.com/santapong/cooker/internal/idempotency"
 )
 
 // idempotencyTTL is how long a cached response stays available for

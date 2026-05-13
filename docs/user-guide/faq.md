@@ -12,7 +12,7 @@ The README doesn't say; ask the maintainer.
 
 ## How is Cooker different from Drone / Woodpecker / Argo Workflows / Tekton / Dagger / Jenkins / GitHub Actions?
 
-The [roadmap](https://github.com/cooker-ci/cooker/blob/main/docs/roadmap-2026.md#1-strategic-frame) has the honest framing. Short version:
+The [roadmap](https://github.com/santapong/cooker/blob/main/docs/roadmap-2026.md#1-strategic-frame) has the honest framing. Short version:
 
 - vs **Drone / Woodpecker** — Cooker wins on the graph editor and first-class environment / promotion model. They win on maturity.
 - vs **Argo Workflows / Jenkins X** — Cooker wins on single-binary deployability and a unified Apps abstraction. They win on K8s-CRD purity.
@@ -120,7 +120,7 @@ Email `security@cooker-ci.example.com`. Do NOT open a public GitHub issue. See [
 
 ## What's the license?
 
-MIT. See [LICENSE](https://github.com/cooker-ci/cooker/blob/main/LICENSE).
+MIT. See [LICENSE](https://github.com/santapong/cooker/blob/main/LICENSE).
 
 ## Who maintains Cooker?
 
@@ -128,8 +128,8 @@ See [`docs/design.md`](../design.md) for governance and code-organization conven
 
 ## Where do I get help?
 
-- **GitHub Issues** for bugs: https://github.com/cooker-ci/cooker/issues
-- **GitHub Discussions** for questions (when enabled): https://github.com/cooker-ci/cooker/discussions
+- **GitHub Issues** for bugs: https://github.com/santapong/cooker/issues
+- **GitHub Discussions** for questions (when enabled): https://github.com/santapong/cooker/discussions
 - **Security**: `security@cooker-ci.example.com`
 
 ## Where do I find what's planned?

@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/cooker-ci/cooker/internal/config"
+	"github.com/santapong/cooker/internal/config"
 )
 
 func TestNewMiddleware_Disabled(t *testing.T) {

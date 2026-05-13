@@ -306,5 +306,5 @@ Catching CHANGELOG up to where commits already landed. Each block summarises a m
 - Docker, Kubernetes, and Registry handlers are structured with placeholder implementations; service layer integration with Docker SDK, client-go, and go-containerregistry is the next step
 - OIDC token validation uses placeholder parsing in dev mode; production wiring with `go-oidc` is prepared
 
-[Unreleased]: https://github.com/cooker-ci/cooker/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/cooker-ci/cooker/releases/tag/v0.1.0
+[Unreleased]: https://github.com/santapong/cooker/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/santapong/cooker/releases/tag/v0.1.0

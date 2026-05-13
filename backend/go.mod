@@ -1,4 +1,4 @@
-module github.com/cooker-ci/cooker
+module github.com/santapong/cooker
 
 go 1.25.0
 

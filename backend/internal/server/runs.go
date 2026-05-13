@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/observability"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/observability"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // heartbeatInterval is how often a tracked goroutine writes

@@ -4,8 +4,8 @@ package service
 import (
 	"fmt"
 
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/pkg/dagrunner"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/pkg/dagrunner"
 )
 
 // ValidatePipelineDAG validates that a pipeline's stages and edges form a valid DAG.

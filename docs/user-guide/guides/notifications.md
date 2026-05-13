@@ -119,4 +119,4 @@ When roadmap `A7` ships, expect a new `internal/notifier/` package with a `Notif
 
 - **[Stages: Custom](../concepts/stages.md#custom-stagetypecustom)** — the workaround mechanic.
 - **[Secrets](secrets.md)** — storing the webhook URL.
-- **[Roadmap A7](https://github.com/cooker-ci/cooker/blob/main/docs/roadmap-2026.md#a-integrations)** — when proper notifiers will land.
+- **[Roadmap A7](https://github.com/santapong/cooker/blob/main/docs/roadmap-2026.md#a-integrations)** — when proper notifiers will land.

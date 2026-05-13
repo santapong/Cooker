@@ -135,4 +135,4 @@ Expected: `202 Accepted` with `{"status":"deploy queued"}`.
 
 - **[GitHub webhooks guide](../guides/github-webhooks.md)** — end-to-end walkthrough.
 - **[Apps](../concepts/apps.md)** — App.AutoDeploy and the synthesised run.
-- **[`backend/internal/source/github/webhook.go`](https://github.com/cooker-ci/cooker/blob/main/backend/internal/source/github/webhook.go)** — the verification source.
+- **[`backend/internal/source/github/webhook.go`](https://github.com/santapong/cooker/blob/main/backend/internal/source/github/webhook.go)** — the verification source.

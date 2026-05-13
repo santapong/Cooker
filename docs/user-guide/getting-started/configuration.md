@@ -1,6 +1,6 @@
 # Configuration
 
-All Cooker configuration is environment-variable-based today. There is no config file yet — adding a YAML overlay is on the [roadmap](https://github.com/cooker-ci/cooker/blob/main/docs/shipping-go.md#4-configuration-story) but not yet shipped.
+All Cooker configuration is environment-variable-based today. There is no config file yet — adding a YAML overlay is on the [roadmap](https://github.com/santapong/cooker/blob/main/docs/shipping-go.md#4-configuration-story) but not yet shipped.
 
 For the full enumerated list, see [Reference: Environment variables](../reference/env-vars.md).
 

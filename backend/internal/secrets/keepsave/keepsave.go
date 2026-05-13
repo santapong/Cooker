@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/cooker-ci/cooker/internal/secrets"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/secrets"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // Manager is the KeepSave-backed secrets.Manager. KeepSave is the

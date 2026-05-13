@@ -9,9 +9,9 @@ import (
 
 // Build-time version metadata. Populate via ldflags, e.g.:
 //
-//	go build -ldflags "-X github.com/cooker-ci/cooker/internal/server.BuildSHA=$(git rev-parse --short HEAD) \
-//	                   -X github.com/cooker-ci/cooker/internal/server.BuildVersion=$(git describe --tags --always) \
-//	                   -X github.com/cooker-ci/cooker/internal/server.BuildTime=$(date -u +%FT%TZ)"
+//	go build -ldflags "-X github.com/santapong/cooker/internal/server.BuildSHA=$(git rev-parse --short HEAD) \
+//	                   -X github.com/santapong/cooker/internal/server.BuildVersion=$(git describe --tags --always) \
+//	                   -X github.com/santapong/cooker/internal/server.BuildTime=$(date -u +%FT%TZ)"
 //
 // Defaults are "dev" so the endpoint still responds in test
 // builds; ops dashboards and grafana panels look at this to

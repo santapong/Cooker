@@ -19,7 +19,7 @@ This uses the bundled UAT compose stack. For production install via Helm, see [H
 ## Bring it up
 
 ```sh
-git clone https://github.com/cooker-ci/cooker.git
+git clone https://github.com/santapong/cooker.git
 cd cooker
 make uat-up
 ```

@@ -13,7 +13,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/cooker-ci/cooker/internal/secrets"
+	"github.com/santapong/cooker/internal/secrets"
 	"github.com/hashicorp/vault-client-go"
 	"github.com/hashicorp/vault-client-go/schema"
 )

@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 
-	"github.com/cooker-ci/cooker/internal/auth"
+	"github.com/santapong/cooker/internal/auth"
 )
 
 // rateLimiter is a per-user token-bucket limiter intended for the

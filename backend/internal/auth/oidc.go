@@ -16,9 +16,9 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gin-gonic/gin"
 
-	"github.com/cooker-ci/cooker/internal/auth/local"
-	"github.com/cooker-ci/cooker/internal/config"
-	"github.com/cooker-ci/cooker/internal/observability"
+	"github.com/santapong/cooker/internal/auth/local"
+	"github.com/santapong/cooker/internal/config"
+	"github.com/santapong/cooker/internal/observability"
 )
 
 // providerDiscoveryRetry is the cool-down between failed attempts to

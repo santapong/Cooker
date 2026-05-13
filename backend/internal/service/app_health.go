@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // defaultAppHealthInterval is how often the checker probes each App

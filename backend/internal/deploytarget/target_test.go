@@ -6,9 +6,9 @@ import (
 	"io"
 	"testing"
 
-	"github.com/cooker-ci/cooker/internal/deploytarget"
-	"github.com/cooker-ci/cooker/internal/deploytarget/cloudrun"
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/deploytarget"
+	"github.com/santapong/cooker/internal/deploytarget/cloudrun"
+	"github.com/santapong/cooker/internal/model"
 )
 
 type fakeTarget struct{ kind model.DeployTargetKind }

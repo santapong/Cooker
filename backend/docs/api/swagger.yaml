@@ -329,7 +329,7 @@ host: localhost:8080
 info:
   contact:
     name: Cooker maintainers
-    url: https://github.com/cooker-ci/cooker
+    url: https://github.com/santapong/cooker
   description: REST API for Cooker pipelines, environments, secrets, and apps.
   license:
     name: Apache-2.0

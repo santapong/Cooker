@@ -8,9 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/cooker-ci/cooker/internal/auth"
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/secrets"
+	"github.com/santapong/cooker/internal/auth"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/secrets"
 )
 
 // ListEnvironments returns all environments with secrets redacted so

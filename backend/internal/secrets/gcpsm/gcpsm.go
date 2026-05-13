@@ -19,7 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/cooker-ci/cooker/internal/secrets"
+	"github.com/santapong/cooker/internal/secrets"
 )
 
 // Manager satisfies secrets.Manager against GCP Secret Manager.

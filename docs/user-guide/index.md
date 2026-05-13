@@ -4,7 +4,7 @@ Cooker is a self-hosted CI/CD tool. You author pipelines as a graph in the brows
 
 ## The 60-second pitch
 
-- **Visual pipeline editor.** Drag stages onto a canvas, connect them, hit Run. No YAML, no DSL (yet — see the [roadmap](https://github.com/cooker-ci/cooker/blob/main/docs/roadmap-2026.md)).
+- **Visual pipeline editor.** Drag stages onto a canvas, connect them, hit Run. No YAML, no DSL (yet — see the [roadmap](https://github.com/santapong/cooker/blob/main/docs/roadmap-2026.md)).
 - **OCI native.** Builds produce OCI v1.1 manifests; pushes use the distribution-spec; the referrers API is supported for supply-chain metadata.
 - **Apps, not just pipelines.** An "App" is a higher-level shortcut: point at a GitHub repo, pick a deploy target, click Deploy. Cooker synthesises a Clone -> Build -> Push -> Deploy run.
 - **One binary.** API, frontend, migrations, and OIDC client all ship in one container.
@@ -32,8 +32,8 @@ It does NOT cover:
 
 ## Stability notice
 
-Cooker is pre-1.0. Treat every minor version as potentially breaking until [`UPGRADING.md`](https://github.com/cooker-ci/cooker/blob/main/CHANGELOG.md) is stable (tracked under shipping-go 30-90d in the [roadmap](https://github.com/cooker-ci/cooker/blob/main/docs/roadmap-2026.md)). Where a feature in this guide is incomplete, it is called out inline with a note like:
+Cooker is pre-1.0. Treat every minor version as potentially breaking until [`UPGRADING.md`](https://github.com/santapong/cooker/blob/main/CHANGELOG.md) is stable (tracked under shipping-go 30-90d in the [roadmap](https://github.com/santapong/cooker/blob/main/docs/roadmap-2026.md)). Where a feature in this guide is incomplete, it is called out inline with a note like:
 
 > **Partial.** This works for X but does not yet do Y. Tracked in the roadmap as [item ID].
 
-When in doubt, [the roadmap](https://github.com/cooker-ci/cooker/blob/main/docs/roadmap-2026.md) and [backlog](https://github.com/cooker-ci/cooker/blob/main/backlog.md) are the honest list of what isn't done.
+When in doubt, [the roadmap](https://github.com/santapong/cooker/blob/main/docs/roadmap-2026.md) and [backlog](https://github.com/santapong/cooker/blob/main/backlog.md) are the honest list of what isn't done.
