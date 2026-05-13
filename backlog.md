@@ -43,6 +43,43 @@ The chart can't make these decisions for you:
 
 What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-line rationale for why they didn't ship in PR #17 and what unblocks them.
 
+### W6 carry-forward (queued)
+
+Items deferred from the W2–W5 cycle. Sequenced for the next session.
+
+#### W6.1 — Primitive #1: per-stage retry policies (~3 days)
+
+- [ ] Per-stage `RetryPolicy` on `model.Stage` (`MaxAttempts`, `BackoffStrategy: fixed|exponential`, `BackoffSeconds`, `RetryOn: error|timeout|always`).
+- [ ] Executor honours the policy with bounded retry helper from `internal/retry/`.
+- [ ] Frontend stage-node UI exposes the policy (Pro-mode toggle).
+- [ ] Schema migration `011_stage_retry.up.sql` adds the field to JSONB stages (no DDL — CHECK constraint as in P#3 sketch).
+- [ ] Tests: retry-on-error, retry-on-timeout, max-attempts-reached, exponential-backoff timing.
+- [ ] **Prerequisite already on main:** T5 batched persistProgress (PR #75 squash) — without T5, retry attempts triple the JSONB write rate per stage.
+- [ ] **Audit closure:** `docs/dag-adaptation-2026.md` §3.1 Primitive #1, `docs/audits/2026-05-p1-context-pack.md`.
+
+#### W6.2 — useStageLogs reconnect backfill (~1 hour, HIGH severity)
+
+- [ ] Expose `onReconnect`/`reconnectCount` from `useWebSocket` (`frontend/src/hooks/useWebSocket.ts`).
+- [ ] `useStageLogs` re-issues `getStageLogs` REST call on each reconnect and merges with the live WS stream.
+- [ ] Test: simulate WS drop + reconnect mid-run; assert no log lines lost.
+- [ ] **Found by:** `docs/audits/2026-05-usestagelogs-reconnect.md` (PR #80) — log lines during 0-30 s reconnect window are permanently dropped today.
+
+#### W6.3 — README screenshots (operator step)
+
+- [ ] Capture three PNGs into `docs/images/`: pipeline-editor.png, run-view.png, app-detail.png.
+- [ ] Update the placeholder Screenshots table in `README.md` to reference them.
+
+#### W6.4 — Branch cleanup (operator step)
+
+- [ ] ~80 stale branches on origin from merged PRs. Sandbox proxy refuses `git push --delete`. Run locally:
+  ```bash
+  gh pr list --state merged --limit 200 --json headRefName -q '.[].headRefName' \
+    | xargs -I{} git push origin --delete {}
+  ```
+- [ ] Or enable Settings → General → Pull Requests → "Automatically delete head branches" for future PRs.
+
+---
+
 ### P0 — SPOF closeout follow-ups (PR #21 spillover)
 
 All P0.1–P0.7 items are now closed (see "Closed (recent)" below). P0.8 (operator rollout playbook) shipped in PR #21.
