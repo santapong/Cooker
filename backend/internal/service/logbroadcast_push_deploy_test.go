@@ -67,7 +67,7 @@ func TestExecutor_PushStage_BroadcastsLogLines(t *testing.T) {
 	}
 
 	exec := NewExecutor(WithPusher(sp), WithLogBroadcaster(rec.record))
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func TestExecutor_DeployStage_BroadcastsLogLines(t *testing.T) {
 	}
 
 	exec := NewExecutor(WithDeployer(sd), WithLogBroadcaster(rec.record))
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestExecutor_PushStage_NoBroadcasterIsNoOp(t *testing.T) {
 	}
 
 	exec := NewExecutor(WithPusher(sp))
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := run.StageRuns[0].Logs; !strings.Contains(got, "Pushed image to reg/app:v1") {
@@ -183,7 +183,7 @@ func TestExecutor_DeployStage_NoBroadcasterIsNoOp(t *testing.T) {
 	}
 
 	exec := NewExecutor(WithDeployer(sd))
-	if err := exec.Execute(context.Background(), p, run); err != nil {
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := run.StageRuns[0].Logs; !strings.Contains(got, "Applied Deployment/web") {

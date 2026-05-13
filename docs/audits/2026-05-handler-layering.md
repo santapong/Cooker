@@ -28,32 +28,41 @@
 
 ---
 
-### Finding 2 — HIGH — Run Status Finalisation Logic in `RunPipeline` Closure
+### ~~Finding 2 — HIGH~~ Finding 2 — CLOSED — Run Status Finalisation Logic in `RunPipeline` Closure
 
-**File:** `backend/internal/handler/pipeline.go:191–210`
+**CLOSED in `claude/w5-f2-executor-runresult`.**
 
-**Current behaviour:** The `h.Runs.Spawn` callback inside `RunPipeline` contains status-reconciliation logic after `h.Executor.Execute` returns:
+**What was done:**
+- `model.RunResult` added (`{Status, FinishedAt}`) in `internal/model/run.go`.
+- `service.Executor.Execute` now returns `(model.RunResult, error)`. The new private `Executor.finalize` owns the terminal-status state machine: `startedCancelled` snapshot at entry preserves a pre-marked Cancelled across the Running→terminal transition; `errors.Is(err, context.Canceled)` maps to Cancelled; any other err maps to Failed; clean return maps to Success.
+- `handler/pipeline.go` `RunPipeline` closure shrinks: the four-branch status-reconciliation block is deleted. Closure is now `_, execErr := h.Executor.Execute(ctx, p, runCopy); h.Store.Runs.Update(ctx, runCopy); return execErr` — no re-derive, no `FinishedAt` re-stamp.
+- `service/app_deployer.go` updated to the new signature (discards the RunResult; relies on `run.Status` which Execute also stamps).
+- New `TestExecutor_F2_RunResult` (four cases: success / failed / context cancelled / empty pipeline) and `TestExecutor_F2_CancelledStaysCancelled` lock in the silent-flip regression the audit flagged: a run pre-marked Cancelled stays Cancelled even when every stage completes successfully.
 
-```go
-if execErr != nil {
-    if runCopy.Status != model.RunStatusFailed {
-        runCopy.Status = model.RunStatusFailed
-    }
-    if runCopy.Error == "" {
-        runCopy.Error = execErr.Error()
-    }
-} else if runCopy.Status == model.RunStatusRunning {
-    runCopy.Status = model.RunStatusSuccess
-}
-```
+~~**File:** `backend/internal/handler/pipeline.go:191–210`~~
 
-This is a domain rule ("if the executor returned an error and the status was not already set to failed, set it to failed; if it succeeded and the run is still showing running, advance to success") embedded in an HTTP handler goroutine. The `Executor.Execute` contract should own the terminal-status guarantee. The handler's job ends at "call Execute, persist the result."
+~~**Current behaviour:** The `h.Runs.Spawn` callback inside `RunPipeline` contains status-reconciliation logic after `h.Executor.Execute` returns:~~
 
-**Impact:** The rule is now split: `Executor.Execute` sets `RunStatusFailed` on a stage error (line 278 of `executor.go`) and returns an error, but the handler additionally guards against the case where the executor set it to something else. This interplay is fragile — if `Execute` is extended to set `RunStatusCancelled` for context-cancelled runs, the handler's `else if runCopy.Status == model.RunStatusRunning` branch will incorrectly advance that to `Success`.
+~~```go~~
+~~if execErr != nil {~~
+~~    if runCopy.Status != model.RunStatusFailed {~~
+~~        runCopy.Status = model.RunStatusFailed~~
+~~    }~~
+~~    if runCopy.Error == "" {~~
+~~        runCopy.Error = execErr.Error()~~
+~~    }~~
+~~} else if runCopy.Status == model.RunStatusRunning {~~
+~~    runCopy.Status = model.RunStatusSuccess~~
+~~}~~
+~~```~~
 
-**Recommended fix:** Move the guard into `Executor.Execute` so it guarantees on return: run status is either `RunStatusSuccess` or `RunStatusFailed` (never `RunStatusRunning`). The handler closure becomes: call `Execute`, set `FinishedAt`, call `h.Store.Runs.Update`. See also `dag-performance.md` §3 ("No mid-run progress writes") — the same closure is flagged there for a related reason.
+~~This is a domain rule ("if the executor returned an error and the status was not already set to failed, set it to failed; if it succeeded and the run is still showing running, advance to success") embedded in an HTTP handler goroutine. The `Executor.Execute` contract should own the terminal-status guarantee. The handler's job ends at "call Execute, persist the result."~~
 
-**Effort:** S (add a status-clamp at the end of `Executor.Execute`; simplify handler closure).
+~~**Impact:** The rule is now split: `Executor.Execute` sets `RunStatusFailed` on a stage error (line 278 of `executor.go`) and returns an error, but the handler additionally guards against the case where the executor set it to something else. This interplay is fragile — if `Execute` is extended to set `RunStatusCancelled` for context-cancelled runs, the handler's `else if runCopy.Status == model.RunStatusRunning` branch will incorrectly advance that to `Success`.~~
+
+~~**Recommended fix:** Move the guard into `Executor.Execute` so it guarantees on return: run status is either `RunStatusSuccess` or `RunStatusFailed` (never `RunStatusRunning`). The handler closure becomes: call `Execute`, set `FinishedAt`, call `h.Store.Runs.Update`. See also `dag-performance.md` §3 ("No mid-run progress writes") — the same closure is flagged there for a related reason.~~
+
+~~**Effort:** S (add a status-clamp at the end of `Executor.Execute`; simplify handler closure).~~
 
 ---
 
@@ -174,7 +183,7 @@ The following are too small to warrant individual backlog items but are recorded
 | # | Finding | Severity | File:Line |
 |---|---------|----------|-----------|
 | 1 | ~~Duplicate DAG validator — 57 LoC of cycle-detection in handler~~ | ~~**High**~~ **Closed** in `claude/w3-t1-t3-handler-f1` | `handler/pipeline.go` |
-| 2 | Run-status finalisation logic in `RunPipeline` closure | **High** | `handler/pipeline.go:191–210` |
+| 2 | ~~Run-status finalisation logic in `RunPipeline` closure~~ | ~~**High**~~ **Closed** in `claude/w5-f2-executor-runresult` | `handler/pipeline.go` |
 | 3 | ~~Compose file parsing + graph construction in handler (~200 LoC)~~ | ~~**High**~~ **Closed** in `claude/w5-f3-parse-compose-graph` | `handler/docker.go:150–352` |
 | 4 | `bootstrapRole` business rule in auth handler | **Medium** | `handler/auth_local.go:197–209` |
 | 5 | Variables/PlainVars normalisation in Create/UpdateEnvironment | **Medium** | `handler/environment.go:44–57, 75–80` |
