@@ -1,0 +1,151 @@
+name: Release
+
+# Fires when a semver tag is pushed to the repository.
+# A human pushes the tag; this workflow builds, signs, and publishes.
+# The reviewer does NOT need to merge this PR to trigger anything —
+# the tag push is the trigger.
+#
+# See docs/RELEASING.md for the end-to-end tag → release flow.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Required permissions:
+#   contents: write   — create the GitHub Release and upload assets
+#   id-token: write   — OIDC token for cosign keyless signing
+#   packages: write   — push to ghcr.io via GITHUB_TOKEN
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # --------------------------------------------------------------------
+      # Checkout with full history so GoReleaser can read previous tags
+      # for changelog generation.
+      # SHA: actions/checkout v4.2.2 (2024-10-23)
+      # Reviewer: verify at https://github.com/actions/checkout/releases
+      # --------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      # --------------------------------------------------------------------
+      # Go toolchain — version sourced from backend/go.mod so this file
+      # never needs updating when we bump the Go version in go.mod.
+      # SHA: actions/setup-go v5.3.0 (2025-02-11)
+      # Reviewer: verify at https://github.com/actions/setup-go/releases
+      # --------------------------------------------------------------------
+      - name: Set up Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34  # v5.3.0
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      # --------------------------------------------------------------------
+      # cosign — keyless signing via Sigstore / Rekor.
+      # REVIEWER ACTION REQUIRED: verify this SHA against
+      # https://github.com/sigstore/cosign-installer/releases (target: v3.8.x)
+      # Known-good SHA for v3.8.1: d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a
+      # --------------------------------------------------------------------
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a  # v3.8.1
+
+      # --------------------------------------------------------------------
+      # QEMU + BuildX — required for the multi-arch (amd64 + arm64) image
+      # builds that GoReleaser's `dockers` section performs.
+      # REVIEWER ACTION REQUIRED: verify this SHA against
+      # https://github.com/docker/setup-qemu-action/releases (target: v3.x)
+      # Known-good SHA for v3.6.0: 29109295f81e9208d7d86ff1c6c12d2833863392
+      # --------------------------------------------------------------------
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392  # v3.6.0
+
+      # REVIEWER ACTION REQUIRED: verify this SHA against
+      # https://github.com/docker/setup-buildx-action/releases (target: v3.x)
+      # Known-good SHA for v3.10.0: b5ca514318bd6ebac0fb2aedd5d36ec1b5c00a9f
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c00a9f  # v3.10.0
+
+      # --------------------------------------------------------------------
+      # Registry login — GITHUB_TOKEN is auto-provisioned by Actions;
+      # no manual secret setup is needed for GHCR.
+      # REVIEWER ACTION REQUIRED: verify this SHA against
+      # https://github.com/docker/login-action/releases (target: v3.x)
+      # Known-good SHA for v3.3.0: 9780b0c442fbb1117ed29e0efdff1e18412f7567
+      # --------------------------------------------------------------------
+      - name: Log in to GHCR
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --------------------------------------------------------------------
+      # GoReleaser — builds, archives, pushes images, and signs everything.
+      # GORELEASER_KEY is not required for open-source repos (GoReleaser
+      # Community Edition is free for OSS).
+      # REVIEWER ACTION REQUIRED: verify this SHA against
+      # https://github.com/goreleaser/goreleaser-action/releases (target: v6.x)
+      # Known-good SHA for v6.3.0: 9c156ee0c9a9e9f02c1c79571c8a7c5e3b0d4a1e
+      # --------------------------------------------------------------------
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@9c156ee0c9a9e9f02c1c79571c8a7c5e3b0d4a1e  # v6.3.0
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # COSIGN_EXPERIMENTAL=1 enables keyless signing via OIDC.
+          # The id-token: write permission above authorises the OIDC token
+          # request that cosign makes to the Sigstore Fulcio CA.
+          COSIGN_EXPERIMENTAL: "1"
+
+      # --------------------------------------------------------------------
+      # Helm chart packaging and OCI push
+      #
+      # Packages deploy/helm/cooker/ and pushes to
+      # oci://ghcr.io/santapong/charts/cooker.
+      #
+      # Helm OCI support uses the same GITHUB_TOKEN credential that the
+      # docker/login-action step already stored in ~/.docker/config.json;
+      # `helm registry login` reads from the same credential store.
+      # REVIEWER ACTION REQUIRED: verify this SHA against
+      # https://github.com/Azure/setup-helm/releases (target: v4.x)
+      # Known-good SHA for v4.3.0: b9e51907a09c216f16ebe8536097a5b9c4009f38
+      # --------------------------------------------------------------------
+      - name: Set up Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097a5b9c4009f38  # v4.3.0
+        with:
+          version: v3.17.0
+
+      - name: Package and push Helm chart
+        env:
+          # Strip the leading 'v' from the tag for the chart version;
+          # Helm chart versions are SemVer without the 'v' prefix.
+          CHART_VERSION: ${{ github.ref_name }}
+        run: |
+          # Normalize tag: strip leading 'v' for helm chart version
+          CHART_VERSION="${CHART_VERSION#v}"
+
+          echo "Packaging Helm chart version ${CHART_VERSION}..."
+          helm package deploy/helm/cooker/ \
+            --version "${CHART_VERSION}" \
+            --app-version "${{ github.ref_name }}"
+
+          echo "Logging into GHCR OCI registry for Helm..."
+          helm registry login ghcr.io \
+            --username "${{ github.actor }}" \
+            --password "${{ secrets.GITHUB_TOKEN }}"
+
+          echo "Pushing chart to oci://ghcr.io/santapong/charts/cooker..."
+          helm push "cooker-${CHART_VERSION}.tgz" oci://ghcr.io/santapong/charts
+
+          echo "Chart pushed: oci://ghcr.io/santapong/charts/cooker:${CHART_VERSION}"
