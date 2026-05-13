@@ -1,6 +1,6 @@
 # ADR-0004 — Multi-tenancy: data-scoped `owner_team_id`, with namespace-scoped `tenant_id` deferred
 Date: 2026-05-12
-Status: Proposed (awaiting Decision A on hosted Cooker Cloud — see `docs/pm-brief-2026-05.md:111` Q1 and `docs/pm-brief-2026-05.md:117` Q7)
+Status: Accepted (PM decision 2026-05-13, A3-defer). Supersedes the "awaiting Decision A" gate. Revisit Q4 2026 if a hosted-Cloud signal arrives.
 
 ## Context
 
@@ -25,7 +25,7 @@ The 2026 roadmap encodes the same dependency graph:
 
 Decision A in the PM brief (`docs/pm-brief-2026-05.md:111` Q1, `docs/pm-brief-2026-05.md:117` Q7) is unanswered: we do not yet know whether hosted Cooker Cloud will be pursued. Both questions explicitly note that this ADR is gated on the answer.
 
-We can either wait, or we can pick the shape that is cheapest now AND doesn't foreclose either decision later. This ADR takes the second path.
+PM locked **A3-defer** on 2026-05-13: ship `owner_team_id` now; do not ship `tenant_id` until a hosted-Cloud signal lands; revisit Q4 2026. This ADR documents the now-shape (Decision §1–§3) and the future-execution playbook (Appendix A).
 
 ## Decision
 
@@ -110,29 +110,62 @@ This means **picking A3 today does not foreclose A1 tomorrow**. The ownership-co
 - Pros: closes `S26-05-09`; matches the C1 description verbatim (`docs/roadmap-2026.md:80`); leaves C2/C3 open without committing to them; cheap.
 - Cons: a future C3 commitment forces a second migration (`010_tenancy.up.sql`). Acceptable cost of optionality.
 
-## Appendix A — If the user picks A1 instead
+## Appendix A — Future `tenant_id` migration (revisit Q4 2026)
 
-If Decision A (`docs/pm-brief-2026-05.md:111` Q1) lands as "yes, hosted Cooker Cloud is on the roadmap":
+The Q4-2026 execution playbook for a hosted-Cloud commitment. **Do not execute** until at least one trigger fires: (a) PM commits to hosted Cooker Cloud, (b) a customer contract requires tenant isolation, (c) SAML (roadmap C2) is greenlit. None today → keep deferred.
 
-1. Swap `owner_team_id` for `tenant_id` in this ADR's schema table. Keep teams as an inner-loop concept (a tenant owns N teams; a team is the RBAC unit). `tenant_id` becomes the outer boundary.
-2. Add a `tenants(id, slug, plan, created_at, suspended_at)` table.
-3. Add `tenant_id BIGINT NOT NULL REFERENCES tenants(id)` to: `teams`, `pipelines`, `apps`, `environments`, `hosts`, `runs`, `users`, `audit_log`.
-4. Document the migration as `internal/store/postgres/migrations/010_tenancy.up.sql`. Single-tenant installs get a `default` tenant (id=1) seeded.
-5. RBAC composes: `RequireTenantBoundary && RequireTeamMember`. All handlers go through both checks; the helper is one function.
-6. OIDC: tenancy claim mapping (e.g. `aud` or a custom claim → tenant_id) added to `internal/auth/`.
-7. Quotas, billing hooks, suspend/restore flows: out of scope for the ADR itself but unblocked.
-8. Estimate: ~3 weeks of focused work (handler updates, store-layer scoping, OIDC tenancy claim, admin UI for tenant management). Matches the C3 "XL" sizing (`docs/roadmap-2026.md:82`).
+### A.1 Migration #010 — `010_tenancy.up.sql`
 
-The migration is forward-only-compatible with this ADR's `owner_team_id` shape: every existing row already has an owning team, and the back-fill is `UPDATE <table> SET tenant_id = (SELECT tenant_id FROM teams WHERE teams.id = <table>.owner_team_id)`.
+```sql
+CREATE TABLE tenants (
+  id BIGSERIAL PRIMARY KEY,
+  slug TEXT UNIQUE NOT NULL,
+  plan TEXT NOT NULL DEFAULT 'free',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  suspended_at TIMESTAMPTZ NULL
+);
 
-## Appendix B — If the user picks A2 instead
+INSERT INTO tenants (id, slug, plan) VALUES (1, 'default', 'self-hosted');
 
-If Decision A lands as "no, single-tenant forever":
+ALTER TABLE teams        ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE pipelines    ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE apps         ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE environments ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE hosts        ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE runs         ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE users        ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
+ALTER TABLE audit_log    ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants(id);
 
-1. Keep this ADR as written. The `owner_team_id` schema column is cheap insurance and still closes `S26-05-09`.
-2. Tombstone roadmap C2 (SAML — `docs/roadmap-2026.md:81`) and C3 (Cooker Cloud — `docs/roadmap-2026.md:82`) explicitly. Add a `Status: tombstoned (Decision A → single-tenant)` note to each row.
-3. The `teams` table stays; the install runs with one team forever. Operators can still use teams as an internal RBAC partition (e.g. "platform-team" vs "ml-team" inside one company).
-4. The `tenant_id` migration path in §3 is removed from this ADR (replace with a one-line "not pursued; see Decision A").
-5. Estimate: 0 additional work beyond this ADR's base scope.
+-- Back-fill from team ownership; the DEFAULT 1 above handles fresh-install case
+UPDATE pipelines    SET tenant_id = (SELECT tenant_id FROM teams WHERE teams.id = pipelines.owner_team_id);
+UPDATE apps         SET tenant_id = (SELECT tenant_id FROM teams WHERE teams.id = apps.owner_team_id);
+UPDATE environments SET tenant_id = (SELECT tenant_id FROM teams WHERE teams.id = environments.owner_team_id);
+UPDATE hosts        SET tenant_id = (SELECT tenant_id FROM teams WHERE teams.id = hosts.owner_team_id);
+UPDATE runs         SET tenant_id = (SELECT tenant_id FROM teams WHERE teams.id = runs.owner_team_id);
+```
 
-The schema column does not become dead weight: it remains the IDOR fix. It just guarantees one team forever instead of one tenant forever.
+Paired `010_tenancy.down.sql` drops the columns and `DROP TABLE tenants`.
+
+### A.2 Model field bumps
+
+`Pipeline`, `App`, `Environment`, `Host`, `Run`, `User`, `Team`, `AuditLog` each gain `TenantID int64 \`json:"tenantId"\``. Store-interface `Get*ByID` and `List*` methods gain `tenantID int64` as the leftmost arg after `ctx`. Memory and Postgres impls add `WHERE tenant_id = $1` filtering.
+
+### A.3 Middleware injection
+
+New `auth.RequireTenantBoundary` registered in `internal/server/server.go` immediately **after** `auth.AuthMiddleware` on the `/api/v1` group. Reads `tenant_id` from the configured OIDC claim, sets `c.Set("tenantID", tid)`. Every handler that currently calls `auth.RequireTeamMember` gains a preceding `tid := auth.TenantFromContext(c)` and passes it to the store call. Composition: `RequireTenantBoundary` outer-loop, `RequireTeamMember` inner-loop.
+
+### A.4 WS hub scope-key changes
+
+`internal/server/ws_hub.go` currently keys subscriptions by `runID` and `userID`. Under tenancy: keys become `tenantID:runID` and `tenantID:userID`. The ticket store (`POST /api/v1/ws-tickets`) embeds `tenant_id` in the ticket payload. WS upgrade handler cross-validates ticket-tenant vs URL-path resource-tenant before joining the hub.
+
+### A.5 OIDC tenancy claim mapping
+
+`internal/auth/oidc.go` extracts `tenant_id` from a configured claim path. New env var `COOKER_OIDC_TENANT_CLAIM` (default `cooker_tenant_id`). Self-hosted installs continue to mint a synthetic claim `cooker_tenant_id=1` in the dev-admin injector path. Production-mode `Config.Validate()` requires `COOKER_OIDC_TENANT_CLAIM` when `COOKER_TENANCY_MODE=multi`.
+
+### Estimate
+
+~3 weeks of focused work (handler updates, store-layer scoping, OIDC tenancy claim, admin UI for tenant management). Matches the C3 "XL" sizing (`docs/roadmap-2026.md:82`).
+
+## Appendix B — A2 (rejected by PM 2026-05-13)
+
+A2 (single-tenant forever, document `S26-05-09` as a known property) was rejected. Retained for historical context only: the marketing brief excluded the Enterprise persona from launch ICP because of `S26-05-09` (`docs/pm-brief-2026-05.md:47`); closing it is a roadmap-level priority, not a documentation-level one. See "Alternatives Considered → A2" above for the original analysis.
