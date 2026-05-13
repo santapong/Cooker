@@ -1,7 +1,8 @@
 # DeployTarget Adapter Walk — 2026-05 W3
 
-> Status: **read-only research deliverable.** No code changes.
-> Branch: `claude/w3-research-deploytarget-walk`.
+> Status: **research deliverable; E-2, F-2, F-3, R-2 closed by PR `claude/w4-multicloud-bug-bundle`.**
+> Original research branch: `claude/w3-research-deploytarget-walk`.
+> Fix branch: `claude/w4-multicloud-bug-bundle`.
 > Scope: `backend/internal/deploytarget/{cloudrun,ecs,flyio,render}/` plus the Kubernetes deploy
 > path in `backend/internal/deployer/clientgo.go` (no `deploytarget/kubernetes/` subdirectory
 > exists; `DeployTargetKubernetes` is served by `deployer.ClientGo` wired in
@@ -104,17 +105,19 @@ This performs file I/O, IMDS HTTP calls, and env-var parsing each time. Fix: cac
 ### E-2 — `UpdateService` non-404 error swallowed; creates on any failure
 
 **Severity: High (Critical for operators) | File:line:** `ecs.go:113-119`
+**Status: CLOSED** — Fixed in `claude/w4-multicloud-bug-bundle`. `errors.As(uerr, &notFound)`
+now gates the CreateService fallthrough; any non-ServiceNotFoundException is returned
+immediately with context. Test: `TestECS_E2_UpdateServiceNonNotFoundErrorPropagates`.
 
 ```go
 if _, uerr := c.UpdateService(ctx, ...); uerr == nil { return nil }
 // falls through to CreateService on ANY uerr — including IAM deny, throttle
 ```
 
-An IAM permission error or wrong cluster ARN on `UpdateService` silently triggers
-`CreateService`, creating a ghost ECS service consuming Fargate capacity. This is the most
-dangerous silent-data-corruption bug in the adapters: it burns money and is undiagnosable
-from the Cooker UI. Fix: check `errors.As(uerr, &ecstypes.ServiceNotFoundException{})` before
-falling through; return the error otherwise. Effort: ~1 hour including a test.
+An IAM permission error or wrong cluster ARN on `UpdateService` silently triggered
+`CreateService`, creating a ghost ECS service consuming Fargate capacity. This was the most
+dangerous silent-data-corruption bug in the adapters: it burned money and was undiagnosable
+from the Cooker UI.
 
 ### E-3 — No LogWriter; async deploy is fire-and-forget
 
@@ -157,23 +160,27 @@ remove the client `Timeout`; wrap `ctx` with `context.WithTimeout` using a confi
 ### F-2 — Deploy always creates a new Machine; no update path
 
 **Severity: High | File:line:** `flyio.go:112-134`
+**Status: CLOSED** — Fixed in `claude/w4-multicloud-bug-bundle`. `Deploy` now calls
+`GET /apps/<id>/machines` first via `listMachines()`. When machines exist, it calls
+`POST /apps/<id>/machines/<machine_id>` (update); otherwise it creates. Tests:
+`TestFly_F2_DeployUpdatesExistingMachine`, `TestFly_F2_DeployCreatesOnFirstDeploy`.
 
-`Deploy` always `POST /apps/<id>/machines` (create). Every subsequent deploy appends a new
-machine alongside existing ones; billing grows linearly with deploy count. The correct pattern
-is `GET /apps/<id>/machines` first, then `PATCH /machines/<machine_id>` if machines exist.
-Effort: ~2 hours including a test that asserts the update path fires on re-deploy.
+`Deploy` previously always `POST /apps/<id>/machines` (create). Every subsequent deploy
+appended a new machine alongside existing ones; billing grew linearly with deploy count.
 
 ### F-3 — Rollback calls a nonexistent bulk-restart endpoint
 
 **Severity: High | File:line:** `flyio.go:180`
+**Status: CLOSED** — Fixed in `claude/w4-multicloud-bug-bundle`. `Rollback` now calls
+`listMachines()` then `POST /apps/<id>/machines/<machine_id>/restart` for each machine.
+Returns a clear error when no machines are found. Test: `TestFly_F3_RollbackUsesPerMachineRestart`.
 
 ```go
 t.do(ctx, http.MethodPost, "/apps/"+appID+"/machines/restart", nil)
 ```
 
 The Fly Machines API requires a machine ID: `POST /apps/{app}/machines/{machine_id}/restart`.
-The current URL returns `404` from the Fly API. The Rollback button silently fails; operators
-cannot roll back via Cooker. Fix: list machines first, then restart each by ID. Effort: ~1 hour.
+The old URL returned `404` from the Fly API silently; operators could not roll back via Cooker.
 
 ### F-4 — No LogWriter; machine allocation details discarded
 
@@ -198,15 +205,17 @@ can exhaust Render's per-account rate limits on health checks alone. Fix: cache
 ### R-2 — `Status` URL always empty; broken JSON struct tag
 
 **Severity: High | File:line:** `render.go:143-156`
+**Status: CLOSED** — Fixed in `claude/w4-multicloud-bug-bundle`. `renderServiceDetail` now
+has a proper nested struct for `serviceDetails`; `Status()` reads
+`resp.Service.ServiceDetails.URL`. Test: `TestRender_StatusURLDecodes` locks the JSON shape.
 
 ```go
 ServiceURL string `json:"serviceDetails.url"`
 ```
 
-`"serviceDetails.url"` is not a valid Go JSON path — it is treated as a literal field name,
-not a dot-traversal. The Render API returns the URL nested under
-`service.serviceDetails.url`; the current struct never decodes it. `Status.URL` is always
-`""` for every Render service. Fix: model the nested struct. Effort: < 15 minutes.
+`"serviceDetails.url"` was treated as a literal field name (not a dot-path). The Render API
+returns the URL nested under `service.serviceDetails.url`; `Status.URL` was always `""` for
+every Render service.
 
 ### R-3 — No LogWriter; async deploy is silent
 
@@ -271,16 +280,16 @@ fix; flag for service-layer owners.
 | CR-3 | Cloud Run | Rollback error not wrapped | Low |
 | CR-4 | Cloud Run | Non-404 GetService error swallowed | Medium |
 | E-1 | ECS | AWS config loaded per call | High |
-| E-2 | ECS | UpdateService non-404 swallowed → ghost service | **High (Critical)** |
+| E-2 | ECS | UpdateService non-404 swallowed → ghost service | **CLOSED** |
 | E-3 | ECS | No LogWriter; async deploy invisible | High |
 | E-4 | ECS | CPU/Memory hardcoded; not configurable | Medium |
 | E-5 | ECS | `aws.ToInt32` on value-type field | Low |
 | F-1 | Fly.io | Hardcoded timeout ignores ctx deadline | Medium |
-| F-2 | Fly.io | Deploy always creates; accumulates machines | High |
-| F-3 | Fly.io | Rollback calls nonexistent URL; silent 404 | High |
+| F-2 | Fly.io | Deploy always creates; accumulates machines | **CLOSED** |
+| F-3 | Fly.io | Rollback calls nonexistent URL; silent 404 | **CLOSED** |
 | F-4 | Fly.io | No LogWriter; machine details discarded | High |
 | R-1 | Render | `findServiceID` called twice per poll | Medium |
-| R-2 | Render | Status URL always empty; broken JSON tag | High |
+| R-2 | Render | Status URL always empty; broken JSON tag | **CLOSED** |
 | R-3 | Render | No LogWriter; async deploy silent | High |
 | R-4 | Render | Hardcoded timeout ignores ctx deadline | Medium |
 | X-1 | All | `Spec` has no `LogWriter`; T2 blocked | High |
@@ -291,23 +300,21 @@ fix; flag for service-layer owners.
 
 ## 8. Top 3 findings by operator impact (multi-cloud production)
 
-**1. E-2 — ECS UpdateService non-404 swallowed → ghost Fargate service (`ecs.go:113-119`)**
+All three have been closed by PR `claude/w4-multicloud-bug-bundle`.
+
+**1. E-2 — ECS UpdateService non-404 swallowed → ghost Fargate service (`ecs.go:113-119`) — CLOSED**
 An IAM permission error, API throttle, or wrong cluster ARN on `UpdateService` silently
-triggers `CreateService`. The result is a ghost Fargate service consuming capacity and
-incurring billing, with no Cooker-visible error. Operators discover this only via the AWS
-console. A fix takes ~1 hour; a regression test asserting non-404 errors propagate is mandatory.
+triggered `CreateService`. The result was a ghost Fargate service consuming capacity and
+incurring billing, with no Cooker-visible error. Fix: `errors.As` gate on
+`ServiceNotFoundException`; non-404 errors returned immediately. Regression test added.
 
-**2. F-2 + F-3 — Fly.io accumulates machines + Rollback is a silent 404 (`flyio.go:112-134, 180`)**
-These two compound: every deploy appends a new Machine (unbounded billing growth), and the
-Rollback button calls `POST /apps/<id>/machines/restart` — a URL that does not exist on the
-Fly API — returning a 404 that is surfaced as a generic error. Operators who ship a broken
-image to Fly cannot roll back via Cooker, and will accumulate idle machines on every retry.
-Together ~3 hours to fix; urgent before any customer uses the Fly adapter in production.
+**2. F-2 + F-3 — Fly.io accumulates machines + Rollback is a silent 404 (`flyio.go:112-134, 180`) — CLOSED**
+These two compound: every deploy appended a new Machine (unbounded billing growth), and the
+Rollback button called `POST /apps/<id>/machines/restart` — a URL that does not exist on the
+Fly API. Fix: `listMachines()` helper drives both; Deploy updates in-place when machines exist;
+Rollback calls `POST /apps/<id>/machines/<id>/restart` per machine. Two test files added.
 
-**3. R-2 — Render Status URL always empty due to malformed JSON tag (`render.go:143-156`)**
-`json:"serviceDetails.url"` is not a dot-path; Go's JSON decoder treats it as a literal key.
-The deployed service URL is never decoded; `Status.URL` is always `""`. The App detail page
-shows no URL for any Render service, making it impossible to click through to the running
-application. The health check still works (suspended field decodes correctly), so this passes
-CI but breaks on first production use. Fix is < 15 minutes but requires a JSON-decode unit
-test to prevent regression.
+**3. R-2 — Render Status URL always empty due to malformed JSON tag (`render.go:143-156`) — CLOSED**
+`json:"serviceDetails.url"` was treated by Go's JSON decoder as a literal key, not a dot-path.
+Fix: `renderServiceDetail.ServiceDetails` is now a proper nested struct. `Status()` reads
+`resp.Service.ServiceDetails.URL`. `TestRender_StatusURLDecodes` locks the JSON shape.

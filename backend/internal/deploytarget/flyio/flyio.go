@@ -73,9 +73,38 @@ func (t *Target) do(ctx context.Context, method, path string, body any) ([]byte,
 	return data, resp.StatusCode, nil
 }
 
-// Deploy creates / updates a Machine for spec.AppID. fly.io's
-// machines API treats a Machine as the deployable unit; here we
-// keep one Machine per app, named after the AppID.
+// listMachines returns the machine IDs for an app, or an empty slice
+// if none exist. A 404 from the Fly API is treated as "no machines"
+// (app may not exist yet) rather than an error.
+func (t *Target) listMachines(ctx context.Context, appID string) ([]string, error) {
+	data, code, err := t.do(ctx, http.MethodGet, "/apps/"+appID+"/machines", nil)
+	if err != nil {
+		return nil, fmt.Errorf("fly: list machines: %w", err)
+	}
+	if code == http.StatusNotFound {
+		return nil, nil
+	}
+	if code != http.StatusOK {
+		return nil, fmt.Errorf("fly: list machines: unexpected status %d", code)
+	}
+	var machines []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &machines); err != nil {
+		return nil, fmt.Errorf("fly: list machines: decode: %w", err)
+	}
+	ids := make([]string, 0, len(machines))
+	for _, m := range machines {
+		ids = append(ids, m.ID)
+	}
+	return ids, nil
+}
+
+// Deploy creates or updates a Machine for spec.AppID.
+//
+// On first deploy (no machines exist) a new machine is created.
+// On subsequent deploys the first existing machine is updated in-place
+// so that billing does not grow linearly with deploy count (F-2).
 func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 	if err := t.requireConfig(); err != nil {
 		return err
@@ -104,12 +133,34 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 		"env":      envMap,
 		"services": services,
 	}
-	body := map[string]any{
+
+	// Check for existing machines before deciding create vs update.
+	existingIDs, err := t.listMachines(ctx, spec.AppID)
+	if err != nil {
+		return err
+	}
+
+	if len(existingIDs) > 0 {
+		// Update the first existing machine in-place.
+		machineID := existingIDs[0]
+		updateBody := map[string]any{"config": machineCfg}
+		_, code, err := t.do(ctx, http.MethodPost, "/apps/"+spec.AppID+"/machines/"+machineID, updateBody)
+		if err != nil {
+			return fmt.Errorf("fly: update machine: %w", err)
+		}
+		if code >= 400 {
+			return fmt.Errorf("fly: update machine: status %d", code)
+		}
+		return nil
+	}
+
+	// No machines yet — create one (and the app if needed).
+	createBody := map[string]any{
 		"name":   spec.AppID,
 		"region": region,
 		"config": machineCfg,
 	}
-	_, code, err := t.do(ctx, http.MethodPost, "/apps/"+spec.AppID+"/machines", body)
+	_, code, err := t.do(ctx, http.MethodPost, "/apps/"+spec.AppID+"/machines", createBody)
 	if err != nil {
 		return fmt.Errorf("fly: create machine: %w", err)
 	}
@@ -117,13 +168,13 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 		return nil
 	}
 	if code == http.StatusNotFound {
-		// App doesn't exist; create it then retry.
+		// App doesn't exist; create it then retry the machine create.
 		if _, _, err := t.do(ctx, http.MethodPost, "/apps", map[string]any{
 			"app_name": spec.AppID,
 		}); err != nil {
 			return fmt.Errorf("fly: create app: %w", err)
 		}
-		_, code, err = t.do(ctx, http.MethodPost, "/apps/"+spec.AppID+"/machines", body)
+		_, code, err = t.do(ctx, http.MethodPost, "/apps/"+spec.AppID+"/machines", createBody)
 		if err != nil {
 			return fmt.Errorf("fly: create machine after app create: %w", err)
 		}
@@ -172,19 +223,35 @@ func (t *Target) Logs(_ context.Context, _ string, _ io.Writer) error {
 
 func (t *Target) Rollback(ctx context.Context, appID string) error {
 	// fly's "rollback" depends on app release history (GraphQL).
-	// Without that wiring we can at least restart machines so a
+	// Without that wiring we restart all existing machines so a
 	// crash-looping deploy gets healed.
+	//
+	// The Fly Machines API requires a machine ID in the restart URL
+	// (POST /apps/{app}/machines/{machine_id}/restart). The previous
+	// bulk-restart URL (/apps/{app}/machines/restart) does not exist
+	// and returns 404 — this is the F-3 fix.
 	if err := t.requireConfig(); err != nil {
 		return err
 	}
-	_, code, err := t.do(ctx, http.MethodPost, "/apps/"+appID+"/machines/restart", nil)
+	ids, err := t.listMachines(ctx, appID)
 	if err != nil {
-		return fmt.Errorf("fly: restart: %w", err)
+		return err
 	}
-	if code >= 400 {
-		return fmt.Errorf("fly: restart status %d", code)
+	if len(ids) == 0 {
+		return fmt.Errorf("fly: rollback: no machines found for app %q", appID)
 	}
-	return nil
+	var restartErr error
+	for _, id := range ids {
+		_, code, err := t.do(ctx, http.MethodPost, "/apps/"+appID+"/machines/"+id+"/restart", nil)
+		if err != nil {
+			restartErr = fmt.Errorf("fly: restart machine %s: %w", id, err)
+			continue
+		}
+		if code >= 400 {
+			restartErr = fmt.Errorf("fly: restart machine %s: status %d", id, code)
+		}
+	}
+	return restartErr
 }
 
 var _ deploytarget.Target = (*Target)(nil)
