@@ -145,16 +145,18 @@ Severity legend: **Correct** / **Drift** / **Missing**.
 
 ## Drift findings summary
 
-| # | Section | Severity | Finding |
-|---|---|---|---|
-| 1 | §1.2 RBAC table | Drift (MEDIUM) | `approver` role missing; operator wrongly credited with promotion-approval |
-| 2 | §2.1 Secrets adapters | Drift (LOW) | Five backends ship; doc names only two managers; `COOKER_SECRETS_BACKEND` not surfaced |
-| 3 | §2.2 KeepSave (CLAUDE.md, not SECURITY.md) | Drift (INFO) | CLAUDE.md says parked; adapter ships at HEAD — out of scope for this PR |
-| 4 | §4.2 Multi-replica Redis triad | Drift (INFO) | Rate-limit caveat only; WS-ticket + WS-hub Redis requirement undocumented |
-| 5 | §6.2 `S26-05-15` scope | Drift (MEDIUM) | Implies action-pinning fully closed; 17 `uses:` across `ci.yml`/`cooker-weekly.yml`/`oci-conformance.yml` still float, including `claude-code-action@v1` with PR-write perms |
-| 6 | §6.4 `SECURITY-RELEASE-VERIFY` link | Drift (MEDIUM) | File exists but unlinked from SECURITY.md / RELEASING.md |
+All six drift findings from this W4 walk have been **closed** in `claude/w5-security-drift-bundle` (PR following #71). See the "Closed" section below for the per-finding closure note. The table is retained for historical reference.
 
-**Drift count: 6.** 0 CRITICAL/HIGH; 3 MEDIUM, 1 LOW, 2 INFO. All documentation drift, none RCE-shaped. The three MEDIUMs are corrigible in a ~15-minute SECURITY.md edit pass.
+| # | Section | Severity | Finding | Status |
+|---|---|---|---|---|
+| 1 | §1.2 RBAC table | Drift (MEDIUM) | `approver` role missing; operator wrongly credited with promotion-approval | **Closed** — see Closed §1 |
+| 2 | §2.1 Secrets adapters | Drift (LOW) | Five backends ship; doc names only two managers; `COOKER_SECRETS_BACKEND` not surfaced | **Closed** — see Closed §2 |
+| 3 | §2.2 KeepSave (CLAUDE.md, not SECURITY.md) | Drift (INFO) | CLAUDE.md says parked; adapter ships at HEAD | **Closed** — see Closed §3 |
+| 4 | §4.2 Multi-replica Redis triad | Drift (INFO) | Rate-limit caveat only; WS-ticket + WS-hub Redis requirement undocumented | **Closed** — see Closed §4 |
+| 5 | §6.2 `S26-05-15` scope | Drift (MEDIUM) | Implies action-pinning fully closed; 17 `uses:` across `ci.yml`/`cooker-weekly.yml`/`oci-conformance.yml` still float, including `claude-code-action@v1` with PR-write perms | **Closed** — see Closed §5 |
+| 6 | §6.4 `SECURITY-RELEASE-VERIFY` link | Drift (MEDIUM) | File exists but unlinked from SECURITY.md / RELEASING.md | **Closed** — see Closed §6 |
+
+**Drift count: 6.** 0 CRITICAL/HIGH; 3 MEDIUM, 1 LOW, 2 INFO. All documentation drift, none RCE-shaped. All six closed in `claude/w5-security-drift-bundle`.
 
 ## Explicitly verified Correct
 
@@ -176,8 +178,43 @@ Each is < 5 lines of doc; no code changes implied.
 
 - `docs/audits/2026-05-security-review.md` (`S26-05-*` IDs).
 - `docs/audits/2026-05-action-pinning.md` (broader S26-05-15 scope, 17 unpinned refs).
-- `docs/SECURITY-RELEASE-VERIFY.md` (orphan; closes S26-05-15 operator-checklist side).
+- `docs/SECURITY-RELEASE-VERIFY.md` (now cross-linked from `SECURITY.md` §"Verifying a release" and `docs/RELEASING.md` §"Step 4").
 - `docs/RELEASING.md:116-167` (Step 4 verification commands).
 - `backend/internal/auth/rbac.go:12-17, 92-102, 120-125` (approver role).
 - `backend/internal/config/config.go:373-389, 411-433, 458-495` (Validate gates).
 - `backend/internal/store/postgres/run.go:142-143` (S26-05-23 open SQL half).
+
+---
+
+## Closed
+
+All six drift findings landed in `claude/w5-security-drift-bundle` (follow-up to PR #71). Documentation only — no code touched.
+
+### 1. RBAC table omits `approver` role — MEDIUM (closed)
+
+`SECURITY.md` §"Authorization (RBAC)" rewritten as a four-row table (admin / operator / approver / viewer). Operator row no longer credits promotion-approval rights; new approver row added; the `DefaultGroupRoleMap` example below the table expanded to include `cooker-approvers → approver` and `cooker-viewers → viewer`. Source-line cites added: `backend/internal/auth/rbac.go:12-17, 92-102, 120-125`.
+
+### 2. Secrets adapter inventory understated — LOW (closed)
+
+`SECURITY.md` §"Data Security" → "Secrets" bullet replaced the `(e.g., HashiCorp Vault, AWS Secrets Manager)` hint with a five-row table enumerating every adapter that ships: `database`, `keepsave`, `vault`, `aws`, `gcp`. Each row records the `COOKER_SECRETS_BACKEND` value, the package path, and the per-backend required env vars enforced by `Config.Validate()` (`backend/internal/config/config.go:411-433`).
+
+### 3. CLAUDE.md drift on KeepSave — INFO (closed)
+
+`CLAUDE.md` bottom-of-file note "KeepSave (P2 / PR G) is parked pending a walkthrough" replaced with an accurate status: adapter ships at HEAD (`backend/internal/secrets/keepsave/`), Helm wiring renders `COOKER_SECRETS_KEEPSAVE_{URL,PROJECT_ID,API_KEY}` (the API key via `secretKeyRef`), and `Config.Validate()` (`config.go:413-423`) gates the required env vars. Selectable with `COOKER_SECRETS_BACKEND=keepsave`.
+
+### 4. Multi-replica Redis triad understated — INFO (closed)
+
+`SECURITY.md` §"Rate limiting" bullet rewritten. Previously: "Multi-replica deployments must disable this." Now: explicit three-bullet callout naming `COOKER_RATE_LIMIT_BACKEND`, `COOKER_WS_TICKET_BACKEND`, `COOKER_WS_HUB_BACKEND` — each with the failure mode that flips when it isn't pointed at Redis — plus a pointer to `Config.Validate()`'s `config.go:482-499` enforcement. Sticky sessions kept as a fallback path.
+
+### 5. `S26-05-15` action-pinning closure scope — MEDIUM (closed)
+
+`SECURITY.md` §"Pinned action SHAs" reworded to be honest about scope. The release-workflow half (`release.yml`, cosign trust chain) is described as fully pinned. A "Known gap — non-release workflows" sub-paragraph names `ci.yml`, `cooker-weekly.yml`, and `oci-conformance.yml`, references the 17 unpinned `uses:` count, points to `docs/audits/2026-05-action-pinning.md`, and explicitly calls out `anthropics/claude-code-action@v1` in `cooker-weekly.yml` as the highest-write-permission unpinned action (`contents: write` + `pull-requests: write`) so blast-radius reasoning is visible to readers.
+
+### 6. `docs/SECURITY-RELEASE-VERIFY.md` orphaned — MEDIUM (closed)
+
+Two inbound links added:
+
+- `SECURITY.md` §"Verifying a release" now points to `docs/SECURITY-RELEASE-VERIFY.md` for the security-side post-publish checklist (Rekor lookup, identity drift checks, expected workflow subjects).
+- `docs/RELEASING.md` §"Step 4 — Verify the release artifacts" carries a blockquote callout to the same file, framed as the security curator's checklist counterpart to the operator commands below it.
+
+The orphan walk now reaches the file from both the security entry point and the release how-to.
