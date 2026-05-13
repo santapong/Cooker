@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/cooker-ci/cooker/internal/service"
 )
 
 func TestValidateDAG_Valid(t *testing.T) {
@@ -25,7 +27,7 @@ func TestValidateDAG_Valid(t *testing.T) {
 		},
 	}
 
-	errs := validateDAG(p)
+	errs := service.ValidatePipelineDAG(p)
 	if len(errs) != 0 {
 		t.Errorf("expected no errors, got %v", errs)
 	}
@@ -40,7 +42,7 @@ func TestValidateDAG_DuplicateStageIDs(t *testing.T) {
 		Edges: []model.Edge{},
 	}
 
-	errs := validateDAG(p)
+	errs := service.ValidatePipelineDAG(p)
 	found := false
 	for _, e := range errs {
 		if e == "duplicate stage ID: build" {
@@ -62,7 +64,7 @@ func TestValidateDAG_UnknownEdgeSource(t *testing.T) {
 		},
 	}
 
-	errs := validateDAG(p)
+	errs := service.ValidatePipelineDAG(p)
 	found := false
 	for _, e := range errs {
 		if e == "edge references unknown source: nonexistent" {
@@ -84,7 +86,7 @@ func TestValidateDAG_UnknownEdgeTarget(t *testing.T) {
 		},
 	}
 
-	errs := validateDAG(p)
+	errs := service.ValidatePipelineDAG(p)
 	found := false
 	for _, e := range errs {
 		if e == "edge references unknown target: nonexistent" {
@@ -110,10 +112,10 @@ func TestValidateDAG_Cycle(t *testing.T) {
 		},
 	}
 
-	errs := validateDAG(p)
+	errs := service.ValidatePipelineDAG(p)
 	found := false
 	for _, e := range errs {
-		if e == "pipeline contains a cycle" {
+		if strings.Contains(e, "cycle") {
 			found = true
 		}
 	}
@@ -128,7 +130,7 @@ func TestValidateDAG_Empty(t *testing.T) {
 		Edges:  []model.Edge{},
 	}
 
-	errs := validateDAG(p)
+	errs := service.ValidatePipelineDAG(p)
 	if len(errs) != 0 {
 		t.Errorf("expected no errors for empty pipeline, got %v", errs)
 	}
@@ -142,7 +144,7 @@ func TestValidateDAG_SingleNode(t *testing.T) {
 		Edges: []model.Edge{},
 	}
 
-	errs := validateDAG(p)
+	errs := service.ValidatePipelineDAG(p)
 	if len(errs) != 0 {
 		t.Errorf("expected no errors for single node, got %v", errs)
 	}
@@ -167,7 +169,7 @@ func TestValidateDAG_ParallelBranches(t *testing.T) {
 		},
 	}
 
-	errs := validateDAG(p)
+	errs := service.ValidatePipelineDAG(p)
 	if len(errs) != 0 {
 		t.Errorf("expected no errors for diamond DAG, got %v", errs)
 	}

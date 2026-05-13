@@ -90,6 +90,9 @@ func (m *mockGitOps) Commit(_ context.Context, req gitops.Request) (gitops.Resul
 }
 
 func TestExecutor_ExecuteSimplePipeline(t *testing.T) {
+	// Use implemented stage types only (build → push). The test stage type
+	// is deliberately unimplemented and returns an error (T1 fix); using it
+	// here would make this pipeline-level test fail for the wrong reason.
 	p := &model.Pipeline{
 		ID: "pipe-1",
 		Stages: []model.Stage{
@@ -98,13 +101,13 @@ func TestExecutor_ExecuteSimplePipeline(t *testing.T) {
 				Context:    ".",
 				Tags:       []string{"latest"},
 			}},
-			{ID: "test", Name: "Test", Type: model.StageTypeTest, Config: model.StageConfig{
-				Image:   "app:latest",
-				Command: []string{"npm", "test"},
+			{ID: "push", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{
+				Image:      "app:latest",
+				Repository: "registry.example.com/app:latest",
 			}},
 		},
 		Edges: []model.Edge{
-			{ID: "e1", Source: "build", Target: "test"},
+			{ID: "e1", Source: "build", Target: "push"},
 		},
 	}
 
@@ -114,7 +117,7 @@ func TestExecutor_ExecuteSimplePipeline(t *testing.T) {
 		Status:     model.RunStatusPending,
 		StageRuns: []model.StageRun{
 			{StageID: "build", Status: model.RunStatusPending},
-			{StageID: "test", Status: model.RunStatusPending},
+			{StageID: "push", Status: model.RunStatusPending},
 		},
 	}
 
@@ -147,23 +150,21 @@ func TestExecutor_ExecuteSimplePipeline(t *testing.T) {
 	}
 }
 
-func TestExecutor_AllStageTypes(t *testing.T) {
+// TestExecutor_ImplementedStageTypes verifies the three fully-implemented
+// stage types (build, push, deploy) succeed end-to-end. test/approval/custom
+// are stubs that now return errors — verified separately in
+// TestExecutor_StubStagesFail.
+func TestExecutor_ImplementedStageTypes(t *testing.T) {
 	p := &model.Pipeline{
-		ID: "pipe-all",
+		ID: "pipe-implemented",
 		Stages: []model.Stage{
 			{ID: "s1", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{}},
-			{ID: "s2", Name: "Test", Type: model.StageTypeTest, Config: model.StageConfig{}},
-			{ID: "s3", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{}},
-			{ID: "s4", Name: "Deploy", Type: model.StageTypeDeploy, Config: model.StageConfig{ManifestPath: "k8s/app.yaml"}},
-			{ID: "s5", Name: "Approval", Type: model.StageTypeApproval, Config: model.StageConfig{}},
-			{ID: "s6", Name: "Custom", Type: model.StageTypeCustom, Config: model.StageConfig{}},
+			{ID: "s2", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{}},
+			{ID: "s3", Name: "Deploy", Type: model.StageTypeDeploy, Config: model.StageConfig{ManifestPath: "k8s/app.yaml"}},
 		},
 		Edges: []model.Edge{
 			{ID: "e1", Source: "s1", Target: "s2"},
 			{ID: "e2", Source: "s2", Target: "s3"},
-			{ID: "e3", Source: "s3", Target: "s4"},
-			{ID: "e4", Source: "s4", Target: "s5"},
-			{ID: "e5", Source: "s5", Target: "s6"},
 		},
 	}
 
@@ -173,8 +174,8 @@ func TestExecutor_AllStageTypes(t *testing.T) {
 	}
 
 	run := &model.PipelineRun{
-		ID:         "run-all",
-		PipelineID: "pipe-all",
+		ID:         "run-implemented",
+		PipelineID: "pipe-implemented",
 		Status:     model.RunStatusPending,
 		StageRuns:  stageRuns,
 	}
@@ -187,6 +188,48 @@ func TestExecutor_AllStageTypes(t *testing.T) {
 
 	if run.Status != model.RunStatusSuccess {
 		t.Errorf("expected success, got %s", run.Status)
+	}
+}
+
+// TestExecutor_StubStagesFail verifies that the unimplemented stage types
+// (test, approval, custom) return an explicit error rather than silently
+// returning nil. Closes dag-adaptation-2026.md §6 T1.
+func TestExecutor_StubStagesFail(t *testing.T) {
+	stubTypes := []model.StageType{
+		model.StageTypeTest,
+		model.StageTypeApproval,
+		model.StageTypeCustom,
+	}
+
+	for _, st := range stubTypes {
+		st := st
+		t.Run(string(st), func(t *testing.T) {
+			p := &model.Pipeline{
+				ID: "pipe-stub-" + string(st),
+				Stages: []model.Stage{
+					{ID: "s1", Name: string(st), Type: st, Config: model.StageConfig{}},
+				},
+				Edges: []model.Edge{},
+			}
+			run := &model.PipelineRun{
+				ID:         "run-stub-" + string(st),
+				PipelineID: p.ID,
+				Status:     model.RunStatusPending,
+				StageRuns:  []model.StageRun{{StageID: "s1", Status: model.RunStatusPending}},
+			}
+
+			exec := NewExecutor()
+			err := exec.Execute(context.Background(), p, run)
+			if err == nil {
+				t.Fatalf("stage type %q should return an error (not implemented), got nil", st)
+			}
+			if run.Status != model.RunStatusFailed {
+				t.Errorf("expected run status failed, got %s", run.Status)
+			}
+			if run.StageRuns[0].Error == "" {
+				t.Error("expected non-empty StageRun.Error field")
+			}
+		})
 	}
 }
 
@@ -254,7 +297,7 @@ func TestExecutor_ContextCancellation(t *testing.T) {
 		ID: "pipe-cancel",
 		Stages: []model.Stage{
 			{ID: "s1", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{}},
-			{ID: "s2", Name: "Test", Type: model.StageTypeTest, Config: model.StageConfig{}},
+			{ID: "s2", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{}},
 		},
 		Edges: []model.Edge{
 			{ID: "e1", Source: "s1", Target: "s2"},

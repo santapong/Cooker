@@ -10,17 +10,21 @@
 
 ## Category 1 — Business Logic in Handlers
 
-### Finding 1 — HIGH — Duplicate DAG Validator in `pipeline.go`
+### ~~Finding 1 — HIGH~~ Finding 1 — CLOSED — Duplicate DAG Validator in `pipeline.go`
 
-**File:** `backend/internal/handler/pipeline.go:267–324`
+**CLOSED in `claude/w3-t1-t3-handler-f1`.**
 
-**Current behaviour:** `validateDAG(p *model.Pipeline) []string` (57 lines) implements Kahn's topological-sort cycle detection, duplicate-stage-ID detection, and dangling-edge detection in full inside the handler file. `service.ValidatePipelineDAG` (`internal/service/pipeline.go:12–26`) independently delegates the same work to `dagrunner.DAG.Validate()`. Both functions are called from within the handler package: `CreatePipeline` calls the private `validateDAG`; `ValidatePipeline` also calls `validateDAG`. The service variant is never used by any handler.
+**What was done:**
+- `validateDAG` (57-line Kahn's algorithm) deleted from `handler/pipeline.go`.
+- `service.ValidatePipelineDAG` extended with duplicate-stage-ID and dangling-edge checks (previously handler-only).
+- `CreatePipeline` now calls `service.ValidatePipelineDAG` to reject cyclic pipelines at creation time.
+- `ValidatePipeline` now delegates to `service.ValidatePipelineDAG` instead of the deleted private function.
+- `handler/pipeline_test.go` updated: tests now call `service.ValidatePipelineDAG` directly; cycle-detection test uses `strings.Contains(e, "cycle")` because `dagrunner` returns `"DAG contains a cycle"` (not the old handler's `"pipeline contains a cycle"`).
+- `service/pipeline_test.go` updated: added `TestValidatePipelineDAG_DuplicateStageID` and `TestValidatePipelineDAG_DanglingEdge` to pin the moved checks at the service layer.
 
-**Impact:** Two implementations of the same rule diverge silently. The handler version checks for duplicate stage IDs and dangling edge references; the service version delegates to `dagrunner.Validate` which may or may not replicate those checks. A bug fix in one implementation does not propagate to the other.
+~~**File:** `backend/internal/handler/pipeline.go:267–324`~~
 
-**Recommended fix:** Delete `validateDAG` from `handler/pipeline.go`. Call `service.ValidatePipelineDAG(p)` in both `CreatePipeline` (line 59 area) and `ValidatePipeline` (line 138). Move the duplicate-ID and dangling-edge checks into `service.ValidatePipelineDAG` (or into `dagrunner.DAG.Validate`) so they are exercised by the service unit tests.
-
-**Effort:** S (delete 57 handler lines, add one import, wire existing service call).
+~~**Current behaviour:** `validateDAG(p *model.Pipeline) []string` (57 lines) implements Kahn's topological-sort cycle detection, duplicate-stage-ID detection, and dangling-edge detection in full inside the handler file.~~
 
 ---
 
@@ -165,7 +169,7 @@ The following are too small to warrant individual backlog items but are recorded
 
 | # | Finding | Severity | File:Line |
 |---|---------|----------|-----------|
-| 1 | Duplicate DAG validator — 57 LoC of cycle-detection in handler | **High** | `handler/pipeline.go:267–324` |
+| 1 | ~~Duplicate DAG validator — 57 LoC of cycle-detection in handler~~ | ~~**High**~~ **Closed** in `claude/w3-t1-t3-handler-f1` | `handler/pipeline.go` |
 | 2 | Run-status finalisation logic in `RunPipeline` closure | **High** | `handler/pipeline.go:191–210` |
 | 3 | Compose file parsing + graph construction in handler (~200 LoC) | **High** | `handler/docker.go:150–352` |
 | 4 | `bootstrapRole` business rule in auth handler | **Medium** | `handler/auth_local.go:197–209` |

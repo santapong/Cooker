@@ -262,13 +262,13 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		return nil
 	}, dagMaxParallel())
 
-	// Drain status updates (in production, these go to WebSocket)
-	go func() {
-		for update := range runner.Updates() {
-			logger.Info("pipeline stage transition", "stage", update.NodeID, "status", update.Status)
-		}
-	}()
-
+	// The goroutine that formerly drained runner.Updates() here had a
+	// small race: runner.Run is synchronous, so if it completed and
+	// closed the channel before the goroutine started ranging, the
+	// range exited immediately with no logging. The slog.Info it emitted
+	// also duplicated the per-stage "pipeline executing stage" log above.
+	// Removed per dag-adaptation-2026.md §6 T3. A debounced drain that
+	// also persists progress mid-run will replace this in T5 (W4).
 	err = runner.Run(ctx)
 
 	finishTime := time.Now()
@@ -374,10 +374,12 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 
 func (c *cappedBuffer) String() string { return c.buf.String() }
 
-func (e *Executor) executeTest(ctx context.Context, stage *model.Stage) error {
-	// TODO: Run test container with specified image and command
-	slog.Info("stage test", "image", stage.Config.Image, "command", stage.Config.Command)
-	return nil
+func (e *Executor) executeTest(_ context.Context, stage *model.Stage) error {
+	// Stage type "test" is not yet implemented. Return an explicit error so
+	// pipelines that include a test stage fail loudly rather than silently
+	// passing. Closes dag-adaptation-2026.md §6 T1 / dag-performance.md
+	// §3 Critical finding #1.
+	return fmt.Errorf("stage type %q not implemented", stage.Type)
 }
 
 func (e *Executor) executePush(ctx context.Context, stage *model.Stage, sr *model.StageRun) error {
@@ -457,16 +459,18 @@ func hasRegistryHost(ref string) bool {
 	return false
 }
 
-func (e *Executor) executeApproval(ctx context.Context, stage *model.Stage) error {
-	// TODO: Wait for manual approval via WebSocket/API
-	slog.Info("approval gate waiting")
-	return nil
+func (e *Executor) executeApproval(_ context.Context, stage *model.Stage) error {
+	// Stage type "approval" is not yet implemented. Return an explicit error
+	// so pipelines that include an approval gate fail loudly rather than
+	// silently auto-approving. Closes dag-adaptation-2026.md §6 T1.
+	return fmt.Errorf("stage type %q not implemented", stage.Type)
 }
 
-func (e *Executor) executeCustom(ctx context.Context, stage *model.Stage) error {
-	// TODO: Execute custom script
-	slog.Info("stage custom", "script", stage.Config.Script, "timeout", stage.Config.Timeout)
-	return nil
+func (e *Executor) executeCustom(_ context.Context, stage *model.Stage) error {
+	// Stage type "custom" is not yet implemented. Return an explicit error
+	// so pipelines that include a custom stage fail loudly rather than
+	// silently succeeding. Closes dag-adaptation-2026.md §6 T1.
+	return fmt.Errorf("stage type %q not implemented", stage.Type)
 }
 
 func (e *Executor) executeGitOpsCommit(ctx context.Context, stage *model.Stage, sr *model.StageRun) error {

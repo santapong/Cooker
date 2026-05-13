@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/cooker-ci/cooker/internal/service"
 	"github.com/cooker-ci/cooker/internal/validate"
 )
 
@@ -58,6 +59,13 @@ func (h *Handler) CreatePipeline(c *gin.Context) {
 	}
 	if err := validatePipelineInput(&p); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate DAG structure at the service layer. Replaces the private
+	// validateDAG that was deleted per handler-layering audit Finding 1.
+	if dagErrs := service.ValidatePipelineDAG(&p); len(dagErrs) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"valid": false, "errors": dagErrs})
 		return
 	}
 
@@ -135,9 +143,12 @@ func (h *Handler) ValidatePipeline(c *gin.Context) {
 		return
 	}
 
-	errors := validateDAG(p)
-	if len(errors) > 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"valid": false, "errors": errors})
+	// Delegate to service.ValidatePipelineDAG (which calls dagrunner.DAG.Validate)
+	// instead of the private validateDAG that was deleted from this file.
+	// See handler-layering audit Finding 1.
+	dagErrs := service.ValidatePipelineDAG(p)
+	if len(dagErrs) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"valid": false, "errors": dagErrs})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"valid": true, "errors": []string{}})
@@ -264,61 +275,3 @@ func (h *Handler) GetStageLogs(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "stage not found"})
 }
 
-// validateDAG checks for cycles and unresolved references.
-func validateDAG(p *model.Pipeline) []string {
-	var errors []string
-
-	stageIDs := make(map[string]bool)
-	for _, s := range p.Stages {
-		if stageIDs[s.ID] {
-			errors = append(errors, "duplicate stage ID: "+s.ID)
-		}
-		stageIDs[s.ID] = true
-	}
-
-	for _, e := range p.Edges {
-		if !stageIDs[e.Source] {
-			errors = append(errors, "edge references unknown source: "+e.Source)
-		}
-		if !stageIDs[e.Target] {
-			errors = append(errors, "edge references unknown target: "+e.Target)
-		}
-	}
-
-	// Cycle detection using Kahn's algorithm
-	inDegree := make(map[string]int)
-	adj := make(map[string][]string)
-	for _, s := range p.Stages {
-		inDegree[s.ID] = 0
-	}
-	for _, e := range p.Edges {
-		adj[e.Source] = append(adj[e.Source], e.Target)
-		inDegree[e.Target]++
-	}
-
-	var queue []string
-	for id, deg := range inDegree {
-		if deg == 0 {
-			queue = append(queue, id)
-		}
-	}
-
-	visited := 0
-	for len(queue) > 0 {
-		node := queue[0]
-		queue = queue[1:]
-		visited++
-		for _, next := range adj[node] {
-			inDegree[next]--
-			if inDegree[next] == 0 {
-				queue = append(queue, next)
-			}
-		}
-	}
-
-	if visited != len(p.Stages) {
-		errors = append(errors, "pipeline contains a cycle")
-	}
-
-	return errors
-}

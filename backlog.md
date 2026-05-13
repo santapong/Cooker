@@ -288,7 +288,13 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), and the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks):
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), and the `claude/w3-t1-t3-handler-f1` PR (executor stubs + drain goroutine + DAG validator dedup):
+
+### `claude/w3-t1-t3-handler-f1` — executor stubs + drain race + DAG validator dedup
+
+- ✅ **§6 T1 — Executor stubs now fail loudly** — `executeTest`, `executeApproval`, and `executeCustom` now return `fmt.Errorf("stage type %q not implemented", stage.Type)` instead of `nil`. Pipelines that include these stage types will fail with a clear error rather than silently succeeding. Side-effect: any existing pipeline using test/approval/custom stages will start failing. Closes dag-performance.md Critical #1.
+- ✅ **§6 T3 — Drain goroutine removed** — the goroutine at `executor.go` that ranged over `runner.Updates()` was removed. It had a race (channel may close before range starts if `runner.Run` completes synchronously) and duplicated the per-stage `slog.Info` already emitted in the stage loop. A debounced replacement that also persists progress mid-run will land in T5 (W4). Noted in dag-performance.md Medium #10.
+- ✅ **Handler-layering F1 — `validateDAG` deleted from handler** — the 57-line Kahn's-algorithm re-implementation in `handler/pipeline.go` is deleted. Both `CreatePipeline` and `ValidatePipeline` now call `service.ValidatePipelineDAG`. The duplicate-ID and dangling-edge checks (previously handler-only) were moved into `service.ValidatePipelineDAG`. Closes handler-layering audit Finding 1.
 
 ### `claude/frontend-bundle-split` — frontend bundle performance
 
