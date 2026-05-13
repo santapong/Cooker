@@ -294,6 +294,10 @@ Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cook
 
 - ✅ **§6 T4 — `Edge.Condition` unsupported values refused at validation** — `ValidatePipelineDAG` in `internal/service/pipeline.go` now appends an error for any edge whose `Condition` is non-empty and not `"success"`. A pipeline imported from YAML or a CKR-DSL round-trip with `condition: failure` will fail at validation time with `service: edge X->Y: condition "failure" not yet supported (only "success" or empty)` rather than silently running as success. Empty-string and `"success"` conditions are unchanged (allowed). Primitive #2 (W6, DR-4) replaces this refusal with real evaluation per `dag-adaptation-2026.md §7.2`. Three new sub-tests in `TestValidatePipelineDAG_EdgeCondition`.
 
+### `claude/w4-f04-created-at` — add `PipelineRun.CreatedAt` (store-parity F-04)
+
+- ✅ **F-04 — `pipeline_runs.created_at` surfaced on `model.PipelineRun`** — `model.PipelineRun` gains `CreatedAt time.Time` (`json:"createdAt"`). Postgres `Get` and `List` now select the column; `Create` uses `RETURNING created_at` to populate the field. Memory `Create` stamps `time.Now()` when the caller omits the field; memory `List` sorts newest-first, matching `ORDER BY created_at DESC`. Tests `TestRunStore_ListOrderedByCreatedAt` and `TestRunStore_CreateSetsCreatedAt` added in `internal/store/memory/run_created_at_test.go`. No new migration needed — the column pre-existed in `001_initial.up.sql`. Closes store-parity audit F-04.
+
 ### `claude/w3-t1-t3-handler-f1` — executor stubs + drain race + DAG validator dedup
 
 - ✅ **§6 T1 — Executor stubs now fail loudly** — `executeTest`, `executeApproval`, and `executeCustom` now return `fmt.Errorf("stage type %q not implemented", stage.Type)` instead of `nil`. Pipelines that include these stage types will fail with a clear error rather than silently succeeding. Side-effect: any existing pipeline using test/approval/custom stages will start failing. Closes dag-performance.md Critical #1.

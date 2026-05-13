@@ -21,9 +21,13 @@ type PipelineRun struct {
 	StageRuns           []StageRun          `json:"stageRuns"`
 	EnvironmentStatuses []EnvironmentStatus `json:"environmentStatuses"`
 	Variables           map[string]string   `json:"variables"`
-	StartedAt           *time.Time          `json:"startedAt" db:"started_at"`
-	FinishedAt          *time.Time          `json:"finishedAt" db:"finished_at"`
-	Error               string              `json:"error,omitempty" db:"error"`
+	// CreatedAt is set once at insert time and never changes. Clients use
+	// it to sort or paginate run history because StartedAt is null for
+	// pending runs.
+	CreatedAt  time.Time  `json:"createdAt" db:"created_at"`
+	StartedAt  *time.Time `json:"startedAt" db:"started_at"`
+	FinishedAt *time.Time `json:"finishedAt" db:"finished_at"`
+	Error      string     `json:"error,omitempty" db:"error"`
 	// HeartbeatAt is updated by the run coordinator while the run is
 	// in flight. A NULL value combined with status='running' marks the
 	// row as a candidate for the boot-time orphan sweep.
