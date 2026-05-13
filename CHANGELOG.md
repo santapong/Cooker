@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — May 2026 W5 batch (PRs #78, #79, #80, #81, #82, #83, #84)
+
+**Fifth week of execution.** Closes the **handler-layering audit** in full (F1+F2+F3 all merged), finalises the **multi-tenancy ADR** as `Accepted (A3-defer)` per PM Decision A, lands the **CI cache quota fix**, **closes 6 SECURITY.md drift findings** from W4, and produces two forward-looking research docs.
+
+#### Handler-layering closure — F2 + F3 (#82, #84)
+
+- **F2** (#84) — `Executor.Execute` signature bumped to `(model.RunResult, error)`. `model.RunResult{Status, FinishedAt}` added in `internal/model/run.go`. The four-branch status-reconciliation block in `handler/pipeline.go RunPipeline` (which could flip `Cancelled → Success` on a nil error — silent bug) is deleted; handler persists what `Execute` returned. New private `Executor.finalize` owns the terminal-state machine: snapshots `startedCancelled` at entry so external pre-set Cancelled survives `Running→terminal`; `context.Canceled → Cancelled` (was `Failed` pre-F2, semantic correction); other errors → `Failed`; clean return → `Success`. New `TestExecutor_F2_RunResult` (4 cases) + `TestExecutor_F2_CancelledStaysCancelled` pin the regression. `service/app_deployer.go` updated to new signature. Closes handler-layering Finding 2.
+- **F3** (#82) — `service.ParseComposeGraph(data []byte) (*model.ComposeGraph, error)` extracted from `handler/docker.go` (~200 LOC moved). Handler `ParseComposeFile` shrinks to disk + path-allowlist + HTTP framing only; `resolveComposePath` untouched; the three generic 400 strings byte-identical. Typed `service.ErrInvalidComposeYAML`. **11-case table-driven corpus** + dedicated `TestParseComposeGraph_ConnSetKeyFormat` byte-locking the `src->dst:type` dedup key shape. Closes handler-layering Finding 3.
+
+**Combined with PR #64's F1, all three handler-layering findings are now closed.**
+
+#### Multi-tenancy ADR — A3-defer (#79)
+
+PM locked Decision A as **A3-defer** on 2026-05-13. `docs/adr/0004-multi-tenancy.md` flipped Proposed → Accepted. Appendix A rewritten as Q4-2026 execution playbook (migration `010_tenancy.up.sql` SQL, model field bumps, middleware composition rule, WS hub scope-key changes, OIDC tenancy claim mapping, trigger checklist). Appendix B (A2 alternative) collapsed. `docs/roadmap-2026.md` C1 row updated: "Decision: A3-defer. Unblocked."
+
+#### CI cache quota fix (#78)
+
+`.github/workflows/ci.yml` docker job: `cache-to: type=gha,mode=max` → `mode=min`. `mode=max` stored 2-4 GB of intermediate layers per push, crowding out go-build + npm caches within GHA's 10 GB per-repo quota. `mode=min` stores only the final stage (~50 MB). The "next quick win" identified in PR #69's CI baseline audit.
+
+#### SECURITY.md drift bundle (#83)
+
+Six fixes from PR #71's walk, doc-only:
+
+1. **RBAC table** rewritten as four-row (admin / operator / approver / viewer); operator's "approve promotions" claim removed (`CanApprovePromotion` accepts only admin + approver).
+2. **Secrets adapter inventory** expanded from "e.g., Vault, AWS Secrets Manager" to full five-row table (database / keepsave / vault / aws / gcp).
+3. **Multi-replica Redis triad** enumerated (rate-limit + ws-ticket + ws-hub backends).
+4. **`S26-05-15` action-pinning closure** honest: release.yml pinned, other workflows tracked as Known Gap with `cooker-weekly.yml`'s `claude-code-action@v1` (`contents:write` + `pull-requests:write`) called out.
+5. **`SECURITY-RELEASE-VERIFY.md`** cross-linked from both `SECURITY.md` and `docs/RELEASING.md`.
+6. **CLAUDE.md KeepSave** corrected: parked → shipped at HEAD.
+
+#### Research audits (W5 idle lane)
+
+- **`docs/audits/2026-05-p3-schema-sketch.md`** (#81) — P#3 outputs schema migration. Recommendation: DDL-additive `010_stage_outputs.up.sql` with CHECK constraint at 32 KiB (PR #58 §1 authoritative). One caveat: W6 implementation must wrap in `DO $$ BEGIN IF NOT EXISTS ... END $$` for idempotency.
+- **`docs/audits/2026-05-usestagelogs-reconnect.md`** (#80) — **Real HIGH gap found.** `useStageLogs` REST backfill not re-issued on WebSocket reconnect; log lines during 0-30s reconnect window are permanently dropped. **Proposed fix (queued for W6):** expose `onReconnect`/`reconnectCount` from `useWebSocket`; `useStageLogs` re-fetches `getStageLogs` on each reconnect and merges. ~1 hour, frontend-only. Pairs with PR #72 (transport-layer audit which was clean).
+
 ### Added — May 2026 W4 batch (PRs #66, #67, #69, #70, #71, #72, #73, #75)
 
 **Fourth week of execution.** Closes the **T-series tidy sprint** (T1+T3+F1 in W3, T4+T5+T2 in W4) — `dag-adaptation-2026.md` §6 is now fully resolved. Ships F-04 (final store-parity finding), the multi-cloud bug bundle (three production bugs across ECS/Fly.io/Render), the empty-state roll-out across five list pages, four forward-looking research audits, and the F2+F3 ready-to-fire prompts for W5.
