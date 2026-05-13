@@ -83,13 +83,40 @@ HTTP/1.1 403 Forbidden
 
 The frontend API client recognises this response and re-issues the OIDC sign-in redirect with `acr_values=<configured>` so the IdP runs the second factor and the user retries the action with a fresh, MFA-bearing token. Empty config disables the gate (current default).
 
+### Supply chain and release signing (v0.1.0+)
+
+Cooker releases are signed using **cosign keyless signing** via the Sigstore / Rekor transparency log. There are no long-lived signing keys stored in the repository or in CI secrets.
+
+#### What is signed
+
+| Artifact | Verification method |
+|---|---|
+| `checksums.txt` (SHA-256 of all binary archives) | `cosign verify-blob checksums.txt --signature checksums.txt.sig --certificate checksums.txt.pem` |
+| `ghcr.io/santapong/cooker:<tag>` manifest digest | `cosign verify ghcr.io/santapong/cooker:<tag> --certificate-identity ...` |
+| `oci://ghcr.io/santapong/charts/cooker` Helm chart | Not signed in v0.1.0; tracked as a follow-up (Helm OCI + Referrers API). |
+
+#### How it works
+
+1. The release workflow (`.github/workflows/release.yml`) requests a short-lived OIDC token from the GitHub Actions token endpoint (`id-token: write` permission).
+2. `cosign` exchanges that token with the Sigstore Fulcio CA for a short-lived X.509 certificate whose Subject is bound to the workflow's run ID and the tag ref.
+3. The certificate + signature are stored in the Sigstore Rekor transparency log, not in the repository.
+4. Verifiers run `cosign verify-blob` or `cosign verify` with `--certificate-identity` set to the workflow path and `--certificate-oidc-issuer` set to `https://token.actions.githubusercontent.com`. Any signature that does NOT originate from the official workflow and tag will fail verification.
+
+#### Pinned action SHAs
+
+All third-party actions in `.github/workflows/release.yml` are pinned to 40-character SHAs per the supply-chain policy. The SHA comments in the workflow file record the action version at the time of pinning; reviewers must verify these SHAs against upstream release tags before merging updates.
+
+#### Verifying a release
+
+See [`docs/RELEASING.md`](RELEASING.md#step-4--verify-the-release-artifacts) for the exact `cosign verify-blob` and `cosign verify` commands.
+
 ### OCI Registry Security
 
 - **Authentication**: Registry credentials stored server-side only, never exposed to the frontend
 - **Transport**: All registry communication over TLS (HTTPS)
 - **Content trust**: Images tracked by content-addressable digests (`sha256:...`) per OCI image-spec
 - **Conformance**: The image-push path is exercised against the upstream [OCI distribution-spec conformance suite](https://github.com/opencontainers/distribution-spec/tree/main/conformance) via `.github/workflows/oci-conformance.yml` (weekly + on pusher changes).
-- **Supply chain**: Referrers API support for attaching signatures, SBOMs, and build provenance to images
+- **Supply chain**: Referrers API support for attaching signatures, SBOMs, and build provenance; keyless cosign signatures shipped with every release starting v0.1.0 (see "Supply chain and release signing" above).
 
 ### Kubernetes Access
 
@@ -196,3 +223,4 @@ Referrer-Policy: strict-origin-when-cross-origin
 - [x] Run the container as non-root *(image runs as UID 65532 by default)*
 - [x] Enable network policies to restrict pod-to-pod traffic *(NetworkPolicy ships with the Helm chart, gated by `networkPolicy.enabled`; raw manifest at `deploy/kubernetes/network-policy.yaml`)*
 - [ ] Regularly update base images and dependencies
+- [x] Verify release artifact signatures *(cosign keyless signing ships with every release from v0.1.0; see "Supply chain and release signing" and `docs/RELEASING.md §Step 4`)*

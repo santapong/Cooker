@@ -1,0 +1,235 @@
+# .goreleaser.yaml — GoReleaser v2 configuration for Cooker v0.1.0 publish.
+#
+# This file produces:
+#   - Cross-compiled binaries for linux/darwin/windows (amd64 + arm64)
+#   - tar.gz archives (zip for Windows) with checksums.txt
+#   - Multi-arch Docker images pushed to ghcr.io/santapong/cooker
+#   - A multi-arch manifest list (:{{ .Tag }} + :latest)
+#   - Cosign keyless signatures on binary archives and the manifest list
+#
+# Local usage:
+#   Snapshot (no publish, no push):   make release-snapshot
+#   Real release (tag-triggered):     make release   (requires GITHUB_TOKEN + logged-in ghcr.io)
+#
+# The release workflow (.github/workflows/release.yml) fires automatically
+# on a push of a v*.*.* tag; it handles registry login, cosign install, etc.
+#
+# Reference: https://goreleaser.com/customization/
+
+version: 2
+
+project_name: cooker
+
+before:
+  hooks:
+    # Tidy the module before building so binaries reflect a clean
+    # dependency tree. go.mod lives in backend/ so we change into it.
+    - sh -c "cd backend && go mod tidy"
+
+# ---------------------------------------------------------------------------
+# Binary builds
+# ---------------------------------------------------------------------------
+
+builds:
+  - id: cooker
+    # go.mod + main package live under backend/; GoReleaser operates
+    # from the repo root so the path is relative to that.
+    main: ./backend/cmd/cooker
+    binary: cooker
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # We don't publish a Windows/arm64 binary — runner support is limited
+    # and there's no demand. darwin/arm64 (Apple Silicon) is fully supported.
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      # Strip debug info and populate the three build-time vars declared
+      # in backend/cmd/cooker/main.go.  GoReleaser exposes these template
+      # variables automatically from the git tag and CI environment.
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+    # Reproducible: pin the embedded modification time to the git commit
+    # timestamp so identical source produces identical binaries.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+# ---------------------------------------------------------------------------
+# Archives
+# ---------------------------------------------------------------------------
+
+archives:
+  - id: cooker-archive
+    ids: [cooker]
+    # POSIX platforms get tar.gz; Windows users expect zip.
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+# ---------------------------------------------------------------------------
+# Checksums
+# ---------------------------------------------------------------------------
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# ---------------------------------------------------------------------------
+# Snapshot versioning (make release-snapshot)
+# ---------------------------------------------------------------------------
+
+snapshot:
+  # When --snapshot is passed GoReleaser skips the tag requirement and
+  # uses this template instead; useful for testing the pipeline locally.
+  version_template: "{{ incpatch .Version }}-next"
+
+# ---------------------------------------------------------------------------
+# Changelog (sourced from GitHub releases / commit log)
+# ---------------------------------------------------------------------------
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+# ---------------------------------------------------------------------------
+# GitHub release
+# ---------------------------------------------------------------------------
+
+release:
+  # Stay in draft until a human reviews and clicks "Publish release".
+  # Remove once the release process is routine (3+ shipped releases).
+  draft: true
+  prerelease: auto
+  name_template: "Cooker {{ .Version }}"
+
+# ---------------------------------------------------------------------------
+# Docker images — multi-arch push to GHCR
+#
+# GoReleaser builds one image per GOOS/GOARCH pair ("dockers"), then stitches
+# them into a manifest list ("docker_manifests").  The caller (release.yml)
+# must run `docker login ghcr.io` before goreleaser.
+# ---------------------------------------------------------------------------
+
+dockers:
+  - id: cooker-amd64
+    ids: [cooker]
+    goos: linux
+    goarch: amd64
+    image_templates:
+      - "ghcr.io/santapong/cooker:{{ .Tag }}-amd64"
+      - "ghcr.io/santapong/cooker:latest-amd64"
+    dockerfile: deploy/docker/Dockerfile
+    # use_buildx enables BuildKit so we get --platform support and
+    # the layer-cache back-end used in the release workflow.
+    use_buildx: true
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.source=https://github.com/santapong/Cooker"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+      # Pass ldflags into the Dockerfile ARG so the binary baked into
+      # the image carries real version metadata too.
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=COMMIT={{ .Commit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
+  - id: cooker-arm64
+    ids: [cooker]
+    goos: linux
+    goarch: arm64
+    image_templates:
+      - "ghcr.io/santapong/cooker:{{ .Tag }}-arm64"
+      - "ghcr.io/santapong/cooker:latest-arm64"
+    dockerfile: deploy/docker/Dockerfile
+    use_buildx: true
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.source=https://github.com/santapong/Cooker"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=COMMIT={{ .Commit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
+# ---------------------------------------------------------------------------
+# Docker manifests — stitch amd64 + arm64 into a single pull-by-tag
+# ---------------------------------------------------------------------------
+
+docker_manifests:
+  - name_template: "ghcr.io/santapong/cooker:{{ .Tag }}"
+    image_templates:
+      - "ghcr.io/santapong/cooker:{{ .Tag }}-amd64"
+      - "ghcr.io/santapong/cooker:{{ .Tag }}-arm64"
+  - name_template: "ghcr.io/santapong/cooker:latest"
+    image_templates:
+      - "ghcr.io/santapong/cooker:latest-amd64"
+      - "ghcr.io/santapong/cooker:latest-arm64"
+
+# ---------------------------------------------------------------------------
+# Signing — cosign keyless via GitHub OIDC
+#
+# signs:    applies to binary archives (the checksum file)
+# docker_signs: applies to docker manifest digests
+#
+# Both use the Sigstore Rekor transparency log so signatures are publicly
+# auditable without a long-lived signing key.  The release workflow must
+# have `id-token: write` permission and `cosign` on PATH.
+# ---------------------------------------------------------------------------
+
+signs:
+  - id: cosign-checksum
+    cmd: cosign
+    env:
+      - COSIGN_EXPERIMENTAL=1
+    # Sign the checksums file; verifiers can reproduce all artifacts from
+    # it rather than signing every individual binary.
+    artifacts: checksum
+    args:
+      - sign-blob
+      - --yes
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+
+docker_signs:
+  - id: cosign-docker
+    cmd: cosign
+    env:
+      - COSIGN_EXPERIMENTAL=1
+    # Sign manifest digests (not tags — tags are mutable).
+    artifacts: manifests
+    args:
+      - sign
+      - --yes
+      - "${artifact}"

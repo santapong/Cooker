@@ -1,4 +1,4 @@
-.PHONY: all build clean dev test lint uat-up uat-up-socketproxy uat-up-with-keycloak uat-down uat-logs uat-shell uat-reset test-e2e
+.PHONY: all build clean dev test lint uat-up uat-up-socketproxy uat-up-with-keycloak uat-down uat-logs uat-shell uat-reset test-e2e release release-snapshot
 
 # Variables
 BINARY_NAME=cooker
@@ -6,11 +6,26 @@ BACKEND_DIR=backend
 FRONTEND_DIR=frontend
 DEPLOY_DIR=deploy
 
+# Build metadata injected via -ldflags so `cooker --version` reports
+# the real commit and date even for local builds.  GoReleaser overrides
+# these same vars during an official release (VERSION is set from the
+# git tag; COMMIT and BUILD_DATE come from GoReleaser's template vars).
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.1.0-dev")
+COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+GO_LDFLAGS := -s -w \
+	-X main.version=$(VERSION) \
+	-X main.commit=$(COMMIT) \
+	-X main.date=$(BUILD_DATE)
+
 all: build
 
 # --- Backend ---
 build-backend:
-	cd $(BACKEND_DIR) && CGO_ENABLED=0 GOOS=linux go build -o ../bin/$(BINARY_NAME) ./cmd/cooker/
+	cd $(BACKEND_DIR) && CGO_ENABLED=0 GOOS=linux go build \
+		-ldflags "$(GO_LDFLAGS)" \
+		-o ../bin/$(BINARY_NAME) ./cmd/cooker/
 
 test-backend:
 	cd $(BACKEND_DIR) && go test ./... -v -race
@@ -40,6 +55,27 @@ lint: lint-backend lint-frontend
 
 dev:
 	docker compose up --build
+
+# --- Release (GoReleaser) ---
+#
+# release-snapshot: build + archive locally without pushing anything.
+#   Produces dist/ with binaries, tarballs, and checksums.txt.
+#   Does NOT require a git tag or GITHUB_TOKEN.
+#   Useful for verifying the goreleaser config before tagging.
+#
+# release: publish a real release. Requires:
+#   - The HEAD to be tagged with a semver tag (e.g. v0.1.0).
+#   - GITHUB_TOKEN exported in the environment.
+#   - docker login ghcr.io already performed (or run via the GH Actions
+#     workflow which handles login automatically).
+#   - cosign on PATH (installed by the release workflow via
+#     sigstore/cosign-installer).
+#
+release-snapshot:
+	goreleaser release --snapshot --clean
+
+release:
+	goreleaser release --clean
 
 # --- Docker ---
 docker-build:

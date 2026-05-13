@@ -37,6 +37,35 @@ kubectl -n cooker create secret tls cooker-tls \
 
 ## Step 2 — Install the chart
 
+Starting with v0.1.0, the Cooker chart is published to the OCI registry at `oci://ghcr.io/santapong/charts/cooker`. Pull and install directly without a `helm repo add` step:
+
+```sh
+# Pull the chart (optional — helm install can reference OCI directly)
+helm pull oci://ghcr.io/santapong/charts/cooker --version 0.1.0
+
+# Install from the OCI registry
+helm install cooker oci://ghcr.io/santapong/charts/cooker \
+  --version 0.1.0 \
+  --namespace cooker \
+  --create-namespace \
+  --set cookerEnv=production \
+  --set 'oidc.allowedOrigins={https://cooker.example.com}' \
+  --set oidc.enabled=true \
+  --set oidc.issuerUrl=https://auth.example.com \
+  --set oidc.clientId=cooker \
+  --set oidc.clientSecretRef.name=cooker-oidc \
+  --set oidc.redirectUrl=https://cooker.example.com/callback \
+  --set secretKey.existingSecret=cooker-secret-key \
+  --set 'ingress.tls[0].secretName=cooker-tls' \
+  --set 'ingress.tls[0].hosts[0]=cooker.example.com'
+```
+
+> **Helm version requirement**: OCI chart support requires Helm 3.8+. Run `helm version` to confirm.
+
+### Install from local checkout (alternative)
+
+If you prefer to install from a local clone of the repository:
+
 ```sh
 helm install cooker deploy/helm/cooker/ \
   --namespace cooker \
