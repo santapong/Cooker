@@ -3,8 +3,12 @@ node_modules/
 
 # Build output
 bin/
+backend/cooker
 frontend/dist/
 *.tsbuildinfo
+
+# Agent worktrees (tooling-local; never committed)
+.claude/worktrees/
 
 # Environment
 .env
