@@ -46,6 +46,18 @@ export function useWebSocket({
   const maxDelay = reconnect?.maxDelayMs ?? DEFAULT_MAX_DELAY;
   const maxAttempts = reconnect?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
 
+  // P26-05-29: Stash onMessage in a ref so connect's identity doesn't
+  // churn when the caller passes a fresh arrow on every render.  The
+  // ws.onmessage handler reads onMessageRef.current at call time, so
+  // it always sees the latest callback without being in connect's dep
+  // array.  This prevents the useEffect([autoConnect, connect,
+  // disconnect]) trigger from firing — and the resulting
+  // disconnect+reconnect — just because the parent re-rendered.
+  const onMessageRef = useRef(onMessage);
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  });
+
   // Mutable refs so the connect callback's identity doesn't churn on
   // every attempt (which would re-trigger the autoConnect effect).
   const attemptRef = useRef(0);
@@ -97,19 +109,25 @@ export function useWebSocket({
       // onclose fires after onerror; the close handler triggers reconnect.
     };
     ws.onmessage = (event) => {
+      // Read from the ref so we always call the latest onMessage
+      // without onMessage being in this useCallback's dep array
+      // (P26-05-29).
       try {
         const data = JSON.parse(event.data);
-        onMessage?.(data);
+        onMessageRef.current?.(data);
       } catch {
-        onMessage?.(event.data);
+        onMessageRef.current?.(event.data);
       }
     };
 
     wsRef.current = ws;
     // The connect call below depends on scheduleReconnect, which itself
     // depends on connect — declared via refs to avoid the cycle.
+    // onMessage is intentionally omitted: it lives in onMessageRef and
+    // is updated synchronously before every render via the useEffect
+    // above (P26-05-29).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, onMessage]);
+  }, [url]);
 
   const scheduleReconnect = useCallback(() => {
     if (!reconnectEnabled) return;
