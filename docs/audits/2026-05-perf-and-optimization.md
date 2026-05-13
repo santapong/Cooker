@@ -270,13 +270,8 @@ Where this audit overlaps an open existing finding, the entry below references i
 - **Effort:** S.
 
 ### P26-05-29 — `useWebSocket` recreates `ws.onmessage` closure on every render
-- **Area:** frontend
-- **Current behavior:** `frontend/src/hooks/useWebSocket.ts:62-111` — `connect` is a `useCallback` with `[url, onMessage]` deps. Whenever the caller passes a new `onMessage` (typical: the parent component re-renders for any reason → fresh arrow function passed → `connect` re-memoised → `useEffect([autoConnect, connect, disconnect])` triggers → disconnect+reconnect).
-- **Why it's wasteful:** `useStageLogs.ts:99-114` passes a fresh `onMessage` arrow on every render of the consuming component. Combined with P26-05-25 (re-render storms), this could trigger spurious WS disconnect/reconnect cycles.
-- **Proposed fix:** Stash `onMessage` in a ref: `const onMessageRef = useRef(onMessage); useEffect(() => { onMessageRef.current = onMessage; });`. The connect callback references the ref, never the prop directly. Drops `onMessage` from `useCallback`'s deps.
-- **Expected win:** Eliminates reconnect churn under re-render pressure. Stable WS lifecycle.
-- **Risk:** Low.
-- **Effort:** S.
+- **Status:** CLOSED — see "Closed findings" section below.
+- Fixed in `claude/w3-p26-05-29-onmessage-ref`.
 
 ### P26-05-30 — `JSON.parse(event.data)` on every WS log line in `useWebSocket`
 - **Area:** frontend
@@ -455,3 +450,4 @@ Findings moved here once the fix lands on `main`.
 - **P26-05-34** — Backend test loop serialised packages one at a time. Fixed in `claude/ci-critical-path-3min`: replaced `for pkg in $(go list ./...); do go test -race ...; done` with a single `go test -race -timeout 120s ./...` invocation so Go's native cross-package parallelism applies. Expected: backend job ~90s → ~20s.
 - **P26-05-38** — Docker job had `needs: [backend, frontend, helm]`, serialising it after the full test suite. Fixed in `claude/ci-critical-path-3min`: dropped `needs:` so all four jobs run in parallel. The docker job has no genuine data dependency on test output. Expected: critical-path CI ~8 min → ~3-5 min (docker build and tests run concurrently).
 - **P26-05-39** — Docker build had no buildx layer cache. Fixed in `claude/ci-critical-path-3min`: added `docker/setup-buildx-action@v3` + `docker/build-push-action@v6` with `cache-from: type=gha` and `cache-to: type=gha,mode=max`. Expected: docker job ~4 min → ~1 min on warm cache.
+- **P26-05-29** — `useWebSocket` included `onMessage` in the `useCallback([url, onMessage])` dep array for `connect`. Every parent re-render that passed a fresh arrow function (the common pattern in `useStageLogs`) gave `connect` a new identity, which triggered the `useEffect([autoConnect, connect, disconnect])` — causing a spurious disconnect+reconnect. Fixed in `claude/w3-p26-05-29-onmessage-ref`: `onMessage` is now stashed in `onMessageRef` (a `useRef`) updated via a bare `useEffect()` after every render; `ws.onmessage` reads `onMessageRef.current` at call time; `onMessage` is dropped from `connect`'s deps. The WS lifecycle now only reconnects when `url` actually changes. Expected: eliminates reconnect churn under re-render pressure; stable WS lifecycle during pipeline log streaming.
