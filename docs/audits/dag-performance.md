@@ -115,7 +115,8 @@
 
 ### Concerning
 
-- **The `StageRun.Logs` field is never populated.** `executor.executeBuild` builds `builder.Request` without setting `LogWriter` (`executor.go:168-188`). Same for executePush, executeDeploy. Builder logs therefore go to **nowhere** in the pipeline-run path. The only code path that captures builder logs is `AppDeployer.Deploy` (`app_deployer.go:91`), and even there, the captured stream goes to the *caller's* `logW` — never written into `run.StageRuns[i].Logs`. The misleading comment at `app_deployer.go:90` ("available via the stage runs' Logs field after Execute returns") is **false**.
+- ~~**The `StageRun.Logs` field is never populated.**~~
+  **CLOSED.** `executeBuild` now wires `LogWriter` via a `cappedBuffer + io.MultiWriter + lineWriter` (build half, landed in earlier W3 series). `executePush` and `executeDeploy` mirror the same pattern as of `claude/w4-t2-logwriter-push-deploy` (T2). `pusher.Request` and `deployer.Request` expose `LogWriter io.Writer`; every shipped adapter (`pusher.{Crane,DockerSock,Noop}`, `deployer.{ClientGo,Kubectl,Noop}`) writes a canonical line on success (`Pushed image to <ref>`, `Applied <kind>/<name>`). `StageRun.Logs` is now populated end-to-end for build, push, and deploy stages.
 - **Builder logs are lost on WebSocket disconnect.** With no persistence, a client that disconnects mid-build cannot reattach and read what they missed. There is no replay buffer.
 - **Kubernetes deploy events are not captured.** `clientgo.go` (Deploy path) applies manifests but does not stream Pod events / Deployment status — users don't see "ImagePullBackOff" or rollout progress in run logs.
 - **No correlation IDs.** `slog` calls in the executor / runner don't attach `run_id` to a context-derived logger; multiple concurrent runs interleave in stderr with only `pipeline` + `stage` fields. Filtering "all logs from run X" is not possible without per-run grep.
@@ -146,7 +147,7 @@
 | # | Issue | Severity | File |
 |---|---|---|---|
 | 1 | ~~Test / Approval / Custom stages silently succeed~~ | ~~**Critical**~~ **Closed** — stubs now return `fmt.Errorf("stage type %q not implemented")`, landed in `claude/w3-t1-t3-handler-f1` | `executor.go` |
-| 2 | `StageRun.Logs` never populated by executor | **High** (lost build/deploy logs) | `executor.go:168-254`, `model/run.go:39` |
+| 2 | ~~`StageRun.Logs` never populated by executor~~ | ~~**High**~~ **Closed** — build half (prior wiring) + push/deploy halves (`claude/w4-t2-logwriter-push-deploy`) | `executor.go executeBuild/executePush/executeDeploy`, `model/run.go:39` |
 | 3 | No retry on transient failures | **High** | `executor.go:136-140`, `runner.go:84-87` |
 | 4 | Unbounded goroutine fan-out | **High** at scale | `runner.go:64-79` |
 | 5 | Kaniko has no layer-cache wiring | **High** for build perf | `kaniko.go:159-242` |

@@ -7,6 +7,7 @@ package pusher
 import (
 	"context"
 	"errors"
+	"io"
 )
 
 // ErrUnavailable is returned when the push backend is not reachable or
@@ -23,6 +24,14 @@ type Request struct {
 	// registry host. Nil falls back to the local docker config /
 	// credential helpers.
 	Auth func(host string) (user, pass string, ok bool)
+	// LogWriter, when non-nil, receives a stream of human-readable
+	// progress lines from the adapter. At minimum each implementation
+	// writes a final "Pushed image to <ref>" line on success. The
+	// executor wires this to a capped buffer (persisted to
+	// StageRun.Logs) and, when a broadcaster is configured, to the
+	// per-stage WebSocket channel for live tailing. Implementations
+	// must tolerate a nil LogWriter — callers in tests omit it.
+	LogWriter io.Writer
 }
 
 // Result reports the outcome of a successful push.

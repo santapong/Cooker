@@ -245,9 +245,9 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			case model.StageTypeTest:
 				return e.executeTest(ctx, stage)
 			case model.StageTypePush:
-				return e.executePush(ctx, stage, stageRun)
+				return e.executePush(ctx, run.ID, stage, stageRun)
 			case model.StageTypeDeploy:
-				return e.executeDeploy(ctx, stage, stageRun)
+				return e.executeDeploy(ctx, run.ID, stage, stageRun)
 			case model.StageTypeApproval:
 				return e.executeApproval(ctx, stage)
 			case model.StageTypeCustom:
@@ -465,7 +465,7 @@ func (e *Executor) executeTest(_ context.Context, stage *model.Stage) error {
 	return fmt.Errorf("stage type %q not implemented", stage.Type)
 }
 
-func (e *Executor) executePush(ctx context.Context, stage *model.Stage, sr *model.StageRun) error {
+func (e *Executor) executePush(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
 	target := stage.Config.Repository
 	if stage.Config.Registry != "" && !hasRegistryHost(target) {
 		target = stage.Config.Registry + "/" + target
@@ -473,7 +473,28 @@ func (e *Executor) executePush(ctx context.Context, stage *model.Stage, sr *mode
 	// Source image: pick the first artifact produced by an earlier
 	// stage if none is explicitly set on the push stage.
 	source := stage.Config.Image
-	req := pusher.Request{Source: source, Target: target}
+
+	// Mirror executeBuild's LogWriter wiring (see executor.go executeBuild
+	// for the canonical pattern). The capped buffer persists adapter
+	// output to StageRun.Logs; when a broadcaster is configured a
+	// per-line tee forwards each "Pushing..." / "Pushed image to..."
+	// line to the stage's WebSocket channel for live tailing. Closes
+	// dag-performance.md §4 High #2 for the push half. T2.
+	logs := newCappedBuffer(stageLogCap)
+	var writer io.Writer = logs
+	var lw *lineWriter
+	if e.logBroadcast != nil && runID != "" && stage != nil && stage.ID != "" {
+		lw = newLineWriter(e.logBroadcast, StageLogChannel(runID, stage.ID))
+		writer = io.MultiWriter(logs, lw)
+	}
+	defer func() {
+		if lw != nil {
+			lw.flush()
+		}
+		sr.Logs = logs.String()
+	}()
+
+	req := pusher.Request{Source: source, Target: target, LogWriter: writer}
 	res, err := e.pusher.Push(ctx, req)
 	if err != nil {
 		return fmt.Errorf("push: %w", err)
@@ -486,7 +507,7 @@ func (e *Executor) executePush(ctx context.Context, stage *model.Stage, sr *mode
 	return nil
 }
 
-func (e *Executor) executeDeploy(ctx context.Context, stage *model.Stage, sr *model.StageRun) error {
+func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
 	var kind deployer.Kind
 	switch {
 	case stage.Config.HelmChart != "":
@@ -496,6 +517,27 @@ func (e *Executor) executeDeploy(ctx context.Context, stage *model.Stage, sr *mo
 	default:
 		return fmt.Errorf("deploy stage %q: need ManifestPath or HelmChart", stage.Name)
 	}
+
+	// Mirror executeBuild's LogWriter wiring (see executor.go executeBuild
+	// for the canonical pattern). Persists per-resource "Applied
+	// <kind>/<name>" lines from the adapter into StageRun.Logs and
+	// forwards each to the stage's WebSocket channel when a broadcaster
+	// is configured. Closes dag-performance.md §4 High #2 for the
+	// deploy half. T2.
+	logs := newCappedBuffer(stageLogCap)
+	var writer io.Writer = logs
+	var lw *lineWriter
+	if e.logBroadcast != nil && runID != "" && stage != nil && stage.ID != "" {
+		lw = newLineWriter(e.logBroadcast, StageLogChannel(runID, stage.ID))
+		writer = io.MultiWriter(logs, lw)
+	}
+	defer func() {
+		if lw != nil {
+			lw.flush()
+		}
+		sr.Logs = logs.String()
+	}()
+
 	// Note: stage.Config.ManifestPath is a path; a future revision
 	// should read it here (or the App deployer should synthesize the
 	// manifest). Keeping Manifest empty means the concrete Deployer
@@ -508,6 +550,7 @@ func (e *Executor) executeDeploy(ctx context.Context, stage *model.Stage, sr *mo
 		HelmChart:   stage.Config.HelmChart,
 		HelmValues:  stage.Config.HelmValues,
 		ReleaseName: stage.Name,
+		LogWriter:   writer,
 	}
 	if kind == deployer.KindManifest {
 		req.Manifest = []byte(stage.Config.ManifestPath)

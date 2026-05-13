@@ -56,14 +56,30 @@ func (k *Kubectl) Deploy(ctx context.Context, req Request) (Result, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdin = bytes.NewReader(manifest)
 	var out bytes.Buffer
-	cmd.Stdout = io.MultiWriter(&out)
-	cmd.Stderr = io.MultiWriter(&out)
+	// Tee kubectl's combined output to the caller's LogWriter when wired
+	// so users tailing the run see "deployment.apps/web created" as it
+	// happens; the full output is also retained in `out` for the
+	// parseAppliedResources step below.
+	if req.LogWriter != nil {
+		cmd.Stdout = io.MultiWriter(&out, req.LogWriter)
+		cmd.Stderr = io.MultiWriter(&out, req.LogWriter)
+	} else {
+		cmd.Stdout = io.MultiWriter(&out)
+		cmd.Stderr = io.MultiWriter(&out)
+	}
 
 	if err := cmd.Run(); err != nil {
 		return Result{}, fmt.Errorf("kubectl apply: %w (output: %s)", err, out.String())
 	}
 
-	return Result{AppliedResources: parseAppliedResources(out.String())}, nil
+	applied := parseAppliedResources(out.String())
+	// Emit a normalised "Applied <ref>" line per resource as well, so the
+	// log shape matches the client-go adapter — downstream UI / parsers
+	// see the same vocabulary regardless of backend.
+	for _, ref := range applied {
+		logf(req.LogWriter, "Applied %s\n", ref)
+	}
+	return Result{AppliedResources: applied}, nil
 }
 
 // kubectl apply emits lines like "deployment.apps/myapp created" or

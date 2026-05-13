@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/crane"
@@ -56,6 +57,7 @@ func (c *Crane) Push(ctx context.Context, req Request) (Result, error) {
 	if ua == "" {
 		ua = "cooker"
 	}
+	logf(req.LogWriter, "Pushing %s -> %s\n", req.Source, req.Target)
 	img, err := remote.Image(srcRef,
 		remote.WithContext(ctx),
 		remote.WithAuthFromKeychain(keychain),
@@ -83,9 +85,24 @@ func (c *Crane) Push(ctx context.Context, req Request) (Result, error) {
 		crane.WithUserAgent(ua),
 	)
 	if err != nil {
-		return Result{}, nil // digest fetch is best-effort
+		// Digest fetch is best-effort; still report success of the push.
+		logf(req.LogWriter, "Pushed image to %s\n", req.Target)
+		return Result{}, nil
 	}
+	logf(req.LogWriter, "Pushed image to %s@%s\n", req.Target, digest)
 	return Result{Digest: digest}, nil
+}
+
+// logf writes a formatted line to w when w is non-nil. Callers use this
+// to surface adapter progress to the executor's stage-log capture +
+// WebSocket broadcaster without sprinkling nil-checks at every call
+// site. Errors are swallowed: log streams are best-effort, never a
+// reason to fail a push.
+func logf(w io.Writer, format string, args ...interface{}) {
+	if w == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, format, args...)
 }
 
 var _ Pusher = (*Crane)(nil)

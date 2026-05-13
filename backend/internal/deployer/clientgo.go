@@ -21,6 +21,17 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// logf writes a formatted line to w when w is non-nil. Mirrors the
+// pusher package's helper — adapter progress messages flow through this
+// so a nil LogWriter is a safe no-op. Errors are swallowed: log
+// streaming is best-effort, never a reason to fail a deploy.
+func logf(w io.Writer, format string, args ...interface{}) {
+	if w == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, format, args...)
+}
+
 // ClientGo applies manifests via the Kubernetes dynamic client. The
 // dynamic client is the natural fit because Cooker pipelines hand
 // over arbitrary YAML — the kinds aren't known statically.
@@ -130,7 +141,13 @@ func (c *ClientGo) Deploy(ctx context.Context, req Request) (Result, error) {
 			}
 			return Result{}, fmt.Errorf("%w: apply %s: %v", ErrUnavailable, gvk, err)
 		}
-		applied = append(applied, fmt.Sprintf("%s/%s/%s", out.GetKind(), out.GetNamespace(), out.GetName()))
+		ref := fmt.Sprintf("%s/%s/%s", out.GetKind(), out.GetNamespace(), out.GetName())
+		// Emit a per-resource progress line so the run page reflects each
+		// apply as it happens, not just the final tally. The kind/name
+		// shape mirrors `kubectl apply`'s familiar output so the two
+		// adapters look interchangeable to a viewer.
+		logf(req.LogWriter, "Applied %s/%s\n", out.GetKind(), out.GetName())
+		applied = append(applied, ref)
 	}
 	return Result{AppliedResources: applied}, nil
 }
