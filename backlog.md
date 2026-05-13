@@ -290,6 +290,10 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 
 Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), and the `claude/w3-t1-t3-handler-f1` PR (executor stubs + drain goroutine + DAG validator dedup):
 
+### `claude/w4-f04-created-at` — add `PipelineRun.CreatedAt` (store-parity F-04)
+
+- ✅ **F-04 — `pipeline_runs.created_at` surfaced on `model.PipelineRun`** — `model.PipelineRun` gains `CreatedAt time.Time` (`json:"createdAt"`). Postgres `Get` and `List` now select the column; `Create` uses `RETURNING created_at` to populate the field. Memory `Create` stamps `time.Now()` when the caller omits the field; memory `List` sorts newest-first, matching `ORDER BY created_at DESC`. Tests `TestRunStore_ListOrderedByCreatedAt` and `TestRunStore_CreateSetsCreatedAt` added in `internal/store/memory/run_created_at_test.go`. No new migration needed — the column pre-existed in `001_initial.up.sql`. Closes store-parity audit F-04.
+
 ### `claude/w3-t1-t3-handler-f1` — executor stubs + drain race + DAG validator dedup
 
 - ✅ **§6 T1 — Executor stubs now fail loudly** — `executeTest`, `executeApproval`, and `executeCustom` now return `fmt.Errorf("stage type %q not implemented", stage.Type)` instead of `nil`. Pipelines that include these stage types will fail with a clear error rather than silently succeeding. Side-effect: any existing pipeline using test/approval/custom stages will start failing. Closes dag-performance.md Critical #1.

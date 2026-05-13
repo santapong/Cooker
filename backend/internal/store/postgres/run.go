@@ -25,7 +25,7 @@ func NewRunStore(db *sql.DB) *RunStore {
 func (s *RunStore) List(ctx context.Context, pipelineID string) ([]*model.PipelineRun, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, pipeline_id, status, stage_runs, env_statuses, variables,
-		        started_at, finished_at, error, heartbeat_at
+		        created_at, started_at, finished_at, error, heartbeat_at
 		   FROM pipeline_runs WHERE pipeline_id = $1 ORDER BY created_at DESC`,
 		pipelineID)
 	if err != nil {
@@ -47,7 +47,7 @@ func (s *RunStore) List(ctx context.Context, pipelineID string) ([]*model.Pipeli
 func (s *RunStore) Get(ctx context.Context, id string) (*model.PipelineRun, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, pipeline_id, status, stage_runs, env_statuses, variables,
-		        started_at, finished_at, error, heartbeat_at
+		        created_at, started_at, finished_at, error, heartbeat_at
 		   FROM pipeline_runs WHERE id = $1`, id)
 	r, err := scanRun(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -69,13 +69,25 @@ func (s *RunStore) Create(ctx context.Context, r *model.PipelineRun) error {
 	if err != nil {
 		return fmt.Errorf("marshal variables: %w", err)
 	}
-	// created_at uses DEFAULT NOW() from the schema.
-	_, err = s.db.ExecContext(ctx,
+	// created_at: use the caller-supplied value when non-zero so that
+	// the memory and Postgres impls are symmetric (memory sets it on
+	// Create before calling store). If the caller left it zero, fall
+	// back to NOW() so we never store the zero timestamp.
+	var createdAt interface{}
+	if r.CreatedAt.IsZero() {
+		createdAt = nil // triggers DEFAULT NOW() in the SQL below
+	} else {
+		createdAt = r.CreatedAt
+	}
+	err = s.db.QueryRowContext(ctx,
 		`INSERT INTO pipeline_runs
-		  (id, pipeline_id, status, stage_runs, env_statuses, variables, started_at, finished_at, error)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		  (id, pipeline_id, status, stage_runs, env_statuses, variables,
+		   created_at, started_at, finished_at, error)
+		 VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz, NOW()),$8,$9,$10)
+		 RETURNING created_at`,
 		r.ID, r.PipelineID, string(r.Status), stageJSON, envJSON, varsJSON,
-		nullTime(r.StartedAt), nullTime(r.FinishedAt), r.Error)
+		createdAt,
+		nullTime(r.StartedAt), nullTime(r.FinishedAt), r.Error).Scan(&r.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("creating run: %w", err)
 	}
@@ -155,7 +167,7 @@ func scanRun(row scannable) (*model.PipelineRun, error) {
 	var started, finished, heartbeat sql.NullTime
 	var errStr sql.NullString
 	if err := row.Scan(&r.ID, &r.PipelineID, &status, &stageJSON, &envJSON, &varsJSON,
-		&started, &finished, &errStr, &heartbeat); err != nil {
+		&r.CreatedAt, &started, &finished, &errStr, &heartbeat); err != nil {
 		return nil, err
 	}
 	r.Status = model.RunStatus(status)

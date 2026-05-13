@@ -101,6 +101,10 @@ func (s *runs) List(_ context.Context, pipelineID string) ([]*model.PipelineRun,
 			out = append(out, r)
 		}
 	}
+	// Sort newest-first to match the Postgres ORDER BY created_at DESC.
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
 	return out, nil
 }
 
@@ -117,6 +121,9 @@ func (s *runs) Get(_ context.Context, id string) (*model.PipelineRun, error) {
 func (s *runs) Create(_ context.Context, r *model.PipelineRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if r.CreatedAt.IsZero() {
+		r.CreatedAt = time.Now()
+	}
 	s.m[r.ID] = r
 	return nil
 }
