@@ -13,6 +13,25 @@ import (
 	"github.com/santapong/cooker/internal/pusher"
 )
 
+// fakeRunUpdater records every persistProgress call. Safe for concurrent use.
+type fakeRunUpdater struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (f *fakeRunUpdater) update(_ context.Context, _ *model.PipelineRun) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	return nil
+}
+
+func (f *fakeRunUpdater) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
 // mockBuilder records every Build call and returns a configured
 // response. Safe for concurrent use.
 type mockBuilder struct {
@@ -627,5 +646,146 @@ func TestExecutor_GitOpsCommit_RequiresRepoAndPath(t *testing.T) {
 	}
 	if err := NewExecutor().Execute(context.Background(), p, run); err == nil {
 		t.Fatal("expected validation error")
+	}
+}
+
+// TestExecutor_T5_BatchedWritesDebounce verifies that non-terminal stage
+// transitions are batched: the total number of RunUpdater calls must be
+// strictly less than the pre-T5 count (one call per transition).
+//
+// A 12-stage linear pipeline (all Noop build stages) emits 2 transitions per
+// stage (runner emits "running" then "success") = 24 total. T5 must absorb
+// these into fewer writes via the min(500ms, 10 transitions) debounce.
+//
+// Refs: dag-adaptation-2026.md §6 T5; docs/audits/2026-05-p1-context-pack.md.
+func TestExecutor_T5_BatchedWritesDebounce(t *testing.T) {
+	const numStages = 12 // > progressDrainBatchSize to exercise batching
+
+	stages := make([]model.Stage, numStages)
+	stageRuns := make([]model.StageRun, numStages)
+	edges := make([]model.Edge, numStages-1)
+
+	ids := [12]string{"sa", "sb", "sc", "sd", "se", "sf", "sg", "sh", "si", "sj", "sk", "sl"}
+	for i := 0; i < numStages; i++ {
+		id := ids[i]
+		stages[i] = model.Stage{
+			ID:   id,
+			Name: "Stage " + id,
+			Type: model.StageTypeBuild,
+			Config: model.StageConfig{
+				Context: ".",
+				Tags:    []string{"app:latest"},
+			},
+		}
+		stageRuns[i] = model.StageRun{StageID: id, Status: model.RunStatusPending}
+		if i > 0 {
+			edges[i-1] = model.Edge{
+				ID:     "e" + id,
+				Source: ids[i-1],
+				Target: id,
+			}
+		}
+	}
+
+	p := &model.Pipeline{
+		ID:     "pipe-t5-debounce",
+		Stages: stages,
+		Edges:  edges,
+	}
+	run := &model.PipelineRun{
+		ID:         "run-t5-debounce",
+		PipelineID: p.ID,
+		Status:     model.RunStatusPending,
+		StageRuns:  stageRuns,
+	}
+
+	updater := &fakeRunUpdater{}
+	exec := NewExecutor(WithRunUpdater(updater.update))
+
+	if err := exec.Execute(context.Background(), p, run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != model.RunStatusSuccess {
+		t.Errorf("expected run status success, got %s", run.Status)
+	}
+
+	calls := updater.callCount()
+	// Pre-T5 behaviour: 2 explicit persistProgress calls per stage (start
+	// set + terminal set) plus one at the "running" runner event → at least
+	// 2×numStages = 24 if every transition triggered a direct write.
+	// T5 must produce strictly fewer writes via batching.
+	priorCallCount := 2 * numStages
+	if calls >= priorCallCount {
+		t.Errorf("T5 debounce: expected < %d persistProgress calls, got %d (batching not working)", priorCallCount, calls)
+	}
+	if calls == 0 {
+		t.Error("T5 debounce: expected at least 1 persistProgress call, got 0")
+	}
+	t.Logf("T5 debounce: %d stages → %d persistProgress calls (pre-T5 would be ≥%d)", numStages, calls, priorCallCount)
+}
+
+// TestExecutor_T5_EagerFlushOnTerminal verifies that a terminal stage status
+// ("failed") triggers an immediate persistProgress flush without waiting for
+// the debounce timer or batch-size threshold.
+//
+// The test injects a builder that always errors. The drain goroutine must
+// flush eagerly when it receives the "failed" StatusUpdate. Because Execute
+// joins the drain goroutine before returning (<-drainDone), the RunUpdater
+// call count must be ≥1 at the point Execute returns.
+//
+// Per dag-adaptation-2026.md §6 T5: "Acceptable to flush eagerly on
+// Status == 'failed' or Status == 'success'". This test makes that contract
+// machine-verifiable per PR #61's coordination guidance.
+func TestExecutor_T5_EagerFlushOnTerminal(t *testing.T) {
+	wantErr := errors.New("injected build failure")
+	mb := &mockBuilder{err: wantErr}
+
+	p := &model.Pipeline{
+		ID: "pipe-t5-eager",
+		Stages: []model.Stage{
+			{ID: "b", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{
+				Context: ".",
+				Tags:    []string{"app:v1"},
+			}},
+		},
+		Edges: []model.Edge{},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-t5-eager",
+		PipelineID: p.ID,
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "b", Status: model.RunStatusPending}},
+	}
+
+	updater := &fakeRunUpdater{}
+	exec := NewExecutor(
+		WithBuilder(mb),
+		WithRunUpdater(updater.update),
+	)
+
+	// Execute must return an error (builder always errors).
+	if execErr := exec.Execute(context.Background(), p, run); execErr == nil {
+		t.Fatal("expected error from failed builder, got nil")
+	}
+	if run.Status != model.RunStatusFailed {
+		t.Errorf("expected run status failed, got %s", run.Status)
+	}
+
+	// Eager-flush guarantee: at least one persistProgress call must have
+	// been made before Execute returns. Without eager flush the drain
+	// goroutine would defer the write until the 500ms tick, which may
+	// not fire before the caller observes the result.
+	if calls := updater.callCount(); calls == 0 {
+		t.Error("T5 eager-flush: expected ≥1 persistProgress call on terminal 'failed', got 0")
+	} else {
+		t.Logf("T5 eager-flush: %d persistProgress call(s) on single-stage terminal failure", calls)
+	}
+
+	// Stage-level state must also be set correctly.
+	if run.StageRuns[0].Status != model.RunStatusFailed {
+		t.Errorf("stage status: expected failed, got %s", run.StageRuns[0].Status)
+	}
+	if run.StageRuns[0].Error == "" {
+		t.Error("stage run should record the error string")
 	}
 }

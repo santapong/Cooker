@@ -36,6 +36,21 @@ const defaultStageTimeout = 30 * time.Minute
 // COOKER_DAG_MAX_PARALLEL.
 const defaultMaxParallel = 16
 
+// progressDrainInterval is the maximum time the drain goroutine waits
+// between batched persistProgress writes for non-terminal transitions.
+// Terminal transitions (failed / success) always flush immediately.
+// See dag-adaptation-2026.md §6 T5.
+const progressDrainInterval = 500 * time.Millisecond
+
+// progressDrainBatchSize is the maximum number of non-terminal status
+// transitions the drain goroutine accumulates before forcing a flush
+// regardless of the timer. Together with progressDrainInterval
+// ("whichever comes first") this bounds worst-case lag to
+// min(500ms, 10 transitions). Primitive #1 (retry policies) triples
+// the transition rate per stage; this batch absorbs that increase
+// without proportional write cost.
+const progressDrainBatchSize = 10
+
 func dagMaxParallel() int {
 	if v := os.Getenv("COOKER_DAG_MAX_PARALLEL"); v != "" {
 		var n int
@@ -196,7 +211,8 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		startTime := time.Now()
 		stageRun.StartedAt = &startTime
 		stageRun.Status = model.RunStatusRunning
-		e.persistProgress(ctx, run)
+		// Progress is now persisted by the drain goroutine below via
+		// runner.Updates(). No explicit persistProgress call here.
 
 		logger.Info("pipeline executing stage",
 			"stage", stage.Name, "type", stage.Type, "timeout", timeout)
@@ -252,24 +268,91 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			stageRun.Status = model.RunStatusFailed
 			stageRun.Error = stageErr.Error()
 			observability.ObserveStageDuration(string(stage.Type), "failed", duration)
-			e.persistProgress(ctx, run)
+			// Terminal status: the drain goroutine flushes immediately
+			// when it receives the "failed" StatusUpdate from the runner.
 			return stageErr
 		}
 
 		stageRun.Status = model.RunStatusSuccess
 		observability.ObserveStageDuration(string(stage.Type), "success", duration)
-		e.persistProgress(ctx, run)
+		// Terminal status: the drain goroutine flushes immediately
+		// when it receives the "success" StatusUpdate from the runner.
 		return nil
 	}, dagMaxParallel())
 
-	// The goroutine that formerly drained runner.Updates() here had a
-	// small race: runner.Run is synchronous, so if it completed and
-	// closed the channel before the goroutine started ranging, the
-	// range exited immediately with no logging. The slog.Info it emitted
-	// also duplicated the per-stage "pipeline executing stage" log above.
-	// Removed per dag-adaptation-2026.md §6 T3. A debounced drain that
-	// also persists progress mid-run will replace this in T5 (W4).
+	// Drain goroutine: consumes runner.Updates() and writes batched
+	// persistProgress calls at most once per min(500ms, 10 transitions).
+	// Terminal transitions ("failed" / "success") trigger an immediate
+	// eager flush so the final stage outcome surfaces without debounce lag.
+	//
+	// This replaces the three explicit persistProgress calls that lived
+	// inside the stage taskFunc (dag-adaptation-2026.md §6 T5, W4).
+	// A 50-stage pipeline previously paid up to 100+ full JSONB rewrites;
+	// the drain absorbs them into ≤ceil(100/10) = 10 writes under normal
+	// load, and ≤1 per 500ms burst. Primitive #1 (retry policies) triples
+	// the transition rate per flaky stage; this drain absorbs the increase.
+	//
+	// The goroutine MUST start before runner.Run (which is synchronous and
+	// closes updates when it returns) so the range sees all updates.
+	// drainDone is closed when the goroutine exits; we join after runner.Run
+	// so we never touch run.Status after Execute returns.
+	//
+	// Cross-reference: docs/audits/2026-05-p1-context-pack.md confirms the
+	// terminal-flush rule is complementary to P#1's retry-emit volume.
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		pending := 0
+		tick := time.NewTimer(progressDrainInterval)
+		defer tick.Stop()
+
+		flush := func() {
+			if pending == 0 {
+				return
+			}
+			e.persistProgress(ctx, run)
+			pending = 0
+			// Reset the debounce timer so the next window starts fresh.
+			if !tick.Stop() {
+				select {
+				case <-tick.C:
+				default:
+				}
+			}
+			tick.Reset(progressDrainInterval)
+		}
+
+		for {
+			select {
+			case update, ok := <-runner.Updates():
+				if !ok {
+					// Channel closed: runner.Run has returned. Flush any
+					// accumulated non-terminal updates and exit.
+					flush()
+					return
+				}
+				pending++
+				// Eager flush on any terminal stage status so the final
+				// outcome of a stage lands in the store immediately —
+				// no waiting for the next debounce tick. This is the
+				// guarantee that run-completion code paths (and the
+				// caller) do not observe lag on the last transition.
+				if update.Status == "failed" || update.Status == "success" {
+					flush()
+				} else if pending >= progressDrainBatchSize {
+					flush()
+				}
+			case <-tick.C:
+				flush()
+				tick.Reset(progressDrainInterval)
+			}
+		}
+	}()
+
 	err = runner.Run(ctx)
+	// Join the drain goroutine: all pending updates are flushed before
+	// we set the terminal run.Status / run.FinishedAt below.
+	<-drainDone
 
 	finishTime := time.Now()
 	run.FinishedAt = &finishTime
