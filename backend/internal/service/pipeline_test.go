@@ -72,6 +72,69 @@ func TestValidatePipelineDAG_EmptyPipeline(t *testing.T) {
 	}
 }
 
+// TestValidatePipelineDAG_DuplicateStageID verifies the duplicate-stage-ID
+// check that was moved from handler/pipeline.go validateDAG into this
+// service function per handler-layering audit Finding 1.
+func TestValidatePipelineDAG_DuplicateStageID(t *testing.T) {
+	p := &model.Pipeline{
+		Stages: []model.Stage{
+			{ID: "build"},
+			{ID: "build"}, // duplicate
+		},
+		Edges: []model.Edge{},
+	}
+
+	errs := ValidatePipelineDAG(p)
+	found := false
+	for _, e := range errs {
+		if e == "duplicate stage ID: build" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'duplicate stage ID: build' in errors, got %v", errs)
+	}
+}
+
+// TestValidatePipelineDAG_DanglingEdge verifies the dangling-reference checks
+// that were moved from handler/pipeline.go validateDAG into this service
+// function per handler-layering audit Finding 1.
+func TestValidatePipelineDAG_DanglingEdge(t *testing.T) {
+	t.Run("unknown source", func(t *testing.T) {
+		p := &model.Pipeline{
+			Stages: []model.Stage{{ID: "build"}},
+			Edges:  []model.Edge{{ID: "e1", Source: "missing", Target: "build"}},
+		}
+		errs := ValidatePipelineDAG(p)
+		found := false
+		for _, e := range errs {
+			if e == "edge references unknown source: missing" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected unknown source error, got %v", errs)
+		}
+	})
+
+	t.Run("unknown target", func(t *testing.T) {
+		p := &model.Pipeline{
+			Stages: []model.Stage{{ID: "build"}},
+			Edges:  []model.Edge{{ID: "e1", Source: "build", Target: "missing"}},
+		}
+		errs := ValidatePipelineDAG(p)
+		found := false
+		for _, e := range errs {
+			if e == "edge references unknown target: missing" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected unknown target error, got %v", errs)
+		}
+	})
+}
+
 func TestBuildDAGFromPipeline_Valid(t *testing.T) {
 	p := &model.Pipeline{
 		Stages: []model.Stage{
