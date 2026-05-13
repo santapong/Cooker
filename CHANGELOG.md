@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — May 2026 W2 batch (PRs #42, #43, #44, #45, #46, #47, #48, #49, #50, #52, #53)
+
+**Second week of execution against the May-2026 30-day plan.** W1 surfaced four production-shape bugs and one trust-of-tool category; W2 closes the production bugs as code PRs, ships v0.1.0 release scaffolding, drafts the multi-tenancy ADR, and produces six forward-looking research audits.
+
+#### Production bug fixes (closes W1 findings)
+
+- **F-01** (PR #43) — raw-K8s `deploy/kubernetes/deployment.yaml` probe paths flipped from `/health` (10s initial delay) to `/health/live` + `/health/ready` (60s initial delay, named `http` port, `timeoutSeconds: 5`, `failureThreshold: 5`). Closes the `CrashLoopBackOff` trap for operators using the raw-manifest install path. Chart/raw parity restored.
+- **F-02** (PR #47) — `Config.Validate()` now refuses `COOKER_PUSHER=docker` in production with the same docker.sock RCE-to-host warning as the existing `COOKER_BUILDER=docker` guard. Mirrors the builder check; one peer test. Closes the silent regression where operators followed the builder advice but left the pusher path open. `SECURITY.md` "image build isolation" updated.
+- **F-07** (PR #52) — `internal/handler/app.go` `DeployApp` now creates a stub `PipelineRun` row (`Status=running`, `StartedAt=now`) **before** calling `RunCoordinator.Spawn`. Closes the gap where Spawn's first heartbeat hit a non-existent row and `SweepOrphans` had no orphan to reap if the pod crashed mid-deploy. New `TestRunCoordinator_F07_HeartbeatSucceedsWhenRowCreatedBeforeSpawn` regression test.
+- **FH-03** (PR #49) — `frontend/src/hooks/useWebSocket.ts` `connect()` now re-checks `closedByCallerRef.current` after `await fetchWSTicket()`. Closes the WebSocket-leak race where rapid unmounts during the ticket fetch accumulated dangling sockets up to the browser's 256-per-origin limit (logs view going silently dark). One-line fix.
+
+#### Backend perf wins (closes May-2026 perf-audit findings)
+
+- **P26-05-01** (PR #52) — `gin.Default()` → `gin.New() + gin.Recovery()`; `gin.SetMode(gin.ReleaseMode)` outside dev. Drops the verbose ANSI request logger that duplicated `observability.MetricsMiddleware`. Expected ~5–10% CPU reduction on hot HTTP paths.
+- **P26-05-12** (PR #52) — `rateLimiter.mu` `sync.Mutex` → `sync.RWMutex` with separate `lastMu` for `lastSeen` writes so the lock domains never nest. Bucket-already-registered fast path now read-locked. GC loop collects-then-deletes.
+- **P26-05-29** (deferred to W3) — WebSocket `onMessage` ref pattern. The riskier of the three perf wins; pulled out of the W2 PR for a separate review.
+
+#### Release engineering — v0.1.0 scaffolding (PR #53)
+
+- **Module path fixed.** `github.com/cooker-ci/cooker` → `github.com/santapong/cooker` across 78 Go files + `go.mod` + swagger doc + `.golangci.yml` errcheck exclusion + CHANGELOG footer links + image-ref docs (Dockerfile / Helm `values.yaml` / raw-K8s `deployment.yaml` / `docs/user-guide/operations/architecture.md`). Historical narrative references in `docs/pm-brief-2026-05.md` + `docs/shipping-go.md` intentionally preserved.
+- **`cooker --version`** flag in `cmd/cooker/main.go`: three ldflags-populated package vars (`version`, `commit`, `date`); propagated into `server.BuildVersion`/`SHA`/`Time` so `GET /api/v1/version` reflects real release metadata.
+- **Deferred to W3:** `.goreleaser.yaml` + `Makefile` ldflags + cosign keyless + GHCR multi-arch push + Helm OCI chart publish. The W2 agent's report claimed it shipped GoReleaser config; the actual branch did not contain it. W3 closes that.
+
+#### Multi-tenancy ADR (PR #42)
+
+- **`docs/adr/0004-multi-tenancy.md`** drafted with the **A3-defer** decision: ship the cheap `owner_team_id` ownership column now (closes `S26-05-09` IDOR); document the namespace-scoped `tenant_id` migration as Appendix A for if/when hosted Cooker Cloud is approved; Appendix B sketches the single-tenant-forever variant.
+- **Status: Proposed** — awaiting Decision A on hosted Cloud (pm-brief §4 Q1 + Q7). Planner's deeper-read opinion: A3 still looks right; the hidden A1 advantage doesn't survive the cost math when Decision A is undecided.
+
+#### Forward-looking research (W2 idle lane)
+
+Each lands as one audit doc; the findings will be consumed by future PRs.
+
+- **`docs/audits/2026-05-action-pinning.md`** (PR #44) — 17 action references across 3 workflow files; 0 currently pinned; pinning order recommended (`ci.yml` → `oci-conformance.yml` → `cooker-weekly.yml`, with `anthropics/claude-code-action@v1` FIRST within the weekly because it carries `contents: write` + `pull-requests: write`). Closes `S26-05-15`.
+- **`docs/audits/2026-05-cache-plumb-sketch.md`** (PR #45) — minimal `CacheSpec` model + per-adapter integration sketches (kaniko / buildkit / buildah / docker), test strategy, Helm values shape, and 7 open questions for the future P#4 PR. **Effort confirmed at 10–11 engineering-days** for the narrow scope (matches §10 calendar's 3-week budget); 12–13 days if per-environment `cacheRepo` defaults are bundled.
+- **`docs/audits/2026-05-p1-unmarshaller-corpus.md`** (PR #46) — five round-trip test cases for the `Retries int` → `Retry RetryPolicy` migration, plus the `UnmarshalJSON` skeleton and a risk register. **Design gap flagged:** `Exponential bool` is `omitempty` + "default true" — contradictory; three resolution options proposed. Implementer must pick one before P#1 ships in W5.
+- **`docs/audits/2026-05-p1-context-pack.md`** (PR #48) — file:line context-pack for the three sub-agents that will sub-delegate Primitive #1 implementation (backend-api / frontend-ui / frontend-state). PR-T5 conflict check confirmed clean: T5's batched persistProgress absorbs P#1's extra status-transition emit volume. Three doc-drift findings in `dag-adaptation-2026.md` §7.1 worth a small follow-up PR.
+- **`docs/audits/2026-05-w11-quickwin-wireframes.md`** (PR #50) — text wireframes for three W11 P2 items (webhook URL on AppDetailPage, deployed URL on AppDetailPage, empty-state CTAs on Apps/Pipelines/Environments). PR-#38 bundle-split scan confirmed no drift, but surfaced **two pre-existing hygiene issues**: `AppDetailPage` is eager-loaded despite never being a landing page, and `AppDetailPage.tsx:80` contains a raw `new WebSocket(url)` that violates the CLAUDE.md hard rule (and **bypasses the FH-03 fix** because it doesn't use the hook). W3 follow-up planned.
+
 ### Added — May 2026 W1 batch (PRs #31, #32, #33, #35, #36, #37, #38, #39, #40)
 
 **First week of execution against the May-2026 30-day plan.** Three primary code PRs landed (CI, security, frontend perf); seven research audit docs landed and surfaced four production-shape bugs for fast-track in W2+.
