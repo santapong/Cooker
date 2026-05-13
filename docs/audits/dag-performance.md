@@ -82,11 +82,8 @@
 - **No retry logic on stage failures** (`executor.go:136-140`). A 500 from a registry push, a transient `kubectl` connection reset, or a race with PVC binding fails the whole pipeline. There is no `Stage.Config.Retries`, no exponential backoff in any builder/pusher/deployer.
 - **No skip-downstream / partial-success policy** (`runner.go:84-87`). A failed `test` stage stops the deploy even if the user wanted "best effort". No `continue-on-error` flag on the stage.
 - **Stage timeouts are advertised, not enforced.** `model.StageConfig.Timeout` is read into `executor.go:281` for the `custom` stage type and **logged** — never wired into `context.WithTimeout`. Build/Push/Deploy stages have no per-stage timeout knob at all.
-- **Stub stages silently succeed.**
-  - `executeTest` (`executor.go:190-193`): logs the request, returns `nil`. **Test gates do nothing.**
-  - `executeApproval` (`executor.go:273-276`): logs and returns `nil`. **Approval gates auto-approve.**
-  - `executeCustom` (`executor.go:279-282`): logs and returns `nil`. **Custom scripts never run.**
-  Each of these is a fault-tolerance issue *because* they create false confidence — a green pipeline does not mean the gates passed.
+- ~~**Stub stages silently succeed.**~~
+  **CLOSED** in `claude/w3-t1-t3-handler-f1`: `executeTest`, `executeApproval`, and `executeCustom` now return `fmt.Errorf("stage type %q not implemented", stage.Type)` so pipelines that include these stage types fail loudly. Existing pipelines using these stage types will start failing — this is the intended behaviour (closes §6 T1).
 - **No panic recovery anywhere in the executor / runner / app_deployer.** A panic inside `taskFunc` (`runner.go:71`) crashes the goroutine with no `recover()`. `wg.Done()` is deferred (line 67) so the WaitGroup unblocks, but the panic propagates to the runtime and kills the process. Combined with multi-replica + drain-timeout (25s), one malformed input can rolling-crash the whole API tier.
 - **No transactional run-state writes.** `RunStore.Update` (`store/postgres/run.go:85-113`) is a single `UPDATE` of all JSONB blobs, but each `Executor` callback mutates the in-memory `stageRunMap` and there's no write-back inside the executor. **The executor never persists progress mid-run** — `Update` is presumably called by the handler after `Execute` returns. If the process dies mid-run, all stage transitions are lost; only the boot orphan sweep marks the run failed.
 - **The 30-minute "app-deploy deadline" is documented but absent** (see §2).
@@ -148,7 +145,7 @@
 
 | # | Issue | Severity | File |
 |---|---|---|---|
-| 1 | Test / Approval / Custom stages silently succeed | **Critical** (false confidence) | `executor.go:190-193, 273-276, 279-282` |
+| 1 | ~~Test / Approval / Custom stages silently succeed~~ | ~~**Critical**~~ **Closed** — stubs now return `fmt.Errorf("stage type %q not implemented")`, landed in `claude/w3-t1-t3-handler-f1` | `executor.go` |
 | 2 | `StageRun.Logs` never populated by executor | **High** (lost build/deploy logs) | `executor.go:168-254`, `model/run.go:39` |
 | 3 | No retry on transient failures | **High** | `executor.go:136-140`, `runner.go:84-87` |
 | 4 | Unbounded goroutine fan-out | **High** at scale | `runner.go:64-79` |
@@ -157,7 +154,7 @@
 | 7 | No panic recovery in stage goroutine | **Medium** (process crash) | `runner.go:66-78` |
 | 8 | "30-minute deadline" missing from `Spawn` | **Medium** | `runs.go:41-45` |
 | 9 | Rate limiter is per-replica, no Redis backend | **Medium** | `ratelimit.go:14-18` |
-| 10 | No mid-run progress persistence | **Medium** (orphan-sweep recovers state but loses partial progress) | `executor.go`, `store/postgres/run.go:85-113` |
+| 10 | No mid-run progress persistence | **Medium** (orphan-sweep recovers state but loses partial progress). Note: the `runner.Updates()` drain goroutine that was the intended hook for this was removed in `claude/w3-t1-t3-handler-f1` (§6 T3) — a debounced replacement will land in T5 (W4). | `executor.go`, `store/postgres/run.go:85-113` |
 | 11 | No deploy event / kubectl status capture | **Low/Medium** | `internal/deployer/clientgo.go` |
 | 12 | No log-level config / no `run_id` correlation | **Low** | `cmd/cooker/main.go:31` |
 
