@@ -111,6 +111,8 @@ needed.
 
 ## 6. Next quick win — docker buildx `mode=min`
 
+**Status: CLOSED** — landed in `claude/w5-ci-cache-mode-min` (PR #78).
+
 **Finding:** `cache-to: type=gha,mode=max` stores all intermediate build
 layers (~2–4 GB for a multi-stage Go+Node Dockerfile). This crowds out the
 go-build and npm caches in the 10 GB quota.
@@ -129,7 +131,7 @@ changes require a full intermediate rebuild (~3 min). Final layer (the
 stripped binary + static files) is still cached, so pushes that touch only
 docs or config files get a fast final-stage build.
 
-**Effort:** S (1 line). Can land in W5 as part of any CI-touching PR.
+**Effort:** S (1 line).
 
 **Predicted effect:** Docker warm build remains ~1–2 min; go-build and npm
 caches stop being evicted, keeping backend warm at ~1.5 min. Critical-path
@@ -153,7 +155,7 @@ Effort: ~20 lines of YAML. See P26-05-36 in
 | W1 PR #35 warm-cache target | ~3 min |
 | Theoretical warm-cache critical path (post-PR #35) | ~2–2.5 min |
 | Live data available | No — `gh` not installed; use protocol in §3 |
-| Next quick win | `docker buildx cache-to: mode=min` (1 line, W5) |
+| Next quick win | `docker buildx cache-to: mode=min` — **closed** (`claude/w5-ci-cache-mode-min`) |
 | Most likely failure mode | GHA cache eviction forcing docker cold build |
 
 ---
