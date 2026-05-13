@@ -37,9 +37,12 @@ A web-based CI/CD management tool with a **graph-based UI** for visually buildin
 - **Audit log**: per-route slog audit trail, on by default in production. Destination configurable (`stdout` or `file`) via `COOKER_AUDIT_DESTINATION` / `COOKER_AUDIT_FILE_PATH`.
 - **Multi-replica state**: rate limiter, WebSocket ticket store, and WebSocket broadcast hub back onto Redis when `COOKER_RATE_LIMIT_BACKEND=redis` / `COOKER_WS_TICKET_BACKEND=redis` / `COOKER_WS_HUB_BACKEND=redis` (chart defaults to all three). See [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md).
 - **Builders**: `docker` (host socket — dev only; refused at boot in production), `kaniko` (in-cluster Job, default), `buildah` (in-cluster Job, full Dockerfile parity), or `buildkit` (gRPC against an external buildkitd). Selectable via `COOKER_BUILDER`. Raw-K8s manifests at `deploy/kubernetes/` no longer mount `/var/run/docker.sock` — closes S26-05-04.
+- **Pushers**: `crane` (default; go-containerregistry) or `docker` (dev only; refused at boot in production alongside `COOKER_BUILDER=docker` — closes F-02).
 - **Deploy targets**: Kubernetes, Cloud Run, AWS ECS / Fargate, Fly.io, Render. See [Cloud deploy targets](#cloud-deploy-targets).
 - **Retention**: optional Helm-rendered CronJob prunes `pipeline_runs` older than `retention.daysToKeep` (default 90 days) at 02:00 UTC daily; gated on `retention.enabled && database.host`.
-- **Orphan sweep**: stale-heartbeat runs are reaped on a configurable interval (`COOKER_ORPHAN_SWEEP_INTERVAL`, default 60s; must exceed `heartbeatInterval`).
+- **Orphan sweep**: stale-heartbeat runs are reaped on a configurable interval (`COOKER_ORPHAN_SWEEP_INTERVAL`, default 60s; must exceed `heartbeatInterval`). App-deploy runs create the `PipelineRun` row before heartbeat starts so OOM-killed pods leave an orphan row for the sweep to reap (closes F-07).
+- **Version flag**: `cooker --version` prints `version`, `commit`, `date` (ldflags-populated); same metadata on `GET /api/v1/version`. Module path is `github.com/santapong/cooker`.
+- **Raw-K8s liveness probes**: `deploy/kubernetes/deployment.yaml` now probes `/health/live` + `/health/ready` (matching the Helm chart) so the raw install path no longer crash-loops on cold boot (closes F-01).
 
 See [docs/architecture.md](docs/architecture.md) for the full architecture document and [docs/adr/](docs/adr/) for the structural decisions and their rationale.
 
@@ -419,7 +422,7 @@ Three cooker-internal pieces of state are per-process by default and need shared
 |----------|-------------|
 | [docs/architecture.md](docs/architecture.md) | System architecture, component map, data flow, OCI integration |
 | [docs/design.md](docs/design.md) | Design patterns, conventions, auth flow, testing strategy, contributor checklist (§11) |
-| [docs/adr/](docs/adr/) | Architecture decision records (strategy interfaces, secrets manager, JSONB) |
+| [docs/adr/](docs/adr/) | Architecture decision records (strategy interfaces, secrets manager, JSONB graph, **multi-tenancy A3-defer**) |
 | [docs/openapi.yaml](docs/openapi.yaml) | Hand-curated OpenAPI 3.1 sketch |
 | `backend/docs/api/swagger.yaml` | Generated OpenAPI from `swag` annotations — regenerate with `make swagger` |
 | [CHANGELOG.md](CHANGELOG.md) | Version history following Keep a Changelog format |
@@ -434,7 +437,7 @@ Three cooker-internal pieces of state are per-process by default and need shared
 | [docs/protocols.md](docs/protocols.md) | Custom Cooker protocols proposal — CKR-LOG/1 (binary log stream) + CKR-DSL (pipeline DSL) |
 | [docs/shipping-go.md](docs/shipping-go.md) | Research: how mature OSS Go products release and operate, applied to Cooker |
 | [docs/marketing/strategy.md](docs/marketing/strategy.md) | OSS adoption marketing strategy (90-day post-launch horizon) |
-| [docs/audits/](docs/audits/) | Audit series. May 2026: security review, perf/optimization, dag-performance, W11 personas, W11 follow-up, **adapter-wiring**, **handler-layering**, **store-parity**, **deploy-parity**, **frontend-hygiene**, **half-shipped** |
+| [docs/audits/](docs/audits/) | Audit series. May 2026: security review, perf/optimization, dag-performance, W11 personas, W11 follow-up, adapter-wiring, handler-layering, store-parity, deploy-parity, frontend-hygiene, half-shipped, **action-pinning (W2)**, **cache-plumb sketch (W2)**, **P#1 unmarshaller corpus (W2)**, **P#1 context-pack (W2)**, **W11 quickwin wireframes (W2)** |
 
 ## Contributing
 
