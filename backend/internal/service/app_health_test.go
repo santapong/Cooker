@@ -13,7 +13,7 @@ import (
 
 // fakeAppLister is a minimal in-memory AppLister for the health-check
 // tests. Records every UpdateHealth so assertions can pin the exact
-// (status, message, ts) tuple the checker wrote.
+// (status, message, ts, url) tuple the checker wrote.
 type fakeAppLister struct {
 	mu         sync.Mutex
 	listResult []*model.App
@@ -23,10 +23,11 @@ type fakeAppLister struct {
 }
 
 type healthWrite struct {
-	id      string
-	status  model.AppHealth
-	message string
-	at      time.Time
+	id          string
+	status      model.AppHealth
+	message     string
+	at          time.Time
+	deployedURL string
 }
 
 func (f *fakeAppLister) List(_ context.Context) ([]*model.App, error) {
@@ -40,13 +41,13 @@ func (f *fakeAppLister) List(_ context.Context) ([]*model.App, error) {
 	return out, nil
 }
 
-func (f *fakeAppLister) UpdateHealth(_ context.Context, id string, status model.AppHealth, msg string, at time.Time) error {
+func (f *fakeAppLister) UpdateHealth(_ context.Context, id string, status model.AppHealth, msg string, at time.Time, deployedURL string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.writeErr != nil {
 		return f.writeErr
 	}
-	f.writes = append(f.writes, healthWrite{id: id, status: status, message: msg, at: at})
+	f.writes = append(f.writes, healthWrite{id: id, status: status, message: msg, at: at, deployedURL: deployedURL})
 	return nil
 }
 
@@ -70,11 +71,11 @@ func TestAppHealthChecker_TickWritesPerTargetVerdict(t *testing.T) {
 
 	checker := NewAppHealthChecker(apps,
 		WithClock(func() time.Time { return now }),
-		WithProber(model.DeployTargetKubernetes, ProberFunc(func(_ context.Context, a *model.App) (model.AppHealth, string) {
-			return model.AppHealthHealthy, "all replicas ready"
+		WithProber(model.DeployTargetKubernetes, ProberFunc(func(_ context.Context, a *model.App) (model.AppHealth, string, string) {
+			return model.AppHealthHealthy, "all replicas ready", ""
 		})),
-		WithProber(model.DeployTargetCloudRun, ProberFunc(func(_ context.Context, a *model.App) (model.AppHealth, string) {
-			return model.AppHealthDegraded, "latest revision not ready"
+		WithProber(model.DeployTargetCloudRun, ProberFunc(func(_ context.Context, a *model.App) (model.AppHealth, string, string) {
+			return model.AppHealthDegraded, "latest revision not ready", ""
 		})),
 	)
 
@@ -91,13 +92,40 @@ func TestAppHealthChecker_TickWritesPerTargetVerdict(t *testing.T) {
 		"u": {id: "u", status: model.AppHealthUnknown, message: "no health probe registered for target kind weird-future-kind", at: now},
 	}
 	for _, w := range got {
-		if got, ok := want[w.id]; ok {
-			if w != got {
-				t.Errorf("write for %q: got %+v want %+v", w.id, w, got)
+		if want, ok := want[w.id]; ok {
+			if w.status != want.status || w.message != want.message || !w.at.Equal(want.at) {
+				t.Errorf("write for %q: got {status:%q msg:%q at:%v} want {status:%q msg:%q at:%v}",
+					w.id, w.status, w.message, w.at, want.status, want.message, want.at)
 			}
 		} else {
 			t.Errorf("unexpected write: %+v", w)
 		}
+	}
+}
+
+func TestAppHealthChecker_TickIncludesDeployedURL(t *testing.T) {
+	now := time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+	apps := &fakeAppLister{
+		listResult: []*model.App{
+			{ID: "fly", Name: "fly-app", DeployTarget: model.DeployTarget{Kind: model.DeployTargetFly}},
+		},
+	}
+
+	checker := NewAppHealthChecker(apps,
+		WithClock(func() time.Time { return now }),
+		WithProber(model.DeployTargetFly, ProberFunc(func(_ context.Context, a *model.App) (model.AppHealth, string, string) {
+			return model.AppHealthHealthy, "running", "https://fly-app.fly.dev"
+		})),
+	)
+
+	checker.tick(context.Background())
+
+	got := apps.snapshot()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 write, got %d", len(got))
+	}
+	if got[0].deployedURL != "https://fly-app.fly.dev" {
+		t.Errorf("deployedURL: got %q want %q", got[0].deployedURL, "https://fly-app.fly.dev")
 	}
 }
 
@@ -118,8 +146,8 @@ func TestAppHealthChecker_DeletedAppRaceTolerated(t *testing.T) {
 		writeErr: store.ErrNotFound,
 	}
 	checker := NewAppHealthChecker(apps,
-		WithProber(model.DeployTargetKubernetes, ProberFunc(func(_ context.Context, _ *model.App) (model.AppHealth, string) {
-			return model.AppHealthHealthy, ""
+		WithProber(model.DeployTargetKubernetes, ProberFunc(func(_ context.Context, _ *model.App) (model.AppHealth, string, string) {
+			return model.AppHealthHealthy, "", ""
 		})),
 	)
 	// Should not panic / log.Fatal — ErrNotFound is benign.
@@ -157,7 +185,7 @@ func TestAppHealthChecker_ProberPanicRecovered(t *testing.T) {
 		},
 	}
 	checker := NewAppHealthChecker(apps,
-		WithProber(model.DeployTargetKubernetes, ProberFunc(func(_ context.Context, _ *model.App) (model.AppHealth, string) {
+		WithProber(model.DeployTargetKubernetes, ProberFunc(func(_ context.Context, _ *model.App) (model.AppHealth, string, string) {
 			panic("flaky cloud SDK")
 		})),
 	)
@@ -182,12 +210,12 @@ func TestAppHealthChecker_ProberPanicRecovered(t *testing.T) {
 func TestWithProber_NilUnregisters(t *testing.T) {
 	apps := &fakeAppLister{}
 	checker := NewAppHealthChecker(apps,
-		WithProber(model.DeployTargetKubernetes, ProberFunc(func(_ context.Context, _ *model.App) (model.AppHealth, string) {
-			return model.AppHealthHealthy, "registered"
+		WithProber(model.DeployTargetKubernetes, ProberFunc(func(_ context.Context, _ *model.App) (model.AppHealth, string, string) {
+			return model.AppHealthHealthy, "registered", ""
 		})),
 		WithProber(model.DeployTargetKubernetes, nil), // unregister
 	)
-	got, msg := checker.proberFor(model.DeployTargetKubernetes).Probe(context.Background(), &model.App{
+	got, msg, _ := checker.proberFor(model.DeployTargetKubernetes).Probe(context.Background(), &model.App{
 		DeployTarget: model.DeployTarget{Kind: model.DeployTargetKubernetes},
 	})
 	if got != model.AppHealthUnknown {

@@ -72,13 +72,35 @@ export default function EnvironmentsPage() {
       />
 
       {environments.length === 0 && !loading ? (
+        // Empty-state CTA — Indie step 2 (W11-A3, PR #50).
         <EmptyState
           title="No environments yet."
-          body="Set up dev → staging → production so promotions have somewhere to flow."
+          body="Set up dev → staging → production so deploys have a conveyor belt to roll along."
           action={
-            <Btn kind="primary" icon="spark" onClick={seed} disabled={busy}>
-              {busy ? 'Setting up…' : 'Seed dev / staging / prod'}
-            </Btn>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Btn kind="primary" icon="spark" onClick={seed} disabled={busy}>
+                {busy ? 'Setting up…' : 'Seed dev / staging / prod'}
+              </Btn>
+              <a
+                href="https://github.com/santapong/Cooker/blob/main/docs/user-guide/README.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 16px',
+                  border: `1px solid currentColor`,
+                  borderRadius: 7,
+                  fontSize: 13.5,
+                  color: 'inherit',
+                  textDecoration: 'none',
+                  opacity: 0.7,
+                }}
+              >
+                Read the user guide ↗
+              </a>
+            </div>
           }
         />
       ) : (

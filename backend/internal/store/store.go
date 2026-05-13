@@ -66,7 +66,9 @@ type AppStore interface {
 	// service.AppHealthChecker on its periodic tick. Returns
 	// ErrNotFound if the App is gone (probe lost the race with a
 	// delete) — callers should log and skip rather than retry.
-	UpdateHealth(ctx context.Context, id string, status model.AppHealth, msg string, at time.Time) error
+	// deployedURL may be empty for targets that don't expose an ingress;
+	// an empty string leaves a previously-written URL intact in the store.
+	UpdateHealth(ctx context.Context, id string, status model.AppHealth, msg string, at time.Time, deployedURL string) error
 }
 
 // HostStore manages managed-host persistence (Phase 4).
