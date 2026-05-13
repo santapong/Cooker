@@ -87,6 +87,6 @@ make uat-up
 
 ## Cross-references
 
-- **[`CHANGELOG.md`](https://github.com/cooker-ci/cooker/blob/main/CHANGELOG.md)** — version history.
+- **[`CHANGELOG.md`](https://github.com/santapong/cooker/blob/main/CHANGELOG.md)** — version history.
 - **[Postgres](../operations/postgres.md)** — backup and the boot-time migration story.
 - **[`docs/shipping-go.md`](../../shipping-go.md)** — why there isn't an `UPGRADING.md` yet, and when there will be.

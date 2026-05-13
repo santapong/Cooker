@@ -230,4 +230,4 @@ These are baked into the JS bundle at `npm run build`, not read at runtime. Sett
 ## Cross-references
 
 - **[Configuration](../getting-started/configuration.md)** — narrative version with examples.
-- **[`backend/internal/config/config.go`](https://github.com/cooker-ci/cooker/blob/main/backend/internal/config/config.go)** — the source.
+- **[`backend/internal/config/config.go`](https://github.com/santapong/cooker/blob/main/backend/internal/config/config.go)** — the source.

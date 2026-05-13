@@ -11,7 +11,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/cooker-ci/cooker/internal/observability"
+	"github.com/santapong/cooker/internal/observability"
 )
 
 // secureJitter returns a uniformly-random duration in [0, d/2]. The

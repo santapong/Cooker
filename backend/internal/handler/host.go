@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/validate"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/validate"
 )
 
 func validateHostInput(h *model.Host) error {

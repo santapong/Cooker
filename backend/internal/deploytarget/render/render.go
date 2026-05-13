@@ -15,8 +15,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/deploytarget"
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/deploytarget"
+	"github.com/santapong/cooker/internal/model"
 )
 
 const baseURL = "https://api.render.com/v1"

@@ -10,9 +10,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cooker-ci/cooker/internal/crypto"
-	"github.com/cooker-ci/cooker/internal/secrets"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/crypto"
+	"github.com/santapong/cooker/internal/secrets"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // Manager is the database-backed secrets.Manager.

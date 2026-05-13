@@ -11,7 +11,7 @@ const docTemplate = `{
         "title": "{{.Title}}",
         "contact": {
             "name": "Cooker maintainers",
-            "url": "https://github.com/cooker-ci/cooker"
+            "url": "https://github.com/santapong/cooker"
         },
         "license": {
             "name": "Apache-2.0",

@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/cooker-ci/cooker/internal/oci"
+	"github.com/santapong/cooker/internal/oci"
 )
 
 func ListRepositories(c *gin.Context) {

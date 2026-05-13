@@ -11,9 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/secrets"
-	"github.com/cooker-ci/cooker/internal/store/memory"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/secrets"
+	"github.com/santapong/cooker/internal/store/memory"
 )
 
 // fakeKeepSave mimics the subset of the KeepSave HTTP API the adapter

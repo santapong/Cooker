@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/deploytarget"
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/deploytarget"
+	"github.com/santapong/cooker/internal/model"
 )
 
 // Target is the fly.io Machines API adapter.

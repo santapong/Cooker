@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/cooker-ci/cooker/internal/audit"
-	"github.com/cooker-ci/cooker/internal/auth"
+	"github.com/santapong/cooker/internal/audit"
+	"github.com/santapong/cooker/internal/auth"
 )
 
 // recordingSink captures emitted events without I/O.

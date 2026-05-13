@@ -6,11 +6,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cooker-ci/cooker/internal/builder"
-	"github.com/cooker-ci/cooker/internal/deployer"
-	"github.com/cooker-ci/cooker/internal/gitops"
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/pusher"
+	"github.com/santapong/cooker/internal/builder"
+	"github.com/santapong/cooker/internal/deployer"
+	"github.com/santapong/cooker/internal/gitops"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/pusher"
 )
 
 // mockBuilder records every Build call and returns a configured

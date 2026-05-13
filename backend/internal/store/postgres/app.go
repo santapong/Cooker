@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // appColumns is the canonical SELECT-list for an App. Centralised so

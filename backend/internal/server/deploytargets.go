@@ -4,12 +4,12 @@ import (
 	"errors"
 	"log/slog"
 
-	"github.com/cooker-ci/cooker/internal/config"
-	"github.com/cooker-ci/cooker/internal/deploytarget"
-	"github.com/cooker-ci/cooker/internal/deploytarget/cloudrun"
-	"github.com/cooker-ci/cooker/internal/deploytarget/ecs"
-	"github.com/cooker-ci/cooker/internal/deploytarget/flyio"
-	"github.com/cooker-ci/cooker/internal/deploytarget/render"
+	"github.com/santapong/cooker/internal/config"
+	"github.com/santapong/cooker/internal/deploytarget"
+	"github.com/santapong/cooker/internal/deploytarget/cloudrun"
+	"github.com/santapong/cooker/internal/deploytarget/ecs"
+	"github.com/santapong/cooker/internal/deploytarget/flyio"
+	"github.com/santapong/cooker/internal/deploytarget/render"
 )
 
 // registerDeployTargets registers the cloud deploy-target adapters

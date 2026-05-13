@@ -11,10 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/cooker-ci/cooker/internal/auth"
-	"github.com/cooker-ci/cooker/internal/auth/local"
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/auth"
+	"github.com/santapong/cooker/internal/auth/local"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // LocalAuthHandler exposes the email + password endpoints. Wired into

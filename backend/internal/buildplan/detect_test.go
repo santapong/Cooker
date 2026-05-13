@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/model"
 )
 
 type fakeFileInfo struct {

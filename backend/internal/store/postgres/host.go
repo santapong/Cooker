@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cooker-ci/cooker/internal/model"
-	"github.com/cooker-ci/cooker/internal/store"
+	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // HostStore implements store.HostStore using PostgreSQL.

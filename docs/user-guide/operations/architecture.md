@@ -48,7 +48,7 @@ A condensed map of the system, for people running Cooker. For the full architect
 
 ## What ships in one container
 
-The Cooker container image (`ghcr.io/cooker-ci/cooker:<tag>`, once releases are wired up) contains:
+The Cooker container image (`ghcr.io/santapong/cooker:<tag>`, once releases are wired up) contains:
 
 | Component | Path inside container |
 |---|---|

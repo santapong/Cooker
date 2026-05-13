@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cooker-ci/cooker/internal/builder"
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/builder"
+	"github.com/santapong/cooker/internal/model"
 )
 
 // TestStageLogChannel locks down the wire-format string. The server

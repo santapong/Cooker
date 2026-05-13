@@ -203,4 +203,4 @@ The generated version is more complete and is the truth-source when they disagre
 
 - **[Webhooks](webhooks.md)** — payload format.
 - **[CLI](cli.md)** — what's wired today (very little) and what's roadmap.
-- **[`backend/internal/server/router.go`](https://github.com/cooker-ci/cooker/blob/main/backend/internal/server/router.go)** — the source.
+- **[`backend/internal/server/router.go`](https://github.com/santapong/cooker/blob/main/backend/internal/server/router.go)** — the source.

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/cooker-ci/cooker/internal/model"
+	"github.com/santapong/cooker/internal/model"
 )
 
 // Promoter handles promotion logic between environments (Dev → Staging → Production).

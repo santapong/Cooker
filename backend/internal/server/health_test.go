@@ -11,8 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/cooker-ci/cooker/internal/store"
-	"github.com/cooker-ci/cooker/internal/store/memory"
+	"github.com/santapong/cooker/internal/store"
+	"github.com/santapong/cooker/internal/store/memory"
 )
 
 func TestLivenessHandler_AlwaysOK(t *testing.T) {

@@ -99,7 +99,7 @@ Reveal returns the plaintext. Listing environments NEVER returns secret values, 
 
 Today, every authenticated user can read every environment's metadata (target, namespace, plainVars, secretKeys — but NOT secret values). The redaction is one-deep: secret values are never serialised, but the rest is exposed.
 
-This is intentional but visible: `S26-05-09` in the [security review](../../audits/2026-05-security-review.md) documents it and `C1` on the [roadmap](https://github.com/cooker-ci/cooker/blob/main/docs/roadmap-2026.md) tracks the multi-tenancy ADR.
+This is intentional but visible: `S26-05-09` in the [security review](../../audits/2026-05-security-review.md) documents it and `C1` on the [roadmap](https://github.com/santapong/cooker/blob/main/docs/roadmap-2026.md) tracks the multi-tenancy ADR.
 
 ## Cross-references
 
