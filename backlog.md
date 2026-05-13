@@ -288,7 +288,11 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 
 ## Closed (recent)
 
-Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), and the `claude/w3-t1-t3-handler-f1` PR (executor stubs + drain goroutine + DAG validator dedup):
+Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), the `claude/w3-t1-t3-handler-f1` PR (executor stubs + drain goroutine + DAG validator dedup), and the `claude/w4-t4-edge-condition-refuse` PR (T4 forward-compat Edge.Condition refusal):
+
+### `claude/w4-t4-edge-condition-refuse` — T4 edge condition forward-compat guard
+
+- ✅ **§6 T4 — `Edge.Condition` unsupported values refused at validation** — `ValidatePipelineDAG` in `internal/service/pipeline.go` now appends an error for any edge whose `Condition` is non-empty and not `"success"`. A pipeline imported from YAML or a CKR-DSL round-trip with `condition: failure` will fail at validation time with `service: edge X->Y: condition "failure" not yet supported (only "success" or empty)` rather than silently running as success. Empty-string and `"success"` conditions are unchanged (allowed). Primitive #2 (W6, DR-4) replaces this refusal with real evaluation per `dag-adaptation-2026.md §7.2`. Three new sub-tests in `TestValidatePipelineDAG_EdgeCondition`.
 
 ### `claude/w3-t1-t3-handler-f1` — executor stubs + drain race + DAG validator dedup
 

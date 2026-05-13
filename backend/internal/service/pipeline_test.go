@@ -135,6 +135,51 @@ func TestValidatePipelineDAG_DanglingEdge(t *testing.T) {
 	})
 }
 
+// TestValidatePipelineDAG_EdgeCondition verifies the T4 forward-compat check
+// (dag-adaptation-2026.md §6 T4): edges with Condition="" or Condition="success"
+// are allowed; any other value is refused until Primitive #2 wires real
+// evaluation in W6.
+func TestValidatePipelineDAG_EdgeCondition(t *testing.T) {
+	t.Run("empty condition allowed", func(t *testing.T) {
+		p := &model.Pipeline{
+			Stages: []model.Stage{{ID: "build"}, {ID: "test"}},
+			Edges:  []model.Edge{{ID: "e1", Source: "build", Target: "test", Condition: ""}},
+		}
+		errs := ValidatePipelineDAG(p)
+		if len(errs) != 0 {
+			t.Errorf("expected no errors for empty condition, got %v", errs)
+		}
+	})
+
+	t.Run("success condition allowed", func(t *testing.T) {
+		p := &model.Pipeline{
+			Stages: []model.Stage{{ID: "build"}, {ID: "test"}},
+			Edges:  []model.Edge{{ID: "e1", Source: "build", Target: "test", Condition: "success"}},
+		}
+		errs := ValidatePipelineDAG(p)
+		if len(errs) != 0 {
+			t.Errorf("expected no errors for condition=success, got %v", errs)
+		}
+	})
+
+	t.Run("failure condition rejected", func(t *testing.T) {
+		p := &model.Pipeline{
+			Stages: []model.Stage{{ID: "build"}, {ID: "notify"}},
+			Edges:  []model.Edge{{ID: "e1", Source: "build", Target: "notify", Condition: "failure"}},
+		}
+		errs := ValidatePipelineDAG(p)
+		found := false
+		for _, e := range errs {
+			if e == `service: edge build->notify: condition "failure" not yet supported (only "success" or empty)` {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected unsupported condition error, got %v", errs)
+		}
+	})
+}
+
 func TestBuildDAGFromPipeline_Valid(t *testing.T) {
 	p := &model.Pipeline{
 		Stages: []model.Stage{
