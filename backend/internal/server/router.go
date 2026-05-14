@@ -9,56 +9,21 @@ import (
 	"github.com/santapong/cooker/internal/handler"
 )
 
-// registerRoutes sets up all API routes.
-//
-// Authorization model: the /api/v1 group requires a valid OIDC
-// session (or the dev user when OIDC is disabled). On top of that,
-// state-changing routes are gated by auth.RequireRole so that a
-// user with only RoleViewer cannot mutate resources. The two
-// shortcut middlewares below — `writeRole` and `adminRole` — capture
-// the two policies: most writes need operator OR admin; destructive
-// deletes and credential rotations need admin. Secret reveal, webhook
-// rotation, and promotion approval keep their per-handler checks so
-// RBAC is enforced both at the router and at the point of sensitive
-// action, which is what a reader auditing the handler expects to see.
-//
-// Phase-1 / A3: three sensitive routes additionally adopt the new
-// auth.RequirePermission middleware as a declarative resource-action
-// guard alongside the role check. Belt-and-braces — dropping one
-// gate by accident still leaves the other in place. Incremental
-// adoption: more routes can switch to RequirePermission in follow-ups
-// without a flag day.
 func (s *Server) registerRoutes() {
-	// Local-auth signup + signin live OUTSIDE the /api/v1 auth group:
-	// they're how an unauthenticated client gets a token in the first
-	// place. /me is inside the group because it requires a valid session.
 	if s.localAuth != nil {
 		s.router.POST("/api/v1/auth/local/signup", s.localAuth.Signup)
 		s.router.POST("/api/v1/auth/local/signin", s.localAuth.Signin)
 	}
-	// Public capability probe so the frontend knows which auth methods
-	// to render. No auth required — every unauthenticated client needs
-	// to know whether to show the SSO button, the local-auth form, or
-	// both.
 	s.router.GET("/api/v1/auth/methods", s.authMethods)
 
 	api := s.router.Group("/api/v1", s.oidcMW.Handler())
-	// Audit middleware sits immediately after auth so claims are in
-	// context. It self-filters to mutating verbs; GETs pass through
-	// untouched.
 	api.Use(auditMiddleware(s.audit))
 
 	h := s.handler
 	writeRole := auth.RequireRole(auth.RoleOperator, auth.RoleAdmin)
 	adminRole := auth.RequireRole(auth.RoleAdmin)
-	// Step-up MFA gate. Empty COOKER_OIDC_MFA_ACR_VALUES yields a
-	// passthrough; configured values require the token's `acr` (or
-	// `amr`) to match. Applied to admin-only destructive operations.
 	mfa := auth.RequireMFA(s.config.OIDC.MFAACRValues...)
 
-	// Per-user rate limit applied to expensive endpoints below.
-	// Disabled when COOKER_RATE_LIMIT_ENABLED=false (multi-replica
-	// deployments rely on edge limiting; see SECURITY.md).
 	var expensive gin.HandlerFunc
 	switch {
 	case !s.config.RateLimit.Enabled:
@@ -69,7 +34,6 @@ func (s *Server) registerRoutes() {
 		expensive = newRateLimiter(s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
 	}
 
-	// Pipeline routes
 	pipelines := api.Group("/pipelines")
 	{
 		pipelines.GET("", h.ListPipelines)
@@ -86,9 +50,20 @@ func (s *Server) registerRoutes() {
 		pipelines.GET("/:id/runs/:runId", h.GetPipelineRun)
 		pipelines.POST("/:id/runs/:runId/cancel", writeRole, h.CancelPipelineRun)
 		pipelines.GET("/:id/runs/:runId/logs/:stageId", h.GetStageLogs)
+		// Phase-2 / F4: create a pipeline from a catalog template. Same
+		// writeRole gate as POST /pipelines (creating-via-template is
+		// just a parameterised create).
+		pipelines.POST("/from-template/:id", writeRole, h.CreatePipelineFromTemplate)
 	}
 
-	// Docker routes
+	// Phase-2 / F4 templates catalog. Read endpoints are available to
+	// any authenticated user; the gallery view is metadata only.
+	templates := api.Group("/templates")
+	{
+		templates.GET("", h.ListTemplates)
+		templates.GET("/:id", h.GetTemplate)
+	}
+
 	docker := api.Group("/docker")
 	{
 		docker.GET("/images", handler.ListDockerImages)
@@ -102,22 +77,17 @@ func (s *Server) registerRoutes() {
 		docker.GET("/containers/:id/logs", handler.GetContainerLogs)
 		docker.POST("/compose/parse", handler.ParseComposeFile)
 		docker.PUT("/compose/services/:name", writeRole, handler.UpdateComposeService)
-
-		// Networks
 		docker.GET("/networks", h.ListDockerNetworks)
 		docker.POST("/networks", writeRole, h.CreateDockerNetwork)
 		docker.GET("/networks/:id", h.GetDockerNetwork)
 		docker.DELETE("/networks/:id", adminRole, h.DeleteDockerNetwork)
 		docker.POST("/networks/:id/connect", writeRole, h.ConnectContainerToNetwork)
-
-		// Volumes
 		docker.GET("/volumes", h.ListDockerVolumes)
 		docker.POST("/volumes", writeRole, h.CreateDockerVolume)
 		docker.GET("/volumes/:name", h.GetDockerVolume)
 		docker.DELETE("/volumes/:name", adminRole, h.DeleteDockerVolume)
 	}
 
-	// OCI Registry routes
 	registry := api.Group("/registry")
 	{
 		registry.GET("/repositories", handler.ListRepositories)
@@ -128,7 +98,6 @@ func (s *Server) registerRoutes() {
 		registry.GET("/:name/referrers/:digest", handler.GetReferrers)
 	}
 
-	// Kubernetes routes
 	kubernetes := api.Group("/kubernetes")
 	{
 		kubernetes.GET("/namespaces", handler.ListNamespaces)
@@ -141,7 +110,6 @@ func (s *Server) registerRoutes() {
 		kubernetes.DELETE("/:ns/:kind/:name", adminRole, handler.DeleteResource)
 	}
 
-	// Environment routes
 	environments := api.Group("/environments")
 	{
 		environments.GET("", h.ListEnvironments)
@@ -157,12 +125,10 @@ func (s *Server) registerRoutes() {
 		environments.POST("/:id/secrets/promote", adminRole, mfa, h.PromoteSecrets)
 	}
 
-	// Promotion routes (nested under pipeline runs)
 	api.POST("/pipelines/:id/runs/:runId/promote", writeRole, h.PromoteRun)
 	api.POST("/pipelines/:id/runs/:runId/approve", h.ApprovePromotion)
 	api.GET("/pipelines/:id/runs/:runId/env-status", h.GetEnvStatus)
 
-	// App routes — the user-facing "Deploy" button and its CRUD.
 	apps := api.Group("/apps")
 	{
 		apps.GET("", h.ListApps)
@@ -177,7 +143,6 @@ func (s *Server) registerRoutes() {
 			h.SetAppWebhookSecret)
 	}
 
-	// Managed hosts (Phase 4).
 	hosts := api.Group("/hosts")
 	{
 		hosts.GET("", h.ListHosts)
@@ -188,25 +153,16 @@ func (s *Server) registerRoutes() {
 	}
 
 	// Git provider webhook receivers (unauthenticated — each provider's
-	// signature / token header is the authentication). The idempotency
-	// middleware captures provider-specific delivery IDs (X-GitHub-
-	// Delivery, X-Gitlab-Event-UUID, X-Hook-UUID for Bitbucket, X-Gitea
-	// -Delivery) so retried deliveries replay the original response
-	// instead of triggering duplicate deploys.
+	// signature / token header is the authentication).
 	s.router.POST("/webhooks/github", idempotencyMiddleware(s.idempotency), h.GitHubWebhook)
 	s.router.POST("/webhooks/gitlab", idempotencyMiddleware(s.idempotency), h.GitLabWebhook)
 	s.router.POST("/webhooks/bitbucket", idempotencyMiddleware(s.idempotency), h.BitbucketWebhook)
 	s.router.POST("/webhooks/gitea", idempotencyMiddleware(s.idempotency), h.GiteaWebhook)
 
-	// Local-auth /me lives inside the auth group because it needs a
-	// session. It works for both local and OIDC sessions because the
-	// underlying middleware populates the same auth.Claims either way.
 	if s.localAuth != nil {
 		api.GET("/auth/local/me", s.localAuth.Me)
 	}
 
-	// Settings routes — treating as admin-only because they change
-	// how Cooker talks to external systems (registries, clusters).
 	settings := api.Group("/settings")
 	{
 		settings.GET("/registries", handler.ListRegistryConfigs)
@@ -216,9 +172,6 @@ func (s *Server) registerRoutes() {
 		settings.POST("/clusters", adminRole, handler.AddClusterConfig)
 	}
 
-	// Ticket exchange for WebSocket upgrades. The browser POSTs here
-	// over the authenticated /api/v1 group, gets back a single-use
-	// 60-second ticket, then opens /ws/... with ?ticket=<value>.
 	api.POST("/ws-tickets", func(c *gin.Context) {
 		claims := auth.GetUser(c)
 		if claims == nil {
@@ -236,10 +189,6 @@ func (s *Server) registerRoutes() {
 		})
 	})
 
-	// WebSocket routes. Each request must present a single-use
-	// ticket obtained from POST /api/v1/ws-tickets. The ticket
-	// gate runs before the upgrade so unauthenticated probing
-	// gets 401 without ever touching the hub.
 	ws := s.router.Group("/ws", s.wsTicketGate())
 	{
 		ws.GET("/pipeline-run/:runId", func(c *gin.Context) {
@@ -259,11 +208,6 @@ func (s *Server) registerRoutes() {
 		})
 	}
 
-	// Serve frontend static files in production. The OIDC redirect
-	// URI (/callback) is handled entirely in the browser via PKCE —
-	// the backend never sees the auth code, so no server-side
-	// callback handler is needed. NoRoute serves index.html for all
-	// unmatched paths, including /callback.
 	s.router.NoRoute(func(c *gin.Context) {
 		c.File("/usr/share/cooker/static/index.html")
 	})

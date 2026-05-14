@@ -47,11 +47,12 @@ type Server struct {
 	runs          *RunCoordinator
 	idempotency   idempotency.Store
 	jobQueue      *jobQueueDeps
-	// scheduler is the Phase-2 cron loop. nil when disabled or when
-	// jobqueue is off (the runner needs the jobqueue's Enqueuer). When
-	// non-nil, RunContext launches Runner.Run alongside the HTTP server
-	// and the shutdown branch waits for it to drain.
-	scheduler    *schedulerDeps
+	scheduler     *schedulerDeps
+	// templatesDB is the dedicated *sql.DB opened by bootTemplates
+	// when the jobqueue is off; nil when templates share the
+	// jobqueue's pool or when the templates feature is disabled.
+	// Closed in Server.Close after the WS hub.
+	templatesDB *struct{ closer func() error }
 	healthCancel context.CancelFunc
 	healthDone   chan struct{}
 }
@@ -213,15 +214,29 @@ func New(cfg *config.Config) (*Server, error) {
 		h.Enqueuer = jobDeps.Enqueuer
 	}
 
-	// Phase-2 / F2 cron scheduler. Returns nil when disabled. Requires
-	// jobqueue to be enabled (the runner enqueues runs through the
-	// jobqueue's Enqueuer); when jobqueue is off and scheduler is on,
-	// bootScheduler returns an error and config.Validate() catches the
-	// combo earlier in production.
 	schedDeps, err := bootScheduler(ctx, cfg, jobDeps)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("scheduler boot: %w", err)
+	}
+
+	// Phase-2 / F4 pipeline-template catalog. Returns (nil, nil, nil)
+	// in dev-mode without a DB; the /templates endpoints will respond
+	// 503. Shares the jobqueue's *sql.DB when available; otherwise
+	// opens a small dedicated pool we have to close on shutdown.
+	tplStore, tplOwnedDB, err := bootTemplates(ctx, cfg, jobDeps)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("templates boot: %w", err)
+	}
+	if tplStore != nil {
+		h.Templates = tplStore
+	}
+	var templatesDBCloser *struct{ closer func() error }
+	if tplOwnedDB != nil {
+		db := tplOwnedDB
+		templatesDBCloser = &struct{ closer func() error }{closer: db.Close}
+		cleanups = append(cleanups, func() { _ = db.Close() })
 	}
 
 	sweepCtx, sweepCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -275,6 +290,7 @@ func New(cfg *config.Config) (*Server, error) {
 		idempotency:   idem,
 		jobQueue:      jobDeps,
 		scheduler:     schedDeps,
+		templatesDB:   templatesDBCloser,
 		healthCancel:  healthCancel,
 		healthDone:    healthDone,
 	}
@@ -339,12 +355,6 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		// Shutdown drain order (extended for scheduler):
-		// 1. HTTP drain
-		// 2. run coordinator drain
-		// 3. job queue pool drain (workers complete in-flight jobs)
-		// 4. scheduler drain (lock release; loop returns on ctx)
-		// 5. health checker cancel + 5s wait
 		slog.Info("shutdown: draining HTTP server", "timeout", shutdownTimeout.String())
 		drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
@@ -410,6 +420,9 @@ func (s *Server) Close() error {
 	}
 	if s.jobQueue != nil {
 		s.jobQueue.closeAll()
+	}
+	if s.templatesDB != nil && s.templatesDB.closer != nil {
+		_ = s.templatesDB.closer()
 	}
 	if s.store == nil {
 		return nil
