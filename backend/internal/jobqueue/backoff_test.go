@@ -6,18 +6,15 @@ import (
 )
 
 func TestExponentialBackoffMonotonicAndCapped(t *testing.T) {
-	b := ExponentialBackoff{Base: 1 * time.Second, Max: 30 * time.Second}
-	// Take the floor of each (i.e. before jitter) by sampling many
-	// times; the minimum across samples is the no-jitter delay.
-	min := func(attempt int) time.Duration {
-		var m time.Duration = 1<<62 - 1
-		for i := 0; i < 64; i++ {
-			if d := b.NextDelay(attempt); d < m {
-				m = d
-			}
-		}
-		return m
-	}
+	base := 1 * time.Second
+	maxD := 30 * time.Second
+	b := ExponentialBackoff{Base: base, Max: maxD}
+	// Each NextDelay returns `floor + jitter` where jitter ∈ [0, base/2].
+	// The chance of any single sample landing on the no-jitter floor is
+	// effectively zero (jitter is computed via crypto/rand mod base/2 in
+	// nanoseconds, so the support is ~5×10^8 values for base=1s). Assert
+	// the range [floor, floor + base/2] instead — equivalent semantic
+	// check, deterministic outcome.
 	cases := map[int]time.Duration{
 		1: 1 * time.Second,
 		2: 2 * time.Second,
@@ -27,9 +24,15 @@ func TestExponentialBackoffMonotonicAndCapped(t *testing.T) {
 		6: 30 * time.Second, // capped
 		7: 30 * time.Second, // capped
 	}
+	maxJitter := base / 2
 	for attempt, want := range cases {
-		if got := min(attempt); got != want {
-			t.Errorf("attempt %d: floor=%v want %v", attempt, got, want)
+		for i := 0; i < 16; i++ {
+			got := b.NextDelay(attempt)
+			if got < want || got > want+maxJitter {
+				t.Errorf("attempt %d sample %d: got=%v want range [%v, %v]",
+					attempt, i, got, want, want+maxJitter)
+				break
+			}
 		}
 	}
 }

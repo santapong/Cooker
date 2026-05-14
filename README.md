@@ -65,6 +65,8 @@ Whether you're a solo developer deploying a side project to Fly.io or a platform
 
 > **Status:** production-ready on single-replica and multi-replica (Redis-backed) deployments. `Config.Validate` refuses unsafe boots in production. See the [rollout playbook](docs/ROLLOUT.md) for the UAT → production cutover.
 
+> **Recently shipped (May 2026 W6):** Phase 1 + Phase 2 of the Dokploy adaptation work landed in PR #89 — a durable Postgres-backed job queue, formal run/stage state machine, resource-action permission middleware, multi-channel notifications (Slack/Discord/Email/Webhook), cron-triggered runs, GitLab/Bitbucket/Gitea webhook receivers, and a pipeline templates catalog. All gated behind default-off feature flags; merging is a no-op until an operator opts in. See [`docs/adapted-from-dokploy.md`](docs/adapted-from-dokploy.md) for the attribution matrix and [`docs/architecture-phase1-phase2.md`](docs/architecture-phase1-phase2.md) for the new subsystem deep-dive.
+
 ## 🤔 Why Cooker?
 
 | Pain point | How Cooker solves it |
@@ -117,6 +119,12 @@ Whether you're a solo developer deploying a side project to Fly.io or a platform
 - **Run deadlines** — circuit-break long-running stages automatically
 - **Graceful 30 s shutdown** drains in-flight runs on SIGTERM
 - **Orphan sweep** reaps stale runs after OOM kills
+- **Durable async job queue** (Phase 1 / default-off) — runs survive restarts via Postgres `FOR UPDATE SKIP LOCKED` + `LISTEN/NOTIFY`; per-pipeline concurrency keys
+- **Formal state machine** (Phase 1) for run / stage status — invalid transitions rejected at the API boundary, terminal-sticky
+- **Cron-triggered runs** (Phase 2 / default-off) — leader-elected via `pg_advisory_lock`; in-house POSIX cron parser with IANA timezone support
+- **Multi-provider git webhooks** — GitHub + GitLab + Bitbucket Server + Gitea, each with provider-correct signature verification (`hmac.Equal` / `subtle.ConstantTimeCompare`)
+- **Multi-channel notifications** — Slack, Discord, Email (SMTP), generic JSON webhook; per-target event-type filters
+- **Pipeline templates** — catalog + create-from-template with fresh-ID deep-copy + DAG re-validation
 
 </details>
 
@@ -407,6 +415,10 @@ Cooker is configured entirely via environment variables. Production-mode (`COOKE
 | `COOKER_WS_TICKET_BACKEND` | `memory` | `memory` · `redis` |
 | `COOKER_WS_HUB_BACKEND` | `memory` | `memory` · `redis` |
 | `COOKER_STICKY_SESSIONS` | `false` | Set `true` if your ingress pins clients to the same replica |
+| `COOKER_JOBQUEUE_ENABLED` | `false` | Phase 1: spawn the durable job-queue worker pool and switch `RunPipeline` to async enqueue |
+| `COOKER_JOBQUEUE_WORKERS` | `4` | Worker goroutine count (only when jobqueue enabled) |
+| `COOKER_SCHEDULER_ENABLED` | `false` | Phase 2 F2: spawn the cron-triggered runs loop (requires `COOKER_JOBQUEUE_ENABLED=true`) |
+| `COOKER_SCHEDULER_TICK` | `30s` | Scheduler tick interval; smaller = faster overdue catch, more queries |
 
 <details>
 <summary><b>Auth & OIDC variables</b></summary>
@@ -761,8 +773,13 @@ Cooker/
 │   │   ├── crypto/           AES-GCM codec for app webhook secrets
 │   │   ├── retry/            Bounded retry helpers
 │   │   ├── idempotency/      Run-launch dedupe + pg_advisory_lock
+│   │   ├── jobqueue/         Phase 1 / A1: durable Postgres job queue + workers + NOTIFY
+│   │   ├── runstate/         Phase 1 / A2: run + stage FSM with typed invalid-transition errors
+│   │   ├── notifier/         Phase 2 / F1: Slack/Discord/Email/Webhook dispatcher
+│   │   ├── scheduler/        Phase 2 / F2: leader-elected cron-triggered runs
+│   │   ├── templates/        Phase 2 / F4: pipeline template catalog
 │   │   ├── buildplan/        Clone→Build→Push→Deploy run synthesis
-│   │   ├── source/           Repo clone helpers
+│   │   ├── source/           Repo clone helpers + Phase 2 / F3 webhook parsers (github, gitlab, bitbucket, gitea)
 │   │   ├── validate/         Cross-cutting validation
 │   │   ├── model/            Domain types
 │   │   ├── oci/              OCI image-spec types, media types, validation
@@ -893,6 +910,8 @@ make test-e2e
 | Document | Description |
 |----------|-------------|
 | [Architecture](docs/architecture.md) | System architecture · component map · data flow · OCI integration |
+| [Architecture — Phase 1 + Phase 2](docs/architecture-phase1-phase2.md) | New subsystems: jobqueue, runstate FSM, permission middleware, notifier, scheduler |
+| [Adapted from Dokploy](docs/adapted-from-dokploy.md) | What was adapted, what was skipped, what was deferred — with paths into both codebases |
 | [Design Patterns](docs/design.md) | Layering · error wrapping · test strategy · contributor checklist (§11) |
 | [ADRs](docs/adr/) | Architecture decision records |
 | [Roadmap 2026](docs/roadmap-2026.md) | Strategic themes for the year |
@@ -1117,13 +1136,34 @@ Found a security issue? Please follow the [responsible disclosure policy](SECURI
 
 ## 🗺️ Roadmap
 
+### ✅ Recently shipped — Phase 1 + Phase 2 (May 2026 W6)
+
 | Theme | What |
 |-------|------|
+| **Durable async execution** | Postgres-backed job queue + `NOTIFY` wake-ups + `FOR UPDATE SKIP LOCKED` pickup + per-pipeline concurrency keys + exp. backoff |
+| **Run state machine** | Formal FSM with typed `ErrInvalidTransition`; state alphabet pinned to `model.RunStatus` |
+| **Permission middleware** | Resource × action matrix + `RequirePermission` Gin middleware (defense-in-depth alongside roles + MFA) |
+| **Notifications** | Slack / Discord / Email / Webhook fan-out via `errors.Join`; per-target `SendTimeout` |
+| **Cron triggers** | Leader-elected (`pg_advisory_lock`) scheduler with in-house POSIX cron parser; DST-correct IANA timezones |
+| **Git providers** | GitLab + Bitbucket Server + Gitea webhook receivers alongside GitHub |
+| **Templates v1** | Pipeline-template catalog + create-from-template with fresh stage IDs + DAG re-validation |
+
+Full attribution + design rationale: [`docs/adapted-from-dokploy.md`](docs/adapted-from-dokploy.md)
+Full Phase 1+2 architecture: [`docs/architecture-phase1-phase2.md`](docs/architecture-phase1-phase2.md)
+Ready-to-paste CHANGELOG entry: [`docs/CHANGELOG-PHASE1-PHASE2.md`](docs/CHANGELOG-PHASE1-PHASE2.md)
+
+### 🚀 Upcoming
+
+| Theme | What |
+|-------|------|
+| **Admin UI** | CRUD endpoints + frontend pages for templates / schedules / notification-targets |
 | **DAG primitives** | Retry policies · conditional edges · fan-out matrix · cache plumbing · stage outputs |
+| **Executor migration** | Switch `service/executor.go` status writes through `runstate.TransitionRun` (mechanical; primitive in place) |
 | **More deploy targets** | Kamal · Cloud Run depth · HashiCorp Nomad |
 | **Pipeline-as-code** | CKR-DSL parser · import from Drone / GitHub Actions YAML |
-| **Marketplace** | Sharable pipeline templates · org-scoped catalog |
+| **Marketplace** | Sharable pipeline templates · org-scoped catalog · frontend gallery |
 | **AI assist** | Suggest stages · explain failures (local heuristics first, optional hosted LLM) |
+| **Builder breadth** | Nixpacks · Railpack · Paketo · Heroku Buildpacks |
 
 - 📋 **Active backlog** with effort estimates: [`backlog.md`](backlog.md)
 - 🗓️ **Strategic plan:** [`docs/roadmap-2026.md`](docs/roadmap-2026.md)

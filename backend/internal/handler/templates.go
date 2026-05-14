@@ -128,8 +128,8 @@ func (h *Handler) CreatePipelineFromTemplate(c *gin.Context) {
 		newPipeline.Stages = append(newPipeline.Stages, s)
 	}
 	for _, e := range schema.Edges {
-		e.From = stageIDMap[e.From]
-		e.To = stageIDMap[e.To]
+		e.Source = stageIDMap[e.Source]
+		e.Target = stageIDMap[e.Target]
 		newPipeline.Edges = append(newPipeline.Edges, e)
 	}
 
@@ -152,4 +152,120 @@ func (h *Handler) CreatePipelineFromTemplate(c *gin.Context) {
 		"templateId": tpl.ID,
 		"pipeline":   newPipeline,
 	})
+}
+
+// adminTemplateRequest is the JSON body of POST /admin/templates and
+// PUT /admin/templates/:id. Schema is the Pipeline-shaped JSONB blob
+// the gallery materialises via CreatePipelineFromTemplate; we do not
+// re-validate it here because operators may stage a template before
+// the referenced builders/clusters exist. ValidatePipelineDAG runs at
+// create-from-template time, which is the right boundary.
+type adminTemplateRequest struct {
+	Name        string          `json:"name" binding:"required"`
+	Description string          `json:"description,omitempty"`
+	Category    string          `json:"category,omitempty"`
+	Schema      json.RawMessage `json:"schema" binding:"required"`
+	IconURL     string          `json:"iconUrl,omitempty"`
+	Enabled     *bool           `json:"enabled,omitempty"`
+}
+
+// CreateTemplate is the admin-only Create endpoint. Operators who
+// want to seed via SQL can keep doing so; this endpoint exists so
+// the (future) settings UI doesn't need DB access.
+func (h *Handler) CreateTemplate(c *gin.Context) {
+	if h.Templates == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "templates store not configured"})
+		return
+	}
+	var req adminTemplateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validate.Name("name", req.Name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	tpl := templates.Template{
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		Description: req.Description,
+		Category:    req.Category,
+		Schema:      req.Schema,
+		IconURL:     req.IconURL,
+		Enabled:     enabled,
+	}
+	if err := h.Templates.Create(c.Request.Context(), tpl); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, tpl)
+}
+
+// UpdateTemplate replaces a template by ID. 404 if the template
+// doesn't exist (the store reports ErrNotFound from the UPDATE
+// rows-affected check).
+func (h *Handler) UpdateTemplate(c *gin.Context) {
+	if h.Templates == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "templates store not configured"})
+		return
+	}
+	id := c.Param("id")
+	existing, err := h.Templates.Get(c.Request.Context(), id)
+	if errors.Is(err, templates.ErrNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var req adminTemplateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validate.Name("name", req.Name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	existing.Name = req.Name
+	existing.Description = req.Description
+	existing.Category = req.Category
+	existing.Schema = req.Schema
+	existing.IconURL = req.IconURL
+	if req.Enabled != nil {
+		existing.Enabled = *req.Enabled
+	}
+	if err := h.Templates.Update(c.Request.Context(), existing); err != nil {
+		if errors.Is(err, templates.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, existing)
+}
+
+// DeleteTemplate removes a template by ID. 404 on unknown.
+func (h *Handler) DeleteTemplate(c *gin.Context) {
+	if h.Templates == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "templates store not configured"})
+		return
+	}
+	err := h.Templates.Delete(c.Request.Context(), c.Param("id"))
+	if errors.Is(err, templates.ErrNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

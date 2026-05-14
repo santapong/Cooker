@@ -213,11 +213,17 @@ func New(cfg *config.Config) (*Server, error) {
 	if jobDeps.Enqueuer != nil {
 		h.Enqueuer = jobDeps.Enqueuer
 	}
+	if jobDeps.TargetStore != nil {
+		h.NotificationTargets = jobDeps.TargetStore
+	}
 
 	schedDeps, err := bootScheduler(ctx, cfg, jobDeps)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("scheduler boot: %w", err)
+	}
+	if schedDeps != nil && schedDeps.Store != nil {
+		h.Schedules = schedDeps.Store
 	}
 
 	// Phase-2 / F4 pipeline-template catalog. Returns (nil, nil, nil)

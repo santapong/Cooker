@@ -12,6 +12,8 @@ import (
 
 	"github.com/santapong/cooker/internal/crypto"
 	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/scheduler"
 	"github.com/santapong/cooker/internal/secrets"
 	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/store"
@@ -52,6 +54,15 @@ type Handler struct {
 	// returns 503 from the /templates endpoints; the rest of the API
 	// is unaffected. Set by server.New when DATABASE_URL is non-empty.
 	Templates templates.Store
+	// Schedules is the cron-trigger catalog (Phase-2 / F2). nil returns
+	// 503 from the /admin/schedules endpoints. Set by server.New when
+	// COOKER_SCHEDULER_ENABLED=true.
+	Schedules scheduler.Store
+	// NotificationTargets is the notifier-target catalog (Phase-2 / F1).
+	// nil returns 503 from the /admin/notification-targets endpoints.
+	// Set by server.New when COOKER_JOBQUEUE_ENABLED=true (the
+	// dispatcher only fires when the queue is running anyway).
+	NotificationTargets notifier.TargetStore
 }
 
 // New constructs a Handler bound to the given store. secs may be nil

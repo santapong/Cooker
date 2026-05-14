@@ -17,6 +17,7 @@ import (
 	"github.com/santapong/cooker/internal/observability"
 	"github.com/santapong/cooker/internal/pusher"
 	"github.com/santapong/cooker/internal/retry"
+	"github.com/santapong/cooker/internal/runstate"
 	"github.com/santapong/cooker/pkg/dagrunner"
 )
 
@@ -211,7 +212,23 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 	startedCancelled := run.Status == model.RunStatusCancelled
 
 	now := time.Now()
-	run.Status = model.RunStatusRunning
+	// Route the pending→running transition through runstate so an
+	// unexpected initial state (e.g. terminal Failed re-run) is logged
+	// as ErrInvalidTransition rather than silently overwritten. When
+	// startedCancelled is true the transition refuses, leaving the
+	// status as Cancelled; we explicitly stamp Running below because
+	// observers (the WS hub, GET handlers) need to see in-flight state
+	// even for pre-cancelled runs — finalize() restores Cancelled via
+	// the startedCancelled flag.
+	if next, terr := runstate.TransitionRun(run.Status, runstate.EventStart); terr == nil {
+		run.Status = next
+	} else if !startedCancelled {
+		slog.Warn("pipeline: unexpected initial state at Execute",
+			"run", run.ID, "status", run.Status, "err", terr)
+		run.Status = model.RunStatusRunning
+	} else {
+		run.Status = model.RunStatusRunning
+	}
 	run.StartedAt = &now
 
 	runner := dagrunner.NewRunnerBounded(dag, func(ctx context.Context, nodeID string) error {
@@ -241,7 +258,18 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 
 		startTime := time.Now()
 		stageRun.StartedAt = &startTime
-		stageRun.Status = model.RunStatusRunning
+		// Route stage start through runstate so a stage rerun from a
+		// terminal state (operator triggered, currently uncommon)
+		// surfaces as a log-level invariant rather than silently
+		// flipping the stage row. Fall back to direct assignment on
+		// invalid transition to preserve current behaviour.
+		if next, terr := runstate.TransitionStage(stageRun.Status, runstate.EventStart); terr == nil {
+			stageRun.Status = next
+		} else {
+			slog.Warn("pipeline: unexpected stage initial state",
+				"run", run.ID, "stage", stage.Name, "status", stageRun.Status, "err", terr)
+			stageRun.Status = model.RunStatusRunning
+		}
 		// Progress is now persisted by the drain goroutine below via
 		// runner.Updates(). No explicit persistProgress call here.
 
@@ -296,7 +324,11 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		duration := endTime.Sub(startTime)
 
 		if stageErr != nil {
-			stageRun.Status = model.RunStatusFailed
+			if next, terr := runstate.TransitionStage(stageRun.Status, runstate.EventFail); terr == nil {
+				stageRun.Status = next
+			} else {
+				stageRun.Status = model.RunStatusFailed
+			}
 			stageRun.Error = stageErr.Error()
 			observability.ObserveStageDuration(string(stage.Type), "failed", duration)
 			// Terminal status: the drain goroutine flushes immediately
@@ -304,7 +336,11 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			return stageErr
 		}
 
-		stageRun.Status = model.RunStatusSuccess
+		if next, terr := runstate.TransitionStage(stageRun.Status, runstate.EventSucceed); terr == nil {
+			stageRun.Status = next
+		} else {
+			stageRun.Status = model.RunStatusSuccess
+		}
 		observability.ObserveStageDuration(string(stage.Type), "success", duration)
 		// Terminal status: the drain goroutine flushes immediately
 		// when it receives the "success" StatusUpdate from the runner.
@@ -407,25 +443,38 @@ func (e *Executor) finalize(run *model.PipelineRun, runErr error, startedCancell
 	finishTime := time.Now()
 	run.FinishedAt = &finishTime
 
+	// Route the running→terminal transition through runstate so an
+	// out-of-band caller can't drive the row through an illegal edge
+	// (e.g. Pending→Success). The startedCancelled / Cancelled
+	// precedence still wins by short-circuit — the FSM doesn't model
+	// "caller-pinned terminal" intent, so we apply that rule first.
+	terminal := func(event runstate.Event, fallback model.RunStatus) {
+		if next, terr := runstate.TransitionRun(run.Status, event); terr == nil {
+			run.Status = next
+		} else {
+			run.Status = fallback
+		}
+	}
+
 	switch {
 	case startedCancelled || run.Status == model.RunStatusCancelled:
 		// Caller pre-marked the run cancelled — do not flip to
-		// Success or Failed. Preserve any existing Error verbatim
-		// (CancelPipelineRun does not set one, but a future caller
-		// might want to attribute the cancellation).
-		run.Status = model.RunStatusCancelled
+		// Success or Failed. Preserve any existing Error verbatim.
+		// We still route through TransitionRun so a Running→Cancelled
+		// transition is recorded canonically when applicable.
+		terminal(runstate.EventCancel, model.RunStatusCancelled)
 	case runErr != nil && errors.Is(runErr, context.Canceled):
-		run.Status = model.RunStatusCancelled
+		terminal(runstate.EventCancel, model.RunStatusCancelled)
 		if run.Error == "" {
 			run.Error = runErr.Error()
 		}
 	case runErr != nil:
-		run.Status = model.RunStatusFailed
+		terminal(runstate.EventFail, model.RunStatusFailed)
 		if run.Error == "" {
 			run.Error = runErr.Error()
 		}
 	default:
-		run.Status = model.RunStatusSuccess
+		terminal(runstate.EventSucceed, model.RunStatusSuccess)
 	}
 
 	return model.RunResult{Status: run.Status, FinishedAt: finishTime}

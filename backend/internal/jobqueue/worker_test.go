@@ -258,9 +258,19 @@ func TestPoolPayloadRoundTrip(t *testing.T) {
 	type payload struct {
 		Name string `json:"name"`
 	}
-	var got payload
+	var (
+		mu  sync.Mutex
+		got payload
+	)
 	reg.Register("k", func(ctx context.Context, j *Job) error {
-		return json.Unmarshal(j.Payload, &got)
+		var local payload
+		if err := json.Unmarshal(j.Payload, &local); err != nil {
+			return err
+		}
+		mu.Lock()
+		got = local
+		mu.Unlock()
+		return nil
 	})
 	pool, _ := NewPool(PoolOptions{Store: store, Registry: reg, Size: 1, PollEvery: 5 * time.Millisecond})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -273,7 +283,12 @@ func TestPoolPayloadRoundTrip(t *testing.T) {
 	if _, err := store.Enqueue(ctx, "k", bs, EnqueueOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if !waitForCondition(t, 2*time.Second, func() bool { return got.Name == in.Name }) {
+	if !waitForCondition(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return got.Name == in.Name
+	}) {
+		mu.Lock()
 		t.Fatalf("got=%+v want %+v", got, in)
 	}
 	cancel()
