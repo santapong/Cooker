@@ -21,12 +21,13 @@ import (
 // the caller treats that as "no queue" and falls back to the inline
 // RunPipeline path.
 type jobQueueDeps struct {
-	Pool       *jobqueue.Pool
-	Store      jobqueue.Store
-	Listener   *jobqueue.PqListener
-	DB         *sql.DB
-	Dispatcher *notifier.Dispatcher
-	Enqueuer   *service.JobQueueEnqueuer
+	Pool        *jobqueue.Pool
+	Store       jobqueue.Store
+	Listener    *jobqueue.PqListener
+	DB          *sql.DB
+	Dispatcher  *notifier.Dispatcher
+	TargetStore notifier.TargetStore
+	Enqueuer    *service.JobQueueEnqueuer
 }
 
 // closeAll releases every resource held by the deps in reverse boot
@@ -117,12 +118,13 @@ func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec
 		"listener", listener != nil)
 
 	return &jobQueueDeps{
-		Pool:       pool,
-		Store:      pgStore,
-		Listener:   listener,
-		DB:         db,
-		Dispatcher: dispatcher,
-		Enqueuer:   enqueuer,
+		Pool:        pool,
+		Store:       pgStore,
+		Listener:    listener,
+		DB:          db,
+		Dispatcher:  dispatcher,
+		TargetStore: targetStore,
+		Enqueuer:    enqueuer,
 	}, nil
 }
 

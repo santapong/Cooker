@@ -36,6 +36,10 @@ const (
 	DeployTargetECS        DeployTargetKind = "ecs"
 	DeployTargetFly        DeployTargetKind = "fly"
 	DeployTargetRender     DeployTargetKind = "render"
+	// DeployTargetSSH is the Dokploy/Coolify model: pull and `docker
+	// run` an image over SSH on a registered HostKindSSHDocker host.
+	// No agent on the remote, no Kubernetes, no cloud API.
+	DeployTargetSSH DeployTargetKind = "ssh"
 )
 
 // BuildPlan is a resolved build strategy for an App's repository.

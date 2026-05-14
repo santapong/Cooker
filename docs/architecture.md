@@ -1,5 +1,16 @@
 # Cooker Architecture
 
+> **Phase 1 + Phase 2 (May 2026 W6):** This document covers Cooker's
+> stable architecture. Five new subsystems landed in PR #89 —
+> durable job queue, run-state FSM, permission middleware, notifier,
+> cron scheduler — and are documented separately in
+> [`docs/architecture-phase1-phase2.md`](./architecture-phase1-phase2.md).
+> They are gated by default-off feature flags
+> (`COOKER_JOBQUEUE_ENABLED`, `COOKER_SCHEDULER_ENABLED`) so this
+> document remains accurate for any deployment that hasn't opted
+> in. The full Dokploy attribution matrix is in
+> [`docs/adapted-from-dokploy.md`](./adapted-from-dokploy.md).
+
 ## Overview
 
 Cooker is a three-tier web application for CI/CD pipeline management with visual graph editing, Docker/Kubernetes operations, and full OCI standard compliance.
@@ -98,11 +109,18 @@ Cooker is a three-tier web application for CI/CD pipeline management with visual
 | **Pusher** | `internal/pusher/` | `Pusher` interface + adapters: `crane` (`go-containerregistry`), `docker` (CLI shell-out), `noop`. |
 | **Deployer** | `internal/deployer/` | `Deployer` interface + adapters: `kubectl` (CLI shell-out), `clientgo` (dynamic client + server-side apply), `noop`. |
 | **DeployTarget** | `internal/deploytarget/` | App-deploy adapters per cloud runtime: `kubernetes`, `cloudrun`, `ecs` (Fargate), `flyio`, `render`. Self-register on non-empty config. |
+| **DeployTarget / SSH** | `internal/deploytarget/ssh/` | Dokploy/Coolify-style remote: SSH into a registered host (kind `ssh-docker`), run `docker pull` + `docker run -d --restart=always`. Host-key TOFU pinning is mandatory; `Config.ValidateSSHHosts` refuses production boot if any host has `sshStrictHostKey=false`. |
 | **GitOps** | `internal/gitops/` | `Writer` interface + `gogit` adapter (`go-git/v5`). Used by GitOpsCommit pipeline node. |
 | **Observability** | `internal/observability/` | Prometheus `/metrics` (Gin middleware) + OpenTelemetry tracing (otelgin + OTLP/gRPC exporter). Both opt-in. |
 | **DAG Runner** | `pkg/dagrunner/` | Reusable, standalone DAG execution engine. Topological sort into parallel levels, concurrent execution, status updates via channel. |
 | **OCI Utilities** | `pkg/ociutil/` | Higher-level helpers: manifest parsing, index parsing, layer size calculation. |
 | **Config** | `internal/config/` | Environment-variable-based configuration loading with defaults. |
+| **Job queue** | `internal/jobqueue/` | Durable Postgres job queue: store, worker pool, `pq.NewListener`, exponential backoff. Phase 1 / A1 (`COOKER_JOBQUEUE_ENABLED`). |
+| **Run state machine** | `internal/runstate/` | Run + stage state machine (FSM with typed invalid-transition errors). Phase 1 / A2. |
+| **Notifier** | `internal/notifier/` | Multi-channel dispatcher: Slack / Discord / Email / Webhook adapters. Phase 2 / F1. |
+| **Scheduler** | `internal/scheduler/` | Leader-elected cron-triggered runs (`pg_advisory_lock` + in-house POSIX cron parser). Phase 2 / F2 (`COOKER_SCHEDULER_ENABLED`). |
+| **Templates** | `internal/templates/` | Pipeline-template catalog + create-from-template flow. Phase 2 / F4. |
+| **Webhook parsers** | `internal/source/{gitlab,bitbucket,gitea}/` | Provider-specific push parsers + signature verifiers (`X-Gitlab-Token`, HMAC-SHA256, raw-hex HMAC-SHA256). Phase 2 / F3. |
 
 ### Data Flow
 
@@ -281,6 +299,43 @@ Cooker manages deployments to three environments. Each can point to a different 
 | **Dev** | Namespace `cooker-dev` in the same cluster, or a separate dev cluster |
 | **Staging** | Namespace `cooker-staging` or a dedicated staging cluster |
 | **Production** | Separate production cluster (recommended) or `cooker-prod` namespace |
+
+## New subsystems (Phase 1 + Phase 2)
+
+Five subsystems were added in PR #89. Each is default-off and
+additive — the existing components above this section behave
+identically until an operator flips the feature flag.
+
+| Subsystem | Package | Migration | Feature flag |
+|---|---|---|---|
+| Durable job queue | `internal/jobqueue/` | `010_jobs` | `COOKER_JOBQUEUE_ENABLED` |
+| Run / stage FSM | `internal/runstate/` | — | (always loaded; only the executor migration is gated) |
+| Resource-action permissions | `internal/auth/permission.go` | — | (always loaded; routes adopt incrementally) |
+| Multi-channel notifier | `internal/notifier/` | `011_notification_targets` | (always loaded; off when no targets configured) |
+| Cron scheduler | `internal/scheduler/` | `012_schedules` | `COOKER_SCHEDULER_ENABLED` |
+| Pipeline templates | `internal/templates/` | `013_pipeline_templates` | (always loaded; endpoints 503 when no DB) |
+
+The interaction shape:
+
+```
+cron tick OR HTTP /pipelines/:id/run
+        │
+        ▼
+JobQueueEnqueuer.EnqueueRun(pipelineID, runID)
+        │
+        ▼                                  ┌─ worker pool (N goroutines)
+INSERT jobs + NOTIFY cooker_jobs_new ──────▼
+                                          worker.Dequeue()  (FOR UPDATE SKIP LOCKED)
+                                          │
+                                          ▼
+                                  JobQueueRunner.Handle
+                                    ├─ Executor.Execute (unchanged)
+                                    ├─ Store.Runs.Update
+                                    └─ Notifier.Dispatch ─────────────────▶ Slack / Discord / Email / Webhook
+```
+
+Deep-dive: [`docs/architecture-phase1-phase2.md`](./architecture-phase1-phase2.md).
+Attribution: [`docs/adapted-from-dokploy.md`](./adapted-from-dokploy.md).
 
 ## Design Decisions
 

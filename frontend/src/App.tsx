@@ -29,6 +29,9 @@ const EnvironmentsPage = lazy(() => import('./pages/EnvironmentsPage'))
 const HostsPage = lazy(() => import('./pages/HostsPage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const RegistryPage = lazy(() => import('./pages/RegistryPage'))
+const SchedulesPage = lazy(() => import('./pages/SchedulesPage'))
+const NotificationTargetsPage = lazy(() => import('./pages/NotificationTargetsPage'))
+const TemplatesGalleryPage = lazy(() => import('./pages/TemplatesGalleryPage'))
 
 /**
  * Full-viewport skeleton shown while a lazy route chunk is being fetched.
@@ -71,6 +74,9 @@ export default function App() {
                     <Route path="/hosts" element={<MainLayout><HostsPage /></MainLayout>} />
                     <Route path="/settings" element={<MainLayout><SettingsPage /></MainLayout>} />
                     <Route path="/registry" element={<MainLayout><RegistryPage /></MainLayout>} />
+                    <Route path="/admin/schedules" element={<MainLayout><SchedulesPage /></MainLayout>} />
+                    <Route path="/admin/notifications" element={<MainLayout><NotificationTargetsPage /></MainLayout>} />
+                    <Route path="/admin/templates" element={<MainLayout><TemplatesGalleryPage /></MainLayout>} />
                   </Routes>
                 </Suspense>
               </ProtectedRoute>

@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — SSH remote deploy target (Thread 1, Dokploy/Coolify model)
+
+- New `deploytarget/ssh` adapter: SSH into a registered host
+  (`HostKindSSHDocker = "ssh-docker"`), run `docker pull` then
+  `docker run -d --restart=always`. No agent on the remote, no
+  Kubernetes, no cloud API. Host-key TOFU pinning is mandatory
+  (`golang.org/x/crypto/ssh` with a strict `HostKeyCallback`).
+- New `DeployTargetSSH = "ssh"` constant on `model.DeployTargetKind`.
+- New SSH fields on `model.Host`: `SSHEndpoint`, `SSHUser`,
+  `SSHPort`, `SSHPrivateKeyRef` (write-only, never serialised),
+  `SSHKnownHostKey` (TOFU-pinned), `SSHStrictHostKey`. PEM bodies
+  flow through `secrets.Manager` via a new `service.HostService`.
+- New migration `014_ssh_hosts` adds the columns idempotently
+  (`ADD COLUMN IF NOT EXISTS`); down migration drops them.
+- Hosts page extended: kind selector now includes
+  `ssh-docker`; the form accepts a private-key PEM textarea and
+  a strict-host-key toggle (default ON). `GET /hosts/:id`
+  redacts the PEM ref and surfaces only `hasSSHPrivateKey`.
+- `Config.ValidateSSHHosts` refuses production boot if any
+  registered SSH host has `sshStrictHostKey=false`. Runs after
+  the store is open but before serving traffic.
+
+### Added — May 2026 W6 batch (PR #89: Phase 1 + Phase 2 Dokploy adaptation)
+
+Closed in a 16-commit branch (`claude/analyze-dokploy-integration-NTrW3`).
+All new subsystems are gated by default-off feature flags; merging
+is a no-op for any operator who hasn't flipped `COOKER_JOBQUEUE_ENABLED`.
+Full design rationale and "what we adapted from Dokploy" matrix in
+[`docs/adapted-from-dokploy.md`](docs/adapted-from-dokploy.md) and
+[`docs/architecture-phase1-phase2.md`](docs/architecture-phase1-phase2.md).
+
+#### Phase 1 — architectural primitives
+
+- **A1: Durable async job queue** (`internal/jobqueue/`). Postgres-native with `FOR UPDATE SKIP LOCKED` for lock-free pickup and `NOTIFY cooker_jobs_new` for near-instant worker wake-up. `EnqueueOptions.ConcurrencyKey` enforces per-key serialisation via a `NOT EXISTS` guard inside the dequeue query. Worker pool with panic-recover, capped exponential backoff with jitter, atomic `Reschedule` that transitions to terminal `failed` when `attempts >= max_attempts`. Three new Prometheus series: `cooker_jobqueue_depth{status}`, `cooker_jobqueue_attempts_total{kind}`, `cooker_jobqueue_run_duration_seconds{kind,outcome}`. Migration `010_jobs.up.sql`. Gated by `COOKER_JOBQUEUE_ENABLED=false` by default; when off, `RunPipeline` keeps using the inline `Runs.Spawn` path. Pattern adapted from Dokploy's BullMQ + Inngest dual queue but reimplemented Postgres-native to avoid making Redis mandatory.
+
+- **A2: Run + stage state machine** (`internal/runstate/`). Formal transition-table FSM with typed `ErrInvalidTransition`. State alphabet is pinned to `model.RunStatus` (`pending`, `running`, `success`, `failed`, `cancelled`) via a test assertion so a future rename can't drift the two. `TransitionRun(current, event)` adapter returns the input state unchanged on error. Terminal-sticky property covered by exhaustive tests. In-house 80-LOC FSM rather than `github.com/looplab/fsm` because `push_files` over the GitHub MCP can't run `go mod tidy`; semantic guarantee is identical and a swap is mechanical.
+
+- **A3: Resource-action permission middleware** (`internal/auth/permission.go`). `Resource` and `Action` typed constants, role × resource × action matrix with deny-by-default for undeclared pairs. `RequirePermission(resource, action)` Gin middleware applied at route registration alongside the existing `RequireRole` / `RequireMFA`. Three sensitive routes adopted: `POST /pipelines/:id/run` (`(pipeline, invoke)`), `GET /environments/:id/secrets/:key` (`(secret, reveal)`), `PUT /apps/:id/webhook` (`(webhook, update)`). Remaining routes adopt incrementally without a flag day. Pattern adapted from Dokploy's tRPC `withPermission` middleware.
+
+#### Phase 2 — feature gaps
+
+- **F1: Multi-channel notification fan-out** (`internal/notifier/`). Four channel adapters — Slack (incoming-webhook), Discord (color-coded embed), generic Webhook (JSON POST with optional bearer token + arbitrary headers), Email (SMTP via stubbable `SMTPSender`). `Dispatcher` fans out concurrently with `errors.Join` for per-target failures and per-target `SendTimeout` (default 10s). Per-event-type `text/template` rendering. `Target` rows carry an `event_types` array filter (empty = all events) for per-target event scoping. Migration `011_notification_targets.up.sql`. Dispatched by `service.JobQueueRunner.Handle` on terminal run status so a slow Slack webhook can't slow run completion.
+
+- **F2: Cron-triggered pipeline runs** (`internal/scheduler/`). In-house 5-field POSIX cron parser supporting `*`, lists, ranges, steps; operates in the schedule's IANA location for DST-correct firing. Search capped at 4 years to bail on pathological expressions. Runner uses `pg_try_advisory_lock` on a dedicated connection for continuous (not one-shot) leader election. Per-tick: scan `schedules` for `enabled AND next_run_at <= NOW()`, enqueue a pipeline-run job through the existing `JobQueueEnqueuer`, atomically `MarkFired` with computed `next_run_at`. Bad cron expressions disable the row rather than looping forever. Migration `012_schedules.up.sql`. Gated by `COOKER_SCHEDULER_ENABLED=false` by default; production `Config.Validate()` rejects `SCHEDULER_ENABLED=true` without `JOBQUEUE_ENABLED=true`.
+
+- **F3: GitLab + Bitbucket Server + Gitea webhook receivers** (`internal/source/{gitlab,bitbucket,gitea}/`, handlers `internal/handler/webhook_{gitlab,bitbucket,gitea}.go`). Each package mirrors `internal/source/github` with provider-specific signature verifiers. GitLab uses a literal `X-Gitlab-Token` (no HMAC); Bitbucket Server and Gitea use HMAC-SHA256 with different header conventions (Bitbucket prefixes `sha256=`, Gitea sends raw hex). All comparisons use `subtle.ConstantTimeCompare` / `hmac.Equal`. Three new endpoints, `POST /webhooks/{gitlab,bitbucket,gitea}`, mirroring the existing `/webhooks/github` flow exactly. Bitbucket Cloud not supported in v1 (Atlassian doesn't sign Cloud webhooks).
+
+- **F4: Pipeline templates v1** (`internal/templates/`). A `pipeline_templates` table carries reusable Pipeline-shaped JSONB schemas. New endpoints: `GET /api/v1/templates` (gallery), `GET /api/v1/templates/:id` (single template + schema), `POST /api/v1/pipelines/from-template/:id` (create-from-template). Create-from-template deep-copies the schema with fresh stage IDs (re-mapping edges accordingly) and re-validates through `service.ValidatePipelineDAG`. Operators seed templates via SQL in v1. Migration `013_pipeline_templates.up.sql`.
+
+#### Integration + safety
+
+- **Default-off feature flags throughout**. With both `COOKER_JOBQUEUE_ENABLED` and `COOKER_SCHEDULER_ENABLED` off, the runtime is byte-identical to pre-Phase-1 except for two no-op nil-checks.
+- **Deterministic shutdown order**. HTTP drain → run coordinator drain → jobqueue pool drain → scheduler drain → health checker drain. Each step has its own timeout.
+- **Migrations**: `010_jobs`, `011_notification_targets`, `012_schedules`, `013_pipeline_templates`.
+
 ### Added — May 2026 W5 batch (PRs #78, #79, #80, #81, #82, #83, #84)
 
 **Fifth week of execution.** Closes the **handler-layering audit** in full (F1+F2+F3 all merged), finalises the **multi-tenancy ADR** as `Accepted (A3-defer)` per PM Decision A, lands the **CI cache quota fix**, **closes 6 SECURITY.md drift findings** from W4, and produces two forward-looking research docs.

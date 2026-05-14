@@ -38,6 +38,11 @@ type Spec struct {
 	Env      map[string]string
 	Ports    []int
 	Replicas int
+	// LogWriter, when non-nil, receives per-call streaming output
+	// from the adapter (docker pull progress for SSH, kubectl apply
+	// output for K8s, etc.). Adapters that don't stream may ignore
+	// it. Non-streaming adapters MUST NOT panic on a nil writer.
+	LogWriter io.Writer
 }
 
 // Status summarises the live state of a deployment.

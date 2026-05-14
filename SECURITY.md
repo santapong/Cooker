@@ -158,6 +158,43 @@ The Helm chart conditionally drops the `docker.sock` volume + mount when `builde
 - **Environment variables**: Sensitive configuration injected at runtime, never baked into images
 - **No secrets in pipelines**: Pipeline variable values are stored in the database; sensitive values should use secret references rather than plaintext
 
+#### Credential handling — SSH remote hosts
+
+When an operator registers a host with `kind=ssh-docker` (the
+Dokploy/Coolify-style remote-deploy target), the PEM-encoded
+private key body never lands on the `hosts` table. The flow is:
+
+1. Handler binds `sshPrivateKeyPem` from the POST/PUT body. The
+   field is **write-only**: it's not declared on `model.Host` and
+   cannot be returned by any serialiser.
+2. `service.HostService.maybeStoreKey` parses the PEM (rejecting
+   malformed input with `ErrInvalidPrivateKey`), then writes it
+   to `secrets.Manager.Put` under the synthetic envID `_hosts`,
+   key `ssh_private_key.<host-id>`. The reference stored on the
+   row is `host:<host-id>`; the bytes themselves live wherever
+   the configured secrets backend keeps them.
+3. `GET /api/v1/hosts/:id` (and `/hosts`) return a `HostResponse`
+   that omits the ref and surfaces only `hasSSHPrivateKey: bool`.
+   A regression test in `internal/handler/host_test.go` asserts
+   no response body contains the substring `PRIVATE KEY` after a
+   Create with a real PEM. Logs from the SSH adapter never echo
+   the PEM either — the log writer is sanity-checked in
+   `ssh_test.go`.
+4. Host-key verification is **mandatory**. The SSH adapter's
+   `HostKeyCallback` enforces a TOFU policy: pinned key required
+   in strict mode, recorded on first connect in lax mode (lax
+   mode is forbidden in production by `Config.ValidateSSHHosts`,
+   which runs after store boot but before serving traffic). The
+   `golang.org/x/crypto/ssh` "accept any host key" callback is
+   forbidden in this codebase — a grep tripwire and a package-
+   level test catch any reintroduction.
+5. SSH connections are cached per host inside `Target` for the
+   process lifetime and closed on shutdown via a `cleanup`
+   registered with `server.New`. No global mutable state — the
+   cache mutex is per-`Target` instance and the package is
+   race-detector clean (`go test ./internal/deploytarget/ssh
+   -race`).
+
 ### Network Security
 
 - **CORS**: Configurable allowed origins via `COOKER_ALLOWED_ORIGINS`. Defaults to `localhost:5173,localhost:3000` for `COOKER_ENV=dev|uat`; defaults to **deny-all** for `COOKER_ENV=production` so missing config is loud, not silent. Boot **refuses to start** if `COOKER_ALLOWED_ORIGINS` is empty in production (`Config.Validate` — `backend/internal/config/config.go`); a wildcard `*` is also rejected (S26-05-19).

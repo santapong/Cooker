@@ -12,6 +12,8 @@ import (
 
 	"github.com/santapong/cooker/internal/crypto"
 	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/scheduler"
 	"github.com/santapong/cooker/internal/secrets"
 	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/store"
@@ -41,6 +43,11 @@ type Handler struct {
 	Codec       *crypto.Codec
 	Secrets     secrets.Manager
 	AppDeployer *service.AppDeployer
+	// Hosts coordinates host-CRUD side-effects (writing SSH private
+	// keys through secrets.Manager). Set by server.New; nil-safe in
+	// dev when no secrets backend is configured (SSH host create/
+	// update with a key body returns 503).
+	Hosts       *service.HostService
 	WSBroadcast func(channel string, data []byte)
 	Executor *service.Executor
 	Runs RunSpawner
@@ -52,6 +59,15 @@ type Handler struct {
 	// returns 503 from the /templates endpoints; the rest of the API
 	// is unaffected. Set by server.New when DATABASE_URL is non-empty.
 	Templates templates.Store
+	// Schedules is the cron-trigger catalog (Phase-2 / F2). nil returns
+	// 503 from the /admin/schedules endpoints. Set by server.New when
+	// COOKER_SCHEDULER_ENABLED=true.
+	Schedules scheduler.Store
+	// NotificationTargets is the notifier-target catalog (Phase-2 / F1).
+	// nil returns 503 from the /admin/notification-targets endpoints.
+	// Set by server.New when COOKER_JOBQUEUE_ENABLED=true (the
+	// dispatcher only fires when the queue is running anyway).
+	NotificationTargets notifier.TargetStore
 }
 
 // New constructs a Handler bound to the given store. secs may be nil

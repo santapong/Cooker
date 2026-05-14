@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/santapong/cooker/internal/jobqueue"
 )
@@ -33,7 +34,7 @@ func (s *stubStore) Dequeue(context.Context, string, []string) (*jobqueue.Job, e
 }
 func (s *stubStore) Complete(context.Context, string, string) error   { panic("not used") }
 func (s *stubStore) Fail(context.Context, string, string, string) error { panic("not used") }
-func (s *stubStore) Reschedule(context.Context, string, string, _ interface{}, string) error {
+func (s *stubStore) Reschedule(context.Context, string, string, time.Time, string) error {
 	panic("not used")
 }
 func (s *stubStore) Get(context.Context, string) (*jobqueue.Job, error) { panic("not used") }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { hostsApi } from '../api/hosts';
-import type { Host } from '../types/infra';
+import type { Host, HostKind } from '../types/infra';
 import { useTheme } from '../theme/ThemeProvider';
 import { hexA } from '../theme/tokens';
 import {
@@ -110,7 +110,7 @@ export default function HostsPage() {
                   header: 'Host',
                   render: (h) => (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <StatusDot tone={h.kind === 'kubernetes' ? 'cool' : 'accent'} />
+                      <StatusDot tone={h.kind === 'kubernetes' ? 'cool' : h.kind === 'ssh-docker' ? 'good' : 'accent'} />
                       <div>
                         <div style={{ fontFamily: t.mono, fontSize: 13, color: t.text, fontWeight: 600 }}>
                           {h.name}
@@ -127,7 +127,7 @@ export default function HostsPage() {
                   header: 'Kind',
                   width: '140px',
                   render: (h) => (
-                    <Pill tone={h.kind === 'kubernetes' ? 'cool' : 'accent'}>{h.kind}</Pill>
+                    <Pill tone={h.kind === 'kubernetes' ? 'cool' : h.kind === 'ssh-docker' ? 'good' : 'accent'}>{h.kind}</Pill>
                   ),
                 },
                 {
@@ -154,7 +154,9 @@ export default function HostsPage() {
                         textOverflow: 'ellipsis',
                       }}
                     >
-                      {h.dockerEndpoint || h.kubeconfigRef || h.tailnetIp || '—'}
+                      {h.kind === 'ssh-docker'
+                        ? `${h.sshUser ?? ''}@${h.sshEndpoint ?? ''}`
+                        : h.dockerEndpoint || h.kubeconfigRef || h.tailnetIp || '—'}
                     </span>
                   ),
                 },
@@ -184,7 +186,7 @@ export default function HostsPage() {
               <span style={{ fontFamily: t.serif, fontSize: 18, fontWeight: 500, color: t.text }}>
                 {selected.name}
               </span>
-              <Pill tone={selected.kind === 'kubernetes' ? 'cool' : 'accent'}>{selected.kind}</Pill>
+              <Pill tone={selected.kind === 'kubernetes' ? 'cool' : selected.kind === 'ssh-docker' ? 'good' : 'accent'}>{selected.kind}</Pill>
               <div style={{ flex: 1 }} />
               <button
                 onClick={() => setSelected(null)}
@@ -217,6 +219,24 @@ export default function HostsPage() {
               {selected.dockerEndpoint && <Field label="Docker endpoint" mono={selected.dockerEndpoint} />}
               {selected.kubeconfigRef && <Field label="Kubeconfig ref" mono={selected.kubeconfigRef} />}
               {selected.tailnetIp && <Field label="Tailnet IP" mono={selected.tailnetIp} />}
+              {selected.kind === 'ssh-docker' && (
+                <>
+                  <Field label="SSH endpoint" mono={selected.sshEndpoint ?? '—'} />
+                  <Field label="SSH user" mono={selected.sshUser ?? '—'} />
+                  <Field label="SSH port" mono={String(selected.sshPort ?? 22)} />
+                  <Field
+                    label="Strict host-key check"
+                    mono={selected.sshStrictHostKey ? 'enabled (recommended)' : 'TOFU (dev only)'}
+                  />
+                  <Field
+                    label="Private key"
+                    mono={selected.hasSSHPrivateKey ? 'on file (rotate via edit)' : 'missing'}
+                  />
+                  {selected.sshKnownHostKey && (
+                    <Field label="Pinned host key" mono={selected.sshKnownHostKey} />
+                  )}
+                </>
+              )}
               <Field label="Created" mono={new Date(selected.createdAt).toLocaleString()} />
 
               <div style={{ flex: 1 }} />
@@ -245,10 +265,15 @@ function CreateHostPanel({ onCancel, onCreated }: { onCancel: () => void; onCrea
   const t = useTheme();
   const pushToast = useToastStore((s) => s.push);
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<'docker' | 'kubernetes'>('docker');
+  const [kind, setKind] = useState<HostKind>('docker');
   const [reachability, setReachability] = useState<'direct' | 'tailnet'>('direct');
   const [dockerEndpoint, setDockerEndpoint] = useState('');
   const [kubeconfigRef, setKubeconfigRef] = useState('');
+  const [sshEndpoint, setSshEndpoint] = useState('');
+  const [sshUser, setSshUser] = useState('');
+  const [sshPort, setSshPort] = useState<number>(22);
+  const [sshStrictHostKey, setSshStrictHostKey] = useState(true);
+  const [sshPrivateKeyPem, setSshPrivateKeyPem] = useState('');
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
@@ -260,6 +285,11 @@ function CreateHostPanel({ onCancel, onCreated }: { onCancel: () => void; onCrea
         reachability,
         dockerEndpoint: kind === 'docker' ? dockerEndpoint : undefined,
         kubeconfigRef: kind === 'kubernetes' ? kubeconfigRef : undefined,
+        sshEndpoint: kind === 'ssh-docker' ? sshEndpoint : undefined,
+        sshUser: kind === 'ssh-docker' ? sshUser : undefined,
+        sshPort: kind === 'ssh-docker' ? sshPort : undefined,
+        sshStrictHostKey: kind === 'ssh-docker' ? sshStrictHostKey : undefined,
+        sshPrivateKeyPem: kind === 'ssh-docker' ? sshPrivateKeyPem : undefined,
       });
       pushToast({ kind: 'success', message: `Host "${name}" added.` });
       onCreated();
@@ -269,6 +299,10 @@ function CreateHostPanel({ onCancel, onCreated }: { onCancel: () => void; onCrea
       setBusy(false);
     }
   };
+
+  const sshFormValid =
+    kind !== 'ssh-docker' ||
+    (sshEndpoint.trim() !== '' && sshUser.trim() !== '' && sshPrivateKeyPem.trim() !== '');
 
   return (
     <Card pad={0}>
@@ -288,9 +322,10 @@ function CreateHostPanel({ onCancel, onCreated }: { onCancel: () => void; onCrea
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="prod-cluster" />
 
         <Label>Kind</Label>
-        <Select value={kind} onChange={(e) => setKind(e.target.value as 'docker' | 'kubernetes')}>
+        <Select value={kind} onChange={(e) => setKind(e.target.value as HostKind)}>
           <option value="docker">Docker host</option>
           <option value="kubernetes">Kubernetes cluster</option>
+          <option value="ssh-docker">SSH remote (Dokploy / Coolify model)</option>
         </Select>
 
         <Label>Reachability</Label>
@@ -322,12 +357,78 @@ function CreateHostPanel({ onCancel, onCreated }: { onCancel: () => void; onCrea
             />
           </>
         )}
+        {kind === 'ssh-docker' && (
+          <>
+            <Label>SSH endpoint</Label>
+            <Input
+              value={sshEndpoint}
+              onChange={(e) => setSshEndpoint(e.target.value)}
+              placeholder="1.2.3.4 or vm.example.com"
+            />
+
+            <Label>SSH user</Label>
+            <Input
+              value={sshUser}
+              onChange={(e) => setSshUser(e.target.value)}
+              placeholder="deploy"
+            />
+
+            <Label>SSH port</Label>
+            <Input
+              type="number"
+              value={String(sshPort)}
+              onChange={(e) => setSshPort(parseInt(e.target.value, 10) || 22)}
+              placeholder="22"
+            />
+
+            <Label>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={sshStrictHostKey}
+                  onChange={(e) => setSshStrictHostKey(e.target.checked)}
+                />
+                Strict host-key check (recommended; required in production)
+              </span>
+            </Label>
+            <div style={{ fontSize: 11.5, color: t.textMute, marginTop: -4, marginBottom: 10 }}>
+              When enabled, Cooker refuses to connect unless the
+              server's host key matches the one pinned on first
+              successful connect (TOFU). Production-mode boot fails
+              if this is off.
+            </div>
+
+            <Label>Private key (PEM)</Label>
+            <textarea
+              value={sshPrivateKeyPem}
+              onChange={(e) => setSshPrivateKeyPem(e.target.value)}
+              placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n…'}
+              rows={8}
+              style={{
+                fontFamily: t.mono,
+                fontSize: 12,
+                padding: 10,
+                border: `1px solid ${t.line}`,
+                borderRadius: 6,
+                background: t.bg,
+                color: t.text,
+                width: '100%',
+                resize: 'vertical',
+              }}
+            />
+            <div style={{ fontSize: 11.5, color: t.textMute, marginTop: 4 }}>
+              Stored encrypted via Cooker's secrets manager. Never
+              echoed back in any response. Rotate via the edit
+              dialog's "Replace key" toggle.
+            </div>
+          </>
+        )}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 22, justifyContent: 'flex-end' }}>
           <Btn kind="ghost" onClick={onCancel} disabled={busy}>
             Cancel
           </Btn>
-          <Btn kind="primary" onClick={submit} disabled={busy || !name}>
+          <Btn kind="primary" onClick={submit} disabled={busy || !name || !sshFormValid}>
             {busy ? 'Adding…' : 'Add host'}
           </Btn>
         </div>

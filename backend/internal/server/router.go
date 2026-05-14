@@ -64,6 +64,36 @@ func (s *Server) registerRoutes() {
 		templates.GET("/:id", h.GetTemplate)
 	}
 
+	// Admin CRUD for the Phase-1 + Phase-2 catalogs. All endpoints are
+	// admin-only and MFA-gated; nil stores return 503 (handlers handle
+	// the nil check internally so a dev-mode boot still serves the
+	// rest of the API).
+	admin := api.Group("/admin", adminRole, mfa)
+	{
+		adminTemplates := admin.Group("/templates")
+		{
+			adminTemplates.POST("", h.CreateTemplate)
+			adminTemplates.PUT("/:id", h.UpdateTemplate)
+			adminTemplates.DELETE("/:id", h.DeleteTemplate)
+		}
+		adminSchedules := admin.Group("/schedules")
+		{
+			adminSchedules.GET("", h.ListSchedules)
+			adminSchedules.GET("/:id", h.GetSchedule)
+			adminSchedules.POST("", h.CreateSchedule)
+			adminSchedules.PUT("/:id", h.UpdateSchedule)
+			adminSchedules.DELETE("/:id", h.DeleteSchedule)
+		}
+		adminNotificationTargets := admin.Group("/notification-targets")
+		{
+			adminNotificationTargets.GET("", h.ListNotificationTargets)
+			adminNotificationTargets.GET("/:id", h.GetNotificationTarget)
+			adminNotificationTargets.POST("", h.CreateNotificationTarget)
+			adminNotificationTargets.PUT("/:id", h.UpdateNotificationTarget)
+			adminNotificationTargets.DELETE("/:id", h.DeleteNotificationTarget)
+		}
+	}
+
 	docker := api.Group("/docker")
 	{
 		docker.GET("/images", handler.ListDockerImages)
