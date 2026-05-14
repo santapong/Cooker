@@ -6,15 +6,11 @@ package runstate
 // independently (e.g. stages may grow a "skipped" terminal state
 // while runs do not).
 var stageBuilder = NewBuilder("stage").
-	Allow(Transition{From: StatePending, Event: EventEnqueue, To: StateQueued}).
 	Allow(Transition{From: StatePending, Event: EventStart, To: StateRunning}).
 	Allow(Transition{From: StatePending, Event: EventCancel, To: StateCancelled}).
-	Allow(Transition{From: StateQueued, Event: EventStart, To: StateRunning}).
-	Allow(Transition{From: StateQueued, Event: EventCancel, To: StateCancelled}).
 	Allow(Transition{From: StateRunning, Event: EventSucceed, To: StateSucceeded}).
 	Allow(Transition{From: StateRunning, Event: EventFail, To: StateFailed}).
-	Allow(Transition{From: StateRunning, Event: EventCancel, To: StateCancelled}).
-	Allow(Transition{From: StateRunning, Event: EventTimeout, To: StateTimedOut})
+	Allow(Transition{From: StateRunning, Event: EventCancel, To: StateCancelled})
 
 // NewStageFSM returns a fresh FSM for a single stage. Same shape as
 // NewRunFSM — a separate factory keeps the call sites in the

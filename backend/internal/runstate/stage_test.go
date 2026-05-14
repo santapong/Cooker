@@ -6,18 +6,10 @@ import (
 
 func TestStageHappyPath(t *testing.T) {
 	fsm := NewStageFSM(StatePending).
-		MustApply(EventEnqueue).
 		MustApply(EventStart).
 		MustApply(EventSucceed)
 	if fsm.Current() != StateSucceeded {
 		t.Fatalf("final=%s want %s", fsm.Current(), StateSucceeded)
-	}
-}
-
-func TestStageTimeoutFromRunning(t *testing.T) {
-	fsm := NewStageFSM(StateRunning).MustApply(EventTimeout)
-	if fsm.Current() != StateTimedOut {
-		t.Fatalf("Running --Timeout--> %s want %s", fsm.Current(), StateTimedOut)
 	}
 }
 
@@ -28,10 +20,15 @@ func TestStageFailFromRunning(t *testing.T) {
 	}
 }
 
+func TestStageCancelFromRunning(t *testing.T) {
+	fsm := NewStageFSM(StateRunning).MustApply(EventCancel)
+	if fsm.Current() != StateCancelled {
+		t.Fatalf("Running --Cancel--> %s want %s", fsm.Current(), StateCancelled)
+	}
+}
+
 func TestStageTerminalIsSticky(t *testing.T) {
-	// Same property as runs: once a stage is terminal, no event
-	// should re-open it.
-	for _, s := range []State{StateSucceeded, StateFailed, StateCancelled, StateTimedOut} {
+	for _, s := range []State{StateSucceeded, StateFailed, StateCancelled} {
 		fsm := NewStageFSM(s)
 		if _, err := fsm.Apply(EventStart); err == nil {
 			t.Errorf("%s --Start--> succeeded; want rejection", s)

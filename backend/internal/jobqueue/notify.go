@@ -60,11 +60,19 @@ func NewPqListener(dsn string) (*PqListener, error) {
 }
 
 // Wait implements Notifier.
+//
+// Uses time.NewTimer + Stop instead of time.After so the underlying
+// runtime timer is released promptly when Notify or ctx.Done wins
+// the race — the worker pool calls this in a tight loop on an idle
+// system, and time.After would let timers pile up on the runtime's
+// timer heap until each fires on its own schedule.
 func (p *PqListener) Wait(ctx context.Context, timeout time.Duration) bool {
+	t := time.NewTimer(timeout)
+	defer t.Stop()
 	select {
 	case <-p.l.Notify:
 		return true
-	case <-time.After(timeout):
+	case <-t.C:
 		return false
 	case <-ctx.Done():
 		return false
@@ -94,11 +102,15 @@ func (c *chanNotifier) Wake() {
 	}
 }
 
+// Wait implements Notifier. Same NewTimer-not-After pattern as
+// PqListener.Wait above.
 func (c *chanNotifier) Wait(ctx context.Context, timeout time.Duration) bool {
+	t := time.NewTimer(timeout)
+	defer t.Stop()
 	select {
 	case <-c.wake:
 		return true
-	case <-time.After(timeout):
+	case <-t.C:
 		return false
 	case <-ctx.Done():
 		return false

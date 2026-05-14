@@ -9,10 +9,6 @@ import (
 
 func TestRunHappyPath(t *testing.T) {
 	fsm := NewRunFSM(StatePending)
-	fsm = fsm.MustApply(EventEnqueue)
-	if fsm.Current() != StateQueued {
-		t.Fatalf("after Enqueue: %s", fsm.Current())
-	}
 	fsm = fsm.MustApply(EventStart)
 	if fsm.Current() != StateRunning {
 		t.Fatalf("after Start: %s", fsm.Current())
@@ -24,10 +20,10 @@ func TestRunHappyPath(t *testing.T) {
 }
 
 func TestRunTerminalIsSticky(t *testing.T) {
-	terms := []State{StateSucceeded, StateFailed, StateCancelled, StateTimedOut}
+	terms := []State{StateSucceeded, StateFailed, StateCancelled}
 	for _, s := range terms {
 		fsm := NewRunFSM(s)
-		for _, e := range []Event{EventEnqueue, EventStart, EventSucceed, EventFail, EventCancel, EventTimeout} {
+		for _, e := range []Event{EventStart, EventSucceed, EventFail, EventCancel} {
 			if _, err := fsm.Apply(e); err == nil {
 				t.Errorf("%s --%s--> succeeded; want rejection", s, e)
 			}
@@ -35,16 +31,24 @@ func TestRunTerminalIsSticky(t *testing.T) {
 	}
 }
 
-func TestRunCancelFromPendingAndQueued(t *testing.T) {
-	// Pending can be cancelled (run never started).
+func TestRunCancelFromPending(t *testing.T) {
 	fsm := NewRunFSM(StatePending).MustApply(EventCancel)
 	if fsm.Current() != StateCancelled {
 		t.Fatalf("Pending --Cancel--> %s want Cancelled", fsm.Current())
 	}
-	// Queued can also be cancelled (job in queue before worker pickup).
-	fsm = NewRunFSM(StateQueued).MustApply(EventCancel)
+}
+
+func TestRunCancelFromRunning(t *testing.T) {
+	fsm := NewRunFSM(StatePending).MustApply(EventStart).MustApply(EventCancel)
 	if fsm.Current() != StateCancelled {
-		t.Fatalf("Queued --Cancel--> %s want Cancelled", fsm.Current())
+		t.Fatalf("Running --Cancel--> %s want Cancelled", fsm.Current())
+	}
+}
+
+func TestRunFailFromRunning(t *testing.T) {
+	fsm := NewRunFSM(StateRunning).MustApply(EventFail)
+	if fsm.Current() != StateFailed {
+		t.Fatalf("Running --Fail--> %s want Failed", fsm.Current())
 	}
 }
 
@@ -97,16 +101,32 @@ func TestCanTransitionRun(t *testing.T) {
 func TestIsTerminal(t *testing.T) {
 	cases := map[State]bool{
 		StatePending:   false,
-		StateQueued:    false,
 		StateRunning:   false,
 		StateSucceeded: true,
 		StateFailed:    true,
 		StateCancelled: true,
-		StateTimedOut:  true,
 	}
 	for s, want := range cases {
 		if got := IsTerminal(s); got != want {
 			t.Errorf("IsTerminal(%s)=%v want %v", s, got, want)
+		}
+	}
+}
+
+// Pin every State constant value to its corresponding
+// model.RunStatus so a future renaming of one without the other
+// breaks the test instead of silently corrupting run rows.
+func TestStateValuesMatchModelRunStatus(t *testing.T) {
+	cases := map[State]model.RunStatus{
+		StatePending:   model.RunStatusPending,
+		StateRunning:   model.RunStatusRunning,
+		StateSucceeded: model.RunStatusSuccess,
+		StateFailed:    model.RunStatusFailed,
+		StateCancelled: model.RunStatusCancelled,
+	}
+	for s, rs := range cases {
+		if string(s) != string(rs) {
+			t.Errorf("State(%q) != model.RunStatus(%q)", s, rs)
 		}
 	}
 }

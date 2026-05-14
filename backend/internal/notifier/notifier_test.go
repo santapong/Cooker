@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -63,17 +64,15 @@ func TestDispatcherRespectsEventTypeFilter(t *testing.T) {
 		ID:         "w1",
 		Kind:       "webhook",
 		Enabled:    true,
-		EventTypes: []EventType{EventRunFailed}, // only failures
+		EventTypes: []EventType{EventRunFailed},
 	})
 
-	// A success event must not reach the target.
 	if err := d.Dispatch(context.Background(), Event{Type: EventRunSucceeded}); err != nil {
 		t.Fatal(err)
 	}
 	if fake.count() != 0 {
 		t.Fatalf("sent on filtered event: count=%d", fake.count())
 	}
-	// A failure event must reach the target.
 	if err := d.Dispatch(context.Background(), Event{Type: EventRunFailed}); err != nil {
 		t.Fatal(err)
 	}
@@ -115,22 +114,19 @@ func TestDispatcherCollectsErrorsPerTarget(t *testing.T) {
 	if err == nil {
 		t.Fatal("want joined error, got nil")
 	}
-	// errors.Join wraps both — verify both messages surface.
 	msg := err.Error()
-	if !contains(msg, "a boom") || !contains(msg, "b boom") {
+	if !strings.Contains(msg, "a boom") || !strings.Contains(msg, "b boom") {
 		t.Fatalf("joined error missing per-target context: %s", msg)
 	}
 }
 
 func TestDispatcherWarnOnUnregisteredKind(t *testing.T) {
 	store := NewMemoryTargetStore()
-	reg := NewRegistry() // empty
+	reg := NewRegistry()
 	d := NewDispatcher(store, reg)
 
 	_ = store.Create(context.Background(), Target{ID: "x1", Kind: "unregistered", Enabled: true})
 
-	// Should not error — the dispatcher logs + meters this case
-	// rather than failing the whole Dispatch.
 	if err := d.Dispatch(context.Background(), Event{Type: EventRunFailed}); err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
@@ -218,8 +214,6 @@ func TestMemoryTargetStoreCRUD(t *testing.T) {
 	}
 }
 
-// Smoke test that the timeout on Dispatcher.SendTimeout actually
-// cancels a slow notifier.
 func TestDispatcherHonoursSendTimeout(t *testing.T) {
 	store := NewMemoryTargetStore()
 	slow := &slowNotifier{kind: "webhook", sleep: 500 * time.Millisecond}
@@ -256,13 +250,4 @@ func (s *slowNotifier) Send(ctx context.Context, _ Target, _ Event) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
