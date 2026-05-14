@@ -32,7 +32,6 @@ import (
 	"github.com/santapong/cooker/internal/store/postgres"
 )
 
-// Server holds the HTTP server and all dependencies.
 type Server struct {
 	router        *gin.Engine
 	config        *config.Config
@@ -47,22 +46,16 @@ type Server struct {
 	traceShutdown func(context.Context) error
 	runs          *RunCoordinator
 	idempotency   idempotency.Store
-	// jobQueue carries the Phase-1 durable queue pool + notifier
-	// dispatcher + enqueuer + its own *sql.DB / pq listener. nil
-	// when COOKER_JOBQUEUE_ENABLED=false (default); when present,
-	// RunContext spawns Pool.Run in a tracked goroutine and the
-	// shutdown branch drains it deterministically.
-	jobQueue *jobQueueDeps
-	// healthCancel cancels the AppHealthChecker goroutine on shutdown.
-	// nil means the checker was disabled (interval <= 0) or boot
-	// failed before the checker started. healthDone is closed by the
-	// checker goroutine when it returns; RunContext waits on it
-	// before returning so the drain order is deterministic.
+	jobQueue      *jobQueueDeps
+	// scheduler is the Phase-2 cron loop. nil when disabled or when
+	// jobqueue is off (the runner needs the jobqueue's Enqueuer). When
+	// non-nil, RunContext launches Runner.Run alongside the HTTP server
+	// and the shutdown branch waits for it to drain.
+	scheduler    *schedulerDeps
 	healthCancel context.CancelFunc
 	healthDone   chan struct{}
 }
 
-// New creates a new Server instance with all routes and middleware.
 func New(cfg *config.Config) (*Server, error) {
 	ctx := context.Background()
 
@@ -200,7 +193,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	runs := NewRunCoordinator(st)
 
-	const idempotencyMaxBytes = 32 << 20 // 32 MiB
+	const idempotencyMaxBytes = 32 << 20
 	idem := idempotency.NewMemoryBounded(5*time.Minute, idempotencyMaxBytes)
 	cleanups = append(cleanups, func() { idem.Close() })
 
@@ -210,11 +203,6 @@ func New(cfg *config.Config) (*Server, error) {
 	h.Executor = exec
 	h.Runs = runs
 
-	// Phase-1 / A1 durable job queue. When COOKER_JOBQUEUE_ENABLED=
-	// false (default), bootJobQueue returns deps with all fields nil
-	// and the handler's Enqueuer stays nil — RunPipeline keeps using
-	// the inline Runs.Spawn path (pre-Phase-1 behaviour). When true,
-	// pipeline-run jobs go through the durable queue.
 	jobDeps, err := bootJobQueue(ctx, cfg, st, exec)
 	if err != nil {
 		cleanup()
@@ -223,6 +211,17 @@ func New(cfg *config.Config) (*Server, error) {
 	cleanups = append(cleanups, jobDeps.closeAll)
 	if jobDeps.Enqueuer != nil {
 		h.Enqueuer = jobDeps.Enqueuer
+	}
+
+	// Phase-2 / F2 cron scheduler. Returns nil when disabled. Requires
+	// jobqueue to be enabled (the runner enqueues runs through the
+	// jobqueue's Enqueuer); when jobqueue is off and scheduler is on,
+	// bootScheduler returns an error and config.Validate() catches the
+	// combo earlier in production.
+	schedDeps, err := bootScheduler(ctx, cfg, jobDeps)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("scheduler boot: %w", err)
 	}
 
 	sweepCtx, sweepCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -275,6 +274,7 @@ func New(cfg *config.Config) (*Server, error) {
 		runs:          runs,
 		idempotency:   idem,
 		jobQueue:      jobDeps,
+		scheduler:     schedDeps,
 		healthCancel:  healthCancel,
 		healthDone:    healthDone,
 	}
@@ -305,25 +305,24 @@ func New(cfg *config.Config) (*Server, error) {
 	return s, nil
 }
 
-// shutdownTimeout is how long Shutdown waits for in-flight HTTP
-// requests to finish before forcing connections closed.
 const shutdownTimeout = 30 * time.Second
 
-// RunContext runs the HTTP server until ctx is cancelled (e.g. SIGTERM),
-// then drains in-flight requests with shutdownTimeout before returning.
-// Returns the first error from ListenAndServe or Shutdown, or nil on a
-// clean drain.
 func (s *Server) RunContext(ctx context.Context, addr string) error {
-	// Job queue pool runs alongside the HTTP server. When ctx cancels,
-	// Pool.Run sees the cancellation and exits when its workers'
-	// current jobs finish (graceful by design). jobPoolDone is closed
-	// once Pool.Run returns so the shutdown branch can wait on it.
 	var jobPoolDone chan struct{}
 	if s.jobQueue != nil && s.jobQueue.Pool != nil {
 		jobPoolDone = make(chan struct{})
 		go func() {
 			defer close(jobPoolDone)
 			_ = s.jobQueue.Pool.Run(ctx)
+		}()
+	}
+
+	var schedDone chan struct{}
+	if s.scheduler != nil && s.scheduler.Runner != nil {
+		schedDone = make(chan struct{})
+		go func() {
+			defer close(schedDone)
+			_ = s.scheduler.Runner.Run(ctx)
 		}()
 	}
 
@@ -340,11 +339,12 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		// Shutdown drain order (W10-13, extended for jobqueue):
+		// Shutdown drain order (extended for scheduler):
 		// 1. HTTP drain
 		// 2. run coordinator drain
 		// 3. job queue pool drain (workers complete in-flight jobs)
-		// 4. health checker cancel + 5s wait
+		// 4. scheduler drain (lock release; loop returns on ctx)
+		// 5. health checker cancel + 5s wait
 		slog.Info("shutdown: draining HTTP server", "timeout", shutdownTimeout.String())
 		drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
@@ -362,6 +362,15 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 			case <-jobPoolDone:
 			case <-t.C:
 				slog.Warn("shutdown: jobqueue pool drain timed out")
+			}
+			t.Stop()
+		}
+		if schedDone != nil {
+			t := time.NewTimer(5 * time.Second)
+			select {
+			case <-schedDone:
+			case <-t.C:
+				slog.Warn("shutdown: scheduler drain timed out")
 			}
 			t.Stop()
 		}
@@ -399,9 +408,6 @@ func (s *Server) Close() error {
 	if s.redisClient != nil {
 		_ = s.redisClient.Close()
 	}
-	// Job queue resources (listener + dedicated *sql.DB) close after
-	// the WS hub so any final stage-log broadcasts produced by
-	// in-flight Execute calls have already flushed.
 	if s.jobQueue != nil {
 		s.jobQueue.closeAll()
 	}
@@ -411,9 +417,6 @@ func (s *Server) Close() error {
 	return s.store.Close()
 }
 
-// newAuditSink builds the configured audit sink, or returns nil when
-// auditing is disabled. A nil Sink causes auditMiddleware to act as a
-// passthrough — which is what dev-mode wants by default.
 func newAuditSink(cfg config.AuditConfig) (audit.Sink, error) {
 	if !cfg.Enabled {
 		return nil, nil
@@ -512,11 +515,6 @@ func selectDeployer(kind, kubeconfig string) deployer.Deployer {
 	}
 }
 
-// selectSecretsManager constructs the configured Manager. Returning
-// (nil, nil) is intentional for the dev-mode "database backend with
-// no key configured" case: server boots with secret endpoints gated
-// by Handler.requireSecrets returning 503 — same observable behavior
-// as pre-Manager Cooker.
 func selectSecretsManager(cfg *config.Config, st *store.Store, codec *crypto.Codec) (secrets.Manager, error) {
 	ctx := context.Background()
 	switch cfg.SecretsBackend {
