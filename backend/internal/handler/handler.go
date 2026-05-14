@@ -24,6 +24,16 @@ type RunSpawner interface {
 	Spawn(ctx context.Context, runID string, work func(context.Context) error)
 }
 
+// JobEnqueuer enqueues a pipeline-run job onto an async durable queue
+// rather than running the executor inline. Wired in server.New only
+// when COOKER_JOBQUEUE_ENABLED=true; nil otherwise. When nil,
+// RunPipeline falls back to the inline RunSpawner path (the existing
+// pre-Phase-1 behaviour). Implementations live in internal/service
+// (see service.JobQueueEnqueuer).
+type JobEnqueuer interface {
+	EnqueueRun(ctx context.Context, pipelineID, runID string) error
+}
+
 // Handler owns the dependencies shared by request handlers.
 type Handler struct {
 	Store *store.Store
@@ -42,6 +52,10 @@ type Handler struct {
 	// nil, RunPipeline runs the executor synchronously inside the
 	// request goroutine.
 	Runs RunSpawner
+	// Enqueuer routes pipeline runs through the durable async queue
+	// (Phase-1 / A1). nil falls back to the inline Runs path. Set by
+	// server.New when COOKER_JOBQUEUE_ENABLED=true.
+	Enqueuer JobEnqueuer
 }
 
 // New constructs a Handler bound to the given store. secs may be nil

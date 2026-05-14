@@ -47,6 +47,12 @@ type Server struct {
 	traceShutdown func(context.Context) error
 	runs          *RunCoordinator
 	idempotency   idempotency.Store
+	// jobQueue carries the Phase-1 durable queue pool + notifier
+	// dispatcher + enqueuer + its own *sql.DB / pq listener. nil
+	// when COOKER_JOBQUEUE_ENABLED=false (default); when present,
+	// RunContext spawns Pool.Run in a tracked goroutine and the
+	// shutdown branch drains it deterministically.
+	jobQueue *jobQueueDeps
 	// healthCancel cancels the AppHealthChecker goroutine on shutdown.
 	// nil means the checker was disabled (interval <= 0) or boot
 	// failed before the checker started. healthDone is closed by the
@@ -99,23 +105,12 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("secrets: %w", err)
 	}
 
-	// P26-05-01: switch to release mode outside dev to suppress Gin's
-	// verbose per-route registration banner and its duplicative colour
-	// request logger (observability.MetricsMiddleware already records
-	// per-request stats structurally). Expected win: ~5-10% CPU on hot
-	// HTTP paths; cleaner production logs; ~50 ms off boot output.
-	// See docs/audits/2026-05-perf-and-optimization.md §P26-05-01.
 	if cfg.Env != config.EnvDev {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := gin.New()
 	router.Use(gin.Recovery())
 
-	// Stack of cleanups to run if New() returns with err. The first
-	// item pushed runs last; matches the deferred-close pattern used
-	// by Server.Close itself. Without this, an error mid-construction
-	// would leak the redis client, the hub backend, or the audit
-	// sink.
 	var cleanups []func()
 	cleanup := func() {
 		for i := len(cleanups) - 1; i >= 0; i-- {
@@ -199,20 +194,12 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithBuilder(bld),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
 		service.WithDeployer(selectDeployer(cfg.DeployerBackend, cfg.Kubernetes.Kubeconfig)),
-		// Stream stage logs to the WebSocket hub line-by-line on the
-		// canonical per-stage channel. The hub drops on backpressure,
-		// so this never blocks the executor goroutine.
 		service.WithLogBroadcaster(wsHub.Broadcast),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 
 	runs := NewRunCoordinator(st)
 
-	// Idempotency cache for mutating routes. In-memory with a
-	// resident-set cap so a busy webhook integration can't pile
-	// up bodies until 24h-TTL expiry. Redis backend would slot in
-	// here for multi-replica fleets (chain-recheck "newly
-	// introduced #1").
 	const idempotencyMaxBytes = 32 << 20 // 32 MiB
 	idem := idempotency.NewMemoryBounded(5*time.Minute, idempotencyMaxBytes)
 	cleanups = append(cleanups, func() { idem.Close() })
@@ -223,9 +210,21 @@ func New(cfg *config.Config) (*Server, error) {
 	h.Executor = exec
 	h.Runs = runs
 
-	// Sweep runs that were orphaned by a previous crash. Safe to run
-	// before any new runs spawn — the threshold protects in-flight
-	// rows from being reaped by a fast restart.
+	// Phase-1 / A1 durable job queue. When COOKER_JOBQUEUE_ENABLED=
+	// false (default), bootJobQueue returns deps with all fields nil
+	// and the handler's Enqueuer stays nil — RunPipeline keeps using
+	// the inline Runs.Spawn path (pre-Phase-1 behaviour). When true,
+	// pipeline-run jobs go through the durable queue.
+	jobDeps, err := bootJobQueue(ctx, cfg, st, exec)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("jobqueue boot: %w", err)
+	}
+	cleanups = append(cleanups, jobDeps.closeAll)
+	if jobDeps.Enqueuer != nil {
+		h.Enqueuer = jobDeps.Enqueuer
+	}
+
 	sweepCtx, sweepCancel := context.WithTimeout(ctx, 5*time.Second)
 	if n, err := st.Runs.SweepOrphans(sweepCtx, orphanThreshold); err != nil {
 		slog.Warn("orphan sweep failed", "err", err)
@@ -235,13 +234,6 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	sweepCancel()
 
-	// AppHealthChecker — long-running background probe that writes
-	// per-app readiness verdicts. Runs in its own goroutine cancelled
-	// on shutdown via healthCancel; RunContext waits on healthDone
-	// before returning so the drain order stays deterministic.
-	// Setting AppHealthInterval to 0 (or below) disables the checker
-	// entirely — useful for unit tests and operators who'd rather poll
-	// from elsewhere.
 	var healthCancel context.CancelFunc
 	var healthDone chan struct{}
 	if cfg.AppHealthInterval > 0 {
@@ -255,16 +247,11 @@ func New(cfg *config.Config) (*Server, error) {
 			defer close(healthDone)
 			_ = checker.Run(healthCtx)
 		}()
-		// Register a cleanup immediately after the goroutine spawns so
-		// any subsequent error return in New() cancels and drains it.
-		// Without this, an early return leaves healthCancel unwired and
-		// the goroutine leaks (W10-12).
 		cleanups = append(cleanups, func() {
 			if healthCancel != nil {
 				healthCancel()
 			}
 			if healthDone != nil {
-				// Cap so a wedged probe doesn't block the cleanup loop.
 				select {
 				case <-healthDone:
 				case <-time.After(2 * time.Second):
@@ -287,6 +274,7 @@ func New(cfg *config.Config) (*Server, error) {
 		redisClient:   redisClient,
 		runs:          runs,
 		idempotency:   idem,
+		jobQueue:      jobDeps,
 		healthCancel:  healthCancel,
 		healthDone:    healthDone,
 	}
@@ -326,6 +314,19 @@ const shutdownTimeout = 30 * time.Second
 // Returns the first error from ListenAndServe or Shutdown, or nil on a
 // clean drain.
 func (s *Server) RunContext(ctx context.Context, addr string) error {
+	// Job queue pool runs alongside the HTTP server. When ctx cancels,
+	// Pool.Run sees the cancellation and exits when its workers'
+	// current jobs finish (graceful by design). jobPoolDone is closed
+	// once Pool.Run returns so the shutdown branch can wait on it.
+	var jobPoolDone chan struct{}
+	if s.jobQueue != nil && s.jobQueue.Pool != nil {
+		jobPoolDone = make(chan struct{})
+		go func() {
+			defer close(jobPoolDone)
+			_ = s.jobQueue.Pool.Run(ctx)
+		}()
+	}
+
 	httpSrv := &http.Server{Addr: addr, Handler: s.router}
 	errCh := make(chan error, 1)
 	go func() {
@@ -339,8 +340,11 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		// Shutdown drain order (W10-13):
-		// 1. HTTP drain → 2. run coordinator drain → 3. health checker cancel + 5s wait → 4. return.
+		// Shutdown drain order (W10-13, extended for jobqueue):
+		// 1. HTTP drain
+		// 2. run coordinator drain
+		// 3. job queue pool drain (workers complete in-flight jobs)
+		// 4. health checker cancel + 5s wait
 		slog.Info("shutdown: draining HTTP server", "timeout", shutdownTimeout.String())
 		drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
@@ -352,14 +356,19 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 			s.runs.Wait(runDrainCtx)
 			runCancel()
 		}
+		if jobPoolDone != nil {
+			t := time.NewTimer(runDrainTimeout)
+			select {
+			case <-jobPoolDone:
+			case <-t.C:
+				slog.Warn("shutdown: jobqueue pool drain timed out")
+			}
+			t.Stop()
+		}
 		if s.healthCancel != nil {
 			s.healthCancel()
 		}
 		if s.healthDone != nil {
-			// AppHealthChecker.Run returns ~immediately on cancel; cap
-			// the wait so a wedged probe doesn't block shutdown forever.
-			// Use NewTimer so we can Stop it when healthDone wins the
-			// race — time.After leaks the underlying timer (W10-14).
 			t := time.NewTimer(5 * time.Second)
 			defer t.Stop()
 			select {
@@ -376,12 +385,6 @@ func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
-	// Order matters. Tracing first so the rest of shutdown is captured
-	// in any final span; audit next so authenticated mutations flush
-	// before the file is closed; the WebSocket hub before its Redis
-	// transport so consume() exits cleanly; the shared Redis client
-	// after the hub since the hub publishes through it; the store last
-	// because anything above might want to record a final write.
 	if s.traceShutdown != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = s.traceShutdown(shutdownCtx)
@@ -395,6 +398,12 @@ func (s *Server) Close() error {
 	}
 	if s.redisClient != nil {
 		_ = s.redisClient.Close()
+	}
+	// Job queue resources (listener + dedicated *sql.DB) close after
+	// the WS hub so any final stage-log broadcasts produced by
+	// in-flight Execute calls have already flushed.
+	if s.jobQueue != nil {
+		s.jobQueue.closeAll()
 	}
 	if s.store == nil {
 		return nil

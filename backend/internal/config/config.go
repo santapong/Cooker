@@ -70,6 +70,11 @@ type Config struct {
 	// raise this to reduce backend pressure; setting 0 disables the
 	// checker entirely.
 	AppHealthInterval time.Duration
+	// JobQueue configures the Phase-1 durable async job queue.
+	// Default Enabled=false keeps Cooker on the inline RunPipeline
+	// path — zero behavioural change until an operator flips the
+	// flag. See internal/server/jobqueue_boot.go for what's started.
+	JobQueue JobQueueConfig
 }
 
 // WSHubConfig configures the WebSocket broadcast fan-out backend.
@@ -239,6 +244,16 @@ type AuditConfig struct {
 	FilePath    string // required when Destination == "file"
 }
 
+// JobQueueConfig configures the Phase-1 durable async job queue. When
+// Enabled is false (default) Cooker uses the inline RunPipeline path
+// and the queue is not booted at all — no Postgres tables touched, no
+// goroutines spawned, no behavioural change.
+type JobQueueConfig struct {
+	Enabled        bool   // COOKER_JOBQUEUE_ENABLED (default false)
+	Workers        int    // COOKER_JOBQUEUE_WORKERS (default 4)
+	WorkerIDPrefix string // COOKER_JOBQUEUE_WORKER_PREFIX (default "cooker")
+}
+
 // Load reads configuration from environment variables with sensible defaults.
 func Load() *Config {
 	env := Env(getEnv("COOKER_ENV", string(EnvDev)))
@@ -352,6 +367,11 @@ func Load() *Config {
 			ServiceVersion: getEnv("COOKER_SERVICE_VERSION", "dev"),
 		},
 		AppHealthInterval: getEnvDuration("COOKER_APP_HEALTH_INTERVAL", 30*time.Second),
+		JobQueue: JobQueueConfig{
+			Enabled:        getEnvBool("COOKER_JOBQUEUE_ENABLED", false),
+			Workers:        getEnvInt("COOKER_JOBQUEUE_WORKERS", 4),
+			WorkerIDPrefix: getEnv("COOKER_JOBQUEUE_WORKER_PREFIX", "cooker"),
+		},
 	}
 }
 
