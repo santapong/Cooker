@@ -78,10 +78,6 @@ func (s *Server) registerRoutes() {
 		pipelines.PUT("/:id", writeRole, h.UpdatePipeline)
 		pipelines.DELETE("/:id", adminRole, mfa, h.DeletePipeline)
 		pipelines.POST("/:id/validate", h.ValidatePipeline)
-		// Phase-1 / A3: the run-trigger route now also passes through the
-		// declarative resource-action guard. writeRole remains — belt-
-		// and-braces — so an accidental policy change in one place still
-		// leaves the other enforced.
 		pipelines.POST("/:id/run",
 			writeRole,
 			auth.RequirePermission(auth.ResourcePipeline, auth.ActionInvoke),
@@ -152,34 +148,17 @@ func (s *Server) registerRoutes() {
 		environments.POST("", writeRole, h.CreateEnvironment)
 		environments.PUT("/:id", writeRole, h.UpdateEnvironment)
 		environments.DELETE("/:id", adminRole, mfa, h.DeleteEnvironment)
-		// Per-environment secret management. Each handler additionally
-		// enforces admin-only via CanRevealSecret; the adminRole
-		// middleware here is belt-and-braces so unauthenticated probing
-		// of the route table gets a uniform 403 before touching the
-		// handler body.
-		//
-		// Phase-1 / A3: secret reveal also passes through
-		// RequirePermission(secret, reveal). Three layers now block a
-		// non-admin from reaching the handler body — role gate, MFA gate,
-		// declarative permission — plus the existing in-handler
-		// CanRevealSecret check. Defense in depth on the most sensitive
-		// read in the API.
 		environments.GET("/:id/secrets/:key",
 			adminRole, mfa,
 			auth.RequirePermission(auth.ResourceSecret, auth.ActionReveal),
 			h.RevealSecret)
 		environments.PUT("/:id/secrets/:key", adminRole, mfa, h.PutSecret)
 		environments.DELETE("/:id/secrets/:key", adminRole, mfa, h.DeleteSecret)
-		// Promote secrets to another environment in a single backend
-		// round-trip. Returns 501 when the configured secrets backend
-		// does not implement secrets.Promoter (today: database).
 		environments.POST("/:id/secrets/promote", adminRole, mfa, h.PromoteSecrets)
 	}
 
 	// Promotion routes (nested under pipeline runs)
 	api.POST("/pipelines/:id/runs/:runId/promote", writeRole, h.PromoteRun)
-	// ApprovePromotion keeps its CanApprovePromotion check; the handler
-	// is the authority on which roles count (admin OR approver).
 	api.POST("/pipelines/:id/runs/:runId/approve", h.ApprovePromotion)
 	api.GET("/pipelines/:id/runs/:runId/env-status", h.GetEnvStatus)
 
@@ -192,11 +171,6 @@ func (s *Server) registerRoutes() {
 		apps.PUT("/:id", writeRole, h.UpdateApp)
 		apps.DELETE("/:id", adminRole, mfa, h.DeleteApp)
 		apps.POST("/:id/deploy", writeRole, expensive, idempotencyMiddleware(s.idempotency), h.DeployApp)
-		// Webhook rotation re-checks admin in the handler; keeping the
-		// gate here means a viewer can't even reach it to probe codec
-		// behaviour.
-		//
-		// Phase-1 / A3: also gated by RequirePermission(webhook, update).
 		apps.PUT("/:id/webhook",
 			adminRole, mfa,
 			auth.RequirePermission(auth.ResourceWebhook, auth.ActionUpdate),
@@ -213,11 +187,16 @@ func (s *Server) registerRoutes() {
 		hosts.DELETE("/:id", adminRole, mfa, h.DeleteHost)
 	}
 
-	// GitHub webhook receiver (unauthenticated — HMAC is the auth).
-	// X-GitHub-Delivery is captured by the idempotency middleware so a
-	// retry from GitHub replays the original response instead of
-	// triggering a duplicate deploy.
+	// Git provider webhook receivers (unauthenticated — each provider's
+	// signature / token header is the authentication). The idempotency
+	// middleware captures provider-specific delivery IDs (X-GitHub-
+	// Delivery, X-Gitlab-Event-UUID, X-Hook-UUID for Bitbucket, X-Gitea
+	// -Delivery) so retried deliveries replay the original response
+	// instead of triggering duplicate deploys.
 	s.router.POST("/webhooks/github", idempotencyMiddleware(s.idempotency), h.GitHubWebhook)
+	s.router.POST("/webhooks/gitlab", idempotencyMiddleware(s.idempotency), h.GitLabWebhook)
+	s.router.POST("/webhooks/bitbucket", idempotencyMiddleware(s.idempotency), h.BitbucketWebhook)
+	s.router.POST("/webhooks/gitea", idempotencyMiddleware(s.idempotency), h.GiteaWebhook)
 
 	// Local-auth /me lives inside the auth group because it needs a
 	// session. It works for both local and OIDC sessions because the
