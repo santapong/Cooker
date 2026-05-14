@@ -43,6 +43,11 @@ type Handler struct {
 	Codec       *crypto.Codec
 	Secrets     secrets.Manager
 	AppDeployer *service.AppDeployer
+	// Hosts coordinates host-CRUD side-effects (writing SSH private
+	// keys through secrets.Manager). Set by server.New; nil-safe in
+	// dev when no secrets backend is configured (SSH host create/
+	// update with a key body returns 503).
+	Hosts       *service.HostService
 	WSBroadcast func(channel string, data []byte)
 	Executor *service.Executor
 	Runs RunSpawner

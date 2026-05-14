@@ -161,6 +161,99 @@ curl -X POST http://localhost:8080/api/v1/hosts \
 
 List and delete via the analogous routes.
 
+### Scenario 5b — SSH remote hosts (Dokploy / Coolify model)
+
+Deploy a Cooker-built image to a GCP Compute Engine VM, a
+DigitalOcean Droplet, or any plain Linux host with `docker`
+installed — over SSH, no agent on the box, no Kubernetes, no
+cloud APIs.
+
+**Provision a sandbox host:**
+
+1. Spin a fresh VM (e2-micro on GCP, the cheapest Droplet on DO,
+   etc.). Install docker via the distro package manager.
+2. Create a deploy user with `sudo`-less docker access:
+   ```sh
+   sudo useradd -m -G docker deploy
+   sudo mkdir -p /home/deploy/.ssh
+   sudo cp your-pub-key.pem /home/deploy/.ssh/authorized_keys
+   sudo chown -R deploy:deploy /home/deploy/.ssh
+   ```
+3. Confirm: `ssh deploy@<vm-ip> docker version` succeeds from your
+   workstation.
+
+**Register the host in Cooker:**
+
+UI path — Hosts page → "Add host" → kind = "SSH remote
+(Dokploy / Coolify model)". Paste the PEM private key in the
+textarea. Leave **Strict host-key check** enabled (the production
+default). Save.
+
+API path:
+
+```sh
+curl -X POST http://localhost:8080/api/v1/hosts \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "name": "sandbox-vm",
+       "kind": "ssh-docker",
+       "sshEndpoint": "1.2.3.4",
+       "sshUser": "deploy",
+       "sshPort": 22,
+       "sshStrictHostKey": true,
+       "sshPrivateKeyPem": "-----BEGIN OPENSSH PRIVATE KEY-----\n…"
+     }'
+```
+
+The PEM body is stored encrypted via the secrets manager and is
+**never** returned by any GET. Subsequent responses surface only
+`hasSSHPrivateKey: true`.
+
+**Point an App at the SSH host:**
+
+```sh
+curl -X PUT http://localhost:8080/api/v1/apps/<app-id> \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "name": "demo",
+       "githubRepo": "you/demo",
+       "branch": "main",
+       "deployTarget": { "kind": "ssh", "hostId": "<host-uuid>" }
+     }'
+```
+
+`DeployTargetSSH = "ssh"` is the canonical selector value for the
+adapter. Use this as the `deployTarget.kind` on the App.
+
+**Deploy:**
+
+Click **Deploy** on the App page (or `POST /apps/:id/deploy`). The
+run-log stream will show:
+
+```
+[ssh] docker pull nginx:alpine
+[ssh] docker stop cooker-<app-id> (best-effort)
+[ssh] docker rm cooker-<app-id> (best-effort)
+[ssh] docker run -d --restart=always --name 'cooker-<app-id>' -p '80:80' 'nginx:alpine'
+[ssh] pinned host key for <host-id>: ssh-ed25519 …
+```
+
+That last line — the **TOFU pin** — appears only on the first
+successful connect when `sshStrictHostKey=false`. Subsequent
+connects refuse if the server's key has changed.
+
+**Verify the container is serving:**
+
+```sh
+curl http://<vm-ip>:80/   # the nginx welcome page
+```
+
+**Production note:** boot will fail if any registered SSH host has
+`sshStrictHostKey=false` and `COOKER_ENV=production`. The check
+runs after the store is open but before serving traffic; the
+error message names the offending hosts so the operator can fix
+them via PUT and restart.
+
 ### Scenario 6 — Registry round-trip
 
 After a successful Scenario 1, confirm the image landed in the

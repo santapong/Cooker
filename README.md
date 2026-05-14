@@ -647,6 +647,22 @@ Operator pre-creates the Render service; Cooker triggers deploys on it.
 
 </details>
 
+<details>
+<summary><b>SSH remote (Dokploy / Coolify model)</b></summary>
+
+No agent on the box, no Kubernetes, no cloud API — Cooker SSH'es into a registered host with the host's private key and runs `docker pull` + `docker run -d --restart=always` over the wire. Register the host through the **Hosts** page (kind `ssh-docker`), paste the PEM private key once (stored encrypted via the secrets manager, never echoed back), and point an App's deploy target at it.
+
+Host-key verification is **mandatory** — Cooker pins the server's public key on first connect (TOFU) and refuses on key change. Production-mode boot refuses to serve if any registered SSH host has `sshStrictHostKey=false`.
+
+```yaml
+# App deploy target — pick "ssh" kind, point at a registered host
+deployTarget:
+  kind: ssh
+  hostId: <host-uuid>
+```
+
+</details>
+
 ## 🌐 API Reference
 
 Base path: `/api/v1`. All endpoints return JSON. Auth via `Authorization: Bearer <token>` (OIDC access token).

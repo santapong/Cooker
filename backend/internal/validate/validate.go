@@ -72,7 +72,7 @@ func StageType(t model.StageType) error {
 // HostKind rejects any value that isn't a known model.HostKind.
 func HostKind(k model.HostKind) error {
 	switch k {
-	case model.HostKindDocker, model.HostKindKubernetes:
+	case model.HostKindDocker, model.HostKindKubernetes, model.HostKindSSHDocker:
 		return nil
 	}
 	return fmt.Errorf("unknown host kind %q", k)

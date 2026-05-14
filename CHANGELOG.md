@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — SSH remote deploy target (Thread 1, Dokploy/Coolify model)
+
+- New `deploytarget/ssh` adapter: SSH into a registered host
+  (`HostKindSSHDocker = "ssh-docker"`), run `docker pull` then
+  `docker run -d --restart=always`. No agent on the remote, no
+  Kubernetes, no cloud API. Host-key TOFU pinning is mandatory
+  (`golang.org/x/crypto/ssh` with a strict `HostKeyCallback`).
+- New `DeployTargetSSH = "ssh"` constant on `model.DeployTargetKind`.
+- New SSH fields on `model.Host`: `SSHEndpoint`, `SSHUser`,
+  `SSHPort`, `SSHPrivateKeyRef` (write-only, never serialised),
+  `SSHKnownHostKey` (TOFU-pinned), `SSHStrictHostKey`. PEM bodies
+  flow through `secrets.Manager` via a new `service.HostService`.
+- New migration `014_ssh_hosts` adds the columns idempotently
+  (`ADD COLUMN IF NOT EXISTS`); down migration drops them.
+- Hosts page extended: kind selector now includes
+  `ssh-docker`; the form accepts a private-key PEM textarea and
+  a strict-host-key toggle (default ON). `GET /hosts/:id`
+  redacts the PEM ref and surfaces only `hasSSHPrivateKey`.
+- `Config.ValidateSSHHosts` refuses production boot if any
+  registered SSH host has `sshStrictHostKey=false`. Runs after
+  the store is open but before serving traffic.
+
 ### Added — May 2026 W6 batch (PR #89: Phase 1 + Phase 2 Dokploy adaptation)
 
 Closed in a 16-commit branch (`claude/analyze-dokploy-integration-NTrW3`).

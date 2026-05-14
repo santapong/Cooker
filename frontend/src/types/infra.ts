@@ -1,13 +1,30 @@
+export type HostKind = 'docker' | 'kubernetes' | 'ssh-docker';
+
 export interface Host {
   id: string;
   name: string;
-  kind: 'docker' | 'kubernetes';
+  kind: HostKind;
   reachability: 'direct' | 'tailnet';
   dockerEndpoint?: string;
   kubeconfigRef?: string;
   tailnetIp?: string;
+  // SSH fields (kind=ssh-docker). sshPrivateKeyPem is write-only;
+  // the backend never echoes it back, instead surfacing
+  // hasSSHPrivateKey so the UI can render "key on file" state.
+  sshEndpoint?: string;
+  sshUser?: string;
+  sshPort?: number;
+  sshKnownHostKey?: string;
+  sshStrictHostKey?: boolean;
+  hasSSHPrivateKey?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+// HostCreatePayload is the wire shape POST/PUT /hosts accepts. Adds
+// the write-only sshPrivateKeyPem field.
+export interface HostCreatePayload extends Partial<Host> {
+  sshPrivateKeyPem?: string;
 }
 
 export interface DockerNetwork {

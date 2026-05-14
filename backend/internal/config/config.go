@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -421,6 +422,52 @@ func (c *Config) Validate() error {
 		return errors.New("config: " + strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+// SSHHostLister is the minimal store surface ValidateSSHHosts needs.
+// Implemented by store.Store via st.Hosts.List, but kept narrow here
+// to avoid importing the store package (and creating an import cycle).
+type SSHHostLister interface {
+	ListSSHHostsLaxStrictHostKey(ctx context.Context) ([]SSHHostSummary, error)
+}
+
+// SSHHostSummary is the minimal Host info config validation needs
+// to identify a non-compliant row in an error message.
+type SSHHostSummary struct {
+	ID   string
+	Name string
+}
+
+// ValidateSSHHosts enforces the production-mode invariant that no
+// registered SSH host has SSHStrictHostKey=false. Called by
+// server.New AFTER the store is built but BEFORE serving traffic.
+// In non-production environments it is a no-op.
+//
+// This check exists at the post-store layer (not in Validate()
+// itself) because Validate() runs before the database connection is
+// open. The two-stage boot sequence — first Validate() the env, then
+// open the store, then ValidateSSHHosts() — keeps Validate() pure
+// while still failing the boot on lax-TOFU production hosts.
+func (c *Config) ValidateSSHHosts(ctx context.Context, lister SSHHostLister) error {
+	if !c.Env.IsProduction() {
+		return nil
+	}
+	if lister == nil {
+		return nil
+	}
+	lax, err := lister.ListSSHHostsLaxStrictHostKey(ctx)
+	if err != nil {
+		return fmt.Errorf("config: list ssh hosts: %w", err)
+	}
+	if len(lax) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(lax))
+	for _, h := range lax {
+		names = append(names, fmt.Sprintf("%s (%s)", h.Name, h.ID))
+	}
+	return errors.New("config: SSH hosts with sshStrictHostKey=false are forbidden in production: " +
+		strings.Join(names, ", "))
 }
 
 func getEnv(key, fallback string) string {

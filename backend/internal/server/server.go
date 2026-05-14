@@ -203,6 +203,26 @@ func New(cfg *config.Config) (*Server, error) {
 	h.WSBroadcast = wsHub.Broadcast
 	h.Executor = exec
 	h.Runs = runs
+	// HostService coordinates the PEM-bytes-to-secrets-manager
+	// translation for SSH hosts. nil-safe handler-side: when secMgr
+	// is nil (dev without a secrets backend), SSH host create/update
+	// with a key body returns 503 — non-SSH hosts continue to work.
+	h.Hosts = service.NewHostService(st, secMgr)
+
+	// SSH remote deploy target (Thread 1 of the 2026-05 plan). Wired
+	// here so it can pull the App's Host via the store and resolve
+	// the private key via the host service. Registration is
+	// unconditional (no env-var gate) because the per-Host config
+	// supplies all the credentials.
+	registerSSHDeployTarget(st, h.Hosts, &cleanups)
+
+	// Production gate: refuse to serve if any registered SSH host
+	// has sshStrictHostKey=false. The check runs here (post-store
+	// boot, pre-serve) because Config.Validate can't query the DB.
+	if err := cfg.ValidateSSHHosts(ctx, sshHostLister{st: st}); err != nil {
+		cleanup()
+		return nil, err
+	}
 
 	jobDeps, err := bootJobQueue(ctx, cfg, st, exec)
 	if err != nil {

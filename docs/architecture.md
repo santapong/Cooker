@@ -109,6 +109,7 @@ Cooker is a three-tier web application for CI/CD pipeline management with visual
 | **Pusher** | `internal/pusher/` | `Pusher` interface + adapters: `crane` (`go-containerregistry`), `docker` (CLI shell-out), `noop`. |
 | **Deployer** | `internal/deployer/` | `Deployer` interface + adapters: `kubectl` (CLI shell-out), `clientgo` (dynamic client + server-side apply), `noop`. |
 | **DeployTarget** | `internal/deploytarget/` | App-deploy adapters per cloud runtime: `kubernetes`, `cloudrun`, `ecs` (Fargate), `flyio`, `render`. Self-register on non-empty config. |
+| **DeployTarget / SSH** | `internal/deploytarget/ssh/` | Dokploy/Coolify-style remote: SSH into a registered host (kind `ssh-docker`), run `docker pull` + `docker run -d --restart=always`. Host-key TOFU pinning is mandatory; `Config.ValidateSSHHosts` refuses production boot if any host has `sshStrictHostKey=false`. |
 | **GitOps** | `internal/gitops/` | `Writer` interface + `gogit` adapter (`go-git/v5`). Used by GitOpsCommit pipeline node. |
 | **Observability** | `internal/observability/` | Prometheus `/metrics` (Gin middleware) + OpenTelemetry tracing (otelgin + OTLP/gRPC exporter). Both opt-in. |
 | **DAG Runner** | `pkg/dagrunner/` | Reusable, standalone DAG execution engine. Topological sort into parallel levels, concurrent execution, status updates via channel. |
