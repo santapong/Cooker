@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
 // Postgres is a Store backed by the jobs table created in migration
 // 010. Pickup uses FOR UPDATE SKIP LOCKED so N workers can call
-// Dequeue concurrently without coordination.
+// Dequeue concurrently without coordination. Enqueue issues NOTIFY
+// after the insert (slice 2) so listeners wake instantly.
 type Postgres struct {
 	db *sql.DB
 }
@@ -20,7 +22,11 @@ type Postgres struct {
 // connection pool lifecycle; this type does not close it.
 func NewPostgres(db *sql.DB) *Postgres { return &Postgres{db: db} }
 
-// Enqueue implements Store.
+// Enqueue implements Store. After the INSERT it issues NOTIFY
+// cooker_jobs_new so any subscribed PqListener wakes its Pool. The
+// NOTIFY is best-effort: a failure to publish does not roll back the
+// insert (workers will pick the job up on the next poll tick at
+// worst).
 func (p *Postgres) Enqueue(ctx context.Context, kind string, payload json.RawMessage, opts EnqueueOptions) (*Job, error) {
 	if kind == "" {
 		return nil, fmt.Errorf("jobqueue: empty kind")
@@ -60,6 +66,13 @@ func (p *Postgres) Enqueue(ctx context.Context, kind string, payload json.RawMes
 	if err != nil {
 		return nil, fmt.Errorf("jobqueue: enqueue: %w", err)
 	}
+	// Best-effort wake-up. NOTIFY accepts an optional payload; we
+	// keep it empty so listeners just re-poll — the work of picking
+	// the right row belongs in Dequeue's SQL, not in the wake
+	// message.
+	if _, err := p.db.ExecContext(ctx, "NOTIFY "+NotifyChannel); err != nil {
+		slog.Warn("jobqueue: NOTIFY failed (job still enqueued)", "err", err)
+	}
 	return j, nil
 }
 
@@ -79,9 +92,6 @@ func (p *Postgres) Dequeue(ctx context.Context, workerID string, kinds []string)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// The empty-kinds case is handled by the array-overlap operator
-	// short-circuit ($1::text[] = '{}'). We pass a Postgres text[]
-	// literal so a nil/empty slice doesn't require a different query.
 	kindsArr := pgTextArray(kinds)
 
 	var (
@@ -136,7 +146,6 @@ func (p *Postgres) Dequeue(ctx context.Context, workerID string, kinds []string)
 		&lockedBy, &lockedAt, &startedAt, &finishedAt, &lastError,
 		&concurrencyKey, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		// No work available — caller's responsibility to sleep / wait.
 		return nil, tx.Commit()
 	}
 	if err != nil {
@@ -206,11 +215,6 @@ func (p *Postgres) Fail(ctx context.Context, workerID, jobID string, lastError s
 }
 
 func (p *Postgres) Reschedule(ctx context.Context, workerID, jobID string, nextRunAt time.Time, lastError string) error {
-	// Atomically branch: if attempts >= max_attempts the row
-	// transitions to 'failed' (terminal); otherwise it returns to
-	// 'pending' with run_at bumped. Doing this in a single UPDATE
-	// avoids a read-modify-write race against another worker that
-	// might pick up the row in between.
 	res, err := p.db.ExecContext(ctx, `
 		UPDATE jobs
 		   SET status = CASE WHEN attempts >= max_attempts
@@ -234,10 +238,10 @@ func (p *Postgres) Reschedule(ctx context.Context, workerID, jobID string, nextR
 
 func (p *Postgres) Get(ctx context.Context, jobID string) (*Job, error) {
 	var (
-		j                                       Job
-		payload                                 []byte
-		status                                  string
-		lockedAt, startedAt, finishedAt         sql.NullTime
+		j                               Job
+		payload                         []byte
+		status                          string
+		lockedAt, startedAt, finishedAt sql.NullTime
 	)
 	row := p.db.QueryRowContext(ctx, `
 		SELECT id, kind, payload, status, attempts, max_attempts, run_at,
@@ -315,8 +319,7 @@ func checkOwnedRowAffected(res sql.Result, ctx context.Context, db *sql.DB, jobI
 // pgTextArray formats a []string as a Postgres text[] literal.
 // Empty input yields '{}'. Special characters are escaped per
 // Postgres array-literal rules so we don't need a driver-specific
-// array type (lib/pq has one, but keeping it dep-free here makes
-// the package easier to test in isolation).
+// array type.
 func pgTextArray(ss []string) string {
 	if len(ss) == 0 {
 		return "{}"
