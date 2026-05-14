@@ -15,6 +15,7 @@ import (
 	"github.com/santapong/cooker/internal/secrets"
 	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/store"
+	"github.com/santapong/cooker/internal/templates"
 )
 
 // RunSpawner is a narrow interface implemented by server.RunCoordinator.
@@ -24,24 +25,33 @@ type RunSpawner interface {
 	Spawn(ctx context.Context, runID string, work func(context.Context) error)
 }
 
+// JobEnqueuer enqueues a pipeline-run job onto an async durable queue
+// rather than running the executor inline. Wired in server.New only
+// when COOKER_JOBQUEUE_ENABLED=true; nil otherwise. When nil,
+// RunPipeline falls back to the inline RunSpawner path (the existing
+// pre-Phase-1 behaviour). Implementations live in internal/service
+// (see service.JobQueueEnqueuer).
+type JobEnqueuer interface {
+	EnqueueRun(ctx context.Context, pipelineID, runID string) error
+}
+
 // Handler owns the dependencies shared by request handlers.
 type Handler struct {
 	Store *store.Store
-	// Codec is retained for backward compatibility with handlers that
-	// still reach for AES-GCM directly; new code should go through
-	// Secrets instead. Secret endpoints (Put/Reveal/Delete) delegate
-	// to Secrets and ignore Codec.
 	Codec       *crypto.Codec
 	Secrets     secrets.Manager
 	AppDeployer *service.AppDeployer
 	WSBroadcast func(channel string, data []byte)
-	// Executor runs pipeline-run goroutines invoked by RunPipeline. nil
-	// is allowed in tests that do not exercise execution.
 	Executor *service.Executor
-	// Runs spawns tracked goroutines. nil is allowed in tests; when
-	// nil, RunPipeline runs the executor synchronously inside the
-	// request goroutine.
 	Runs RunSpawner
+	// Enqueuer routes pipeline runs through the durable async queue
+	// (Phase-1 / A1). nil falls back to the inline Runs path. Set by
+	// server.New when COOKER_JOBQUEUE_ENABLED=true.
+	Enqueuer JobEnqueuer
+	// Templates is the pipeline-template catalog (Phase-2 / F4). nil
+	// returns 503 from the /templates endpoints; the rest of the API
+	// is unaffected. Set by server.New when DATABASE_URL is non-empty.
+	Templates templates.Store
 }
 
 // New constructs a Handler bound to the given store. secs may be nil
@@ -78,9 +88,6 @@ func abortStoreErr(c *gin.Context, err error, notFoundMsg string) bool {
 		return true
 	}
 	if errors.Is(err, store.ErrConflict) {
-		// Optimistic-concurrency miss: another writer moved the row's
-		// version since the caller fetched it. Tell the client to
-		// refetch and retry.
 		c.JSON(http.StatusConflict, gin.H{
 			"error": "version conflict; refetch and retry",
 		})

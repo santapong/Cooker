@@ -87,6 +87,31 @@ var (
 		Name: "cooker_run_heartbeat_errors_total",
 		Help: "Number of run-coordinator heartbeat write failures.",
 	})
+
+	// Phase 1 / A1 jobqueue series. Depth gauge is set on demand by
+	// callers that have a fresh Stats snapshot; attempts counter
+	// increments per Dispatch; duration histogram observes per Dispatch
+	// labelled by status (succ/fail).
+	jobqueueDepth = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "cooker_jobqueue_depth",
+		Help: "Current number of jobs in the queue, by status (pending, running, succeeded, failed, cancelled).",
+	}, []string{"status"})
+
+	jobqueueAttempts = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cooker_jobqueue_attempts_total",
+		Help: "Number of job-handler dispatches the worker pool has performed, labelled by kind.",
+	}, []string{"kind"})
+
+	jobqueueDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "cooker_jobqueue_run_duration_seconds",
+		Help:    "Wall-clock duration of a single job-handler dispatch, labelled by kind and outcome.",
+		Buckets: []float64{0.05, 0.1, 0.5, 1, 5, 15, 30, 60, 180, 300, 600, 1800, 3600},
+	}, []string{"kind", "outcome"})
+
+	notifierSent = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "cooker_notifier_sent_total",
+		Help: "Number of notification sends attempted by the notifier package, labelled by channel and outcome.",
+	}, []string{"channel", "outcome"})
 )
 
 // ObserveStageDuration records the wall-clock time a pipeline stage
@@ -121,6 +146,43 @@ func AddPipelineRunsOrphaned(n int) {
 	if n > 0 {
 		pipelineRunsOrphaned.Add(float64(n))
 	}
+}
+
+// SetJobqueueDepth sets the gauge for a single status. Callers
+// (typically a periodic scraper goroutine) pass each status they
+// care about; statuses they omit retain their previous value.
+func SetJobqueueDepth(status string, n int) {
+	jobqueueDepth.WithLabelValues(status).Set(float64(n))
+}
+
+// IncJobqueueAttempts records a single dispatch attempt for the
+// given kind. Called by the worker pool unconditionally; the outcome
+// is recorded separately via ObserveJobqueueDuration.
+func IncJobqueueAttempts(kind string) {
+	jobqueueAttempts.WithLabelValues(kind).Inc()
+}
+
+// ObserveJobqueueDuration records the wall-clock time a single job
+// dispatch took. ok=true labels it "success"; ok=false labels it
+// "error". Workers call this immediately after the handler returns,
+// regardless of subsequent Reschedule/Fail outcome.
+func ObserveJobqueueDuration(kind string, d time.Duration, ok bool) {
+	outcome := "success"
+	if !ok {
+		outcome = "error"
+	}
+	jobqueueDuration.WithLabelValues(kind, outcome).Observe(d.Seconds())
+}
+
+// IncNotifierSent records a notifier send attempt by channel and
+// outcome. ok=true labels it "success"; ok=false labels it "error".
+// Channels: slack, discord, email, webhook.
+func IncNotifierSent(channel string, ok bool) {
+	outcome := "success"
+	if !ok {
+		outcome = "error"
+	}
+	notifierSent.WithLabelValues(channel, outcome).Inc()
 }
 
 // MetricsHandler returns the Prometheus /metrics handler.

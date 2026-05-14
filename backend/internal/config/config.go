@@ -34,83 +34,58 @@ type Config struct {
 	AllowedOrigins  []string
 	SecretKey       string
 	Registry        string
-	BuilderBackend  string // "noop" | "docker" | "buildkit" | "kaniko"
-	PusherBackend   string // "noop" | "docker" | "crane"
-	DeployerBackend string // "noop" | "kubectl" | "clientgo"
-	// SecretsBackend selects how environment secrets are stored.
-	// "database" (default) keeps the historical AES-GCM + JSONB path;
-	// "keepsave" delegates to a KeepSave server.
-	SecretsBackend string // "database" | "keepsave"
-	// ReplicaCount is the number of Cooker replicas the chart spins
-	// up (set as COOKER_REPLICA_COUNT). Used by Validate to refuse
-	// boot when shared state is per-process and sticky sessions are
-	// off. Default 1.
-	ReplicaCount int
-	// StickySessions signals that the operator has configured
-	// session-affinity at ingress (NGINX, ALB, Traefik). Lets
-	// Validate accept memory-backed rate limiter / WS ticket store
-	// at >1 replicas. Default false.
-	StickySessions bool
-	RateLimit      RateLimitConfig
-	WSTicket       WSTicketConfig
-	WSHub          WSHubConfig
-	OIDC           OIDCConfig
-	LocalAuth      LocalAuthConfig
-	Docker         DockerConfig
-	Kubernetes     KubernetesConfig
-	KeepSave       KeepSaveConfig
-	Vault          VaultConfig
-	AWSSecrets     AWSSecretsConfig
-	GCPSecrets     GCPSecretsConfig
-	DeployTargets  DeployTargetsConfig
-	Audit          AuditConfig
-	Observability  ObservabilityConfig
-	// AppHealthInterval is how often the AppHealthChecker probes each
-	// App for readiness. Default 30s. Operators with large fleets may
-	// raise this to reduce backend pressure; setting 0 disables the
-	// checker entirely.
+	BuilderBackend  string
+	PusherBackend   string
+	DeployerBackend string
+	SecretsBackend  string
+	ReplicaCount    int
+	StickySessions  bool
+	RateLimit       RateLimitConfig
+	WSTicket        WSTicketConfig
+	WSHub           WSHubConfig
+	OIDC            OIDCConfig
+	LocalAuth       LocalAuthConfig
+	Docker          DockerConfig
+	Kubernetes      KubernetesConfig
+	KeepSave        KeepSaveConfig
+	Vault           VaultConfig
+	AWSSecrets      AWSSecretsConfig
+	GCPSecrets      GCPSecretsConfig
+	DeployTargets   DeployTargetsConfig
+	Audit           AuditConfig
+	Observability   ObservabilityConfig
 	AppHealthInterval time.Duration
+	JobQueue          JobQueueConfig
+	// Scheduler configures the Phase-2 cron-triggered runs loop. Default
+	// Enabled=false; requires JobQueue.Enabled=true at boot. See
+	// internal/scheduler/scheduler.go.
+	Scheduler SchedulerConfig
 }
 
-// WSHubConfig configures the WebSocket broadcast fan-out backend.
-// "memory" (default) keeps the existing in-process channel hub;
-// "redis" uses pub/sub on the shared Redis client so any replica can
-// deliver broadcasts to its connected clients.
 type WSHubConfig struct {
-	Backend string // "memory" | "redis"
+	Backend string
 }
 
-// ObservabilityConfig configures Prometheus /metrics and OpenTelemetry
-// tracing. Both are opt-in (off by default) and add no runtime cost
-// when disabled.
 type ObservabilityConfig struct {
 	MetricsEnabled bool
 	TracingEnabled bool
-	OTLPEndpoint   string // host:port for OTLP/gRPC trace exporter
+	OTLPEndpoint   string
 	OTLPInsecure   bool
 	ServiceName    string
 	ServiceVersion string
 }
 
-// RateLimitConfig tunes per-user rate limiting on expensive endpoints.
 type RateLimitConfig struct {
 	Enabled   bool
 	PerMinute int
 	Burst     int
-	// Backend selects the storage layer. "memory" (default) is
-	// per-process and per-replica; "redis" backs onto the URL in
-	// RedisURL via go-redis/redis_rate (multi-replica safe).
+	Backend   string
+}
+
+type WSTicketConfig struct {
 	Backend string
 }
 
-// WSTicketConfig configures the WebSocket single-use ticket store.
-// "memory" (default) is per-process; "redis" shares state across
-// cooker replicas via Redis GETDEL.
-type WSTicketConfig struct {
-	Backend string // "memory" | "redis"
-}
-
-// OIDCConfig holds SSO/OIDC authentication configuration.
 type OIDCConfig struct {
 	Enabled      bool
 	IssuerURL    string
@@ -118,128 +93,96 @@ type OIDCConfig struct {
 	ClientSecret string
 	RedirectURL  string
 	Scopes       []string
-	// GroupRoleMap maps OIDC group names to Cooker role strings
-	// ("admin"|"operator"|"approver"|"viewer"). Empty falls back to the
-	// auth.DefaultGroupRoleMap. Loaded from COOKER_OIDC_GROUP_MAP as a
-	// CSV of "group:role" pairs, e.g.
-	//   "platform-admins:admin,platform-eng:operator,security-team:approver"
 	GroupRoleMap map[string]string
-	// MFAACRValues lists ACR values that satisfy the step-up MFA gate
-	// applied to destructive admin routes. A token's `acr` claim must
-	// be one of these (or its `amr` must contain a matching method) to
-	// pass auth.RequireMFA. Empty disables the gate. Loaded from
-	// COOKER_OIDC_MFA_ACR_VALUES (CSV).
 	MFAACRValues []string
 }
 
-// LocalAuthConfig configures the email + password authentication path
-// that runs alongside OIDC. When Enabled is true the server registers
-// /api/v1/auth/local/{signup,signin,me} endpoints and the auth
-// middleware accepts JWTs signed with JWTSigningKey. The first user
-// to sign up is granted admin (bootstrap pattern); subsequent signups
-// default to viewer and must be promoted by an admin via the API.
 type LocalAuthConfig struct {
 	Enabled       bool
-	JWTSigningKey string        // base64 or raw; >=32 bytes after decode
-	TokenTTL      time.Duration // default 12h
-	// AllowSignup gates the /signup endpoint. Operators who only want
-	// to invite specific users via admin-created accounts should set
-	// this to false; the UI then hides the sign-up form.
-	AllowSignup bool
+	JWTSigningKey string
+	TokenTTL      time.Duration
+	AllowSignup   bool
 }
 
-// DockerConfig holds Docker Engine connection settings.
 type DockerConfig struct {
 	Host      string
 	TLSVerify bool
 	CertPath  string
 }
 
-// KubernetesConfig holds Kubernetes connection settings.
 type KubernetesConfig struct {
-	InCluster  bool
-	Kubeconfig string
-	// Namespace is the namespace Cooker creates Kaniko build Jobs in.
-	// Cooker's ServiceAccount needs Job + Pod RBAC here. Default: "cooker".
-	Namespace string
-	// KanikoImage pins the Kaniko executor image. Default: latest.
-	KanikoImage string
-	// KanikoServiceAccount runs the Kaniko Job's pod. Empty uses the
-	// namespace's default ServiceAccount.
-	KanikoServiceAccount string
-	// KanikoContextPVC is the PersistentVolumeClaim mounted at the
-	// build-context path on both Cooker and the Kaniko Job. Operators
-	// stage source there before invoking the builder. Empty is
-	// development-only (emptyDir fallback won't see Cooker's source).
-	KanikoContextPVC string
-
-	// Buildah builder knobs (see builder.BuildahConfig). Active when
-	// COOKER_BUILDER=buildah.
+	InCluster             bool
+	Kubeconfig            string
+	Namespace             string
+	KanikoImage           string
+	KanikoServiceAccount  string
+	KanikoContextPVC      string
 	BuildahImage          string
 	BuildahServiceAccount string
 	BuildahContextPVC     string
-	BuildahStorageDriver  string // "overlay" | "vfs"; default "vfs"
+	BuildahStorageDriver  string
 }
 
-// KeepSaveConfig configures the KeepSave secrets backend. Required
-// when SecretsBackend == "keepsave".
 type KeepSaveConfig struct {
-	URL       string // base URL of the KeepSave server, e.g. http://keepsave:8080
-	ProjectID string // single project that owns all of Cooker's secrets
-	APIKey    string // X-API-Key value; per-environment scoping is fine
+	URL       string
+	ProjectID string
+	APIKey    string
 }
 
-// VaultConfig configures the HashiCorp Vault KV v2 backend.
 type VaultConfig struct {
-	Addr   string // VAULT_ADDR equivalent
-	Token  string // VAULT_TOKEN equivalent (can be empty when Vault Agent injects it)
-	Mount  string // KV v2 mount path; default "secret"
-	Prefix string // path prefix appended under <mount>; default ""
+	Addr   string
+	Token  string
+	Mount  string
+	Prefix string
 }
 
-// AWSSecretsConfig configures the AWS Secrets Manager backend.
 type AWSSecretsConfig struct {
 	Region string
-	Prefix string // default "cooker"
+	Prefix string
 }
 
-// GCPSecretsConfig configures the GCP Secret Manager backend.
 type GCPSecretsConfig struct {
 	ProjectID string
-	Prefix    string // default "cooker"
+	Prefix    string
 }
 
-// DeployTargetsConfig bundles the credentials operators provide for
-// each cloud deploy target. Empty fields skip registration of that
-// target — callers don't have to wire every backend they don't use.
 type DeployTargetsConfig struct {
-	CloudRunProject string
-	CloudRunRegion  string
-
+	CloudRunProject   string
+	CloudRunRegion    string
 	ECSRegion         string
 	ECSCluster        string
 	ECSExecutionRole  string
 	ECSTaskRole       string
 	ECSSubnets        []string
 	ECSSecurityGroups []string
-
-	FlyToken  string
-	FlyRegion string
-
-	RenderToken   string
-	RenderOwnerID string
+	FlyToken          string
+	FlyRegion         string
+	RenderToken       string
+	RenderOwnerID     string
 }
 
-// AuditConfig configures the audit-log middleware. When Enabled,
-// every authenticated POST/PUT/PATCH/DELETE under /api/v1 produces
-// one structured event. Defaults: on in production, off elsewhere.
 type AuditConfig struct {
 	Enabled     bool
-	Destination string // "stdout" | "file"
-	FilePath    string // required when Destination == "file"
+	Destination string
+	FilePath    string
 }
 
-// Load reads configuration from environment variables with sensible defaults.
+// JobQueueConfig configures the Phase-1 durable async job queue.
+// Default Enabled=false; when false, no queue is booted.
+type JobQueueConfig struct {
+	Enabled        bool
+	Workers        int
+	WorkerIDPrefix string
+}
+
+// SchedulerConfig configures the Phase-2 cron scheduler. Requires
+// JobQueue.Enabled=true — the scheduler enqueues runs through the
+// jobqueue rather than running them inline.
+type SchedulerConfig struct {
+	Enabled   bool          // COOKER_SCHEDULER_ENABLED (default false)
+	TickEvery time.Duration // COOKER_SCHEDULER_TICK (default 30s)
+}
+
 func Load() *Config {
 	env := Env(getEnv("COOKER_ENV", string(EnvDev)))
 	originDefault := []string{"http://localhost:5173", "http://localhost:3000"}
@@ -266,12 +209,8 @@ func Load() *Config {
 			Burst:     getEnvInt("COOKER_RATE_LIMIT_BURST", 3),
 			Backend:   getEnv("COOKER_RATE_LIMIT_BACKEND", "memory"),
 		},
-		WSTicket: WSTicketConfig{
-			Backend: getEnv("COOKER_WS_TICKET_BACKEND", "memory"),
-		},
-		WSHub: WSHubConfig{
-			Backend: getEnv("COOKER_WS_HUB_BACKEND", "memory"),
-		},
+		WSTicket: WSTicketConfig{Backend: getEnv("COOKER_WS_TICKET_BACKEND", "memory")},
+		WSHub:    WSHubConfig{Backend: getEnv("COOKER_WS_HUB_BACKEND", "memory")},
 		OIDC: OIDCConfig{
 			Enabled:      getEnvBool("COOKER_OIDC_ENABLED", false),
 			IssuerURL:    getEnv("COOKER_OIDC_ISSUER_URL", ""),
@@ -352,47 +291,37 @@ func Load() *Config {
 			ServiceVersion: getEnv("COOKER_SERVICE_VERSION", "dev"),
 		},
 		AppHealthInterval: getEnvDuration("COOKER_APP_HEALTH_INTERVAL", 30*time.Second),
+		JobQueue: JobQueueConfig{
+			Enabled:        getEnvBool("COOKER_JOBQUEUE_ENABLED", false),
+			Workers:        getEnvInt("COOKER_JOBQUEUE_WORKERS", 4),
+			WorkerIDPrefix: getEnv("COOKER_JOBQUEUE_WORKER_PREFIX", "cooker"),
+		},
+		Scheduler: SchedulerConfig{
+			Enabled:   getEnvBool("COOKER_SCHEDULER_ENABLED", false),
+			TickEvery: getEnvDuration("COOKER_SCHEDULER_TICK", 30*time.Second),
+		},
 	}
 }
 
-// Validate enforces production-mode invariants. Errors are intended
-// to be fatal at startup.
 func (c *Config) Validate() error {
 	if !c.Env.IsProduction() {
 		return nil
 	}
 	var problems []string
-	// DATABASE_URL must not be empty or the dev default in production.
-	// The dev default points at localhost with throwaway credentials;
-	// allowing it through silently is a deployment-mistake amplifier.
 	if c.DatabaseURL == "" {
 		problems = append(problems, "DATABASE_URL is required in production")
 	} else if strings.Contains(c.DatabaseURL, "cooker:cooker@localhost") {
 		problems = append(problems, "DATABASE_URL still uses the dev default (cooker:cooker@localhost); set a real value")
 	} else if u, err := url.Parse(c.DatabaseURL); err == nil && u.Host != "" {
-		// S26-05-10: enforce sslmode=require (or stronger) when the
-		// DATABASE_URL points at a non-localhost host. The dev default
-		// is already caught above; for real hosts a missing or
-		// `disable` sslmode means secrets traverse the cluster in
-		// cleartext. The chart's postgresql.sslMode default is
-		// "require", but operators who set DATABASE_URL via extraEnv
-		// or point at external Postgres can bypass it — this
-		// Validate() check is the runtime backstop.
 		host := u.Hostname()
 		if host != "" && host != "localhost" && host != "127.0.0.1" && host != "::1" {
 			switch u.Query().Get("sslmode") {
 			case "require", "verify-ca", "verify-full":
-				// acceptable
 			default:
 				problems = append(problems, "DATABASE_URL requires sslmode=require (or verify-ca/verify-full) in production when host is not localhost")
 			}
 		}
 	}
-	// COOKER_SECRET_KEY is required whenever the active secrets backend
-	// will encrypt anything via crypto.Codec — that's database (always)
-	// and any other backend that fronts environment-secret reveal /
-	// app webhook decryption flows. Treat any non-keepsave backend as
-	// requiring the key in production.
 	requireSecretKey := c.SecretsBackend != "keepsave"
 	if requireSecretKey {
 		if c.SecretKey == "" {
@@ -409,7 +338,6 @@ func (c *Config) Validate() error {
 	}
 	switch c.SecretsBackend {
 	case "", "database":
-		// Already covered by the requireSecretKey block above.
 	case "keepsave":
 		if c.KeepSave.URL == "" {
 			problems = append(problems, "COOKER_SECRETS_KEEPSAVE_URL is required when SecretsBackend=keepsave")
@@ -427,8 +355,6 @@ func (c *Config) Validate() error {
 			problems = append(problems, "COOKER_SECRETS_VAULT_ADDR is required when SecretsBackend=vault")
 		}
 	case "aws":
-		// Region can be auto-discovered from instance metadata; no
-		// hard requirement here.
 	case "gcp":
 		if c.GCPSecrets.ProjectID == "" {
 			problems = append(problems, "COOKER_SECRETS_GCP_PROJECT_ID is required when SecretsBackend=gcp")
@@ -456,7 +382,6 @@ func (c *Config) Validate() error {
 	if c.Audit.Enabled {
 		switch c.Audit.Destination {
 		case "stdout":
-			// fine
 		case "file":
 			if c.Audit.FilePath == "" {
 				problems = append(problems, "COOKER_AUDIT_FILE_PATH is required when COOKER_AUDIT_DESTINATION=file")
@@ -465,23 +390,12 @@ func (c *Config) Validate() error {
 			problems = append(problems, fmt.Sprintf("unknown COOKER_AUDIT_DESTINATION %q (want \"stdout\" or \"file\")", c.Audit.Destination))
 		}
 	}
-	// Builder safety: docker-socket builder is convenient on dev hosts
-	// but gives the Cooker container root-equivalent access to the host
-	// docker daemon. RCE in Cooker -> host takeover. Refuse in prod.
 	if c.BuilderBackend == "docker" {
 		problems = append(problems, "COOKER_BUILDER=docker is unsafe in production (host docker.sock RCE-to-host); use kaniko, buildah, or buildkit")
 	}
-	// Pusher safety: the docker pusher shells out to the Docker CLI which
-	// uses the same bind-mounted host docker.sock. An operator who switches
-	// the builder to kaniko but leaves the pusher as docker still exposes
-	// the same RCE-to-host surface via the push path. Refuse in prod.
 	if c.PusherBackend == "docker" {
 		problems = append(problems, "COOKER_PUSHER=docker is forbidden in production (docker.sock RCE-to-host risk); use crane")
 	}
-	// Multi-replica safety: per-process state must be either shared via
-	// Redis or pinned via sticky sessions. Otherwise a request lands on
-	// a different replica than the one that issued the WS ticket / saw
-	// the rate-limit token, and behaviour becomes unpredictable.
 	if c.ReplicaCount > 1 && !c.StickySessions {
 		var perProcess []string
 		if c.RateLimit.Enabled && c.RateLimit.Backend != "redis" {
@@ -498,6 +412,10 @@ func (c *Config) Validate() error {
 				"COOKER_REPLICA_COUNT=%d requires COOKER_STICKY_SESSIONS=true or redis backend for: %s",
 				c.ReplicaCount, strings.Join(perProcess, ", ")))
 		}
+	}
+	// Scheduler safety: depends on jobqueue.
+	if c.Scheduler.Enabled && !c.JobQueue.Enabled {
+		problems = append(problems, "COOKER_SCHEDULER_ENABLED=true requires COOKER_JOBQUEUE_ENABLED=true")
 	}
 	if len(problems) > 0 {
 		return errors.New("config: " + strings.Join(problems, "; "))
@@ -530,11 +448,6 @@ func getEnvBool(key string, fallback bool) bool {
 	return fallback
 }
 
-// parseGroupRoleMap parses a CSV of "group:role" pairs into a map.
-// Empty or malformed input yields nil so callers fall back to defaults.
-// Whitespace around tokens is tolerated; pairs missing either side are
-// skipped silently — operator typos surface as users defaulting to
-// viewer rather than as a startup crash.
 func parseGroupRoleMap(raw string) map[string]string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -559,11 +472,6 @@ func parseGroupRoleMap(raw string) map[string]string {
 	return out
 }
 
-// DecodeLocalAuthSigningKey returns the raw bytes for the configured
-// JWT signing key. The configured value can be base64 (preferred,
-// matches COOKER_SECRET_KEY) or a raw secret. We try base64 first
-// and fall back to the raw bytes when decode fails — operators who
-// `openssl rand -hex 32` get the same protection without the b64 step.
 func DecodeLocalAuthSigningKey(s string) ([]byte, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

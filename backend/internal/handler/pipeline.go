@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -62,8 +63,6 @@ func (h *Handler) CreatePipeline(c *gin.Context) {
 		return
 	}
 
-	// Validate DAG structure at the service layer. Replaces the private
-	// validateDAG that was deleted per handler-layering audit Finding 1.
 	if dagErrs := service.ValidatePipelineDAG(&p); len(dagErrs) > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"valid": false, "errors": dagErrs})
 		return
@@ -142,10 +141,6 @@ func (h *Handler) ValidatePipeline(c *gin.Context) {
 	if abortStoreErr(c, err, "pipeline not found") {
 		return
 	}
-
-	// Delegate to service.ValidatePipelineDAG (which calls dagrunner.DAG.Validate)
-	// instead of the private validateDAG that was deleted from this file.
-	// See handler-layering audit Finding 1.
 	dagErrs := service.ValidatePipelineDAG(p)
 	if len(dagErrs) > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"valid": false, "errors": dagErrs})
@@ -155,6 +150,11 @@ func (h *Handler) ValidatePipeline(c *gin.Context) {
 }
 
 // RunPipeline kicks off a new run for the pipeline. Rate-limited.
+//
+// When COOKER_JOBQUEUE_ENABLED=true and the server wired an Enqueuer,
+// this returns 202 immediately after persisting the pending run and
+// enqueueing a job; a worker (service.JobQueueRunner) picks it up.
+// Otherwise the existing inline Runs.Spawn path runs unchanged.
 //
 // @Summary      Run a pipeline
 // @Tags         pipelines
@@ -192,8 +192,27 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 		return
 	}
 
-	// Spawn the executor in a tracked goroutine. The handler returns
-	// 202 immediately with the pending run; the caller polls / streams
+	// Durable path (Phase-1 / A1): enqueue and return 202. The worker
+	// pool picks up the job via Dequeue + NOTIFY and runs the
+	// executor via service.JobQueueRunner. Enabled by setting
+	// COOKER_JOBQUEUE_ENABLED=true at boot.
+	if h.Enqueuer != nil {
+		if err := h.Enqueuer.EnqueueRun(c.Request.Context(), p.ID, run.ID); err != nil {
+			// Don't fail the request: the run row exists and the
+			// orphan sweep will recover it on the next boot if no
+			// worker ever picks it up. The handler returns 202 so
+			// the client polls / streams status and observes the
+			// outcome via the existing run-detail endpoint.
+			slog.Warn("RunPipeline: enqueue failed",
+				"run", run.ID, "pipeline", p.ID, "err", err)
+		}
+		c.JSON(http.StatusAccepted, run)
+		return
+	}
+
+	// Inline path (pre-Phase-1 behaviour, still the default). Spawn the
+	// executor in a tracked goroutine. The handler returns 202
+	// immediately with the pending run; the caller polls / streams
 	// status. Without an Executor or RunSpawner the run stays pending
 	// (matches the old behaviour for tests that don't wire either).
 	//
@@ -203,8 +222,6 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 	// Do NOT re-derive run.Status from runCopy.Status here — Execute
 	// guarantees a terminal value and Cancelled stays Cancelled.
 	if h.Runs != nil && h.Executor != nil {
-		// Use a fresh background context so the run survives the
-		// completion of the HTTP request that started it.
 		h.Runs.Spawn(context.Background(), run.ID, func(ctx context.Context) error {
 			runCopy := run
 			_, execErr := h.Executor.Execute(ctx, p, runCopy)
@@ -268,4 +285,3 @@ func (h *Handler) GetStageLogs(c *gin.Context) {
 	}
 	c.JSON(http.StatusNotFound, gin.H{"error": "stage not found"})
 }
-
