@@ -38,6 +38,11 @@ const hostSSHKeyKey = "ssh_private_key"
 type HostService struct {
 	Store   *store.Store
 	Secrets secrets.Manager
+	// OnDelete, if non-nil, is invoked after a successful DeleteHost
+	// with the host ID. The server wires this to the SSH adapter's
+	// Evict so deleting a host drops its cached SSH connection. nil
+	// is safe (skipped).
+	OnDelete func(hostID string)
 }
 
 // NewHostService constructs a HostService.
@@ -110,12 +115,17 @@ func (s *HostService) UpdateHost(ctx context.Context, existing, h *model.Host, p
 // DeleteHost removes the host and (best-effort) its private key.
 // A secrets-delete failure does not fail the host delete; the
 // orphan key entry can be reaped manually if it ever happens.
+// After a successful delete OnDelete is invoked so the SSH adapter
+// can evict any cached connection to this host.
 func (s *HostService) DeleteHost(ctx context.Context, hostID string) error {
 	if err := s.Store.Hosts.Delete(ctx, hostID); err != nil {
 		return err
 	}
 	if s.Secrets != nil {
 		_ = s.Secrets.Delete(ctx, hostSecretsEnvID, hostSSHKeyKey+"."+hostID)
+	}
+	if s.OnDelete != nil {
+		s.OnDelete(hostID)
 	}
 	return nil
 }
@@ -145,26 +155,52 @@ func (s *HostService) LoadPrivateKey(ctx context.Context, host *model.Host) ([]b
 // Called by the SSH adapter the first time it successfully connects
 // to a !strict host. Errors here are non-fatal to a deploy (the
 // connection already succeeded); the caller logs them.
+//
+// The optimistic-concurrency Update can lose a race against an
+// operator editing the host in parallel — that returns ErrConflict
+// because the version no longer matches the snapshot we just Got.
+// We retry up to pinHostKeyMaxRetries times with a fresh Get each
+// time, so a sustained edit window can't permanently prevent the
+// pin from being persisted.
 func (s *HostService) PinHostKey(ctx context.Context, host *model.Host, serialisedKey string) error {
 	if host == nil {
 		return fmt.Errorf("hostservice: nil host")
 	}
-	existing, err := s.Store.Hosts.Get(ctx, host.ID)
-	if err != nil {
-		return err
+	for attempt := 0; attempt < pinHostKeyMaxRetries; attempt++ {
+		existing, err := s.Store.Hosts.Get(ctx, host.ID)
+		if err != nil {
+			return err
+		}
+		if existing.SSHKnownHostKey == serialisedKey {
+			// Already pinned to the same value (concurrent first-
+			// connect or earlier retry). Done.
+			return nil
+		}
+		if existing.SSHKnownHostKey != "" {
+			// Someone else pinned a *different* key already; refuse
+			// to silently overwrite — this is the scenario the TOFU
+			// policy exists to flag.
+			return fmt.Errorf("hostservice: refusing to overwrite pinned host key for %s", host.ID)
+		}
+		existing.SSHKnownHostKey = serialisedKey
+		err = s.Store.Hosts.Update(ctx, existing)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, store.ErrConflict) {
+			return err
+		}
+		// ErrConflict: operator edited the row between our Get and
+		// Update. Re-Get and try again.
 	}
-	// Only pin if still empty — racing pins (two concurrent first-
-	// connects) both succeed against the same key, so a later write
-	// that overwrites with the same value is harmless.
-	if existing.SSHKnownHostKey != "" && existing.SSHKnownHostKey != serialisedKey {
-		// Someone else pinned a different key already; refuse to
-		// silently overwrite — this is the scenario the TOFU policy
-		// exists to flag.
-		return fmt.Errorf("hostservice: refusing to overwrite pinned host key for %s", host.ID)
-	}
-	existing.SSHKnownHostKey = serialisedKey
-	return s.Store.Hosts.Update(ctx, existing)
+	return fmt.Errorf("hostservice: failed to pin host key for %s after %d retries (concurrent edits)",
+		host.ID, pinHostKeyMaxRetries)
 }
+
+// pinHostKeyMaxRetries bounds the PinHostKey retry loop. Three is
+// enough to absorb a typical operator burst-edit without making the
+// adapter sit on a stuck pin call forever.
+const pinHostKeyMaxRetries = 3
 
 // maybeStoreKey writes pemPrivateKey to secrets.Manager under the
 // Host's ref, validating the key parses before storage. Sets

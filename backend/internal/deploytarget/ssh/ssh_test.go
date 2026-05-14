@@ -124,7 +124,19 @@ func TestContainerNameFor_StripsMetacharacters(t *testing.T) {
 
 func TestValidImageRef(t *testing.T) {
 	good := []string{"nginx", "nginx:1.25", "ghcr.io/org/app:v1", "registry.example.com:5000/app@sha256:abc"}
-	bad := []string{"", "img with space", "img;rm -rf /", "img$(date)", "img\nimg"}
+	bad := []string{
+		"",
+		"img with space",
+		"img;rm -rf /",
+		"img$(date)",
+		"img\nimg",
+		// Leading-dash refs would be parsed by docker run/pull as
+		// flags after the shell strips the quoting; reject up front.
+		"-it",
+		"--privileged",
+		// Leading dot is rejected too (no real image ref starts with one).
+		".hidden",
+	}
 	for _, s := range good {
 		if !validImageRef(s) {
 			t.Errorf("validImageRef(%q) = false, want true", s)
@@ -291,6 +303,7 @@ func newTargetWithFakeDial(t *testing.T, fake *fakeClient, host *model.Host) (*T
 			return fake, nil
 		},
 		clientCache: map[string]sshClient{},
+		connectMu:   map[string]*sync.Mutex{},
 		HostResolver: func(_ context.Context, appID string) (*model.Host, error) {
 			h := *host
 			h.ID = appID
@@ -505,6 +518,7 @@ func TestDialHost_CachesClientPerHost(t *testing.T) {
 	var mu sync.Mutex
 	tgt := &Target{
 		clientCache: map[string]sshClient{},
+		connectMu:   map[string]*sync.Mutex{},
 		dial: func(string, string, *gossh.ClientConfig) (sshClient, error) {
 			mu.Lock()
 			dialCount++
@@ -516,7 +530,7 @@ func TestDialHost_CachesClientPerHost(t *testing.T) {
 	tgt.PrivateKeyResolver = func(context.Context, *model.Host) ([]byte, error) { return pemBytes, nil }
 	h := baseSSHHost()
 	for i := 0; i < 3; i++ {
-		if _, err := tgt.dialHost(context.Background(), h); err != nil {
+		if _, err := tgt.dialHost(context.Background(), h, nil); err != nil {
 			t.Fatalf("dialHost: %v", err)
 		}
 	}
@@ -525,6 +539,121 @@ func TestDialHost_CachesClientPerHost(t *testing.T) {
 		t.Fatalf("expected 1 dial across 3 calls, got %d", dialCount)
 	}
 	tgt.CloseAll()
+}
+
+// TestDialHost_ConcurrentFirstDial verifies that two simultaneous
+// first-connect Deploys for the same host result in exactly one
+// dial — i.e. the per-host singleflight that protects against the
+// "two clients dialed, one leaked" race documented in the audit.
+func TestDialHost_ConcurrentFirstDial(t *testing.T) {
+	fake := newFakeClient()
+	dialCount := 0
+	var mu sync.Mutex
+	tgt := &Target{
+		clientCache: map[string]sshClient{},
+		connectMu:   map[string]*sync.Mutex{},
+		dial: func(string, string, *gossh.ClientConfig) (sshClient, error) {
+			mu.Lock()
+			dialCount++
+			mu.Unlock()
+			return fake, nil
+		},
+	}
+	pemBytes, _ := generateEd25519PEM(t)
+	tgt.PrivateKeyResolver = func(context.Context, *model.Host) ([]byte, error) { return pemBytes, nil }
+	h := baseSSHHost()
+
+	const goroutines = 8
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errCh := make(chan error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if _, err := tgt.dialHost(context.Background(), h, nil); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatalf("dialHost: %v", err)
+	}
+	mu.Lock()
+	got := dialCount
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("expected exactly 1 dial across %d concurrent calls, got %d", goroutines, got)
+	}
+	tgt.CloseAll()
+}
+
+// TestEvict_DropsCachedClient verifies that Evict closes the cached
+// SSH client and removes the cache entry so a subsequent dialHost
+// re-dials. Wires the audit finding "SSH client cache outlives Host
+// deletion" closed.
+func TestEvict_DropsCachedClient(t *testing.T) {
+	fake := newFakeClient()
+	dialCount := 0
+	var mu sync.Mutex
+	tgt := &Target{
+		clientCache: map[string]sshClient{},
+		connectMu:   map[string]*sync.Mutex{},
+		dial: func(string, string, *gossh.ClientConfig) (sshClient, error) {
+			mu.Lock()
+			dialCount++
+			mu.Unlock()
+			return fake, nil
+		},
+	}
+	pemBytes, _ := generateEd25519PEM(t)
+	tgt.PrivateKeyResolver = func(context.Context, *model.Host) ([]byte, error) { return pemBytes, nil }
+	h := baseSSHHost()
+	if _, err := tgt.dialHost(context.Background(), h, nil); err != nil {
+		t.Fatalf("dialHost: %v", err)
+	}
+	tgt.Evict(h.ID)
+	if !fake.closed {
+		t.Fatalf("Evict should have closed the cached client")
+	}
+	// Next dialHost re-dials.
+	if _, err := tgt.dialHost(context.Background(), h, nil); err != nil {
+		t.Fatalf("dialHost after Evict: %v", err)
+	}
+	mu.Lock()
+	got := dialCount
+	mu.Unlock()
+	if got != 2 {
+		t.Fatalf("expected 2 dials (one before Evict, one after), got %d", got)
+	}
+}
+
+// TestDeploy_SpecLogWriterOverridesTarget verifies that a per-call
+// Spec.LogWriter wins over the Target-level LogWriter — preventing
+// the cross-deploy log interleaving documented in the audit (two
+// concurrent Deploys must not tee into the same Target.LogWriter).
+func TestDeploy_SpecLogWriterOverridesTarget(t *testing.T) {
+	fake := newFakeClient()
+	tgt, _ := newTargetWithFakeDial(t, fake, baseSSHHost())
+	var targetBuf, specBuf bytes.Buffer
+	tgt.LogWriter = &targetBuf
+	if err := tgt.Deploy(context.Background(), deploytarget.Spec{
+		AppID:     "app-1",
+		Image:     "nginx",
+		LogWriter: &specBuf,
+	}); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if !strings.Contains(specBuf.String(), "docker pull nginx") {
+		t.Fatalf("spec writer should have captured pull line; got %q", specBuf.String())
+	}
+	if strings.Contains(targetBuf.String(), "docker pull nginx") {
+		t.Fatalf("target writer should NOT have received logs when spec writer was set; got %q", targetBuf.String())
+	}
 }
 
 // Diagnostic: simply build a fake ssh.Signer to ensure

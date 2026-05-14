@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -195,7 +196,13 @@ func (h *Handler) DeleteHost(c *gin.Context) {
 
 // handleHostServiceError translates HostService errors into HTTP
 // status codes. ErrInvalidPrivateKey → 400; ErrSecretsUnavailable
-// → 503; anything else → 500.
+// → 503; anything else → 500 with a fixed body string.
+//
+// 5xx bodies must not echo err.Error() because wrapped messages
+// may carry internal paths (e.g. "open /var/run/secrets/...: …") or
+// upstream URLs (e.g. "keepsave: https://.../v1/...: 502") that we
+// don't want to leak to API clients. The detail is logged server-
+// side instead.
 func handleHostServiceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidPrivateKey):
@@ -203,6 +210,7 @@ func handleHostServiceError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrSecretsUnavailable):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		slog.Error("host service error", "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 	}
 }

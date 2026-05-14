@@ -133,6 +133,14 @@ type Target struct {
 	// run. The mutex is per-Target, not per-package.
 	mu          sync.Mutex
 	clientCache map[string]sshClient
+	// connectMu serialises concurrent first-dials per host. Without
+	// it, two simultaneous Deploys to a never-before-seen host both
+	// miss the cache, both dial, and one of the resulting clients
+	// leaks. Keyed by host ID; entries are created on first connect
+	// and never removed (the long-tail count is bounded by host
+	// inventory). Protected by mu for map writes; the per-host Mutex
+	// pointer itself is what holds the singleflight.
+	connectMu map[string]*sync.Mutex
 }
 
 // New constructs an SSH Target with the production dialer. Callers
@@ -141,6 +149,7 @@ func New() *Target {
 	return &Target{
 		dial:        realDial,
 		clientCache: map[string]sshClient{},
+		connectMu:   map[string]*sync.Mutex{},
 	}
 }
 
@@ -184,12 +193,34 @@ func requireHost(h *model.Host) error {
 
 // dialHost opens (or returns a cached) ssh client for h. The
 // returned client must not be Close'd by the caller — Target owns
-// the lifecycle and closes via CloseAll.
-func (t *Target) dialHost(ctx context.Context, h *model.Host) (sshClient, error) {
+// the lifecycle and closes via CloseAll. lw receives any TOFU-pin
+// log lines; nil silently discards them.
+//
+// Concurrent first-dials for the same host are serialised through a
+// per-host Mutex so only one connection is established and cached;
+// subsequent callers reuse it.
+func (t *Target) dialHost(ctx context.Context, h *model.Host, lw io.Writer) (sshClient, error) {
 	if err := requireHost(h); err != nil {
 		return nil, err
 	}
 
+	t.mu.Lock()
+	if c, ok := t.clientCache[h.ID]; ok {
+		t.mu.Unlock()
+		return c, nil
+	}
+	cmu, ok := t.connectMu[h.ID]
+	if !ok {
+		cmu = &sync.Mutex{}
+		t.connectMu[h.ID] = cmu
+	}
+	t.mu.Unlock()
+
+	cmu.Lock()
+	defer cmu.Unlock()
+
+	// Re-check after acquiring the per-host lock: the previous
+	// holder may have populated the cache.
 	t.mu.Lock()
 	if c, ok := t.clientCache[h.ID]; ok {
 		t.mu.Unlock()
@@ -241,14 +272,15 @@ func (t *Target) dialHost(ctx context.Context, h *model.Host) (sshClient, error)
 	// Persist the TOFU-captured key (if any) so subsequent connects
 	// enforce strict equality. Best-effort: a persist failure does
 	// NOT fail the deploy because the connection itself was already
-	// verified by the callback. We log via the LogWriter so the
-	// operator sees the pin.
+	// verified by the callback. The next Deploy's HostResolver will
+	// Get a fresh row with the pin set; we deliberately do NOT mutate
+	// the caller's *model.Host pointer here, since shared pointers
+	// would race.
 	if pinned != "" && t.PinHostKey != nil {
 		if err := t.PinHostKey(ctx, h, pinned); err != nil {
-			t.log("[ssh] warn: failed to persist pinned host key: %v\n", err)
+			logf(lw, "[ssh] warn: failed to persist pinned host key: %v\n", err)
 		} else {
-			h.SSHKnownHostKey = pinned // mutate in-place so the *same Host* used by this Deploy reflects the pin
-			t.log("[ssh] pinned host key for %s: %s\n", h.ID, pinned)
+			logf(lw, "[ssh] pinned host key for %s: %s\n", h.ID, pinned)
 		}
 	}
 
@@ -265,24 +297,26 @@ func (t *Target) connectTimeout() time.Duration {
 	return 15 * time.Second
 }
 
-func (t *Target) log(format string, args ...any) {
-	if t.LogWriter == nil {
+// logf writes a formatted line to w; nil w silently discards. Used
+// for in-band TOFU / step-progress log lines.
+func logf(w io.Writer, format string, args ...any) {
+	if w == nil {
 		return
 	}
-	fmt.Fprintf(t.LogWriter, format, args...)
+	fmt.Fprintf(w, format, args...)
 }
 
 // runCmd opens a fresh session and runs cmd; stdout/stderr stream
-// into t.LogWriter (and the optional extra writer) so the operator
-// tails docker output in real time. The session is closed after Run.
-func (t *Target) runCmd(client sshClient, cmd string, extra io.Writer) error {
+// into lw (the per-call log sink) so the operator tails docker
+// output in real time. The session is closed after Run.
+func runCmd(client sshClient, cmd string, lw io.Writer) error {
 	s, err := client.NewSession()
 	if err != nil {
 		return fmt.Errorf("session: %w", err)
 	}
 	defer s.Close()
 
-	stdout := writerFanout(t.LogWriter, extra)
+	stdout := writerFanout(lw, nil)
 	s.SetStdout(stdout)
 	s.SetStderr(stdout)
 	return s.Run(cmd)
@@ -301,6 +335,16 @@ func runCmdQuiet(client sshClient, cmd string) (string, error) {
 	return string(out), err
 }
 
+// resolveLogWriter returns the per-call writer for this Deploy.
+// Order: spec.LogWriter (per-call override) → t.LogWriter (Target
+// default) → nil (no logging).
+func (t *Target) resolveLogWriter(spec deploytarget.Spec) io.Writer {
+	if spec.LogWriter != nil {
+		return spec.LogWriter
+	}
+	return t.LogWriter
+}
+
 // Deploy runs the four-shot pull→stop→rm→run sequence against the
 // Host attached to spec.AppID. Failure on pull aborts; stop/rm
 // errors are logged but tolerated (the container may not exist yet
@@ -313,7 +357,8 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 	if err != nil {
 		return fmt.Errorf("ssh: resolve host for app %s: %w", spec.AppID, err)
 	}
-	client, err := t.dialHost(ctx, host)
+	lw := t.resolveLogWriter(spec)
+	client, err := t.dialHost(ctx, host, lw)
 	if err != nil {
 		return err
 	}
@@ -325,32 +370,32 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 	}
 
 	// 1. pull
-	t.log("[ssh] docker pull %s\n", image)
-	if err := t.runCmd(client, fmt.Sprintf("docker pull %s", shQuote(image)), nil); err != nil {
+	logf(lw, "[ssh] docker pull %s\n", image)
+	if err := runCmd(client, fmt.Sprintf("docker pull %s", shQuote(image)), lw); err != nil {
 		return fmt.Errorf("ssh: docker pull: %w", err)
 	}
 
 	// 2. stop (best-effort)
-	t.log("[ssh] docker stop %s (best-effort)\n", containerName)
+	logf(lw, "[ssh] docker stop %s (best-effort)\n", containerName)
 	if out, err := runCmdQuiet(client, fmt.Sprintf("docker stop %s", shQuote(containerName))); err != nil {
 		// Tolerate "no such container" but log everything else.
 		if !strings.Contains(out, "No such container") {
-			t.log("[ssh] stop: %v (output: %s)\n", err, strings.TrimSpace(out))
+			logf(lw, "[ssh] stop: %v (output: %s)\n", err, strings.TrimSpace(out))
 		}
 	}
 
 	// 3. rm (best-effort)
-	t.log("[ssh] docker rm %s (best-effort)\n", containerName)
+	logf(lw, "[ssh] docker rm %s (best-effort)\n", containerName)
 	if out, err := runCmdQuiet(client, fmt.Sprintf("docker rm %s", shQuote(containerName))); err != nil {
 		if !strings.Contains(out, "No such container") {
-			t.log("[ssh] rm: %v (output: %s)\n", err, strings.TrimSpace(out))
+			logf(lw, "[ssh] rm: %v (output: %s)\n", err, strings.TrimSpace(out))
 		}
 	}
 
 	// 4. run
-	runCmd := composeRunCommand(containerName, image, spec.Env, spec.Ports)
-	t.log("[ssh] %s\n", runCmd)
-	if err := t.runCmd(client, runCmd, nil); err != nil {
+	dockerRun := composeRunCommand(containerName, image, spec.Env, spec.Ports)
+	logf(lw, "[ssh] %s\n", dockerRun)
+	if err := runCmd(client, dockerRun, lw); err != nil {
 		return fmt.Errorf("ssh: docker run: %w", err)
 	}
 	return nil
@@ -367,7 +412,7 @@ func (t *Target) Status(ctx context.Context, appID string) (deploytarget.Status,
 	if err != nil {
 		return deploytarget.Status{}, fmt.Errorf("ssh: resolve host: %w", err)
 	}
-	client, err := t.dialHost(ctx, host)
+	client, err := t.dialHost(ctx, host, t.LogWriter)
 	if err != nil {
 		return deploytarget.Status{}, err
 	}
@@ -396,7 +441,7 @@ func (t *Target) Logs(ctx context.Context, appID string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("ssh: resolve host: %w", err)
 	}
-	client, err := t.dialHost(ctx, host)
+	client, err := t.dialHost(ctx, host, out)
 	if err != nil {
 		return err
 	}
@@ -415,7 +460,8 @@ func (t *Target) Logs(ctx context.Context, appID string, out io.Writer) error {
 	go func() { done <- sess.Wait() }()
 	select {
 	case <-ctx.Done():
-		_ = sess.Close()
+		// Defer at the top of this function will Close the session
+		// when we return; don't double-close here.
 		return ctx.Err()
 	case err := <-done:
 		return err
@@ -439,6 +485,24 @@ func (t *Target) CloseAll() {
 	for id, c := range t.clientCache {
 		_ = c.Close()
 		delete(t.clientCache, id)
+	}
+}
+
+// Evict closes and removes the cached SSH client for hostID. Called
+// by HostService.DeleteHost so a deleted host doesn't leave a stale
+// open TCP socket pinned in the cache. Safe to call for unknown
+// hostIDs (no-op); concurrent with other Deploy / Status / Logs
+// calls (they'll re-dial on next use if needed).
+func (t *Target) Evict(hostID string) {
+	t.mu.Lock()
+	c, ok := t.clientCache[hostID]
+	if ok {
+		delete(t.clientCache, hostID)
+	}
+	delete(t.connectMu, hostID)
+	t.mu.Unlock()
+	if ok {
+		_ = c.Close()
 	}
 }
 
@@ -466,8 +530,17 @@ func containerNameFor(appID string) string {
 // validImageRef rejects obviously hostile inputs (whitespace, shell
 // metacharacters) without trying to fully parse OCI image refs. We
 // pass image through shQuote anyway; this is belt-and-suspenders.
+//
+// A leading "-" or "." is rejected to prevent the shell-stripped
+// quoted form from being interpreted as a flag by `docker pull` /
+// `docker run` (e.g. an image ref like "-it" would otherwise reach
+// docker as a positional that the flag parser claims). OCI image
+// refs never start with a dash in legitimate usage.
 func validImageRef(s string) bool {
 	if s == "" {
+		return false
+	}
+	if s[0] == '-' || s[0] == '.' {
 		return false
 	}
 	for _, r := range s {
@@ -580,6 +653,10 @@ type multiWriter struct {
 	a, b io.Writer
 }
 
+// Write fans p out to both underlying writers and reports success
+// for len(p) bytes regardless of either underlying writer's outcome.
+// This is intentional: a slow / closed log channel must NOT fail an
+// in-flight deploy. Errors from a / b are dropped on the floor.
 func (m *multiWriter) Write(p []byte) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

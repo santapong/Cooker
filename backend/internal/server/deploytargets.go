@@ -80,6 +80,11 @@ func registerSSHDeployTarget(st *store.Store, hostSvc *service.HostService, clea
 	}
 	tgt.PrivateKeyResolver = hostSvc.LoadPrivateKey
 	tgt.PinHostKey = hostSvc.PinHostKey
+	// When a Host is deleted, evict any cached SSH client so the
+	// adapter doesn't pin a TCP socket to a row that no longer
+	// exists. The service exposes this as a callback so it doesn't
+	// have to import the ssh adapter package.
+	hostSvc.OnDelete = tgt.Evict
 
 	if err := deploytarget.Register(tgt); err != nil {
 		if errors.Is(err, deploytarget.ErrDuplicateKind) {
