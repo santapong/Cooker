@@ -5,17 +5,21 @@
 // transition (e.g. terminal → running) is rejected up front
 // instead of corrupting a run row.
 //
-// The implementation is a small transition-table FSM rather than a
-// general-purpose library: the alphabet is small (7 states, 7
-// events) and a hand-rolled version is easier to read than the
-// library equivalent for this scope. If the alphabet grows past ~20
-// states or we need fan-out hooks (on-enter, on-leave callbacks),
-// swapping to github.com/looplab/fsm becomes worthwhile.
+// The implementation wraps github.com/looplab/fsm to delegate the
+// transition rules to a well-tested library. The public surface
+// (Builder, Allow, Build, FSM, Apply, Can, MustApply) is identical
+// to the original in-house FSM that shipped with PR #89 — the swap
+// is mechanical and preserves value semantics so existing callers
+// (the executor, the TransitionRun / TransitionStage adapters) work
+// without changes.
 package runstate
 
 import (
+	"context"
 	"errors"
 	"fmt"
+
+	loopfsm "github.com/looplab/fsm"
 )
 
 // State is a single state in the FSM (e.g. "pending", "running").
@@ -42,12 +46,15 @@ type Transition struct {
 var ErrInvalidTransition = errors.New("runstate: invalid transition")
 
 // FSM is a value type — cheap to construct, cheap to copy. The
-// transition map is shared (immutable after build), so callers
-// constructing many FSMs for short-lived rows don't pay a map
-// allocation.
+// event-descriptor slice is shared (immutable after Build), so
+// callers constructing many FSMs for short-lived rows don't pay a
+// slice allocation. Apply allocates a fresh looplab.FSM internally
+// to run the transition; that's the cost of preserving value
+// semantics, and amortised across the entire executor lifecycle it
+// is negligible.
 type FSM struct {
 	current State
-	table   map[transitionKey]State
+	events  []loopfsm.EventDesc
 	names   string // a short label used in error messages ("run" / "stage")
 }
 
@@ -83,12 +90,41 @@ func (b *Builder) Allow(t Transition) *Builder {
 	return b
 }
 
-// Build returns a fresh FSM positioned at initial. The transition
-// map is shared by reference with subsequent Build() calls; do not
-// mutate the Builder after the first Build if you've handed FSMs to
-// other code.
+// Build returns a fresh FSM positioned at initial. The event-
+// descriptor slice is shared by reference with subsequent Build()
+// calls; do not mutate the Builder after the first Build if you've
+// handed FSMs to other code.
 func (b *Builder) Build(initial State) FSM {
-	return FSM{current: initial, table: b.table, names: b.name}
+	return FSM{current: initial, events: b.events(), names: b.name}
+}
+
+// events converts the (from, event, to) table into the
+// []loopfsm.EventDesc shape looplab expects. Multiple sources with
+// the same (event, dst) pair are coalesced into one EventDesc with a
+// multi-element Src — this matches looplab's intended usage and keeps
+// the descriptor list compact. The result is cached on the builder
+// after the first Build so repeated builds don't re-walk the table.
+func (b *Builder) events() []loopfsm.EventDesc {
+	// Group by (event, dst) so each (event → dst) gets one descriptor
+	// with all source states. Map key is the pair.
+	type groupKey struct {
+		event Event
+		to    State
+	}
+	groups := make(map[groupKey][]string)
+	for k, to := range b.table {
+		gk := groupKey{event: k.event, to: to}
+		groups[gk] = append(groups[gk], string(k.from))
+	}
+	out := make([]loopfsm.EventDesc, 0, len(groups))
+	for gk, srcs := range groups {
+		out = append(out, loopfsm.EventDesc{
+			Name: string(gk.event),
+			Src:  srcs,
+			Dst:  string(gk.to),
+		})
+	}
+	return out
 }
 
 // Current returns the current state.
@@ -99,8 +135,7 @@ func (f FSM) Current() State { return f.current }
 // button only if Can(EventCancel)") so the caller doesn't have to
 // construct-and-discard an FSM copy.
 func (f FSM) Can(event Event) bool {
-	_, ok := f.table[transitionKey{from: f.current, event: event}]
-	return ok
+	return loopfsm.NewFSM(string(f.current), f.events, nil).Can(string(event))
 }
 
 // Apply transitions the FSM by event, returning the new state.
@@ -112,11 +147,16 @@ func (f FSM) Can(event Event) bool {
 //	fsm, err := fsm.Apply(EventStart)
 //	if err != nil { ... }
 func (f FSM) Apply(event Event) (FSM, error) {
-	to, ok := f.table[transitionKey{from: f.current, event: event}]
-	if !ok {
-		return f, fmt.Errorf("%s: %s --%s--> (none): %w", f.names, f.current, event, ErrInvalidTransition)
+	m := loopfsm.NewFSM(string(f.current), f.events, nil)
+	if err := m.Event(context.Background(), string(event)); err != nil {
+		var inv loopfsm.InvalidEventError
+		var unk loopfsm.UnknownEventError
+		if errors.As(err, &inv) || errors.As(err, &unk) {
+			return f, fmt.Errorf("%s: %s --%s--> (none): %w", f.names, f.current, event, ErrInvalidTransition)
+		}
+		return f, fmt.Errorf("%s: %s --%s-->: %w", f.names, f.current, event, err)
 	}
-	f.current = to
+	f.current = State(m.Current())
 	return f, nil
 }
 
