@@ -21,6 +21,13 @@ import (
 // rotation, and promotion approval keep their per-handler checks so
 // RBAC is enforced both at the router and at the point of sensitive
 // action, which is what a reader auditing the handler expects to see.
+//
+// Phase-1 / A3: three sensitive routes additionally adopt the new
+// auth.RequirePermission middleware as a declarative resource-action
+// guard alongside the role check. Belt-and-braces — dropping one
+// gate by accident still leaves the other in place. Incremental
+// adoption: more routes can switch to RequirePermission in follow-ups
+// without a flag day.
 func (s *Server) registerRoutes() {
 	// Local-auth signup + signin live OUTSIDE the /api/v1 auth group:
 	// they're how an unauthenticated client gets a token in the first
@@ -71,7 +78,14 @@ func (s *Server) registerRoutes() {
 		pipelines.PUT("/:id", writeRole, h.UpdatePipeline)
 		pipelines.DELETE("/:id", adminRole, mfa, h.DeletePipeline)
 		pipelines.POST("/:id/validate", h.ValidatePipeline)
-		pipelines.POST("/:id/run", writeRole, expensive, idempotencyMiddleware(s.idempotency), h.RunPipeline)
+		// Phase-1 / A3: the run-trigger route now also passes through the
+		// declarative resource-action guard. writeRole remains — belt-
+		// and-braces — so an accidental policy change in one place still
+		// leaves the other enforced.
+		pipelines.POST("/:id/run",
+			writeRole,
+			auth.RequirePermission(auth.ResourcePipeline, auth.ActionInvoke),
+			expensive, idempotencyMiddleware(s.idempotency), h.RunPipeline)
 		pipelines.GET("/:id/runs", h.ListPipelineRuns)
 		pipelines.GET("/:id/runs/:runId", h.GetPipelineRun)
 		pipelines.POST("/:id/runs/:runId/cancel", writeRole, h.CancelPipelineRun)
@@ -143,7 +157,17 @@ func (s *Server) registerRoutes() {
 		// middleware here is belt-and-braces so unauthenticated probing
 		// of the route table gets a uniform 403 before touching the
 		// handler body.
-		environments.GET("/:id/secrets/:key", adminRole, mfa, h.RevealSecret)
+		//
+		// Phase-1 / A3: secret reveal also passes through
+		// RequirePermission(secret, reveal). Three layers now block a
+		// non-admin from reaching the handler body — role gate, MFA gate,
+		// declarative permission — plus the existing in-handler
+		// CanRevealSecret check. Defense in depth on the most sensitive
+		// read in the API.
+		environments.GET("/:id/secrets/:key",
+			adminRole, mfa,
+			auth.RequirePermission(auth.ResourceSecret, auth.ActionReveal),
+			h.RevealSecret)
 		environments.PUT("/:id/secrets/:key", adminRole, mfa, h.PutSecret)
 		environments.DELETE("/:id/secrets/:key", adminRole, mfa, h.DeleteSecret)
 		// Promote secrets to another environment in a single backend
@@ -171,7 +195,12 @@ func (s *Server) registerRoutes() {
 		// Webhook rotation re-checks admin in the handler; keeping the
 		// gate here means a viewer can't even reach it to probe codec
 		// behaviour.
-		apps.PUT("/:id/webhook", adminRole, mfa, h.SetAppWebhookSecret)
+		//
+		// Phase-1 / A3: also gated by RequirePermission(webhook, update).
+		apps.PUT("/:id/webhook",
+			adminRole, mfa,
+			auth.RequirePermission(auth.ResourceWebhook, auth.ActionUpdate),
+			h.SetAppWebhookSecret)
 	}
 
 	// Managed hosts (Phase 4).
