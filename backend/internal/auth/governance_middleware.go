@@ -76,6 +76,21 @@ func RequireGovernanceAllow(client *governance.Client, extract GovernanceResourc
 		}
 
 		if !decision.Allowed() {
+			if !decision.Enforced {
+				// Advisory deny: gate would have blocked, but its mode for
+				// this (service, env) is advisory. Log the would-have-blocked
+				// signal so the bake-period dashboard captures it, then let
+				// the request through. The catalog UI is the kill switch.
+				slog.Info("governance: advisory deny (would have blocked)",
+					"service", service, "env", env,
+					"reason", decision.Reason, "policy", decision.PolicyID, "audit", decision.AuditID,
+					"mode", decision.EnforcementMode)
+				c.Set("governance.audit_id", decision.AuditID)
+				c.Set("governance.policy_id", decision.PolicyID)
+				c.Set("governance.advisory_deny", true)
+				c.Next()
+				return
+			}
 			slog.Info("governance: deny",
 				"service", service, "env", env,
 				"reason", decision.Reason, "policy", decision.PolicyID, "audit", decision.AuditID)

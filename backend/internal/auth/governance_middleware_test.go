@@ -63,10 +63,12 @@ func TestMiddleware_AllowsWhenGrovernanceAllows(t *testing.T) {
 func TestMiddleware_403OnDeny(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(governance.Decision{
-			Decision: "deny",
-			Reason:   "actor not in prod-deployer group for svc-x",
-			PolicyID: "rule.prod.human",
-			AuditID:  "audit-2",
+			Decision:        "deny",
+			Reason:          "actor not in prod-deployer group for svc-x",
+			PolicyID:        "rule.prod.human",
+			AuditID:         "audit-2",
+			Enforced:        true,
+			EnforcementMode: "enforce",
 		})
 	}))
 	defer upstream.Close()
@@ -90,6 +92,51 @@ func TestMiddleware_403OnDeny(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "audit-2") {
 		t.Errorf("audit id not in body: %s", w.Body.String())
+	}
+}
+
+// TestMiddleware_AdvisoryDeny_PassesAndLogs is the Milestone-B keystone
+// behaviour on the Cooker side: when the gate returns deny but enforced=false
+// (advisory mode for that service/env), the middleware logs the would-have-
+// blocked event and lets the request through. The advisory_deny flag is set
+// on the gin context for downstream audit middleware.
+func TestMiddleware_AdvisoryDeny_PassesAndLogs(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(governance.Decision{
+			Decision:        "deny",
+			Reason:          "actor not in prod-deployer group for svc-x",
+			PolicyID:        "rule.prod.human",
+			AuditID:         "audit-3",
+			Enforced:        false,
+			EnforcementMode: "advisory",
+		})
+	}))
+	defer upstream.Close()
+
+	client := governance.New(upstream.URL, nil, nil)
+	var sawAdvisoryDeny bool
+	r := gin.New()
+	r.POST("/deploy", auth.RequireGovernanceAllow(client, fixedExtractor("svc-x", "prod")), func(c *gin.Context) {
+		sawAdvisoryDeny = c.GetBool("governance.advisory_deny")
+		c.JSON(200, gin.H{
+			"audit_id":       c.GetString("governance.audit_id"),
+			"advisory_deny":  c.GetBool("governance.advisory_deny"),
+		})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/deploy", nil)
+	req.Header.Set("Authorization", "Bearer tok-bob")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (advisory deny should not block)", w.Code)
+	}
+	if !sawAdvisoryDeny {
+		t.Error("governance.advisory_deny flag was not set on the gin context")
+	}
+	if !strings.Contains(w.Body.String(), "audit-3") {
+		t.Errorf("audit id not propagated: %s", w.Body.String())
 	}
 }
 

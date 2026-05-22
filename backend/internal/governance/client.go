@@ -28,11 +28,19 @@ import (
 )
 
 // Decision mirrors the response shape of Grovernance's POST /authorize.
+//
+// Enforced reports whether the gate is currently configured to *act* on a
+// deny for this (service, env). Grovernance v1.1+ returns enforced=false
+// when its catalog row for the service has enforcement_mode=advisory for
+// the env in question — Cooker logs the deny and lets the deploy proceed.
+// EnforcementMode carries the same signal as a human-readable label.
 type Decision struct {
-	Decision string `json:"decision"` // "allow" | "deny"
-	Reason   string `json:"reason"`
-	PolicyID string `json:"policy_id"`
-	AuditID  string `json:"audit_id"`
+	Decision        string `json:"decision"` // "allow" | "deny"
+	Reason          string `json:"reason"`
+	PolicyID        string `json:"policy_id"`
+	AuditID         string `json:"audit_id"`
+	Enforced        bool   `json:"enforced"`
+	EnforcementMode string `json:"enforcement_mode"`
 }
 
 // Allowed reports whether the decision permits the action.
