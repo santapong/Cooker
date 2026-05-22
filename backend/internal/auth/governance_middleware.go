@@ -21,13 +21,33 @@ import (
 // Grovernance. Use it to short-circuit, e.g. for noop pipelines.
 type GovernanceResourceExtractor func(c *gin.Context) (service string, env string, ok bool, err error)
 
+// BreakGlassOption tunes the optional break-glass branch. When Enabled is
+// true AND governance is unreachable AND env is fail-closed AND the request
+// carries a non-empty X-Break-Glass-Justification header, the middleware
+// records a structured slog event tagged break_glass=true and lets the
+// request through. Without all four conditions the existing 503 fires.
+//
+// Break-glass is a deliberately narrow escape hatch: it is not active when
+// the gate is reachable (deny is deny), it is not active on a healthy
+// fail-open env (no rescue needed), and it is not active without an explicit
+// operator justification on the wire. The event is the audit trail.
+type BreakGlassOption struct {
+	Enabled bool
+}
+
 // RequireGovernanceAllow returns Gin middleware that consults Grovernance
 // before letting the request through. On DENY it responds 403 with the reason
-// from Grovernance. On a fail-closed transport error it responds 503.
+// from Grovernance. On a fail-closed transport error it responds 503 (or
+// passes via break-glass if configured and an operator supplies a
+// justification header).
 //
 // The middleware is a no-op when client.Enabled() is false (i.e. the operator
 // has not configured COOKER_GOVERNANCE_URL).
-func RequireGovernanceAllow(client *governance.Client, extract GovernanceResourceExtractor) gin.HandlerFunc {
+func RequireGovernanceAllow(client *governance.Client, extract GovernanceResourceExtractor, opts ...BreakGlassOption) gin.HandlerFunc {
+	var bg BreakGlassOption
+	if len(opts) > 0 {
+		bg = opts[0]
+	}
 	return func(c *gin.Context) {
 		if client == nil || !client.Enabled() {
 			c.Next()
@@ -59,6 +79,18 @@ func RequireGovernanceAllow(client *governance.Client, extract GovernanceResourc
 		decision, err := client.Authorize(c.Request.Context(), token, service, env, requestID(c))
 		if err != nil {
 			if errors.Is(err, governance.ErrGovernanceUnreachable) {
+				if just, ok := breakGlassJustification(c); ok && bg.Enabled {
+					user := c.GetString("user_sub")
+					slog.Warn("governance: break-glass invoked",
+						"service", service, "env", env,
+						"requester", user,
+						"justification", just,
+						"break_glass", true)
+					c.Set("governance.break_glass", true)
+					c.Set("governance.break_glass_justification", just)
+					c.Next()
+					return
+				}
 				slog.Warn("governance: fail-closed",
 					"service", service, "env", env, "err", err)
 				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
@@ -123,6 +155,15 @@ func extractBearer(c *gin.Context) (string, bool) {
 	}
 	tok := strings.TrimSpace(parts[1])
 	return tok, tok != ""
+}
+
+// breakGlassJustification returns a trimmed non-empty value of the
+// X-Break-Glass-Justification header, or empty + false. Whitespace-only
+// values are rejected so a copy-pasted accidental space cannot trigger
+// break-glass.
+func breakGlassJustification(c *gin.Context) (string, bool) {
+	v := strings.TrimSpace(c.GetHeader("X-Break-Glass-Justification"))
+	return v, v != ""
 }
 
 func requestID(c *gin.Context) string {

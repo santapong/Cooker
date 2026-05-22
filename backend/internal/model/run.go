@@ -50,6 +50,16 @@ type PipelineRun struct {
 	// in flight. A NULL value combined with status='running' marks the
 	// row as a candidate for the boot-time orphan sweep.
 	HeartbeatAt *time.Time `json:"heartbeatAt,omitempty" db:"heartbeat_at"`
+	// StartedBy* captures the actor that initiated the run, so the
+	// deploy-stage executor can call the governance gate on their behalf
+	// at stage-start time (when the original bearer token is no longer in
+	// hand). The token hash is for audit forensics — the raw token is
+	// never persisted. Empty StartedByUserSub means the run pre-dates the
+	// capture (legacy rows) and the executor skips the governance hook.
+	StartedByUserSub    string   `json:"startedByUserSub,omitempty" db:"started_by_user_sub"`
+	StartedByEmail      string   `json:"startedByEmail,omitempty" db:"started_by_email"`
+	StartedByGroups     []string `json:"startedByGroups,omitempty"`
+	StartedByTokenHash  string   `json:"startedByTokenHash,omitempty" db:"started_by_token_hash"`
 }
 
 // StageRun tracks the execution of a single stage within a pipeline run.

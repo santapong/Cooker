@@ -59,6 +59,13 @@ type Client struct {
 	// Empty token == no Authorization header — accepted by Grovernance only
 	// when its caller-auth is disabled.
 	CallerToken string
+	// DelegateToken authenticates Cooker for the delegated-actor path used
+	// by the pipeline-deploy executor (AuthorizeOnBehalf). It must hold the
+	// governance.authorize_on_behalf scope on the gate side. Distinct from
+	// CallerToken so the two scopes can be split across two KeepSave
+	// service accounts if the operator wants the tighter blast radius.
+	// Empty token disables the executor hook (no-op AuthorizeOnBehalf).
+	DelegateToken string
 }
 
 // New builds a Client from the parsed config values. BaseURL == "" disables
@@ -81,6 +88,24 @@ func (c *Client) WithCallerToken(tok string) *Client {
 	}
 	c.CallerToken = strings.TrimSpace(tok)
 	return c
+}
+
+// WithDelegateToken sets the token used on AuthorizeOnBehalf calls.
+func (c *Client) WithDelegateToken(tok string) *Client {
+	if c == nil {
+		return c
+	}
+	c.DelegateToken = strings.TrimSpace(tok)
+	return c
+}
+
+// DelegationEnabled reports whether the executor hook can call out — the
+// integration is enabled, the bootstrap rule doesn't apply, AND we have a
+// delegate token in hand. The hook treats an unset DelegateToken as "skip
+// governance for this stage" so partial rollouts (Milestone A landed but
+// delegate scope not yet provisioned) keep working.
+func (c *Client) DelegationEnabled() bool {
+	return c != nil && c.BaseURL != "" && c.DelegateToken != ""
 }
 
 // Enabled reports whether the client will make HTTP calls. A disabled client
@@ -161,7 +186,8 @@ var ErrGovernanceUnreachable = errors.New("governance unreachable (fail-closed)"
 
 type authorizeRequest struct {
 	Actor struct {
-		Token string `json:"token"`
+		Token       string             `json:"token,omitempty"`
+		Preresolved *preresolvedActor  `json:"preresolved,omitempty"`
 	} `json:"actor"`
 	Action   string `json:"action"`
 	Resource struct {
@@ -171,6 +197,70 @@ type authorizeRequest struct {
 	Context struct {
 		RequestID string `json:"request_id"`
 	} `json:"context"`
+}
+
+// PreresolvedActor is the shape Cooker submits on AuthorizeOnBehalf. Matches
+// the Grovernance request DTO; exported so the executor hook can construct
+// one from a PipelineRun without needing a parallel type.
+type PreresolvedActor struct {
+	Kind   string   `json:"kind"`   // "human" | "service"
+	ID     string   `json:"id"`
+	Groups []string `json:"groups,omitempty"`
+	Scopes []string `json:"scopes,omitempty"`
+}
+
+type preresolvedActor = PreresolvedActor
+
+// AuthorizeOnBehalf is the delegated path. The caller supplies an
+// already-resolved actor (typically captured at run-start and persisted on
+// the PipelineRun) instead of a token. The Authorization header carries the
+// delegate token, which must hold governance.authorize_on_behalf on the gate.
+//
+// Treats an unset BaseURL or unset DelegateToken as "skip the call" and
+// returns Allow + a synthetic PolicyID. The executor's pre-stage hook
+// short-circuits in that case so partial rollouts keep working.
+func (c *Client) AuthorizeOnBehalf(ctx context.Context, actor PreresolvedActor, service, env, requestID string) (Decision, error) {
+	if !c.DelegationEnabled() {
+		return Decision{Decision: "allow", Reason: "governance delegation disabled", PolicyID: "cooker.governance.delegation_disabled"}, nil
+	}
+	if _, ok := c.BootstrapServices[strings.ToLower(service)]; ok {
+		return Decision{Decision: "allow", Reason: "bootstrap-exempt service", PolicyID: "cooker.governance.bootstrap"}, nil
+	}
+
+	payload := authorizeRequest{Action: "deploy"}
+	payload.Actor.Preresolved = &actor
+	payload.Resource.Service = service
+	payload.Resource.Env = env
+	payload.Context.RequestID = requestID
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return Decision{}, fmt.Errorf("governance: marshal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/authorize", bytes.NewReader(body))
+	if err != nil {
+		return Decision{}, fmt.Errorf("governance: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.DelegateToken)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return c.transportFallback(env, fmt.Errorf("governance: post: %w", err))
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return c.transportFallback(env, fmt.Errorf("governance: unexpected status %d", resp.StatusCode))
+	}
+	var decision Decision
+	if err := json.NewDecoder(resp.Body).Decode(&decision); err != nil {
+		return Decision{}, fmt.Errorf("governance: decode response: %w", err)
+	}
+	if decision.Decision != "allow" && decision.Decision != "deny" {
+		return Decision{}, fmt.Errorf("governance: invalid decision %q", decision.Decision)
+	}
+	return decision, nil
 }
 
 func toSet(s []string) map[string]struct{} {

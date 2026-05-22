@@ -80,7 +80,22 @@ type Executor struct {
 	gitops       gitops.Writer
 	runUpdater   RunUpdater
 	logBroadcast LogBroadcaster
+	govHook      DeployGovernanceHook
 }
+
+// DeployGovernanceHook is the executor's pre-stage admission check for
+// StageTypeDeploy. Called once per deploy stage. The implementation captures
+// the (service, env) target from the stage + run, builds a pre-resolved
+// actor from the run's StartedBy* fields, calls Grovernance, and returns
+// nil on allow OR advisory-deny. A non-nil return aborts the stage with
+// the error wrapped into the stage's error column.
+//
+// The hook is optional. Nil means "no executor-level governance" — the
+// HTTP middleware at the /apps/:id/deploy entrypoint still gates that path,
+// but pipeline-defined deploys proceed without the gate. That's the
+// pre-Milestone-C behaviour and remains valid for installs that haven't
+// configured COOKER_GOVERNANCE_DELEGATE_TOKEN.
+type DeployGovernanceHook func(ctx context.Context, run *model.PipelineRun, stage *model.Stage) error
 
 // Option configures a new Executor. Use the With* constructors.
 type Option func(*Executor)
@@ -138,6 +153,15 @@ func WithRunUpdater(u RunUpdater) Option {
 func WithLogBroadcaster(b LogBroadcaster) Option {
 	return func(e *Executor) {
 		e.logBroadcast = b
+	}
+}
+
+// WithDeployGovernanceHook installs the pre-stage governance check for
+// deploy stages (Milestone C executor hook). Nil disables it; pre-Milestone-C
+// behaviour resumes.
+func WithDeployGovernanceHook(h DeployGovernanceHook) Option {
+	return func(e *Executor) {
+		e.govHook = h
 	}
 }
 
@@ -306,6 +330,16 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			case model.StageTypePush:
 				return e.executePush(ctx, run.ID, stage, stageRun)
 			case model.StageTypeDeploy:
+				// Pre-stage governance check (Milestone C). Runs once
+				// per stage attempt — retries don't re-prompt the gate.
+				// On enforce-deny the stage fails immediately with the
+				// policy reason. On advisory-deny the hook returns nil
+				// and slog-logs the would-have-blocked event itself.
+				if e.govHook != nil {
+					if err := e.govHook(ctx, run, stage); err != nil {
+						return err
+					}
+				}
 				return e.executeDeploy(ctx, run.ID, stage, stageRun)
 			case model.StageTypeApproval:
 				return e.executeApproval(ctx, stage)

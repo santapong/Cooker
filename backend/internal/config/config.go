@@ -78,11 +78,26 @@ type Config struct {
 // v1.1+ in production posture (GOVERNANCE_REQUIRE_CALLER_AUTH=true on the
 // gate). Loaded from COOKER_GOVERNANCE_CALLER_TOKEN; production validation
 // requires it whenever URL is set.
+//
+// DelegateToken is the second service-account token, used by the pipeline-
+// deploy executor when it calls AuthorizeOnBehalf with a pre-resolved actor.
+// Must hold the governance.authorize_on_behalf scope on the gate. Optional —
+// when empty the executor hook is a no-op (the HTTP middleware still gates
+// /apps/:id/deploy). Loaded from COOKER_GOVERNANCE_DELEGATE_TOKEN.
+//
+// BreakGlassEnabled toggles the narrow escape hatch in the HTTP middleware:
+// when the gate is unreachable AND env is fail-closed AND the request
+// carries X-Break-Glass-Justification, log a structured event and let the
+// request through. Off by default. Loaded from
+// COOKER_GOVERNANCE_BREAK_GLASS_ENABLED. Audit lives in the slog stream — no
+// dedicated table in v1.1; see Milestone D for the audit-backup runbook.
 type GovernanceConfig struct {
 	URL               string
 	FailOpenEnvs      []string
 	BootstrapServices []string
 	CallerToken       string
+	DelegateToken     string
+	BreakGlassEnabled bool
 }
 
 type WSHubConfig struct {
@@ -328,6 +343,8 @@ func Load() *Config {
 			FailOpenEnvs:      getEnvCSV("COOKER_GOVERNANCE_FAIL_OPEN_ENVS", []string{"dev", "staging"}),
 			BootstrapServices: getEnvCSV("COOKER_GOVERNANCE_BOOTSTRAP_SERVICES", []string{"governance"}),
 			CallerToken:       getEnv("COOKER_GOVERNANCE_CALLER_TOKEN", ""),
+			DelegateToken:     getEnv("COOKER_GOVERNANCE_DELEGATE_TOKEN", ""),
+			BreakGlassEnabled: getEnvBool("COOKER_GOVERNANCE_BREAK_GLASS_ENABLED", false),
 		},
 	}
 }

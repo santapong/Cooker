@@ -195,6 +195,103 @@ func TestMiddleware_401WhenNoBearer(t *testing.T) {
 	}
 }
 
+func TestMiddleware_BreakGlass_PassesWhenAllConditionsMet(t *testing.T) {
+	// Governance unreachable + env not in fail-open + break-glass enabled +
+	// justification header present → log + pass.
+	client := governance.New("http://127.0.0.1:1/not-listening", nil, []string{"dev"})
+	var sawBreakGlass bool
+	r := gin.New()
+	r.POST("/deploy",
+		auth.RequireGovernanceAllow(client, fixedExtractor("svc-x", "prod"),
+			auth.BreakGlassOption{Enabled: true}),
+		func(c *gin.Context) {
+			sawBreakGlass = c.GetBool("governance.break_glass")
+			c.JSON(200, gin.H{"break_glass": c.GetBool("governance.break_glass")})
+		})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/deploy", nil)
+	req.Header.Set("Authorization", "Bearer tok-alice")
+	req.Header.Set("X-Break-Glass-Justification", "INC-42 root cause hot patch")
+	r.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200 (break-glass should pass)", w.Code)
+	}
+	if !sawBreakGlass {
+		t.Error("governance.break_glass flag was not set")
+	}
+}
+
+func TestMiddleware_BreakGlass_NoOpWithoutJustification(t *testing.T) {
+	// Break-glass enabled but no header → 503 (fail-closed).
+	client := governance.New("http://127.0.0.1:1/not-listening", nil, []string{"dev"})
+	r := gin.New()
+	r.POST("/deploy",
+		auth.RequireGovernanceAllow(client, fixedExtractor("svc-x", "prod"),
+			auth.BreakGlassOption{Enabled: true}),
+		func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/deploy", nil)
+	req.Header.Set("Authorization", "Bearer tok-alice")
+	// No X-Break-Glass-Justification header.
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (no header, no break-glass)", w.Code)
+	}
+}
+
+func TestMiddleware_BreakGlass_NoOpWhenDisabled(t *testing.T) {
+	// Header present but break-glass flag off → 503 (fail-closed).
+	client := governance.New("http://127.0.0.1:1/not-listening", nil, []string{"dev"})
+	r := gin.New()
+	r.POST("/deploy",
+		auth.RequireGovernanceAllow(client, fixedExtractor("svc-x", "prod"),
+			auth.BreakGlassOption{Enabled: false}),
+		func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/deploy", nil)
+	req.Header.Set("Authorization", "Bearer tok-alice")
+	req.Header.Set("X-Break-Glass-Justification", "INC-42")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (flag off ignores header)", w.Code)
+	}
+}
+
+func TestMiddleware_BreakGlass_InactiveWhenGateReachable(t *testing.T) {
+	// Gate returns a clean deny + enforced=true. Justification header present
+	// but governance is REACHABLE, so break-glass MUST NOT fire — deny is deny.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(governance.Decision{
+			Decision: "deny", Reason: "not allowed", PolicyID: "rule.prod.human",
+			AuditID: "audit-x", Enforced: true,
+		})
+	}))
+	defer upstream.Close()
+
+	client := governance.New(upstream.URL, nil, nil)
+	r := gin.New()
+	r.POST("/deploy",
+		auth.RequireGovernanceAllow(client, fixedExtractor("svc-x", "prod"),
+			auth.BreakGlassOption{Enabled: true}),
+		func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/deploy", nil)
+	req.Header.Set("Authorization", "Bearer tok-bob")
+	req.Header.Set("X-Break-Glass-Justification", "INC-42")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (break-glass MUST NOT bypass a live deny)", w.Code)
+	}
+}
+
 func TestMiddleware_SkipsWhenExtractorReturnsOkFalse(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Error("upstream should not be called when extractor returns ok=false")

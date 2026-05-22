@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -171,5 +172,72 @@ func TestClient_NoCallerToken_OmitsAuthorizationHeader(t *testing.T) {
 	_, _ = c.Authorize(context.Background(), "actor-tok", "svc-x", "prod", "req-1")
 	if gotAuth != "" {
 		t.Fatalf("Authorization header = %q, want empty", gotAuth)
+	}
+}
+
+func TestClient_AuthorizeOnBehalf_AttachesDelegateToken(t *testing.T) {
+	var gotAuth string
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotBody, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(governance.Decision{Decision: "allow"})
+	}))
+	defer srv.Close()
+
+	c := governance.New(srv.URL, nil, nil).WithDelegateToken("delegate-tok")
+	_, err := c.AuthorizeOnBehalf(context.Background(),
+		governance.PreresolvedActor{Kind: "human", ID: "alice", Groups: []string{"prod-deployers"}},
+		"svc-x", "prod", "run-1")
+	if err != nil {
+		t.Fatalf("authorize on behalf: %v", err)
+	}
+	if gotAuth != "Bearer delegate-tok" {
+		t.Errorf("Authorization = %q, want Bearer delegate-tok", gotAuth)
+	}
+	if !strings.Contains(string(gotBody), `"preresolved"`) {
+		t.Errorf("body missing preresolved field: %s", gotBody)
+	}
+	if !strings.Contains(string(gotBody), `"alice"`) {
+		t.Errorf("body missing actor id: %s", gotBody)
+	}
+}
+
+func TestClient_AuthorizeOnBehalf_NoDelegateToken_IsNoOp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("upstream should not be called when DelegateToken is unset")
+	}))
+	defer srv.Close()
+
+	c := governance.New(srv.URL, nil, nil) // no WithDelegateToken
+	d, err := c.AuthorizeOnBehalf(context.Background(),
+		governance.PreresolvedActor{Kind: "human", ID: "alice"},
+		"svc-x", "prod", "run-1")
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if !d.Allowed() {
+		t.Errorf("decision = %+v, want allow (delegation disabled fallback)", d)
+	}
+	if d.PolicyID != "cooker.governance.delegation_disabled" {
+		t.Errorf("policy_id = %q, want cooker.governance.delegation_disabled", d.PolicyID)
+	}
+}
+
+func TestClient_AuthorizeOnBehalf_BootstrapBypass(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("upstream should not be called for bootstrap services")
+	}))
+	defer srv.Close()
+
+	c := governance.New(srv.URL, []string{"governance"}, nil).WithDelegateToken("tok")
+	d, err := c.AuthorizeOnBehalf(context.Background(),
+		governance.PreresolvedActor{Kind: "human", ID: "alice"},
+		"governance", "prod", "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Allowed() || d.PolicyID != "cooker.governance.bootstrap" {
+		t.Errorf("decision = %+v, want bootstrap allow", d)
 	}
 }

@@ -25,7 +25,8 @@ func NewRunStore(db *sql.DB) *RunStore {
 func (s *RunStore) List(ctx context.Context, pipelineID string) ([]*model.PipelineRun, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, pipeline_id, status, stage_runs, env_statuses, variables,
-		        created_at, started_at, finished_at, error, heartbeat_at
+		        created_at, started_at, finished_at, error, heartbeat_at,
+		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash
 		   FROM pipeline_runs WHERE pipeline_id = $1 ORDER BY created_at DESC`,
 		pipelineID)
 	if err != nil {
@@ -47,7 +48,8 @@ func (s *RunStore) List(ctx context.Context, pipelineID string) ([]*model.Pipeli
 func (s *RunStore) Get(ctx context.Context, id string) (*model.PipelineRun, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, pipeline_id, status, stage_runs, env_statuses, variables,
-		        created_at, started_at, finished_at, error, heartbeat_at
+		        created_at, started_at, finished_at, error, heartbeat_at,
+		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash
 		   FROM pipeline_runs WHERE id = $1`, id)
 	r, err := scanRun(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -79,19 +81,35 @@ func (s *RunStore) Create(ctx context.Context, r *model.PipelineRun) error {
 	} else {
 		createdAt = r.CreatedAt
 	}
+	groupsJSON, err := json.Marshal(nonNilStrings(r.StartedByGroups))
+	if err != nil {
+		return fmt.Errorf("marshal started_by_groups: %w", err)
+	}
 	err = s.db.QueryRowContext(ctx,
 		`INSERT INTO pipeline_runs
 		  (id, pipeline_id, status, stage_runs, env_statuses, variables,
-		   created_at, started_at, finished_at, error)
-		 VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz, NOW()),$8,$9,$10)
+		   created_at, started_at, finished_at, error,
+		   started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash)
+		 VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz, NOW()),$8,$9,$10,$11,$12,$13,$14)
 		 RETURNING created_at`,
 		r.ID, r.PipelineID, string(r.Status), stageJSON, envJSON, varsJSON,
 		createdAt,
-		nullTime(r.StartedAt), nullTime(r.FinishedAt), r.Error).Scan(&r.CreatedAt)
+		nullTime(r.StartedAt), nullTime(r.FinishedAt), r.Error,
+		r.StartedByUserSub, r.StartedByEmail, groupsJSON, r.StartedByTokenHash).Scan(&r.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("creating run: %w", err)
 	}
 	return nil
+}
+
+// nonNilStrings returns an empty slice for nil so JSON marshals to []
+// (not null). pgx + JSONB accepts both but the empty array matches the
+// column DEFAULT '[]'.
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func (s *RunStore) Update(ctx context.Context, r *model.PipelineRun) error {
@@ -163,11 +181,12 @@ func (s *RunStore) SweepOrphans(ctx context.Context, threshold time.Duration) (i
 func scanRun(row scannable) (*model.PipelineRun, error) {
 	r := &model.PipelineRun{}
 	var status string
-	var stageJSON, envJSON, varsJSON []byte
+	var stageJSON, envJSON, varsJSON, groupsJSON []byte
 	var started, finished, heartbeat sql.NullTime
 	var errStr sql.NullString
 	if err := row.Scan(&r.ID, &r.PipelineID, &status, &stageJSON, &envJSON, &varsJSON,
-		&r.CreatedAt, &started, &finished, &errStr, &heartbeat); err != nil {
+		&r.CreatedAt, &started, &finished, &errStr, &heartbeat,
+		&r.StartedByUserSub, &r.StartedByEmail, &groupsJSON, &r.StartedByTokenHash); err != nil {
 		return nil, err
 	}
 	r.Status = model.RunStatus(status)
@@ -179,6 +198,11 @@ func scanRun(row scannable) (*model.PipelineRun, error) {
 	}
 	if err := json.Unmarshal(varsJSON, &r.Variables); err != nil {
 		return nil, fmt.Errorf("unmarshal variables: %w", err)
+	}
+	if len(groupsJSON) > 0 {
+		if err := json.Unmarshal(groupsJSON, &r.StartedByGroups); err != nil {
+			return nil, fmt.Errorf("unmarshal started_by_groups: %w", err)
+		}
 	}
 	if started.Valid {
 		t := started.Time

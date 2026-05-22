@@ -162,9 +162,14 @@ func (s *Server) registerRoutes() {
 
 	// Governance admission hook (Phase-4). The middleware is a no-op when
 	// COOKER_GOVERNANCE_URL is empty, so this is safe to wire unconditionally.
-	// For pipeline-defined deploy stages a follow-up executor hook will catch
-	// the same DENY at stage-start time (see backlog).
-	govDeploy := auth.RequireGovernanceAllow(s.governance, governance.AppDeployExtractor(s.store))
+	// Pipeline-defined deploy stages are caught by the executor pre-stage hook
+	// (Milestone C — service.WithDeployGovernanceHook wired in server.go).
+	// The middleware here gates the synchronous /apps/:id/deploy entrypoint.
+	govDeploy := auth.RequireGovernanceAllow(
+		s.governance,
+		governance.AppDeployExtractor(s.store),
+		auth.BreakGlassOption{Enabled: s.config.Governance.BreakGlassEnabled},
+	)
 
 	apps := api.Group("/apps")
 	{
