@@ -61,6 +61,22 @@ type Config struct {
 	// Enabled=false; requires JobQueue.Enabled=true at boot. See
 	// internal/scheduler/scheduler.go.
 	Scheduler SchedulerConfig
+	// Governance configures the Grovernance Platform admission hook
+	// (Phase-4). URL empty -> disabled (no-op middleware). See
+	// internal/governance/client.go.
+	Governance GovernanceConfig
+}
+
+// GovernanceConfig configures the call-out to the Grovernance Platform's
+// /authorize endpoint that gates every deploy. An empty URL disables the
+// integration; FailOpenEnvs is the comma-separated list of envs that should
+// proceed when Grovernance is unreachable (production is fail-closed by
+// default). BootstrapServices is the allow-list of service names that bypass
+// the gate — required so Grovernance itself can be deployed through Cooker.
+type GovernanceConfig struct {
+	URL               string
+	FailOpenEnvs      []string
+	BootstrapServices []string
 }
 
 type WSHubConfig struct {
@@ -300,6 +316,11 @@ func Load() *Config {
 		Scheduler: SchedulerConfig{
 			Enabled:   getEnvBool("COOKER_SCHEDULER_ENABLED", false),
 			TickEvery: getEnvDuration("COOKER_SCHEDULER_TICK", 30*time.Second),
+		},
+		Governance: GovernanceConfig{
+			URL:               getEnv("COOKER_GOVERNANCE_URL", ""),
+			FailOpenEnvs:      getEnvCSV("COOKER_GOVERNANCE_FAIL_OPEN_ENVS", []string{"dev", "staging"}),
+			BootstrapServices: getEnvCSV("COOKER_GOVERNANCE_BOOTSTRAP_SERVICES", []string{"governance"}),
 		},
 	}
 }

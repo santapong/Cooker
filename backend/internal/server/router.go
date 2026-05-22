@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/santapong/cooker/internal/auth"
+	"github.com/santapong/cooker/internal/governance"
 	"github.com/santapong/cooker/internal/handler"
 )
 
@@ -159,6 +160,12 @@ func (s *Server) registerRoutes() {
 	api.POST("/pipelines/:id/runs/:runId/approve", h.ApprovePromotion)
 	api.GET("/pipelines/:id/runs/:runId/env-status", h.GetEnvStatus)
 
+	// Governance admission hook (Phase-4). The middleware is a no-op when
+	// COOKER_GOVERNANCE_URL is empty, so this is safe to wire unconditionally.
+	// For pipeline-defined deploy stages a follow-up executor hook will catch
+	// the same DENY at stage-start time (see backlog).
+	govDeploy := auth.RequireGovernanceAllow(s.governance, governance.AppDeployExtractor(s.store))
+
 	apps := api.Group("/apps")
 	{
 		apps.GET("", h.ListApps)
@@ -166,7 +173,7 @@ func (s *Server) registerRoutes() {
 		apps.GET("/:id", h.GetApp)
 		apps.PUT("/:id", writeRole, h.UpdateApp)
 		apps.DELETE("/:id", adminRole, mfa, h.DeleteApp)
-		apps.POST("/:id/deploy", writeRole, expensive, idempotencyMiddleware(s.idempotency), h.DeployApp)
+		apps.POST("/:id/deploy", writeRole, expensive, idempotencyMiddleware(s.idempotency), govDeploy, h.DeployApp)
 		apps.PUT("/:id/webhook",
 			adminRole, mfa,
 			auth.RequirePermission(auth.ResourceWebhook, auth.ActionUpdate),
