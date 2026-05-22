@@ -44,6 +44,13 @@ type Client struct {
 	BootstrapServices map[string]struct{}
 	FailOpenEnvs      map[string]struct{}
 	HTTPClient        *http.Client
+	// CallerToken authenticates Cooker to Grovernance on every outbound
+	// /authorize call. Grovernance v1.1+ requires a KeepSave service-account
+	// token with the governance.authorize scope when its
+	// GOVERNANCE_REQUIRE_CALLER_AUTH is true (the production default).
+	// Empty token == no Authorization header — accepted by Grovernance only
+	// when its caller-auth is disabled.
+	CallerToken string
 }
 
 // New builds a Client from the parsed config values. BaseURL == "" disables
@@ -56,6 +63,16 @@ func New(baseURL string, bootstrap, failOpen []string) *Client {
 		FailOpenEnvs:      toSet(failOpen),
 		HTTPClient:        &http.Client{Timeout: 2 * time.Second},
 	}
+}
+
+// WithCallerToken returns c with the caller token set. Returns c unchanged on
+// nil receiver so the no-op disabled-client path keeps working.
+func (c *Client) WithCallerToken(tok string) *Client {
+	if c == nil {
+		return c
+	}
+	c.CallerToken = strings.TrimSpace(tok)
+	return c
 }
 
 // Enabled reports whether the client will make HTTP calls. A disabled client
@@ -92,6 +109,9 @@ func (c *Client) Authorize(ctx context.Context, token, service, env, requestID s
 		return Decision{}, fmt.Errorf("governance: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if c.CallerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.CallerToken)
+	}
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

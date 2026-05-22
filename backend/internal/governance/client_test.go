@@ -143,3 +143,33 @@ func TestClient_PassesContextAndPayload(t *testing.T) {
 		t.Errorf("request_id = %q", got.Context.RequestID)
 	}
 }
+
+func TestClient_CallerToken_AttachesAuthorizationHeader(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(governance.Decision{Decision: "allow"})
+	}))
+	defer srv.Close()
+
+	c := governance.New(srv.URL, nil, nil).WithCallerToken("svc-token-abc")
+	_, _ = c.Authorize(context.Background(), "actor-tok", "svc-x", "prod", "req-1")
+	if gotAuth != "Bearer svc-token-abc" {
+		t.Fatalf("Authorization header = %q, want %q", gotAuth, "Bearer svc-token-abc")
+	}
+}
+
+func TestClient_NoCallerToken_OmitsAuthorizationHeader(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_ = json.NewEncoder(w).Encode(governance.Decision{Decision: "allow"})
+	}))
+	defer srv.Close()
+
+	c := governance.New(srv.URL, nil, nil) // no WithCallerToken
+	_, _ = c.Authorize(context.Background(), "actor-tok", "svc-x", "prod", "req-1")
+	if gotAuth != "" {
+		t.Fatalf("Authorization header = %q, want empty", gotAuth)
+	}
+}

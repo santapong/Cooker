@@ -73,10 +73,16 @@ type Config struct {
 // proceed when Grovernance is unreachable (production is fail-closed by
 // default). BootstrapServices is the allow-list of service names that bypass
 // the gate — required so Grovernance itself can be deployed through Cooker.
+//
+// CallerToken authenticates Cooker to Grovernance. Required by Grovernance
+// v1.1+ in production posture (GOVERNANCE_REQUIRE_CALLER_AUTH=true on the
+// gate). Loaded from COOKER_GOVERNANCE_CALLER_TOKEN; production validation
+// requires it whenever URL is set.
 type GovernanceConfig struct {
 	URL               string
 	FailOpenEnvs      []string
 	BootstrapServices []string
+	CallerToken       string
 }
 
 type WSHubConfig struct {
@@ -321,6 +327,7 @@ func Load() *Config {
 			URL:               getEnv("COOKER_GOVERNANCE_URL", ""),
 			FailOpenEnvs:      getEnvCSV("COOKER_GOVERNANCE_FAIL_OPEN_ENVS", []string{"dev", "staging"}),
 			BootstrapServices: getEnvCSV("COOKER_GOVERNANCE_BOOTSTRAP_SERVICES", []string{"governance"}),
+			CallerToken:       getEnv("COOKER_GOVERNANCE_CALLER_TOKEN", ""),
 		},
 	}
 }
@@ -417,6 +424,9 @@ func (c *Config) Validate() error {
 	}
 	if c.PusherBackend == "docker" {
 		problems = append(problems, "COOKER_PUSHER=docker is forbidden in production (docker.sock RCE-to-host risk); use crane")
+	}
+	if c.Governance.URL != "" && c.Governance.CallerToken == "" {
+		problems = append(problems, "COOKER_GOVERNANCE_CALLER_TOKEN is required in production when COOKER_GOVERNANCE_URL is set (Grovernance v1.1+ rejects unauthenticated callers)")
 	}
 	if c.ReplicaCount > 1 && !c.StickySessions {
 		var perProcess []string

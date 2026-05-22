@@ -302,12 +302,14 @@ func New(cfg *config.Config) (*Server, error) {
 		})
 	}
 
-	govClient := governance.New(cfg.Governance.URL, cfg.Governance.BootstrapServices, cfg.Governance.FailOpenEnvs)
+	govClient := governance.New(cfg.Governance.URL, cfg.Governance.BootstrapServices, cfg.Governance.FailOpenEnvs).
+		WithCallerToken(cfg.Governance.CallerToken)
 	if govClient.Enabled() {
 		slog.Info("governance admission hook enabled",
 			"url", cfg.Governance.URL,
 			"fail_open_envs", cfg.Governance.FailOpenEnvs,
-			"bootstrap_services", cfg.Governance.BootstrapServices)
+			"bootstrap_services", cfg.Governance.BootstrapServices,
+			"caller_auth", cfg.Governance.CallerToken != "")
 	}
 
 	s := &Server{
