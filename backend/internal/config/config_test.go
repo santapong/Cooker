@@ -321,6 +321,58 @@ func TestValidate_ProductionHappyPath(t *testing.T) {
 	}
 }
 
+func TestValidate_ProductionRequiresGovernanceCallerToken(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+		Governance: GovernanceConfig{
+			URL: "http://governance.example.com",
+			// CallerToken intentionally empty
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected production to require CallerToken when URL is set")
+	}
+	if !strings.Contains(err.Error(), "CALLER_TOKEN") {
+		t.Errorf("error should mention CALLER_TOKEN, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionGovernanceCallerTokenPresent(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+		Governance: GovernanceConfig{
+			URL:         "http://governance.example.com",
+			CallerToken: "svc-token-from-keepsave",
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("CallerToken set should validate, got: %v", err)
+	}
+}
+
+func TestValidate_ProductionGovernanceDisabledOK(t *testing.T) {
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+		// Governance.URL empty -> disabled; no CallerToken required.
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("disabled governance should not require CallerToken, got: %v", err)
+	}
+}
+
 func TestValidate_ProductionRejectsDefaultDatabaseURL(t *testing.T) {
 	cfg := &Config{
 		Env:            EnvProduction,

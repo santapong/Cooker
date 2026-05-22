@@ -2,17 +2,33 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/santapong/cooker/internal/auth"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/validate"
 )
+
+// bearerFromAuthHeader returns the raw bearer token (no "Bearer " prefix).
+// Empty string + false when the header is absent or malformed. Used by
+// RunPipeline to compute a forensic hash; the token itself is not retained.
+func bearerFromAuthHeader(h string) (string, bool) {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(h, prefix) {
+		return "", false
+	}
+	tok := strings.TrimSpace(strings.TrimPrefix(h, prefix))
+	return tok, tok != ""
+}
 
 // validatePipelineInput rejects malformed pipeline payloads. Called
 // from CreatePipeline and UpdatePipeline before any store write.
@@ -178,6 +194,22 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 		Status:     model.RunStatusPending,
 		StageRuns:  make([]model.StageRun, 0, len(p.Stages)),
 		Variables:  p.Variables,
+	}
+
+	// Capture the actor that started the run so the deploy-stage executor
+	// can consult the governance gate on their behalf later, when their
+	// bearer is no longer in hand. Token hash is for audit forensics; the
+	// raw token is never persisted. Dev mode (no OIDC) yields an empty
+	// Subject which leaves the columns blank — the executor treats that as
+	// "skip governance" (pre-Phase-4 path).
+	if u := auth.GetUser(c); u != nil {
+		run.StartedByUserSub = u.Subject
+		run.StartedByEmail = u.Email
+		run.StartedByGroups = append([]string(nil), u.Groups...)
+	}
+	if raw, ok := bearerFromAuthHeader(c.GetHeader("Authorization")); ok {
+		sum := sha256.Sum256([]byte(raw))
+		run.StartedByTokenHash = hex.EncodeToString(sum[:16])
 	}
 
 	for _, stage := range p.Stages {

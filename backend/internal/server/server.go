@@ -16,6 +16,7 @@ import (
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/crypto"
 	"github.com/santapong/cooker/internal/deployer"
+	"github.com/santapong/cooker/internal/governance"
 	"github.com/santapong/cooker/internal/handler"
 	"github.com/santapong/cooker/internal/idempotency"
 	"github.com/santapong/cooker/internal/observability"
@@ -48,6 +49,7 @@ type Server struct {
 	idempotency   idempotency.Store
 	jobQueue      *jobQueueDeps
 	scheduler     *schedulerDeps
+	governance    *governance.Client
 	// templatesDB is the dedicated *sql.DB opened by bootTemplates
 	// when the jobqueue is off; nil when templates share the
 	// jobqueue's pool or when the templates feature is disabled.
@@ -184,11 +186,31 @@ func New(cfg *config.Config) (*Server, error) {
 		cleanup()
 		return nil, fmt.Errorf("builder: %w", err)
 	}
+	govClient := governance.New(cfg.Governance.URL, cfg.Governance.BootstrapServices, cfg.Governance.FailOpenEnvs).
+		WithCallerToken(cfg.Governance.CallerToken).
+		WithDelegateToken(cfg.Governance.DelegateToken)
+	if govClient.Enabled() {
+		slog.Info("governance admission hook enabled",
+			"url", cfg.Governance.URL,
+			"fail_open_envs", cfg.Governance.FailOpenEnvs,
+			"bootstrap_services", cfg.Governance.BootstrapServices,
+			"caller_auth", cfg.Governance.CallerToken != "",
+			"delegation", govClient.DelegationEnabled())
+	}
+	govDeployHook := governance.PipelineDeployHook(govClient, st, func(ctx context.Context, pipelineID string) (string, error) {
+		p, err := st.Pipelines.Get(ctx, pipelineID)
+		if err != nil || p == nil {
+			return "", err
+		}
+		return p.Name, nil
+	})
+
 	exec := service.NewExecutor(
 		service.WithBuilder(bld),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
 		service.WithDeployer(selectDeployer(cfg.DeployerBackend, cfg.Kubernetes.Kubeconfig)),
 		service.WithLogBroadcaster(wsHub.Broadcast),
+		service.WithDeployGovernanceHook(govDeployHook),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 
@@ -316,6 +338,7 @@ func New(cfg *config.Config) (*Server, error) {
 		idempotency:   idem,
 		jobQueue:      jobDeps,
 		scheduler:     schedDeps,
+		governance:    govClient,
 		templatesDB:   templatesDBCloser,
 		healthCancel:  healthCancel,
 		healthDone:    healthDone,

@@ -61,6 +61,43 @@ type Config struct {
 	// Enabled=false; requires JobQueue.Enabled=true at boot. See
 	// internal/scheduler/scheduler.go.
 	Scheduler SchedulerConfig
+	// Governance configures the Grovernance Platform admission hook
+	// (Phase-4). URL empty -> disabled (no-op middleware). See
+	// internal/governance/client.go.
+	Governance GovernanceConfig
+}
+
+// GovernanceConfig configures the call-out to the Grovernance Platform's
+// /authorize endpoint that gates every deploy. An empty URL disables the
+// integration; FailOpenEnvs is the comma-separated list of envs that should
+// proceed when Grovernance is unreachable (production is fail-closed by
+// default). BootstrapServices is the allow-list of service names that bypass
+// the gate — required so Grovernance itself can be deployed through Cooker.
+//
+// CallerToken authenticates Cooker to Grovernance. Required by Grovernance
+// v1.1+ in production posture (GOVERNANCE_REQUIRE_CALLER_AUTH=true on the
+// gate). Loaded from COOKER_GOVERNANCE_CALLER_TOKEN; production validation
+// requires it whenever URL is set.
+//
+// DelegateToken is the second service-account token, used by the pipeline-
+// deploy executor when it calls AuthorizeOnBehalf with a pre-resolved actor.
+// Must hold the governance.authorize_on_behalf scope on the gate. Optional —
+// when empty the executor hook is a no-op (the HTTP middleware still gates
+// /apps/:id/deploy). Loaded from COOKER_GOVERNANCE_DELEGATE_TOKEN.
+//
+// BreakGlassEnabled toggles the narrow escape hatch in the HTTP middleware:
+// when the gate is unreachable AND env is fail-closed AND the request
+// carries X-Break-Glass-Justification, log a structured event and let the
+// request through. Off by default. Loaded from
+// COOKER_GOVERNANCE_BREAK_GLASS_ENABLED. Audit lives in the slog stream — no
+// dedicated table in v1.1; see Milestone D for the audit-backup runbook.
+type GovernanceConfig struct {
+	URL               string
+	FailOpenEnvs      []string
+	BootstrapServices []string
+	CallerToken       string
+	DelegateToken     string
+	BreakGlassEnabled bool
 }
 
 type WSHubConfig struct {
@@ -301,6 +338,14 @@ func Load() *Config {
 			Enabled:   getEnvBool("COOKER_SCHEDULER_ENABLED", false),
 			TickEvery: getEnvDuration("COOKER_SCHEDULER_TICK", 30*time.Second),
 		},
+		Governance: GovernanceConfig{
+			URL:               getEnv("COOKER_GOVERNANCE_URL", ""),
+			FailOpenEnvs:      getEnvCSV("COOKER_GOVERNANCE_FAIL_OPEN_ENVS", []string{"dev", "staging"}),
+			BootstrapServices: getEnvCSV("COOKER_GOVERNANCE_BOOTSTRAP_SERVICES", []string{"governance"}),
+			CallerToken:       getEnv("COOKER_GOVERNANCE_CALLER_TOKEN", ""),
+			DelegateToken:     getEnv("COOKER_GOVERNANCE_DELEGATE_TOKEN", ""),
+			BreakGlassEnabled: getEnvBool("COOKER_GOVERNANCE_BREAK_GLASS_ENABLED", false),
+		},
 	}
 }
 
@@ -396,6 +441,9 @@ func (c *Config) Validate() error {
 	}
 	if c.PusherBackend == "docker" {
 		problems = append(problems, "COOKER_PUSHER=docker is forbidden in production (docker.sock RCE-to-host risk); use crane")
+	}
+	if c.Governance.URL != "" && c.Governance.CallerToken == "" {
+		problems = append(problems, "COOKER_GOVERNANCE_CALLER_TOKEN is required in production when COOKER_GOVERNANCE_URL is set (Grovernance v1.1+ rejects unauthenticated callers)")
 	}
 	if c.ReplicaCount > 1 && !c.StickySessions {
 		var perProcess []string
