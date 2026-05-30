@@ -173,7 +173,7 @@ remaining bullet is operator-side only:
 
 ### P8 — Documentation
 
-- [x] **OpenAPI sketch** at `docs/openapi.yaml` covering pipelines, runs, environments + secrets, apps + webhook, and the GitHub webhook entry point.
+- [x] **OpenAPI spec** at `docs/openapi.yaml` — now **full route coverage** (all ~100 operations across pipelines, runs, apps, environments + secrets, docker, kubernetes, registry, hosts, templates, settings, admin, all four webhooks, and the WebSocket endpoints), hand-maintained in lockstep with `backend/internal/server/router.go` and validated against the OpenAPI 3.1 schema. Human-readable mirror at `docs/system-design/14-api-reference.md`.
 - [x] **Generated OpenAPI** via `swaggo/swag` — `make swagger` regenerates `backend/docs/api/swagger.{json,yaml,go}` from doc-comments. Flagship endpoints (pipeline list / run, env list, secret put / promote) are annotated; the rest can be filled in incrementally as a low-friction follow-up.
 - [x] **Incident runbook** at `docs/RUNBOOK.md`.
 - [x] **ADRs 0001-0003** at `docs/adr/`.

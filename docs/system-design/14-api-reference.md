@@ -5,8 +5,10 @@
 > the API is managed" (middleware, idempotency, rate limiting, error envelope).
 
 > **On the OpenAPI spec:** [`../openapi.yaml`](../openapi.yaml) is a **hand-maintained** OpenAPI 3.1
-> sketch and covers only a subset of these routes. A generated, complete spec is backlog item **P8**.
-> Until then, **`router.go` is the source of truth** and this page mirrors it.
+> spec that now covers **all** of these routes (kept in sync with `router.go`). It is not
+> auto-generated; the `swaggo/swag`-generated `backend/docs/api/swagger.*` annotates flagship
+> endpoints only. **`router.go` remains the source of truth** and both this page and `openapi.yaml`
+> mirror it.
 
 ## Conventions
 

@@ -21,7 +21,7 @@ aspirational/non-blocking.
 | "Idempotency caches every response." | Only **2xx** responses are cached (TTL **24h**); replays set `Idempotency-Replayed: true`. Non-2xx is never cached. | [02](02-backend.md) |
 | "WebSocket messages are structured JSON." | Frames carry the **raw payload**; the client infers meaning from the channel name. No envelope. | [07](07-realtime-and-concurrency.md) |
 | "It uses golang-migrate." | The migration runner is **custom** (`//go:embed` + `pg_advisory_lock` + `schema_migrations`, per-migration transaction). | [04](04-data-model.md) |
-| "The OpenAPI spec is generated from code." | [`../openapi.yaml`](../openapi.yaml) is **hand-maintained** (OpenAPI 3.1). A generated spec is backlog **P8**. | [02](02-backend.md) |
+| "The OpenAPI spec is generated from code." | [`../openapi.yaml`](../openapi.yaml) is **hand-maintained** (OpenAPI 3.1) with full route coverage; it is not auto-generated. The `swaggo`-generated `backend/docs/api/swagger.*` covers flagship endpoints only. | [02](02-backend.md) |
 | "The error envelope has codes." | It's a flat `{"error": "<string>"}` — no error code, no nested object. | [02](02-backend.md) |
 | "UAT enables auth." | UAT is **auth-off by design** (dev-admin injected). Enabling OIDC requires a `.env.uat` preset — never flip the flag in compose. | [08](08-deployment.md) |
 
