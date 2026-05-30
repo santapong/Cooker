@@ -1,33 +1,1177 @@
 openapi: 3.1.0
 info:
   title: Cooker API
-  version: 0.2.0
-  summary: CI/CD orchestration over OCI registries, Docker daemons, and Kubernetes clusters.
   description: |
-    Cooker's REST surface. This document is hand-maintained and
-    intentionally a sketch — it documents the resource shapes and
-    auth model so operators can drive Cooker from outside the UI.
-    A full generated spec (via `swaggo/swag` from Go source comments)
-    is tracked as backlog item P8 OpenAPI.
+    CI/CD management tool API. Visual pipeline builder for OCI image
+    build → registry push → Kubernetes deploy across user-defined ordered
+    environments (e.g. Dev/Staging/Production).
 
-    All endpoints under `/api/v1` require a valid OIDC bearer token
-    in `Authorization: Bearer <token>` unless explicitly noted.
-    The `/health` endpoint is unauthenticated. The
-    `/webhooks/github` endpoint is authenticated by HMAC, not by
-    OIDC.
+    **Authentication:** All `/api/v1/*` routes require a Bearer token
+    (OIDC access token or local-auth JWT) unless `security: []` is noted.
+    WebSocket connections use single-use tickets from
+    `POST /api/v1/ws-tickets`.
 
-  contact:
-    name: Cooker
-    url: https://github.com/santapong/cooker
+    **Authorization:** mutating routes require a role. `operator` or `admin`
+    for writes; `admin` (often + MFA) for destructive and secret operations;
+    `approver` for promotion approval. Roles are summarised per-operation via
+    the `x-required-role` extension and in the human-readable reference at
+    `docs/system-design/14-api-reference.md`.
 
+    **Errors:** all error responses use `{ "error": "message" }`.
+
+    **Source of truth:** this spec is hand-maintained to mirror
+    `backend/internal/server/router.go`. The `swaggo/swag`-generated spec at
+    `backend/docs/api/swagger.{json,yaml}` is generated from doc-comments and
+    annotates flagship endpoints.
+  version: "1.1.0"
 servers:
-  - url: https://cooker.example.com
-    description: Production
   - url: http://localhost:8080
-    description: Local development
+    description: Local dev
+  - url: /
+    description: Same-origin (production single-binary)
+tags:
+  - name: meta
+    description: Health, version, metrics
+  - name: auth
+    description: Authentication and auth-method discovery
+  - name: pipelines
+    description: Pipeline CRUD and validation
+  - name: runs
+    description: Pipeline runs, logs, promotion
+  - name: apps
+    description: Application build/deploy
+  - name: environments
+    description: Environments and ordered promotion
+  - name: secrets
+    description: Per-environment secrets
+  - name: docker
+    description: Docker images, containers, networks, volumes, compose
+  - name: kubernetes
+    description: Kubernetes workloads and manifests
+  - name: registry
+    description: OCI registry reads and push/pull
+  - name: hosts
+    description: Registered hosts
+  - name: templates
+    description: Pipeline template catalog
+  - name: settings
+    description: Registry and cluster configuration
+  - name: admin
+    description: Admin-only catalog CRUD (admin + MFA)
+  - name: webhooks
+    description: Git provider webhook receivers (unauthenticated, HMAC-verified)
+  - name: websocket
+    description: Real-time streaming (ticket-gated)
+paths:
+  # ----------------------------------------------------------------- meta
+  /health:
+    get:
+      summary: Liveness probe
+      tags: [meta]
+      security: []
+      responses:
+        "200": { description: Service is alive }
+  /health/live:
+    get:
+      summary: Liveness probe
+      tags: [meta]
+      security: []
+      responses:
+        "200": { description: Service is alive }
+  /health/ready:
+    get:
+      summary: Readiness probe (checks store/redis)
+      tags: [meta]
+      security: []
+      responses:
+        "200": { description: Service is ready }
+        "503": { description: A dependency is not ready }
+  /version:
+    get:
+      summary: Build version info
+      tags: [meta]
+      security: []
+      responses:
+        "200":
+          description: Version metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionInfo" }
+  /metrics:
+    get:
+      summary: Prometheus metrics (currently unauthenticated)
+      tags: [meta]
+      security: []
+      responses:
+        "200":
+          description: Prometheus text exposition format
+          content:
+            text/plain: {}
 
-security:
-  - bearerAuth: []
+  # ----------------------------------------------------------------- auth
+  /api/v1/auth/methods:
+    get:
+      summary: Discover enabled auth methods
+      tags: [auth]
+      security: []
+      responses:
+        "200":
+          description: Which auth modes are enabled (OIDC / local)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthMethods" }
+  /api/v1/auth/local/signup:
+    post:
+      summary: Local-auth signup (only when local auth enabled)
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LocalCredentials" }
+      responses:
+        "201": { description: User created }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/auth/local/signin:
+    post:
+      summary: Local-auth signin → JWT
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LocalCredentials" }
+      responses:
+        "200":
+          description: Issued token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/auth/local/me:
+    get:
+      summary: Current local-auth user
+      tags: [auth]
+      responses:
+        "200":
+          description: Current user claims
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ------------------------------------------------------------ pipelines
+  /api/v1/pipelines:
+    get:
+      summary: List pipelines
+      tags: [pipelines]
+      responses:
+        "200":
+          description: Array of pipelines
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Pipeline" }
+    post:
+      summary: Create a pipeline
+      tags: [pipelines]
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Pipeline" }
+      responses:
+        "201":
+          description: Created pipeline
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pipeline" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/pipelines/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Get a pipeline by ID
+      tags: [pipelines]
+      responses:
+        "200":
+          description: A pipeline
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pipeline" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      summary: Update a pipeline (optimistic concurrency)
+      tags: [pipelines]
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Pipeline" }
+      responses:
+        "200":
+          description: Updated pipeline
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pipeline" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      summary: Delete a pipeline (admin + MFA)
+      tags: [pipelines]
+      x-required-role: admin
+      responses:
+        "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/pipelines/{id}/validate:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      summary: Validate a pipeline DAG (cycle/type check)
+      tags: [pipelines]
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationResult" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/pipelines/from-template/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      summary: Create a pipeline from a catalog template
+      tags: [pipelines, templates]
+      x-required-role: operator
+      responses:
+        "201":
+          description: Created pipeline
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pipeline" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ----------------------------------------------------------------- runs
+  /api/v1/pipelines/{id}/run:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+      - $ref: "#/components/parameters/IdempotencyKey"
+    post:
+      summary: Trigger a pipeline run
+      description: Rate-limited (expensive). Returns 202 immediately; tail progress over WebSocket.
+      tags: [runs]
+      x-required-role: operator
+      responses:
+        "202":
+          description: Run accepted (async)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PipelineRun" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/v1/pipelines/{id}/runs:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: List runs for a pipeline
+      tags: [runs]
+      responses:
+        "200":
+          description: Array of runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PipelineRun" }
+  /api/v1/pipelines/{id}/runs/{runId}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+      - $ref: "#/components/parameters/RunId"
+    get:
+      summary: Get a run by ID
+      tags: [runs]
+      responses:
+        "200":
+          description: A run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PipelineRun" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/pipelines/{id}/runs/{runId}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+      - $ref: "#/components/parameters/RunId"
+    post:
+      summary: Cancel a running run
+      tags: [runs]
+      x-required-role: operator
+      responses:
+        "200": { description: Cancellation requested }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/pipelines/{id}/runs/{runId}/logs/{stageId}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+      - $ref: "#/components/parameters/RunId"
+      - name: stageId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Final logs for a stage (REST snapshot)
+      tags: [runs]
+      responses:
+        "200":
+          description: Stage logs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StageLogs" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/pipelines/{id}/runs/{runId}/promote:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+      - $ref: "#/components/parameters/RunId"
+    post:
+      summary: Promote a run to the next environment
+      tags: [runs, environments]
+      x-required-role: operator
+      responses:
+        "200":
+          description: Promotion result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnvironmentStatus" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/pipelines/{id}/runs/{runId}/approve:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+      - $ref: "#/components/parameters/RunId"
+    post:
+      summary: Approve a manual promotion gate
+      description: Requires the `approver` role (and possibly MFA).
+      tags: [runs, environments]
+      x-required-role: approver
+      responses:
+        "200": { description: Approval recorded }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/pipelines/{id}/runs/{runId}/env-status:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+      - $ref: "#/components/parameters/RunId"
+    get:
+      summary: Per-environment status of a run
+      tags: [runs, environments]
+      responses:
+        "200":
+          description: Per-environment statuses
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EnvironmentStatus" }
+
+  # ----------------------------------------------------------------- apps
+  /api/v1/apps:
+    get:
+      summary: List apps
+      tags: [apps]
+      responses:
+        "200":
+          description: Array of apps
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/App" }
+    post:
+      summary: Create an app
+      tags: [apps]
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/App" }
+      responses:
+        "201":
+          description: Created app
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/App" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/apps/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Get an app
+      tags: [apps]
+      responses:
+        "200":
+          description: An app
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/App" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      summary: Update an app
+      tags: [apps]
+      x-required-role: operator
+      responses:
+        "200":
+          description: Updated app
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/App" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Delete an app (admin + MFA)
+      tags: [apps]
+      x-required-role: admin
+      responses:
+        "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/apps/{id}/deploy:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+      - $ref: "#/components/parameters/IdempotencyKey"
+    post:
+      summary: Deploy an app (build → push → deploy)
+      description: Rate-limited and subject to the governance admission hook. Returns 202.
+      tags: [apps]
+      x-required-role: operator
+      responses:
+        "202":
+          description: Deploy accepted (async)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PipelineRun" }
+        "403": { description: Forbidden or denied by governance hook }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { description: Governance hook unavailable (fail-closed env) }
+  /api/v1/apps/{id}/webhook:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    put:
+      summary: Set an app's webhook secret (admin + MFA)
+      tags: [apps]
+      x-required-role: admin
+      responses:
+        "204": { description: Webhook secret set }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  # --------------------------------------------------------- environments
+  /api/v1/environments:
+    get:
+      summary: List environments
+      tags: [environments]
+      responses:
+        "200":
+          description: Array of environments
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Environment" }
+    post:
+      summary: Create an environment
+      tags: [environments]
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Environment" }
+      responses:
+        "201":
+          description: Created environment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Environment" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/environments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    put:
+      summary: Update an environment
+      tags: [environments]
+      x-required-role: operator
+      responses:
+        "200":
+          description: Updated environment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Environment" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      summary: Delete an environment (admin + MFA)
+      tags: [environments]
+      x-required-role: admin
+      responses:
+        "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/environments/{id}/secrets/{key}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Reveal a secret value (admin + MFA)
+      tags: [environments, secrets]
+      x-required-role: admin
+      responses:
+        "200":
+          description: Secret value
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretValue" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { description: Secrets backend not configured }
+    put:
+      summary: Set a secret (admin + MFA)
+      tags: [environments, secrets]
+      x-required-role: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecretValue" }
+      responses:
+        "204": { description: Secret stored }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    delete:
+      summary: Delete a secret (admin + MFA)
+      tags: [environments, secrets]
+      x-required-role: admin
+      responses:
+        "204": { description: Secret deleted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/environments/{id}/secrets/promote:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      summary: Promote secrets to the next environment (admin + MFA; KeepSave only)
+      tags: [environments, secrets]
+      x-required-role: admin
+      responses:
+        "200": { description: Secrets promoted }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "501": { description: Backend does not support promotion (e.g. database backend) }
+
+  # --------------------------------------------------------------- docker
+  /api/v1/docker/images:
+    get:
+      summary: List Docker images (stub)
+      tags: [docker]
+      responses:
+        "200": { description: Array of images }
+  /api/v1/docker/images/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Inspect a Docker image (stub)
+      tags: [docker]
+      responses:
+        "200": { description: Image details }
+    delete:
+      summary: Remove a Docker image (admin)
+      tags: [docker]
+      x-required-role: admin
+      responses:
+        "204": { description: Removed }
+  /api/v1/docker/images/build:
+    post:
+      summary: Build a Docker image
+      description: Rate-limited (expensive).
+      tags: [docker]
+      x-required-role: operator
+      responses:
+        "202": { description: Build accepted }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/v1/docker/containers:
+    get:
+      summary: List containers
+      tags: [docker]
+      responses:
+        "200": { description: Array of containers }
+    post:
+      summary: Create a container
+      tags: [docker]
+      x-required-role: operator
+      responses:
+        "201": { description: Created }
+  /api/v1/docker/containers/{id}/stop:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      summary: Stop a container
+      tags: [docker]
+      x-required-role: operator
+      responses:
+        "200": { description: Stopped }
+  /api/v1/docker/containers/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    delete:
+      summary: Remove a container (admin)
+      tags: [docker]
+      x-required-role: admin
+      responses:
+        "204": { description: Removed }
+  /api/v1/docker/containers/{id}/logs:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Container logs
+      tags: [docker]
+      responses:
+        "200": { description: Logs }
+  /api/v1/docker/compose/parse:
+    post:
+      summary: Parse a compose file into a topology graph
+      tags: [docker]
+      responses:
+        "200":
+          description: Compose graph
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposeGraph" }
+  /api/v1/docker/compose/services/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      summary: Update a compose service
+      tags: [docker]
+      x-required-role: operator
+      responses:
+        "200": { description: Updated }
+  /api/v1/docker/networks:
+    get:
+      summary: List networks
+      tags: [docker]
+      responses:
+        "200": { description: Array of networks }
+    post:
+      summary: Create a network
+      tags: [docker]
+      x-required-role: operator
+      responses:
+        "201": { description: Created }
+  /api/v1/docker/networks/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Get a network
+      tags: [docker]
+      responses:
+        "200": { description: Network details }
+    delete:
+      summary: Delete a network (admin)
+      tags: [docker]
+      x-required-role: admin
+      responses:
+        "204": { description: Deleted }
+  /api/v1/docker/networks/{id}/connect:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      summary: Connect a container to a network
+      tags: [docker]
+      x-required-role: operator
+      responses:
+        "200": { description: Connected }
+  /api/v1/docker/volumes:
+    get:
+      summary: List volumes
+      tags: [docker]
+      responses:
+        "200": { description: Array of volumes }
+    post:
+      summary: Create a volume
+      tags: [docker]
+      x-required-role: operator
+      responses:
+        "201": { description: Created }
+  /api/v1/docker/volumes/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Get a volume
+      tags: [docker]
+      responses:
+        "200": { description: Volume details }
+    delete:
+      summary: Delete a volume (admin)
+      tags: [docker]
+      x-required-role: admin
+      responses:
+        "204": { description: Deleted }
+
+  # ----------------------------------------------------------- kubernetes
+  /api/v1/kubernetes/namespaces:
+    get:
+      summary: List namespaces (stub)
+      tags: [kubernetes]
+      responses:
+        "200": { description: Array of namespaces }
+  /api/v1/kubernetes/workloads:
+    get:
+      summary: List workloads (stub)
+      tags: [kubernetes]
+      parameters:
+        - name: namespace
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200": { description: Array of workloads }
+  /api/v1/kubernetes/workloads/{ns}/{kind}/{name}:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/Kind"
+      - $ref: "#/components/parameters/Name"
+    get:
+      summary: Get a workload (stub)
+      tags: [kubernetes]
+      responses:
+        "200": { description: Workload details }
+  /api/v1/kubernetes/workloads/{ns}/{kind}/{name}/scale:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/Kind"
+      - $ref: "#/components/parameters/Name"
+    post:
+      summary: Scale a workload
+      tags: [kubernetes]
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                replicas: { type: integer }
+      responses:
+        "200": { description: Scaled }
+  /api/v1/kubernetes/workloads/{ns}/{kind}/{name}/restart:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/Kind"
+      - $ref: "#/components/parameters/Name"
+    post:
+      summary: Rolling-restart a workload
+      tags: [kubernetes]
+      x-required-role: operator
+      responses:
+        "200": { description: Restart initiated }
+  /api/v1/kubernetes/pods/{ns}/{name}/logs:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/Name"
+    get:
+      summary: Pod logs
+      tags: [kubernetes]
+      responses:
+        "200": { description: Logs }
+  /api/v1/kubernetes/apply:
+    post:
+      summary: Apply a manifest
+      tags: [kubernetes]
+      x-required-role: operator
+      responses:
+        "200": { description: Applied }
+  /api/v1/kubernetes/{ns}/{kind}/{name}:
+    parameters:
+      - $ref: "#/components/parameters/Namespace"
+      - $ref: "#/components/parameters/Kind"
+      - $ref: "#/components/parameters/Name"
+    delete:
+      summary: Delete a resource (admin)
+      tags: [kubernetes]
+      x-required-role: admin
+      responses:
+        "204": { description: Deleted }
+
+  # ------------------------------------------------------------- registry
+  /api/v1/registry/repositories:
+    get:
+      summary: List repositories
+      tags: [registry]
+      responses:
+        "200": { description: Array of repositories }
+  /api/v1/registry/{name}/tags:
+    parameters:
+      - $ref: "#/components/parameters/Name"
+    get:
+      summary: List tags for a repository
+      tags: [registry]
+      responses:
+        "200": { description: Array of tags }
+  /api/v1/registry/{name}/manifests/{ref}:
+    parameters:
+      - $ref: "#/components/parameters/Name"
+      - name: ref
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Get a manifest
+      tags: [registry]
+      responses:
+        "200": { description: Manifest }
+  /api/v1/registry/{name}/referrers/{digest}:
+    parameters:
+      - $ref: "#/components/parameters/Name"
+      - name: digest
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: OCI referrers for a digest
+      tags: [registry]
+      responses:
+        "200": { description: Referrers list }
+  /api/v1/registry/push:
+    post:
+      summary: Push an image
+      tags: [registry]
+      x-required-role: operator
+      responses:
+        "200": { description: Pushed }
+  /api/v1/registry/pull:
+    post:
+      summary: Pull an image
+      tags: [registry]
+      x-required-role: operator
+      responses:
+        "200": { description: Pulled }
+
+  # ---------------------------------------------------------------- hosts
+  /api/v1/hosts:
+    get:
+      summary: List hosts
+      tags: [hosts]
+      responses:
+        "200":
+          description: Array of hosts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Host" }
+    post:
+      summary: Register a host
+      tags: [hosts]
+      x-required-role: operator
+      responses:
+        "201":
+          description: Created host
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Host" }
+  /api/v1/hosts/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Get a host
+      tags: [hosts]
+      responses:
+        "200":
+          description: A host
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Host" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      summary: Update a host
+      tags: [hosts]
+      x-required-role: operator
+      responses:
+        "200": { description: Updated host }
+    delete:
+      summary: Delete a host (admin + MFA)
+      tags: [hosts]
+      x-required-role: admin
+      responses:
+        "204": { description: Deleted }
+
+  # ------------------------------------------------------------ templates
+  /api/v1/templates:
+    get:
+      summary: List pipeline templates
+      tags: [templates]
+      responses:
+        "200": { description: Array of templates }
+  /api/v1/templates/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Get a template
+      tags: [templates]
+      responses:
+        "200": { description: A template }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ------------------------------------------------------------- settings
+  /api/v1/settings/registries:
+    get:
+      summary: List registry configs
+      tags: [settings]
+      responses:
+        "200": { description: Array of registry configs }
+    post:
+      summary: Add a registry config (admin)
+      tags: [settings]
+      x-required-role: admin
+      responses:
+        "201": { description: Created }
+  /api/v1/settings/registries/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    delete:
+      summary: Delete a registry config (admin)
+      tags: [settings]
+      x-required-role: admin
+      responses:
+        "204": { description: Deleted }
+  /api/v1/settings/clusters:
+    get:
+      summary: List cluster configs
+      tags: [settings]
+      responses:
+        "200": { description: Array of cluster configs }
+    post:
+      summary: Add a cluster config (admin)
+      tags: [settings]
+      x-required-role: admin
+      responses:
+        "201": { description: Created }
+
+  # ---------------------------------------------------------------- admin
+  /api/v1/admin/templates:
+    post:
+      summary: Create a template (admin + MFA)
+      tags: [admin, templates]
+      x-required-role: admin
+      responses:
+        "201": { description: Created }
+  /api/v1/admin/templates/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    put:
+      summary: Update a template (admin + MFA)
+      tags: [admin, templates]
+      x-required-role: admin
+      responses:
+        "200": { description: Updated }
+    delete:
+      summary: Delete a template (admin + MFA)
+      tags: [admin, templates]
+      x-required-role: admin
+      responses:
+        "204": { description: Deleted }
+  /api/v1/admin/schedules:
+    get:
+      summary: List schedules (admin + MFA)
+      tags: [admin]
+      x-required-role: admin
+      responses:
+        "200": { description: Array of schedules }
+    post:
+      summary: Create a schedule (admin + MFA)
+      tags: [admin]
+      x-required-role: admin
+      responses:
+        "201": { description: Created }
+  /api/v1/admin/schedules/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Get a schedule (admin + MFA)
+      tags: [admin]
+      x-required-role: admin
+      responses:
+        "200": { description: A schedule }
+    put:
+      summary: Update a schedule (admin + MFA)
+      tags: [admin]
+      x-required-role: admin
+      responses:
+        "200": { description: Updated }
+    delete:
+      summary: Delete a schedule (admin + MFA)
+      tags: [admin]
+      x-required-role: admin
+      responses:
+        "204": { description: Deleted }
+  /api/v1/admin/notification-targets:
+    get:
+      summary: List notification targets (admin + MFA)
+      tags: [admin]
+      x-required-role: admin
+      responses:
+        "200": { description: Array of notification targets }
+    post:
+      summary: Create a notification target (admin + MFA)
+      tags: [admin]
+      x-required-role: admin
+      responses:
+        "201": { description: Created }
+  /api/v1/admin/notification-targets/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Get a notification target (admin + MFA)
+      tags: [admin]
+      x-required-role: admin
+      responses:
+        "200": { description: A notification target }
+    put:
+      summary: Update a notification target (admin + MFA)
+      tags: [admin]
+      x-required-role: admin
+      responses:
+        "200": { description: Updated }
+    delete:
+      summary: Delete a notification target (admin + MFA)
+      tags: [admin]
+      x-required-role: admin
+      responses:
+        "204": { description: Deleted }
+
+  # ------------------------------------------------------------- webhooks
+  /webhooks/github:
+    post:
+      summary: GitHub webhook receiver (HMAC-verified, unauthenticated)
+      tags: [webhooks]
+      security: []
+      responses:
+        "200": { description: Event processed }
+        "401": { description: Signature verification failed }
+  /webhooks/gitlab:
+    post:
+      summary: GitLab webhook receiver (token-verified, unauthenticated)
+      tags: [webhooks]
+      security: []
+      responses:
+        "200": { description: Event processed }
+        "401": { description: Token verification failed }
+  /webhooks/bitbucket:
+    post:
+      summary: Bitbucket webhook receiver (HMAC-verified, unauthenticated)
+      tags: [webhooks]
+      security: []
+      responses:
+        "200": { description: Event processed }
+        "401": { description: Signature verification failed }
+  /webhooks/gitea:
+    post:
+      summary: Gitea webhook receiver (HMAC-verified, unauthenticated)
+      tags: [webhooks]
+      security: []
+      responses:
+        "200": { description: Event processed }
+        "401": { description: Signature verification failed }
+
+  # ------------------------------------------------------------ websocket
+  /api/v1/ws-tickets:
+    post:
+      summary: Issue a single-use WebSocket ticket (60s TTL)
+      tags: [websocket]
+      responses:
+        "200":
+          description: A ticket
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WsTicket" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /ws/pipeline-run/{runId}:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+      - $ref: "#/components/parameters/Ticket"
+    get:
+      summary: Stream a pipeline run's status (WebSocket upgrade)
+      description: Authenticated by the `ticket` query param, not a Bearer token.
+      tags: [websocket]
+      security: []
+      responses:
+        "101": { description: Switching Protocols (WebSocket) }
+        "401": { description: Missing or invalid ticket }
+  /ws/app-run/{runId}:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+      - $ref: "#/components/parameters/Ticket"
+    get:
+      summary: Stream an app-deploy run (WebSocket upgrade)
+      tags: [websocket]
+      security: []
+      responses:
+        "101": { description: Switching Protocols (WebSocket) }
+        "401": { description: Missing or invalid ticket }
+  /ws/docker/build/{buildId}:
+    parameters:
+      - name: buildId
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/Ticket"
+    get:
+      summary: Stream a standalone image build (WebSocket upgrade)
+      tags: [websocket]
+      security: []
+      responses:
+        "101": { description: Switching Protocols (WebSocket) }
+        "401": { description: Missing or invalid ticket }
+  /ws/runs/{runId}/stages/{stageId}/logs:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+      - name: stageId
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/Ticket"
+    get:
+      summary: Stream live stage logs (WebSocket upgrade)
+      tags: [websocket]
+      security: []
+      responses:
+        "101": { description: Switching Protocols (WebSocket) }
+        "401": { description: Missing or invalid ticket }
+  /ws/kubernetes/watch:
+    parameters:
+      - name: namespace
+        in: query
+        required: false
+        schema: { type: string }
+      - name: resource
+        in: query
+        required: false
+        schema: { type: string }
+      - $ref: "#/components/parameters/Ticket"
+    get:
+      summary: Stream Kubernetes resource changes (WebSocket upgrade)
+      tags: [websocket]
+      security: []
+      responses:
+        "101": { description: Switching Protocols (WebSocket) }
+        "401": { description: Missing or invalid ticket }
 
 components:
   securitySchemes:
@@ -35,328 +1179,247 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-    apiKey:
-      type: apiKey
+  parameters:
+    PathId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema: { type: string }
+    Namespace:
+      name: ns
+      in: path
+      required: true
+      schema: { type: string }
+    Kind:
+      name: kind
+      in: path
+      required: true
+      schema: { type: string }
+    Name:
+      name: name
+      in: path
+      required: true
+      schema: { type: string }
+    Ticket:
+      name: ticket
+      in: query
+      required: true
+      schema: { type: string }
+      description: Single-use WebSocket ticket from POST /api/v1/ws-tickets
+    IdempotencyKey:
+      name: Idempotency-Key
       in: header
-      name: X-API-Key
-      description: Used for the GitHub webhook HMAC and (future) machine clients.
-
+      required: false
+      schema: { type: string }
   schemas:
+    VersionInfo:
+      type: object
+      properties:
+        version: { type: string }
+        commit: { type: string }
+        date: { type: string }
+    AuthMethods:
+      type: object
+      properties:
+        oidc: { type: boolean }
+        local: { type: boolean }
+    LocalCredentials:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+    TokenResponse:
+      type: object
+      properties:
+        token: { type: string }
+        expiresAt: { type: string }
+    UserInfo:
+      type: object
+      properties:
+        subject: { type: string }
+        roles:
+          type: array
+          items: { type: string }
     Pipeline:
       type: object
       properties:
-        id: { type: string, format: uuid }
+        id: { type: string }
         name: { type: string }
-        graph:
-          type: object
-          description: React-Flow node + edge document. Validated server-side.
-        environments:
+        version: { type: integer }
+        stages:
           type: array
-          items: { type: string }
-        createdAt: { type: string, format: date-time }
+          items: { $ref: "#/components/schemas/Stage" }
+        edges:
+          type: array
+          items: { $ref: "#/components/schemas/Edge" }
+    Stage:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type:
+          type: string
+          enum: [build, test, deploy, push, approval, custom, gitops-commit]
+        config:
+          type: object
+          additionalProperties: true
+    Edge:
+      type: object
+      properties:
+        id: { type: string }
+        source: { type: string }
+        target: { type: string }
+        condition:
+          type: string
+          enum: [success, failure, always]
+          description: Only "success" (or empty) is evaluated today; others are rejected at validation.
     PipelineRun:
       type: object
       properties:
-        id: { type: string, format: uuid }
-        pipelineId: { type: string, format: uuid }
+        id: { type: string }
+        pipelineId: { type: string }
         status:
           type: string
-          enum: [pending, running, succeeded, failed, cancelled]
-        startedAt: { type: string, format: date-time }
-        finishedAt: { type: string, format: date-time, nullable: true }
+          enum: [pending, running, success, failed, cancelled]
+        stageRuns:
+          type: array
+          items: { $ref: "#/components/schemas/StageRun" }
+    StageRun:
+      type: object
+      properties:
+        stageId: { type: string }
+        status:
+          type: string
+          enum: [pending, running, success, failed, cancelled, skipped]
+        startedAt: { type: string }
+        finishedAt: { type: string }
+        logs: { type: string }
+    StageLogs:
+      type: object
+      properties:
+        stageId: { type: string }
+        logs: { type: string }
+    ValidationResult:
+      type: object
+      properties:
+        valid: { type: boolean }
+        errors:
+          type: array
+          items: { type: string }
     Environment:
       type: object
       properties:
-        id: { type: string, format: uuid }
-        name: { type: string, example: prod }
-        order: { type: integer, example: 3, description: "1=Dev, 2=Staging, 3=Prod" }
-        target:
-          type: object
-          properties:
-            type: { type: string, enum: [cluster, namespace] }
-            clusterId: { type: string }
-            namespace: { type: string }
-            kubeContext: { type: string }
-        promotion:
-          type: object
-          properties:
-            strategy: { type: string, enum: [auto, manual] }
-            requiredApprovers: { type: integer }
-        plainVars:
-          type: object
-          additionalProperties: { type: string }
-        secretKeys:
+        id: { type: string }
+        name: { type: string }
+        order: { type: integer }
+        target: { $ref: "#/components/schemas/EnvironmentTarget" }
+        promotionPolicy: { $ref: "#/components/schemas/PromotionPolicy" }
+    EnvironmentTarget:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [cluster, namespace]
+        clusterId: { type: string }
+        namespace: { type: string }
+        kubeContext: { type: string }
+    EnvironmentStatus:
+      type: object
+      properties:
+        environmentId: { type: string }
+        status:
+          type: string
+          enum: [pending, deploying, deployed, failed, awaiting_approval]
+    PromotionPolicy:
+      type: object
+      properties:
+        strategy:
+          type: string
+          enum: [auto, manual]
+        requiredApprovers: { type: integer }
+        autoPromoteOn:
           type: array
           items: { type: string }
-          description: Names only; values are never returned in this response.
     App:
       type: object
       properties:
-        id: { type: string, format: uuid }
+        id: { type: string }
         name: { type: string }
-        githubRepo: { type: string, example: acme/web }
-        branch: { type: string, default: main }
-        autoDeploy: { type: boolean }
-        hasWebhook: { type: boolean }
+        repo: { type: string }
+        version: { type: integer }
+        buildPlan:
+          type: string
+          enum: [dockerfile, compose, buildpack]
+        deployTarget:
+          type: object
+          additionalProperties: true
+    Host:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string }
+    ComposeGraph:
+      type: object
+      properties:
+        services:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        connections:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    SecretValue:
+      type: object
+      properties:
+        value: { type: string }
+    WsTicket:
+      type: object
+      properties:
+        ticket: { type: string }
+        expires_at: { type: string }
     Error:
       type: object
-      required: [error]
       properties:
         error: { type: string }
-
-paths:
-  /health:
-    get:
-      summary: Liveness probe.
-      security: []
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status: { type: string, example: ok }
-                  service: { type: string, example: cooker }
-
-  /api/v1/pipelines:
-    get:
-      summary: List pipelines.
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/Pipeline' }
-    post:
-      summary: Create a pipeline.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/Pipeline' }
-      responses:
-        '201':
-          description: Created
-          content: { application/json: { schema: { $ref: '#/components/schemas/Pipeline' } } }
-
-  /api/v1/pipelines/{id}:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-    get:
-      summary: Get one pipeline.
-      responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Pipeline' } } } }
-        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-    put:
-      summary: Update a pipeline.
-      requestBody:
-        required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/Pipeline' } } }
-      responses:
-        '200': { description: OK }
-    delete:
-      summary: Delete a pipeline.
-      responses:
-        '200': { description: Deleted }
-        '404': { description: Not found }
-
-  /api/v1/pipelines/{id}/run:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-    post:
-      summary: Trigger a pipeline run.
-      responses:
-        '202':
-          description: Run queued
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PipelineRun' }
-
-  /api/v1/pipelines/{id}/runs:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-    get:
-      summary: List runs for a pipeline.
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/PipelineRun' }
-
-  /api/v1/pipelines/{id}/runs/{runId}/cancel:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
-    post:
-      summary: Cancel a running pipeline run.
-      responses:
-        '200': { description: Cancelled }
-
-  /api/v1/pipelines/{id}/runs/{runId}/approve:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
-    post:
-      summary: Approve a manual promotion gate. Requires admin or approver role.
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                note: { type: string }
-      responses:
-        '200': { description: Approved }
-        '403': { description: Insufficient role }
-
-  /api/v1/environments:
-    get:
-      summary: List environments (secrets redacted).
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/Environment' }
-    post:
-      summary: Create an environment. Secrets cannot be set here — use the dedicated /secrets endpoint.
-      requestBody:
-        required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/Environment' } } }
-      responses:
-        '201': { description: Created }
-
-  /api/v1/environments/{id}/secrets/{key}:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      - { name: key, in: path, required: true, schema: { type: string, example: DB_PASSWORD } }
-    put:
-      summary: Set or rotate a single secret. Admin only.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [value]
-              properties:
-                value: { type: string }
-      responses:
-        '200': { description: Stored }
-        '403': { description: Admin role required }
-        '503':
-          description: Secrets backend unavailable. For COOKER_SECRETS_BACKEND=database, COOKER_SECRET_KEY is unset; for keepsave, the upstream is unreachable.
-    get:
-      summary: Reveal the plaintext value. Admin only.
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  key: { type: string }
-                  value: { type: string }
-        '403': { description: Admin role required }
-        '404': { description: Secret not found on this environment }
-    delete:
-      summary: Delete a secret. Admin only.
-      responses:
-        '200': { description: Deleted }
-        '403': { description: Admin role required }
-
-  /api/v1/apps:
-    get:
-      summary: List apps (webhook secret redacted).
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/App' }
-    post:
-      summary: Create an app.
-      requestBody:
-        required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/App' } } }
-      responses:
-        '201': { description: Created }
-
-  /api/v1/apps/{id}:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-    put:
-      summary: Update an app.
-      responses:
-        '200': { description: OK }
-    delete:
-      summary: Delete an app.
-      responses:
-        '200': { description: Deleted }
-
-  /api/v1/apps/{id}/webhook:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-    put:
-      summary: Rotate the GitHub webhook HMAC secret. Admin only.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [secret]
-              properties:
-                secret: { type: string }
-      responses:
-        '200': { description: Rotated }
-        '403': { description: Admin role required }
-
-  /api/v1/apps/{id}/deploy:
-    parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-    post:
-      summary: Trigger a Clone -> Build -> Push -> Deploy run for the app.
-      responses:
-        '202':
-          description: Run queued; subscribe to the returned `stream` URL for live logs.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  appId: { type: string }
-                  runId: { type: string }
-                  channel: { type: string, example: app-run:<runId> }
-                  stream: { type: string, example: /ws/app-run/<runId> }
-
-  /webhooks/github:
-    post:
-      summary: GitHub push-event webhook. HMAC-authenticated; not OIDC.
-      security:
-        - apiKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              description: GitHub push event payload (subset).
-      responses:
-        '202': { description: Deploy queued for matching app+branch }
-        '204': { description: No matching app — silently dropped }
-        '401': { description: Bad HMAC signature }
-        '403': { description: Webhook not configured for this app }
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Version conflict (optimistic concurrency)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Authenticated but lacking the required role / MFA
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds to wait before retrying
+security:
+  - bearerAuth: []
