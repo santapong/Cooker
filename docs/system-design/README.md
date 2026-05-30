@@ -69,6 +69,7 @@ flowchart TB
 | [10-platform-subsystems.md](10-platform-subsystems.md) | You're touching the feature-flagged platform layer (queue, scheduler, notifier, audit, observability, governance) |
 | [11-code-patterns-and-conventions.md](11-code-patterns-and-conventions.md) | You're writing code and want the patterns, style rules, and PR conventions |
 | [12-reality-check.md](12-reality-check.md) | You want the honest list of defaults, gotchas, and what's designed-but-not-yet-real |
+| [13-execution-pipeline.md](13-execution-pipeline.md) | You're working on (or redesigning) the DAG runner, live logging, or tracing |
 
 ## Glossary
 
