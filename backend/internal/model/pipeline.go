@@ -81,6 +81,11 @@ type StageConfig struct {
 	ComposeServiceName  string `json:"composeServiceName,omitempty"`
 	ComposeBuildContext string `json:"composeBuildContext,omitempty"`
 	ComposeDockerfile   string `json:"composeDockerfile,omitempty"`
+	// ComposePorts carries the compose service's `ports:` so a
+	// docker-run deploy can publish them (-p). Format is compose-native
+	// ("host:container" or bare "port"). K8s deploys use the synthesized
+	// manifest's port instead, so this is docker-runtime-specific.
+	ComposePorts []string `json:"composePorts,omitempty"`
 
 	// Resources carries per-service CPU/memory limits to apply at
 	// deploy time (K8s resources.limits, or docker --memory/--cpus).

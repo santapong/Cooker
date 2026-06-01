@@ -342,6 +342,10 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 			ComposeServiceName: svc.Name,
 			Resources:          svc.Resources,
 			Image:              deployImage,
+			// Carry the service's ports + env so a docker-run deploy can
+			// publish/inject them. K8s deploys read the manifest instead.
+			ComposePorts: svc.Ports,
+			Env:          svc.Environment,
 		}
 		if runtime == deployRuntimeKubernetes {
 			deployCfg.Namespace = app.DeployTarget.Namespace

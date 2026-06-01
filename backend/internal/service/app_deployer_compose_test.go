@@ -141,6 +141,53 @@ func TestSynthesizeFromCompose_PerServiceDAG(t *testing.T) {
 	if run.ID != "run-1" {
 		t.Errorf("run id: got %q want run-1", run.ID)
 	}
+
+	// web's deploy stage carries its compose ports for the docker-run
+	// path (K8s uses the manifest, but the data must be present either
+	// way so a docker-host deploy publishes them).
+	webDeploy := stageByID(p, "deploy-web")
+	if webDeploy == nil || len(webDeploy.Config.ComposePorts) != 1 || webDeploy.Config.ComposePorts[0] != "8080:80" {
+		t.Errorf("deploy-web ComposePorts: got %+v", webDeploy.Config.ComposePorts)
+	}
+}
+
+// Env + ports from a compose service must reach the docker deploy stage
+// so a docker-host deploy injects/publishes them (regression guard for
+// the port/env carry-through fix).
+func TestSynthesizeFromCompose_DockerCarriesPortsAndEnv(t *testing.T) {
+	app := &model.App{
+		ID:           "d2",
+		Name:         "edge",
+		DeployTarget: model.DeployTarget{Kind: model.DeployTargetDockerHost},
+	}
+	graph := &model.ComposeGraph{
+		Services: []model.ComposeService{
+			{
+				Name:        "api",
+				Image:       "nginx",
+				Ports:       []string{"8080:80", "9090"},
+				Environment: map[string]string{"LOG_LEVEL": "debug"},
+			},
+		},
+	}
+	p, _, err := synthesizePipelineFromCompose(app, graph, "/w", "reg", 1, "p", "")
+	if err != nil {
+		t.Fatalf("synth error: %v", err)
+	}
+	d := stageByID(p, "deploy-api")
+	if d == nil {
+		t.Fatal("deploy-api missing")
+	}
+	if len(d.Config.ComposePorts) != 2 || d.Config.ComposePorts[0] != "8080:80" {
+		t.Errorf("ComposePorts: got %+v", d.Config.ComposePorts)
+	}
+	if d.Config.Env["LOG_LEVEL"] != "debug" {
+		t.Errorf("Env not carried: got %+v", d.Config.Env)
+	}
+	// And the executor maps ComposePorts → publishable ports.
+	if got := composePortsToPublish(d.Config); len(got) != 2 {
+		t.Errorf("composePortsToPublish: got %+v", got)
+	}
 }
 
 // depends_on cycles must be rejected with a friendly error, not panic.

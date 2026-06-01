@@ -810,12 +810,12 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 }
 
 // composePortsToPublish returns the port specs a docker-run deploy
-// should publish. For now the synthesized stage doesn't carry the raw
-// compose ports separately, so we publish nothing by default; the
-// container's own EXPOSE governs reachability. (Ports are surfaced in
-// the K8s manifest path via firstContainerPort.)
+// should publish, carried from the compose service's `ports:` during
+// synthesis (StageConfig.ComposePorts). The docker deployer normalizes
+// a bare "80" to "80:80". (K8s deploys publish via the synthesized
+// manifest's port instead.)
 func composePortsToPublish(cfg model.StageConfig) []string {
-	return nil
+	return cfg.ComposePorts
 }
 
 // hasRegistryHost returns true when ref already includes a registry
