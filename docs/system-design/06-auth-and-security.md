@@ -41,14 +41,17 @@ Four roles (`internal/auth/rbac.go`):
 | `approver` | Narrow role dedicated to promotion approval |
 | `viewer` | Read-only |
 
-Routes are gated with `RequireRole(...)`: `writeRole` = operator|admin, `adminRole` = admin, and the
-promotion `/approve` route requires `approver`. Permission matrix (resource × action → allowed roles):
+Most routes are gated by a `RequireRole(...)` **middleware**: `writeRole` = operator|admin, `adminRole`
+= admin. **Exception — the `/approve` route.** It carries *no* route-level role middleware; instead the
+`ApprovePromotion` handler calls `auth.CanApprovePromotion(claims)` in-handler, which allows **admin OR
+approver** (`backend/internal/handler/environment.go`). So "approve" is admin-or-approver, gated in the
+handler, not via `RequireRole` like the others. Permission matrix (resource × action → allowed roles):
 
 | Resource | Read | Create/Update/Run | Approve promotion | Admin config |
 |---|---|---|---|---|
 | Pipelines / Runs | all roles | operator, admin | — | — |
 | Apps / Deploy | all roles | operator, admin | — | — |
-| Promotions | all roles | operator, admin (promote) | approver | — |
+| Promotions | all roles | operator, admin (promote) | admin or approver (in-handler) | — |
 | Environments | all roles | operator, admin | — | — |
 | Settings / Users | — | — | — | admin |
 

@@ -31,23 +31,31 @@ flowchart LR
   N -. "error → os.Exit(1)" .-> X
 ```
 
-`server.New(cfg)` wires the whole system, in order:
+`server.New(cfg)` wires the whole system. The order below matches `backend/internal/server/server.go`
+`New()` — note that **auth, store, crypto, and secrets are constructed *before* the Gin engine**, so a
+misconfiguration fails fast before any router exists. It's grouped into phases rather than numbered
+1:1, because several steps are conditional (Redis, job queue, scheduler, governance are feature-gated).
 
-1. `gin.New()` + `Recovery()` middleware.
-2. Auth (OIDC provider discovery / local JWT issuer).
-3. Store selection (Postgres if `DatabaseURL` set, else in-memory).
-4. Redis (optional; for multi-replica WS pub/sub + rate limiting).
-5. WebSocket hub.
-6. Secrets backend (`local` AES-GCM or `keepsave`).
-7. Builder / Pusher / Deployer via `selectBuilder` / `selectPusher` / `selectDeployer`.
-8. Governance client (optional admission hook).
-9. `service.NewExecutor(WithBuilder/WithPusher/WithDeployer/…)`.
-10. Job queue (optional) + worker pool.
-11. Scheduler (optional; requires job queue).
-12. Templates / app-health checker.
-13. **Orphan sweep** at boot — marks stale `running` runs failed (`Runs.SweepOrphans`).
-14. Late middleware + routes: `securityHeaders → CORS → metrics → tracing`, then `/health*`, then
-    `registerRoutes()` (the `/api/v1` group with auth + RBAC).
+**Phase 1 — core dependencies (pre-router):**
+1. **Auth** — `auth.NewMiddleware` (OIDC provider discovery), and `EnableLocalAuth` if a local JWT
+   issuer is configured.
+2. **Store** — `newStore`: Postgres if `DatabaseURL` is set (runs migrations), else in-memory.
+3. **Crypto** — `crypto.NewCodec(cfg.SecretKey)` (AES-GCM codec for secrets-at-rest).
+4. **Secrets backend** — `selectSecretsManager` (`database` / `keepsave` / `vault` / `aws` / `gcp`).
+
+**Phase 2 — Gin engine + strategies:**
+5. `gin.New()` + `Recovery()` middleware.
+6. Redis (optional; multi-replica WS pub/sub + rate limiting), WebSocket hub.
+7. Builder / Pusher / Deployer via `selectBuilder` / `selectPusher` / `selectDeployer`; governance
+   client (optional admission hook).
+8. `service.NewExecutor(WithBuilder/WithPusher/WithDeployer/…)`.
+
+**Phase 3 — background machinery + routes:**
+9. Job queue (optional) + worker pool; scheduler (optional, requires job queue); templates +
+   app-health checker.
+10. **Orphan sweep** at boot — marks stale `running` runs failed (`Runs.SweepOrphans`).
+11. Late middleware then routes: `securityHeaders → CORS → metrics* → tracing*`, then `/health*`,
+    then `registerRoutes()` (the `/api/v1` group with auth + per-route RBAC + audit). `*` = gated.
 
 `RunContext` then starts the HTTP listener, the scheduler tick loop, and the health checker, and wires
 graceful shutdown (drain job-queue pool, scheduler, health checker on `SIGINT`/`SIGTERM`).
