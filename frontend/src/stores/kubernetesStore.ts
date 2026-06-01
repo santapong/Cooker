@@ -8,6 +8,8 @@ interface KubernetesStore {
   selectedNamespace: string;
   loading: boolean;
   error: string | null;
+  /** True when the backend returned 503 — cluster not configured or unreachable. */
+  clusterUnavailable: boolean;
 
   fetchNamespaces: () => Promise<void>;
   fetchWorkloads: (namespace?: string) => Promise<void>;
@@ -22,14 +24,16 @@ export const useKubernetesStore = create<KubernetesStore>((set, get) => ({
   selectedNamespace: 'default',
   loading: false,
   error: null,
+  clusterUnavailable: false,
 
   fetchNamespaces: async () => {
     set({ loading: true });
     try {
       const namespaces = await kubernetesApi.listNamespaces();
-      set({ namespaces, loading: false });
+      set({ namespaces, loading: false, clusterUnavailable: false });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      const msg = (e as Error).message;
+      set({ error: msg, loading: false, clusterUnavailable: true });
     }
   },
 
@@ -38,9 +42,10 @@ export const useKubernetesStore = create<KubernetesStore>((set, get) => ({
     try {
       const ns = namespace || get().selectedNamespace;
       const workloads = await kubernetesApi.listWorkloads(ns);
-      set({ workloads, loading: false });
+      set({ workloads, loading: false, clusterUnavailable: false });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      const msg = (e as Error).message;
+      set({ error: msg, loading: false, clusterUnavailable: true });
     }
   },
 

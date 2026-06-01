@@ -1,13 +1,62 @@
 import { useEffect } from 'react';
 import { useKubernetesStore } from '../stores/kubernetesStore';
 import { useTheme } from '../theme/ThemeProvider';
+import { hexA } from '../theme/tokens';
 import { Btn, Card, EmptyState, HealthBar, PageHeader, Pill, Select, StatusDot, statusTone } from '../components/ui/atoms';
 import { DataTable } from '../components/ui/DataTable';
 
+function ClusterUnavailableBanner() {
+  const t = useTheme();
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 12,
+        padding: '14px 18px',
+        marginBottom: 18,
+        background: hexA(t.warn, 0.1),
+        border: `1px solid ${hexA(t.warn, 0.35)}`,
+        borderRadius: 10,
+      }}
+    >
+      <span
+        style={{
+          flexShrink: 0,
+          width: 8,
+          height: 8,
+          marginTop: 5,
+          borderRadius: 999,
+          background: t.warn,
+        }}
+      />
+      <div>
+        <div style={{ fontFamily: t.sans, fontWeight: 600, fontSize: 13.5, color: t.text }}>
+          No Kubernetes cluster configured or cluster unreachable
+        </div>
+        <div style={{ fontSize: 12.5, color: t.textSoft, marginTop: 4, lineHeight: 1.55 }}>
+          Set <code style={{ fontFamily: t.mono, fontSize: 12 }}>COOKER_KUBECONFIG</code> (or mount a
+          kubeconfig at the default path) and restart Cooker. The backend returned HTTP 503.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function KubernetesPage() {
   const t = useTheme();
-  const { namespaces, workloads, selectedNamespace, loading, fetchNamespaces, fetchWorkloads, setNamespace } =
-    useKubernetesStore();
+  const {
+    namespaces,
+    workloads,
+    selectedNamespace,
+    loading,
+    clusterUnavailable,
+    fetchNamespaces,
+    fetchWorkloads,
+    setNamespace,
+  } = useKubernetesStore();
 
   useEffect(() => {
     fetchNamespaces();
@@ -37,6 +86,7 @@ export default function KubernetesPage() {
               value={selectedNamespace}
               onChange={(e) => setNamespace(e.target.value)}
               style={{ width: 220 }}
+              disabled={clusterUnavailable}
             >
               <option value="">All namespaces</option>
               {namespaces.map((ns) => (
@@ -49,9 +99,17 @@ export default function KubernetesPage() {
         }
       />
 
+      {!loading && clusterUnavailable && <ClusterUnavailableBanner />}
+
       <Card pad={0}>
-        {/* Empty-state two-CTA — W11 §Indie step 2 (PR #66). */}
-        {!loading && workloads.length === 0 ? (
+        {/* Cluster unavailable (503) — show informational empty state, not a broken table. */}
+        {!loading && clusterUnavailable ? (
+          <EmptyState
+            title="Cluster not reachable."
+            body="Cooker could not connect to a Kubernetes cluster. Configure a kubeconfig and restart the server to see live workloads here."
+          />
+        ) : /* Empty cluster (200 + []) vs loading */
+        !loading && workloads.length === 0 ? (
           <EmptyState
             title="No workloads found."
             body="Point Cooker at a kubeconfig to see Deployments, StatefulSets, and DaemonSets live."

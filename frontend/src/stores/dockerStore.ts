@@ -7,6 +7,13 @@ interface DockerStore {
   containers: ContainerInfo[];
   loading: boolean;
   error: string | null;
+  /**
+   * True when the backend returned HTTP 501 — the Docker host transport is
+   * not configured (COOKER_DOCKER_HOST is unset / P9.4 not wired up).
+   * List endpoints still return 200 + [] so this flag is only set when an
+   * inspect or mutating action is attempted.
+   */
+  transportUnconfigured: boolean;
 
   fetchImages: () => Promise<void>;
   fetchContainers: () => Promise<void>;
@@ -21,6 +28,7 @@ export const useDockerStore = create<DockerStore>((set) => ({
   containers: [],
   loading: false,
   error: null,
+  transportUnconfigured: false,
 
   fetchImages: async () => {
     set({ loading: true, error: null });
@@ -43,8 +51,16 @@ export const useDockerStore = create<DockerStore>((set) => ({
   },
 
   buildImage: async (config) => {
-    const result = await dockerApi.buildImage(config);
-    return result.buildId;
+    try {
+      const result = await dockerApi.buildImage(config);
+      return result.buildId;
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg.includes('not configured') || msg.includes('transport')) {
+        set({ transportUnconfigured: true });
+      }
+      throw e;
+    }
   },
 
   deleteImage: async (id: string) => {

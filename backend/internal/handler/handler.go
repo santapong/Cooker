@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/santapong/cooker/internal/crypto"
+	"github.com/santapong/cooker/internal/kube"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/notifier"
 	"github.com/santapong/cooker/internal/scheduler"
@@ -72,6 +73,13 @@ type Handler struct {
 	// deployed compose service (deployment-view runtime panel). Set by
 	// server.New; nil returns 503 from the runtime endpoints.
 	Runtime *service.RuntimeService
+	// Kube is the read-only client-go client backing the Kubernetes
+	// list/inspect endpoints. Set by server.New from the same kubeconfig
+	// source as the ClientGo deployer; nil (or kube.ErrUnavailable from a
+	// cluster that isn't reachable) returns 503 from the k8s read
+	// endpoints. The write path (scale/restart/apply/delete) stays a stub
+	// and does not use this field.
+	Kube *kube.Client
 }
 
 // New constructs a Handler bound to the given store. secs may be nil

@@ -1,9 +1,13 @@
 package handler
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestResolveComposePath_Rejects(t *testing.T) {
@@ -32,6 +36,58 @@ func TestResolveComposePath_Rejects(t *testing.T) {
 				t.Fatalf("expected error for %q, got nil", tc.input)
 			}
 		})
+	}
+}
+
+func TestGetDockerImage_NotImplemented(t *testing.T) {
+	r := gin.New()
+	r.GET("/images/:id", GetDockerImage)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/images/abc", nil))
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"operation":"image.inspect"`) {
+		t.Errorf("expected operation image.inspect, got %s", w.Body.String())
+	}
+}
+
+func TestGetContainerLogs_NotImplemented(t *testing.T) {
+	r := gin.New()
+	r.GET("/containers/:id/logs", GetContainerLogs)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/containers/abc/logs", nil))
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"operation":"container.logs"`) {
+		t.Errorf("expected operation container.logs, got %s", w.Body.String())
+	}
+}
+
+func TestListDockerImages_EmptyOK(t *testing.T) {
+	r := gin.New()
+	r.GET("/images", ListDockerImages)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/images", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := strings.TrimSpace(w.Body.String()); got != "[]" {
+		t.Errorf("expected [], got %q", got)
+	}
+}
+
+func TestListContainers_EmptyOK(t *testing.T) {
+	r := gin.New()
+	r.GET("/containers", ListContainers)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/containers", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := strings.TrimSpace(w.Body.String()); got != "[]" {
+		t.Errorf("expected [], got %q", got)
 	}
 }
 

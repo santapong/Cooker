@@ -19,6 +19,7 @@ import (
 	"github.com/santapong/cooker/internal/governance"
 	"github.com/santapong/cooker/internal/handler"
 	"github.com/santapong/cooker/internal/idempotency"
+	"github.com/santapong/cooker/internal/kube"
 	"github.com/santapong/cooker/internal/logstore"
 	"github.com/santapong/cooker/internal/observability"
 	"github.com/santapong/cooker/internal/pusher"
@@ -245,6 +246,12 @@ func New(cfg *config.Config) (*Server, error) {
 	// deployed compose service. CLI-backed (docker/kubectl); harmless
 	// when those binaries are absent (returns "not found").
 	h.Runtime = service.NewRuntimeService(cfg.Kubernetes.Namespace)
+	// Kube backs the read-only Kubernetes list/inspect endpoints. Built
+	// from the SAME kubeconfig source as the ClientGo deployer
+	// (cfg.Kubernetes.Kubeconfig; empty => in-cluster) so reads target
+	// exactly the cluster the pipeline deploys to. Lazy: a server with no
+	// cluster configured still boots and the read endpoints return 503.
+	h.Kube = kube.New(cfg.Kubernetes.Kubeconfig)
 	// HostService coordinates the PEM-bytes-to-secrets-manager
 	// translation for SSH hosts. nil-safe handler-side: when secMgr
 	// is nil (dev without a secrets backend), SSH host create/update

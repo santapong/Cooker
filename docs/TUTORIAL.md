@@ -243,7 +243,8 @@ Several subsystems default to in-memory (per-replica). For multi-replica, switch
 | **Build caching** (Kaniko/BuildKit cache) | Not wired — every build is cold |
 | **Post-stage hooks** (`always`/`failure` cleanup) | Not built |
 | **Stage-log replay / history over WS** | Live now via the **memory** backend (mid-run join + `?since=` reconnect, single-replica, §11a); durable/multi-replica `postgres`/`redis` backends still pending |
-| **Docker/K8s list & inspect REST endpoints** | Stubs — return empty/sample data |
+| **K8s list & inspect REST endpoints** | Real now — read-only via client-go against the server's configured cluster (`/kubernetes/namespaces`, `/workloads`, `/workloads/:ns/:kind/:name`, `/pods/:ns/:name/logs`). No user-supplied kubeconfig/URL (no SSRF); nil/unreachable cluster → 503. K8s **write** path (scale/restart/apply/delete) still stubbed |
+| **Docker list & inspect REST endpoints** | Honest by design — no docker host transport is wired (no `docker.sock`; see CLAUDE.md / Kaniko P1.1). Lists return `[]` (200); inspect/logs return 501 with `{error,operation,hint}` until a host transport (P9.4) lands |
 | **Multi-tenancy** | Designed (ADR-0004), not implemented — single-tenant today |
 
 Roadmap: [`proposals/dag-adaptation-2026.md`](proposals/dag-adaptation-2026.md) and

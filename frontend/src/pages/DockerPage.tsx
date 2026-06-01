@@ -10,6 +10,48 @@ import { useToastStore } from '../stores/toastStore';
 
 type Tab = 'images' | 'containers' | 'networks' | 'volumes';
 
+/** Persistent banner shown when the Docker host transport is not wired up. */
+function DockerTransportBanner() {
+  const t = useTheme();
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 12,
+        padding: '14px 18px',
+        marginBottom: 18,
+        background: hexA(t.cool, 0.1),
+        border: `1px solid ${hexA(t.cool, 0.35)}`,
+        borderRadius: 10,
+      }}
+    >
+      <span
+        style={{
+          flexShrink: 0,
+          width: 8,
+          height: 8,
+          marginTop: 5,
+          borderRadius: 999,
+          background: t.cool,
+        }}
+      />
+      <div>
+        <div style={{ fontFamily: t.sans, fontWeight: 600, fontSize: 13.5, color: t.text }}>
+          Docker host transport not configured
+        </div>
+        <div style={{ fontSize: 12.5, color: t.textSoft, marginTop: 4, lineHeight: 1.55 }}>
+          Lists show no data and inspect / build / run actions are unavailable until{' '}
+          <code style={{ fontFamily: t.mono, fontSize: 12 }}>COOKER_DOCKER_HOST</code> is set (P9.4).
+          Image and container data will appear here once the transport is wired up.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DockerPage() {
   const t = useTheme();
   const { images, containers, loading, fetchImages, fetchContainers } = useDockerStore();
@@ -29,14 +71,16 @@ export default function DockerPage() {
         actions={
           tab === 'images' ? (
             <>
-              <Btn kind="secondary" icon="layers">Pull image</Btn>
-              <Btn kind="primary" icon="plus">Build image</Btn>
+              <Btn kind="secondary" icon="layers" disabled>Pull image</Btn>
+              <Btn kind="primary" icon="plus" disabled>Build image</Btn>
             </>
           ) : tab === 'containers' ? (
-            <Btn kind="primary" icon="plus">Run container</Btn>
+            <Btn kind="primary" icon="plus" disabled>Run container</Btn>
           ) : null
         }
       />
+
+      <DockerTransportBanner />
 
       <div
         style={{
@@ -77,36 +121,31 @@ export default function DockerPage() {
       {tab === 'images' && (
         <Card pad={0}>
           <SectionHeader title="Images" count={images.length} />
-          {/* Empty-state two-CTA — W11 §Indie step 2 (PR #66). */}
+          {/* Empty-state — W11 §Indie step 2 (PR #66). Transport not configured → [] from backend. */}
           {!loading && images.length === 0 ? (
             <EmptyState
-              title="No images cached locally."
-              body="Make sure the Docker daemon is running and Cooker's host transport is configured."
+              title="No images available."
+              body="The Docker host transport is not configured (COOKER_DOCKER_HOST / P9.4). Images will appear here once the transport is wired up."
               action={
-                <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-                  <Btn kind="primary" icon="play">
-                    Start the Docker daemon
-                  </Btn>
-                  <a
-                    href="https://github.com/santapong/Cooker/blob/main/docs/user-guide/operations/docker-builds.md"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '8px 16px',
-                      border: '1px solid currentColor',
-                      borderRadius: 7,
-                      fontSize: 13.5,
-                      color: 'inherit',
-                      textDecoration: 'none',
-                      opacity: 0.7,
-                    }}
-                  >
-                    Docker builds guide ↗
-                  </a>
-                </div>
+                <a
+                  href="https://github.com/santapong/Cooker/blob/main/docs/user-guide/operations/docker-builds.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '8px 16px',
+                    border: '1px solid currentColor',
+                    borderRadius: 7,
+                    fontSize: 13.5,
+                    color: 'inherit',
+                    textDecoration: 'none',
+                    opacity: 0.7,
+                  }}
+                >
+                  Docker builds guide ↗
+                </a>
               }
             />
           ) : (
@@ -162,6 +201,12 @@ export default function DockerPage() {
       {tab === 'containers' && (
         <Card pad={0}>
           <SectionHeader title="Containers" count={containers.length} />
+          {!loading && containers.length === 0 ? (
+            <EmptyState
+              title="No containers available."
+              body="The Docker host transport is not configured (COOKER_DOCKER_HOST / P9.4). Container data will appear here once the transport is wired up."
+            />
+          ) : (
           <DataTable
             rows={containers}
             rowKey={(c) => c.id}
@@ -204,6 +249,7 @@ export default function DockerPage() {
               },
             ]}
           />
+          )}
         </Card>
       )}
 
@@ -331,7 +377,11 @@ function CreateNetworkForm({
       await dockerApi.createNetwork({ name, driver });
       onCreated();
     } catch (e) {
-      pushToast({ kind: 'error', message: (e as Error).message });
+      const msg = (e as Error).message;
+      const friendly = msg.includes('not configured') || msg.includes('transport') || msg.includes('501')
+        ? 'Not available — no Docker host configured (P9.4).'
+        : msg;
+      pushToast({ kind: 'error', message: friendly });
     } finally {
       setBusy(false);
     }
@@ -483,7 +533,11 @@ function CreateVolumeForm({
       await dockerApi.createVolume({ name, driver });
       onCreated();
     } catch (e) {
-      pushToast({ kind: 'error', message: (e as Error).message });
+      const msg = (e as Error).message;
+      const friendly = msg.includes('not configured') || msg.includes('transport') || msg.includes('501')
+        ? 'Not available — no Docker host configured (P9.4).'
+        : msg;
+      pushToast({ kind: 'error', message: friendly });
     } finally {
       setBusy(false);
     }

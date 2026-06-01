@@ -56,18 +56,22 @@ func resolveComposePath(name string) (string, error) {
 	return candidate, nil
 }
 
+// Docker image/container read endpoints are intentionally honest: no
+// live docker host transport is wired (no docker.sock — see CLAUDE.md /
+// Kaniko P1.1, which closes the docker.sock-to-host RCE gap). Until a
+// host transport lands (backlog P9.4), list endpoints return an empty
+// slice with 200 (so UI pages render their empty state) and inspect
+// endpoints return 501 with the consistent shape from network.go.
+
 func ListDockerImages(c *gin.Context) {
-	// Placeholder: will use Docker Engine SDK
+	// No docker host transport wired (no docker.sock); reads are empty
+	// until P9.4. Empty 200 lets the UI render an empty state.
 	images := []model.ImageInfo{}
 	c.JSON(http.StatusOK, images)
 }
 
 func GetDockerImage(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"id":          c.Param("id"),
-		"message":     "Image details with OCI manifest will be populated via Docker Engine SDK",
-		"ociManifest": nil,
-	})
+	notImplementedDockerHost(c, "image.inspect")
 }
 
 func BuildDockerImage(c *gin.Context) {
@@ -94,6 +98,8 @@ func DeleteDockerImage(c *gin.Context) {
 }
 
 func ListContainers(c *gin.Context) {
+	// No docker host transport wired (no docker.sock); reads are empty
+	// until P9.4. Empty 200 lets the UI render an empty state.
 	containers := []model.ContainerInfo{}
 	c.JSON(http.StatusOK, containers)
 }
@@ -126,7 +132,7 @@ func DeleteContainer(c *gin.Context) {
 }
 
 func GetContainerLogs(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"logs": "", "message": "Stream via WebSocket for live logs"})
+	notImplementedDockerHost(c, "container.logs")
 }
 
 // ParseComposeFile resolves the requested compose filename inside the

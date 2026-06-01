@@ -131,12 +131,16 @@ func (s *Server) registerRoutes() {
 
 	kubernetes := api.Group("/kubernetes")
 	{
-		kubernetes.GET("/namespaces", handler.ListNamespaces)
-		kubernetes.GET("/workloads", handler.ListWorkloads)
-		kubernetes.GET("/workloads/:ns/:kind/:name", handler.GetWorkload)
+		// Read-only list/inspect: real client-go reads against the
+		// server's configured cluster (Handler methods, h.Kube-backed).
+		kubernetes.GET("/namespaces", h.ListNamespaces)
+		kubernetes.GET("/workloads", h.ListWorkloads)
+		kubernetes.GET("/workloads/:ns/:kind/:name", h.GetWorkload)
+		kubernetes.GET("/pods/:ns/:name/logs", h.GetPodLogs)
+		// Write path: still package-level stubs (scale/restart/apply/
+		// delete) — separate work, does not use h.Kube.
 		kubernetes.POST("/workloads/:ns/:kind/:name/scale", writeRole, handler.ScaleWorkload)
 		kubernetes.POST("/workloads/:ns/:kind/:name/restart", writeRole, handler.RestartWorkload)
-		kubernetes.GET("/pods/:ns/:name/logs", handler.GetPodLogs)
 		kubernetes.POST("/apply", writeRole, handler.ApplyManifest)
 		kubernetes.DELETE("/:ns/:kind/:name", adminRole, handler.DeleteResource)
 	}
