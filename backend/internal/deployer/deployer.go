@@ -77,6 +77,10 @@ type Result struct {
 	// describing what landed in the cluster. Empty for Helm (the chart
 	// decides) and compose.
 	AppliedResources []string
+	// Outputs are optional adapter-emitted outputs, merged over the
+	// executor's derived baseline (the executor sets resources from
+	// AppliedResources; an adapter may add or override keys here).
+	Outputs map[string]string
 }
 
 // Deployer applies workloads to a target (Kubernetes cluster, Docker

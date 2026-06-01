@@ -88,6 +88,8 @@ export interface StageRun {
   logs?: string;
   error?: string;
   artifacts?: Artifact[];
+  /** inter-stage outputs; consumed downstream via ${stages.<id>.<key>} */
+  outputs?: Record<string, string>;
 }
 
 export interface Artifact {

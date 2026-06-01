@@ -47,6 +47,30 @@ parallel (capped at 16). If an upstream stage fails, downstream stages don't run
 > ⚠️ **Edge conditions** (`failure` / `always`) are **rejected at save** today — only the default
 > (run-on-success) works. See 🚧 §13.
 
+**Inter-stage outputs.** A stage can reference an upstream stage's outputs in its own string config
+fields with `${stages.<stageId>.<key>}`. The reference is substituted just before the stage runs.
+The headline case is a Push stage that pins the digest the Build stage produced:
+
+```
+Push stage → repository:  reg/app@${stages.build.digest}
+```
+
+Emitted keys by stage type:
+
+| Stage | Keys |
+|---|---|
+| `build` | `digest` (image ID), `tag` (first tag), `tags` (comma-joined) |
+| `push` | `digest`, `ref` (resolved destination) |
+| `deploy` | `resources` (comma-joined applied resources) |
+| `gitops-commit` | `commit` (SHA), `ref` (`repo@branch`) |
+
+Rules: the referenced stage must be an **ancestor** (there must be an edge path to it) — validated at
+save. Unknown stage / non-ancestor references are rejected at save; an unknown output **key** fails the
+stage at run time (keys only exist once the upstream runs). Other `${...}` tokens (e.g. `${IMAGE}`
+runtime templating) pass through untouched. `script` is intentionally **not** interpolated. Outputs are
+capped at 4 KiB per value / 32 KiB per stage. Disable the whole feature with
+`COOKER_OUTPUTS_ENABLED=false`.
+
 **Skip if:** you deploy single apps (use §3) or compose stacks (use §4c).
 
 ---
@@ -213,7 +237,6 @@ Several subsystems default to in-memory (per-replica). For multi-replica, switch
 | Feature | Status |
 |---|---|
 | **Conditional edges** (`failure` / `always`) | Rejected at save; only success-edges run (§1) |
-| **Inter-stage outputs** (Push auto-reads Build's digest) | Not built — manual config today |
 | **Build caching** (Kaniko/BuildKit cache) | Not wired — every build is cold |
 | **Post-stage hooks** (`always`/`failure` cleanup) | Not built |
 | **Stage-log replay / history over WS** | Not built (REST snapshot only) (§11a) |

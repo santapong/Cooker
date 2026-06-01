@@ -39,6 +39,10 @@ type Result struct {
 	// Digest is the content-addressable digest returned by the registry
 	// after the push (sha256:...).
 	Digest string
+	// Outputs are optional adapter-emitted outputs, merged over the
+	// executor's derived baseline (the executor sets digest/ref from
+	// Digest/Target; an adapter may add or override keys here).
+	Outputs map[string]string
 }
 
 // Pusher copies a local image to a remote OCI registry.

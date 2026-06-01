@@ -180,6 +180,136 @@ func TestValidatePipelineDAG_EdgeCondition(t *testing.T) {
 	})
 }
 
+// TestValidatePipelineDAG_OutputRefAncestor covers the inter-stage outputs
+// reference validation (Primitive #3, dag-adaptation-2026.md §7.3 / DR-3):
+// a ${stages.<id>.<key>} reference is valid only when <id> is a declared
+// stage AND an ancestor of the referencing stage. Key existence is not
+// validated here (runtime-only).
+func TestValidatePipelineDAG_OutputRefAncestor(t *testing.T) {
+	t.Run("ancestor reference allowed", func(t *testing.T) {
+		p := &model.Pipeline{
+			Stages: []model.Stage{
+				{ID: "build", Type: model.StageTypeBuild},
+				{ID: "push", Type: model.StageTypePush, Config: model.StageConfig{
+					Repository: "reg/app@${stages.build.digest}",
+				}},
+			},
+			Edges: []model.Edge{{ID: "e1", Source: "build", Target: "push"}},
+		}
+		if errs := ValidatePipelineDAG(p); len(errs) != 0 {
+			t.Errorf("expected no errors for ancestor reference, got %v", errs)
+		}
+	})
+
+	t.Run("transitive ancestor reference allowed", func(t *testing.T) {
+		// build -> test -> push; push references build (a transitive ancestor).
+		p := &model.Pipeline{
+			Stages: []model.Stage{
+				{ID: "build", Type: model.StageTypeBuild},
+				{ID: "test", Type: model.StageTypeTest},
+				{ID: "push", Type: model.StageTypePush, Config: model.StageConfig{
+					Repository: "reg/app@${stages.build.digest}",
+				}},
+			},
+			Edges: []model.Edge{
+				{ID: "e1", Source: "build", Target: "test"},
+				{ID: "e2", Source: "test", Target: "push"},
+			},
+		}
+		if errs := ValidatePipelineDAG(p); len(errs) != 0 {
+			t.Errorf("expected no errors for transitive ancestor, got %v", errs)
+		}
+	})
+
+	t.Run("unknown stage reference rejected", func(t *testing.T) {
+		p := &model.Pipeline{
+			Stages: []model.Stage{
+				{ID: "push", Type: model.StageTypePush, Config: model.StageConfig{
+					Repository: "reg/app@${stages.ghost.digest}",
+				}},
+			},
+			Edges: []model.Edge{},
+		}
+		errs := ValidatePipelineDAG(p)
+		found := false
+		for _, e := range errs {
+			if e == `service: stage "push" references unknown stage "ghost" in ${stages.ghost.*}` {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected unknown-stage error, got %v", errs)
+		}
+	})
+
+	t.Run("non-ancestor reference rejected", func(t *testing.T) {
+		// build and lint are siblings (both feed deploy); push references
+		// lint but has no edge path from lint, so lint's outputs can't exist
+		// when push runs.
+		p := &model.Pipeline{
+			Stages: []model.Stage{
+				{ID: "build", Type: model.StageTypeBuild},
+				{ID: "lint", Type: model.StageTypeCustom},
+				{ID: "push", Type: model.StageTypePush, Config: model.StageConfig{
+					Repository: "reg/app@${stages.lint.digest}",
+				}},
+			},
+			Edges: []model.Edge{
+				{ID: "e1", Source: "build", Target: "push"},
+				// lint is wholly disconnected from push.
+			},
+		}
+		errs := ValidatePipelineDAG(p)
+		found := false
+		for _, e := range errs {
+			if e == `service: stage "push" references ${stages.lint.*} but "lint" is not an ancestor (no path of edges from "lint" to "push")` {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected non-ancestor error, got %v", errs)
+		}
+	})
+
+	t.Run("self reference rejected", func(t *testing.T) {
+		p := &model.Pipeline{
+			Stages: []model.Stage{
+				{ID: "build", Type: model.StageTypeBuild, Config: model.StageConfig{
+					Context: "${stages.build.digest}",
+				}},
+			},
+			Edges: []model.Edge{},
+		}
+		errs := ValidatePipelineDAG(p)
+		found := false
+		for _, e := range errs {
+			if e == `service: stage "build" references its own outputs ${stages.build.*}` {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected self-reference error, got %v", errs)
+		}
+	})
+
+	t.Run("reference in slice field validated", func(t *testing.T) {
+		// Tags is a slice field; a non-ancestor reference there must still
+		// be caught.
+		p := &model.Pipeline{
+			Stages: []model.Stage{
+				{ID: "build", Type: model.StageTypeBuild, Config: model.StageConfig{
+					Tags: []string{"reg/app:${stages.ghost.tag}"},
+				}},
+			},
+			Edges: []model.Edge{},
+		}
+		errs := ValidatePipelineDAG(p)
+		if len(errs) == 0 {
+			t.Errorf("expected error for unknown stage referenced in Tags slice, got none")
+		}
+	})
+}
+
 func TestBuildDAGFromPipeline_Valid(t *testing.T) {
 	p := &model.Pipeline{
 		Stages: []model.Stage{

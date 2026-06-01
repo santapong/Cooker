@@ -71,6 +71,11 @@ type StageRun struct {
 	Logs       string     `json:"logs,omitempty"`
 	Error      string     `json:"error,omitempty"`
 	Artifacts  []Artifact `json:"artifacts,omitempty"`
+	// Outputs are string key/value pairs a stage exposes for downstream
+	// stages to consume via ${stages.<id>.<key>} interpolation. Persisted
+	// in the existing stage_runs JSONB column (no migration). Capped:
+	// per-key value <= 4 KiB, per-stage total <= 32 KiB.
+	Outputs map[string]string `json:"outputs,omitempty"`
 }
 
 // Artifact represents a pipeline output, tracked as an OCI content-addressable reference.

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { pipelineApi } from '../api/pipelines';
 import { useEnvironmentStore } from '../stores/environmentStore';
-import type { PipelineRun, Pipeline, Stage, EnvironmentStatus } from '../types/pipeline';
+import type { PipelineRun, Pipeline, Stage, StageRun, EnvironmentStatus } from '../types/pipeline';
 import { useTheme } from '../theme/ThemeProvider';
 import { useUIStore } from '../stores/uiStore';
 import { hexA } from '../theme/tokens';
@@ -143,6 +143,7 @@ export default function RunPage() {
       />
       <LogsPanel
         stage={stages.find((s) => s.id === selectedStageId) ?? null}
+        stageRun={run?.stageRuns?.find((sr) => sr.stageId === selectedStageId) ?? null}
         logs={stageLogs}
         loading={logsLoading}
         run={run}
@@ -361,11 +362,13 @@ function StepDot({ tone }: { tone: Tone }) {
 
 function LogsPanel({
   stage,
+  stageRun,
   logs,
   loading,
   run,
 }: {
   stage: Stage | null;
+  stageRun: StageRun | null;
   logs: string;
   loading: boolean;
   run: PipelineRun | null;
@@ -548,6 +551,8 @@ function LogsPanel({
         )}
       </div>
 
+      <StageOutputsTable stageRun={stageRun} />
+
       <div
         style={{
           padding: '8px 18px',
@@ -571,6 +576,95 @@ function LogsPanel({
         <span>{run?.status ?? 'idle'}</span>
       </div>
     </section>
+  );
+}
+
+function StageOutputsTable({ stageRun }: { stageRun: StageRun | null }) {
+  const t = useTheme();
+
+  const outputs = stageRun?.outputs;
+  if (!outputs) return null;
+
+  const visibleEntries = Object.entries(outputs).filter(([k]) => !k.startsWith('_'));
+  const isTruncated = '_truncated' in outputs;
+  const hasInvalid = '_invalid' in outputs;
+
+  if (visibleEntries.length === 0 && !isTruncated && !hasInvalid) return null;
+
+  return (
+    <div
+      style={{
+        borderTop: `1px solid ${t.line}`,
+        background: t.surface,
+        padding: '10px 18px',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          marginBottom: visibleEntries.length > 0 ? 8 : 0,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: t.mono,
+            fontSize: 11,
+            letterSpacing: 1.4,
+            textTransform: 'uppercase',
+            color: t.textMute,
+          }}
+        >
+          Outputs
+        </span>
+        <span style={{ flex: 1, height: 1, background: t.line }} />
+        {isTruncated && (
+          <Pill tone="warn">outputs truncated</Pill>
+        )}
+        {hasInvalid && (
+          <Pill tone="bad">some outputs rejected</Pill>
+        )}
+      </div>
+
+      {visibleEntries.length > 0 && (
+        <table
+          style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontFamily: t.mono,
+            fontSize: 11.5,
+          }}
+        >
+          <tbody>
+            {visibleEntries.map(([key, value]) => (
+              <tr key={key}>
+                <td
+                  style={{
+                    padding: '3px 12px 3px 0',
+                    color: t.textMute,
+                    whiteSpace: 'nowrap',
+                    verticalAlign: 'top',
+                    width: '1%',
+                  }}
+                >
+                  {key}
+                </td>
+                <td
+                  style={{
+                    padding: '3px 0',
+                    color: t.text,
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {value}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 

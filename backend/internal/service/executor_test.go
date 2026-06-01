@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -972,6 +973,259 @@ func TestExecutor_F2_RunResult(t *testing.T) {
 					*run.FinishedAt, result.FinishedAt)
 			}
 		})
+	}
+}
+
+// --- Primitive #3: inter-stage outputs (dag-adaptation-2026.md §7.3) ---
+
+// TestExecutor_Outputs_BuildDigestFlowsToPush is the headline case: a Build
+// stage emits a digest, and a downstream Push stage references it via
+// ${stages.<buildID>.digest} in its Repository. The executor must interpolate
+// the token before dispatching to the pusher, so the pusher receives the
+// resolved Target. Run with -race (go test ./... -race).
+func TestExecutor_Outputs_BuildDigestFlowsToPush(t *testing.T) {
+	mb := &mockBuilder{res: builder.Result{
+		ImageID: "sha256:abcd1234",
+		Tags:    []string{"reg/app:v1"},
+	}}
+	mp := &mockPusher{res: pusher.Result{Digest: "sha256:pushed"}}
+
+	p := &model.Pipeline{
+		ID: "pipe-outputs",
+		Stages: []model.Stage{
+			{ID: "build", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{
+				Context: ".",
+				Tags:    []string{"reg/app:v1"},
+			}},
+			{ID: "push", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{
+				Image:      "reg/app:v1",
+				Repository: "reg/app@${stages.build.digest}",
+			}},
+		},
+		Edges: []model.Edge{{ID: "e1", Source: "build", Target: "push"}},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-outputs",
+		PipelineID: p.ID,
+		Status:     model.RunStatusPending,
+		StageRuns: []model.StageRun{
+			{StageID: "build", Status: model.RunStatusPending},
+			{StageID: "push", Status: model.RunStatusPending},
+		},
+	}
+
+	exec := NewExecutor(WithBuilder(mb), WithPusher(mp))
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != model.RunStatusSuccess {
+		t.Fatalf("expected success, got %s", run.Status)
+	}
+	if len(mp.calls) != 1 {
+		t.Fatalf("expected 1 push call, got %d", len(mp.calls))
+	}
+	if want := "reg/app@sha256:abcd1234"; mp.calls[0].Target != want {
+		t.Errorf("pusher Target: got %q, want %q (digest not interpolated)", mp.calls[0].Target, want)
+	}
+	// The build stage's outputs must be recorded on its StageRun.
+	var buildSR *model.StageRun
+	for i := range run.StageRuns {
+		if run.StageRuns[i].StageID == "build" {
+			buildSR = &run.StageRuns[i]
+		}
+	}
+	if buildSR == nil || buildSR.Outputs["digest"] != "sha256:abcd1234" {
+		t.Errorf("build outputs.digest: got %v", buildSR.Outputs)
+	}
+}
+
+// TestExecutor_Outputs_ParallelSiblingsNoRace exercises the concurrency path
+// the headline test does not: two build stages with no edge between them run
+// concurrently in the same DAG level, each invoking the outputs resolver at
+// stage start. If the resolver reads the whole stage-run map it reads a
+// sibling's StageRun.Status while that sibling's goroutine is writing it —
+// a data race with no happens-before edge. The resolver must therefore only
+// read ANCESTOR stage runs (fenced by the runner's per-level WaitGroup).
+// Must stay green under `go test -race`.
+func TestExecutor_Outputs_ParallelSiblingsNoRace(t *testing.T) {
+	mb := &mockBuilder{res: builder.Result{ImageID: "sha256:abcd1234", Tags: []string{"reg/app:v1"}}}
+	mp := &mockPusher{res: pusher.Result{Digest: "sha256:pushed"}}
+
+	p := &model.Pipeline{
+		ID: "pipe-parallel",
+		Stages: []model.Stage{
+			{ID: "b1", Name: "B1", Type: model.StageTypeBuild, Config: model.StageConfig{Context: ".", Tags: []string{"reg/app:v1"}}},
+			{ID: "b2", Name: "B2", Type: model.StageTypeBuild, Config: model.StageConfig{Context: ".", Tags: []string{"reg/app:v1"}}},
+			{ID: "push", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{
+				Image:      "reg/app:v1",
+				Repository: "reg/app@${stages.b1.digest}",
+			}},
+		},
+		Edges: []model.Edge{
+			{ID: "e1", Source: "b1", Target: "push"},
+			{ID: "e2", Source: "b2", Target: "push"},
+		},
+	}
+	run := &model.PipelineRun{
+		ID: "run-parallel", PipelineID: p.ID, Status: model.RunStatusPending,
+		StageRuns: []model.StageRun{
+			{StageID: "b1", Status: model.RunStatusPending},
+			{StageID: "b2", Status: model.RunStatusPending},
+			{StageID: "push", Status: model.RunStatusPending},
+		},
+	}
+
+	exec := NewExecutor(WithBuilder(mb), WithPusher(mp))
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != model.RunStatusSuccess {
+		t.Fatalf("expected success, got %s", run.Status)
+	}
+	if len(mp.calls) != 1 || mp.calls[0].Target != "reg/app@sha256:abcd1234" {
+		t.Fatalf("push target: got %+v", mp.calls)
+	}
+}
+
+// TestExecutor_Outputs_UnknownKeyFailsStage verifies that a reference to an
+// output key the upstream stage never produced is a runtime stage failure
+// carrying the buildplan error (key existence is not validated statically).
+func TestExecutor_Outputs_UnknownKeyFailsStage(t *testing.T) {
+	mb := &mockBuilder{res: builder.Result{ImageID: "sha256:abcd1234", Tags: []string{"reg/app:v1"}}}
+	mp := &mockPusher{res: pusher.Result{Digest: "sha256:pushed"}}
+
+	p := &model.Pipeline{
+		ID: "pipe-outputs-missing",
+		Stages: []model.Stage{
+			{ID: "build", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{Context: ".", Tags: []string{"reg/app:v1"}}},
+			{ID: "push", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{
+				Image:      "reg/app:v1",
+				Repository: "reg/app@${stages.build.missing}",
+			}},
+		},
+		Edges: []model.Edge{{ID: "e1", Source: "build", Target: "push"}},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-outputs-missing",
+		PipelineID: p.ID,
+		Status:     model.RunStatusPending,
+		StageRuns: []model.StageRun{
+			{StageID: "build", Status: model.RunStatusPending},
+			{StageID: "push", Status: model.RunStatusPending},
+		},
+	}
+
+	exec := NewExecutor(WithBuilder(mb), WithPusher(mp))
+	_, err := exec.Execute(context.Background(), p, run)
+	if err == nil {
+		t.Fatal("expected stage failure for unknown output key")
+	}
+	if run.Status != model.RunStatusFailed {
+		t.Errorf("expected run status failed, got %s", run.Status)
+	}
+	// The push stage must carry the buildplan error and the pusher must
+	// never have been invoked (interpolation fails before dispatch).
+	var pushSR *model.StageRun
+	for i := range run.StageRuns {
+		if run.StageRuns[i].StageID == "push" {
+			pushSR = &run.StageRuns[i]
+		}
+	}
+	if pushSR == nil || pushSR.Status != model.RunStatusFailed {
+		t.Fatalf("expected push stage failed, got %+v", pushSR)
+	}
+	if !strings.Contains(pushSR.Error, "no output") {
+		t.Errorf("expected buildplan 'no output' error, got %q", pushSR.Error)
+	}
+	if len(mp.calls) != 0 {
+		t.Errorf("pusher must not be called when interpolation fails; got %d calls", len(mp.calls))
+	}
+}
+
+// TestExecutor_Outputs_CapTruncation verifies an oversized adapter-emitted
+// output value is truncated to the per-key cap and the "_truncated" marker
+// is set on the stage's outputs.
+func TestExecutor_Outputs_CapTruncation(t *testing.T) {
+	big := strings.Repeat("x", outputKeyMax+500)
+	mb := &mockBuilder{res: builder.Result{
+		ImageID: "sha256:abcd1234",
+		Tags:    []string{"reg/app:v1"},
+		Outputs: map[string]string{"blob": big},
+	}}
+
+	p := &model.Pipeline{
+		ID: "pipe-outputs-cap",
+		Stages: []model.Stage{
+			{ID: "build", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{Context: ".", Tags: []string{"reg/app:v1"}}},
+		},
+		Edges: []model.Edge{},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-outputs-cap",
+		PipelineID: p.ID,
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "build", Status: model.RunStatusPending}},
+	}
+
+	exec := NewExecutor(WithBuilder(mb))
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := run.StageRuns[0].Outputs
+	if out == nil {
+		t.Fatal("expected outputs to be populated")
+	}
+	if out["_truncated"] != "true" {
+		t.Errorf("expected _truncated marker, got outputs=%v", out)
+	}
+	if v := out["blob"]; len(v) <= outputKeyMax || len(v) > outputKeyMax+len("...[truncated]") {
+		t.Errorf("expected blob truncated to ~%d bytes, got %d", outputKeyMax, len(v))
+	}
+}
+
+// TestExecutor_Outputs_DisabledPassesThrough verifies that with
+// COOKER_OUTPUTS_ENABLED=false the ${stages.*} token is passed through to
+// the adapter literally — no interpolation, no error, no ingestion.
+func TestExecutor_Outputs_DisabledPassesThrough(t *testing.T) {
+	t.Setenv("COOKER_OUTPUTS_ENABLED", "false")
+
+	mb := &mockBuilder{res: builder.Result{ImageID: "sha256:abcd1234", Tags: []string{"reg/app:v1"}}}
+	mp := &mockPusher{res: pusher.Result{Digest: "sha256:pushed"}}
+
+	p := &model.Pipeline{
+		ID: "pipe-outputs-off",
+		Stages: []model.Stage{
+			{ID: "build", Name: "Build", Type: model.StageTypeBuild, Config: model.StageConfig{Context: ".", Tags: []string{"reg/app:v1"}}},
+			{ID: "push", Name: "Push", Type: model.StageTypePush, Config: model.StageConfig{
+				Image:      "reg/app:v1",
+				Repository: "reg/app@${stages.build.digest}",
+			}},
+		},
+		Edges: []model.Edge{{ID: "e1", Source: "build", Target: "push"}},
+	}
+	run := &model.PipelineRun{
+		ID:         "run-outputs-off",
+		PipelineID: p.ID,
+		Status:     model.RunStatusPending,
+		StageRuns: []model.StageRun{
+			{StageID: "build", Status: model.RunStatusPending},
+			{StageID: "push", Status: model.RunStatusPending},
+		},
+	}
+
+	exec := NewExecutor(WithBuilder(mb), WithPusher(mp))
+	if _, err := exec.Execute(context.Background(), p, run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mp.calls) != 1 {
+		t.Fatalf("expected 1 push call, got %d", len(mp.calls))
+	}
+	if want := "reg/app@${stages.build.digest}"; mp.calls[0].Target != want {
+		t.Errorf("with outputs disabled, token must pass through literally: got %q, want %q", mp.calls[0].Target, want)
+	}
+	// Ingestion is also short-circuited: no outputs stored.
+	if out := run.StageRuns[0].Outputs; out != nil {
+		t.Errorf("expected no outputs ingested when disabled, got %v", out)
 	}
 }
 
