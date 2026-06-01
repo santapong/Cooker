@@ -176,4 +176,4 @@ psql "$DATABASE_URL" < before-fixup.sql
 
 - **[Postgres](../operations/postgres.md)** — migration semantics in detail.
 - **[Upgrading](../getting-started/upgrading.md)** — pre-flight checklist.
-- **[`docs/RUNBOOK.md`](../../RUNBOOK.md)** — incident response.
+- **[`docs/RUNBOOK.md`](../../guides/RUNBOOK.md)** — incident response.

@@ -1,7 +1,7 @@
 # 11 · Code Patterns & Conventions
 
 > **Purpose:** the patterns and rules a contributor needs in one place — what the code looks like and
-> what's enforced. **See also:** [`../design.md`](../design.md) (don't duplicate it; this links to it),
+> what's enforced. **See also:** [`../design.md`](../reference/design.md) (don't duplicate it; this links to it),
 > esp. §11 "adding a feature".
 
 ## Design patterns
@@ -67,11 +67,11 @@ Be honest about what actually blocks a merge:
 
 - **Handlers:** one file per domain in `internal/handler/` (`pipeline.go`, `app.go`, …).
 - **Pluggable backends:** the `selectXxx` recipe — implement the interface → add a `case` → document
-  the env var in `.env.uat.example` + [`../UAT.md`](../UAT.md) → add a contract test (see
+  the env var in `.env.uat.example` + [`../UAT.md`](../guides/UAT.md) → add a contract test (see
   [05-extension-points.md](05-extension-points.md)).
 - **Branches:** `claude/<topic>` or `<area>/<topic>`, branched from `main`.
 - **Checklists:** "adding a feature" and "adding a pluggable backend" live in
-  [`../design.md`](../design.md) §11.
+  [`../design.md`](../reference/design.md) §11.
 
 ## PR conventions
 

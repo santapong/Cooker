@@ -1,7 +1,7 @@
 # 02 · Backend (Go)
 
 > **Purpose:** how the Go backend is structured, how it boots, and **how Cooker manages the API**.
-> **See also:** [`../design.md`](../design.md) for conventions and the §11 "adding a feature" checklist.
+> **See also:** [`../design.md`](../reference/design.md) for conventions and the §11 "adding a feature" checklist.
 
 ## Layering
 

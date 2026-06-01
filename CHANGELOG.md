@@ -35,8 +35,8 @@ Closed in a 16-commit branch (`claude/analyze-dokploy-integration-NTrW3`).
 All new subsystems are gated by default-off feature flags; merging
 is a no-op for any operator who hasn't flipped `COOKER_JOBQUEUE_ENABLED`.
 Full design rationale and "what we adapted from Dokploy" matrix in
-[`docs/adapted-from-dokploy.md`](docs/adapted-from-dokploy.md) and
-[`docs/architecture-phase1-phase2.md`](docs/architecture-phase1-phase2.md).
+[`docs/adapted-from-dokploy.md`](docs/proposals/adapted-from-dokploy.md) and
+[`docs/architecture-phase1-phase2.md`](docs/reference/architecture-phase1-phase2.md).
 
 #### Phase 1 — architectural primitives
 
@@ -247,7 +247,7 @@ The W1 parallel-spawn run (10 background agents sharing one cwd) produced cross-
 
 ### Added — `claude/project-audit-security-GKXzQ` (PR #29) — May 2026 audit week
 
-**Seven-workstream audit run. Four waves of consolidation. No production code changes — this PR ships the planning + research surface that the 30-day execution plan runs against.** Detailed scope and decisions in [`docs/pm-brief-2026-05.md`](docs/pm-brief-2026-05.md).
+**Seven-workstream audit run. Four waves of consolidation. No production code changes — this PR ships the planning + research surface that the 30-day execution plan runs against.** Detailed scope and decisions in [`docs/pm-brief-2026-05.md`](docs/proposals/pm-brief-2026-05.md).
 
 #### Wave 1 — fresh audits
 

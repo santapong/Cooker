@@ -71,7 +71,7 @@ FROM pipeline_runs WHERE status='running';
 
 **Fix:** Wait for the next boot's sweep, OR restart the Cooker pod to trigger it immediately. Then re-run the pipeline / App deploy.
 
-> **Known UX gap.** WebSocket reconnect is not automatic. If the Cooker container restarts mid-deploy, refresh the App detail page and trigger a new deploy. See [`docs/UAT.md`](../../UAT.md#known-limitations-uat-compose).
+> **Known UX gap.** WebSocket reconnect is not automatic. If the Cooker container restarts mid-deploy, refresh the App detail page and trigger a new deploy. See [`docs/UAT.md`](../../guides/UAT.md#known-limitations-uat-compose).
 
 ## 4. Build Job pending in K8s
 
@@ -148,5 +148,5 @@ Then re-run the pipeline. If the same stage hangs again, the issue is in the sta
 
 - **[Runs](../concepts/runs.md)** — the heartbeat + orphan sweep model.
 - **[Docker builds](../operations/docker-builds.md)** — builder selection and resource sizing.
-- **[`docs/RUNBOOK.md`](../../RUNBOOK.md)** — incident response for build-hung scenarios.
+- **[`docs/RUNBOOK.md`](../../guides/RUNBOOK.md)** — incident response for build-hung scenarios.
 - **[WS disconnects](ws-disconnects.md)** — when the issue is the log stream, not the run itself.

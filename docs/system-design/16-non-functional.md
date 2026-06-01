@@ -2,8 +2,8 @@
 
 > **Purpose:** the operational envelope — tunables, defaults, scale limits, and the single-replica vs
 > multi-replica boundary. Every number below is the in-code default (verified against source), not an
-> aspiration. **See also:** [`../MULTI_REPLICA.md`](../MULTI_REPLICA.md),
-> [`../ROLLOUT.md`](../ROLLOUT.md), [`../RUNBOOK.md`](../RUNBOOK.md).
+> aspiration. **See also:** [`../MULTI_REPLICA.md`](../guides/MULTI_REPLICA.md),
+> [`../ROLLOUT.md`](../guides/ROLLOUT.md), [`../RUNBOOK.md`](../guides/RUNBOOK.md).
 
 > **Honesty note:** Cooker does **not** publish formal SLOs (availability %, p99 latency targets) today.
 > This chapter documents the *mechanisms and limits* that determine performance, not contractual

@@ -3,9 +3,9 @@
 > **Purpose:** the verified current state of the three subsystems that turn a pipeline into a running
 > deployment: the **DAG runner**, **live logging**, and **tracing/observability**. This is the
 > accurate baseline for any redesign. **See also:** the existing 20-week DAG plan in
-> [`../dag-adaptation-2026.md`](../dag-adaptation-2026.md), the perf audit in
+> [`../dag-adaptation-2026.md`](../proposals/dag-adaptation-2026.md), the perf audit in
 > [`../audits/dag-performance.md`](../audits/dag-performance.md), and the redesign proposal in
-> [`../execution-observability-redesign-2026.md`](../execution-observability-redesign-2026.md).
+> [`../execution-observability-redesign-2026.md`](../proposals/execution-observability-redesign-2026.md).
 
 > **Why this chapter exists:** two earlier informal analyses contained stale claims (e.g. "push/deploy
 > have no live logs", "edge conditions are silently ignored"). Everything below was re-verified against
@@ -49,7 +49,7 @@ flowchart TB
 
 ### Foundation already landed (tidy-first T1–T5)
 
-All five "tidy-first" refactors from [`../dag-adaptation-2026.md`](../dag-adaptation-2026.md) §6 are
+All five "tidy-first" refactors from [`../dag-adaptation-2026.md`](../proposals/dag-adaptation-2026.md) §6 are
 **implemented on `main`** (verified):
 
 | Item | What it did | State |
@@ -62,7 +62,7 @@ All five "tidy-first" refactors from [`../dag-adaptation-2026.md`](../dag-adapta
 
 ### Real gaps (designed, not yet built)
 
-These are the five **primitives** in [`../dag-adaptation-2026.md`](../dag-adaptation-2026.md) §4 —
+These are the five **primitives** in [`../dag-adaptation-2026.md`](../proposals/dag-adaptation-2026.md) §4 —
 fully designed, with model fields, ADRs, and a 20-week plan, but not yet implemented:
 
 1. **Conditional edges / trigger rules** — `failure`/`always` edges are *refused* today (not silently
@@ -111,7 +111,7 @@ flowchart LR
 - **No envelope.** Frames are raw payloads — no `{ts, stageId, lineNo}` — which makes ordered replay
   ambiguous.
 
-These are addressed in the proposal: [`../execution-observability-redesign-2026.md`](../execution-observability-redesign-2026.md).
+These are addressed in the proposal: [`../execution-observability-redesign-2026.md`](../proposals/execution-observability-redesign-2026.md).
 
 ## Tracing & observability
 
@@ -136,7 +136,7 @@ These are addressed in the proposal: [`../execution-observability-redesign-2026.
   in-cluster build work can't link back to the run trace.
 - **Operational.** No sampling config; `/metrics` is unauthenticated.
 
-Addressed in the proposal: [`../execution-observability-redesign-2026.md`](../execution-observability-redesign-2026.md).
+Addressed in the proposal: [`../execution-observability-redesign-2026.md`](../proposals/execution-observability-redesign-2026.md).
 
 ## Overall assessment
 

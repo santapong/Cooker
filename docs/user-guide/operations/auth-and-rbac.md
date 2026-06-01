@@ -183,7 +183,7 @@ When `COOKER_OIDC_ENABLED=false` AND `COOKER_LOCAL_AUTH_ENABLED=false`, the midd
 }
 ```
 
-This is for UAT and local dev. The compose stack uses it by default — see [`docs/UAT.md`](../../UAT.md#enabling-oidc-sign-in-for-uat) for how to switch UAT to real OIDC.
+This is for UAT and local dev. The compose stack uses it by default — see [`docs/UAT.md`](../../guides/UAT.md#enabling-oidc-sign-in-for-uat) for how to switch UAT to real OIDC.
 
 `Config.Validate()` emits a `slog.Warn` if both are disabled in production. **It does NOT refuse to boot.** Closing this loophole is `S26-05-07`.
 

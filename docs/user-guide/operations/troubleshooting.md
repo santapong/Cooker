@@ -2,7 +2,7 @@
 
 The fifteen issues most commonly hit by Cooker operators, ordered by frequency. Each entry: symptom -> first thing to check -> common cause -> fix.
 
-For dedicated runbooks of the worst symptoms, see the [Troubleshooting pages](../troubleshooting/). For incident response (DB down, OIDC unreachable, etc.), see [`docs/RUNBOOK.md`](../../RUNBOOK.md).
+For dedicated runbooks of the worst symptoms, see the [Troubleshooting pages](../troubleshooting/). For incident response (DB down, OIDC unreachable, etc.), see [`docs/RUNBOOK.md`](../../guides/RUNBOOK.md).
 
 ## 1. "config: ... is required in production" on boot
 
@@ -187,7 +187,7 @@ head -c 32 /dev/urandom | base64
 
 ## Cross-references
 
-- **[`docs/RUNBOOK.md`](../../RUNBOOK.md)** — incident response for the worst-case symptoms (DB down, IdP outage, OOM).
+- **[`docs/RUNBOOK.md`](../../guides/RUNBOOK.md)** — incident response for the worst-case symptoms (DB down, IdP outage, OOM).
 - **[Login loop](../troubleshooting/login-loop.md)** — dedicated walkthrough.
 - **[Builds stuck](../troubleshooting/builds-stuck.md)** — dedicated walkthrough.
 - **[WS disconnects](../troubleshooting/ws-disconnects.md)** — dedicated walkthrough.

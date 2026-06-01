@@ -2,7 +2,7 @@
 
 > **Purpose:** the additive, **feature-flagged** platform layer — all default-**OFF**. When a flag is
 > off, Cooker falls back (e.g. inline run execution instead of the queue). **See also:**
-> [`../architecture-phase1-phase2.md`](../architecture-phase1-phase2.md).
+> [`../architecture-phase1-phase2.md`](../reference/architecture-phase1-phase2.md).
 
 These subsystems make Cooker durable and operable at scale, but none is required for the core
 build→push→deploy loop. Each is gated by a config flag.

@@ -9,7 +9,7 @@ Cooker is pre-1.0. The current upgrade policy is "stay close to `main` and pin t
 - **No LTS commitment** until v1.0.
 - **Security patches** back-ported to the last two minors.
 
-The full versioning rationale and the gap to "actually shipping releases" is in [`docs/shipping-go.md` §1](../../shipping-go.md#1-release-engineering). At the time of writing Cooker does not have a tagged release stream or a published Docker image; both are tracked as `shipping-go 0-30d`.
+The full versioning rationale and the gap to "actually shipping releases" is in [`docs/shipping-go.md` §1](../../reference/shipping-go.md#1-release-engineering). At the time of writing Cooker does not have a tagged release stream or a published Docker image; both are tracked as `shipping-go 0-30d`.
 
 ## What an upgrade does
 
@@ -89,4 +89,4 @@ make uat-up
 
 - **[`CHANGELOG.md`](https://github.com/santapong/cooker/blob/main/CHANGELOG.md)** — version history.
 - **[Postgres](../operations/postgres.md)** — backup and the boot-time migration story.
-- **[`docs/shipping-go.md`](../../shipping-go.md)** — why there isn't an `UPGRADING.md` yet, and when there will be.
+- **[`docs/shipping-go.md`](../../reference/shipping-go.md)** — why there isn't an `UPGRADING.md` yet, and when there will be.

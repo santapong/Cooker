@@ -52,7 +52,7 @@ A **Host** is a managed Docker daemon or Kubernetes cluster Cooker can dial. The
 | Reachability | When | Caveats |
 |---|---|---|
 | `direct` | Host is reachable on the cluster network. | Use TLS for any non-trivial deployment (`tcp://` over plaintext is dev-only). |
-| `tailnet` | Host is only reachable over a Tailscale tailnet Cooker joins via `tsnet`. | **Build-tagged.** Default builds do NOT include the tsnet transport; you need `-tags tsnet` (see [`docs/UAT.md`](../../UAT.md#what-works-right-now)). |
+| `tailnet` | Host is only reachable over a Tailscale tailnet Cooker joins via `tsnet`. | **Build-tagged.** Default builds do NOT include the tsnet transport; you need `-tags tsnet` (see [`docs/UAT.md`](../../guides/UAT.md#what-works-right-now)). |
 
 > **Partial.** The Hosts page in the frontend is not yet a menu item — the API works but the UI is incomplete. Test via:
 >
@@ -62,7 +62,7 @@ A **Host** is a managed Docker daemon or Kubernetes cluster Cooker can dial. The
 >      -d '{"name":"prod-docker","kind":"docker","reachability":"direct","dockerEndpoint":"tcp://10.0.0.3:2375"}'
 > ```
 >
-> Source: [`docs/UAT.md`](../../UAT.md#scenario-5--managed-hosts).
+> Source: [`docs/UAT.md`](../../guides/UAT.md#scenario-5--managed-hosts).
 
 ## CRUD endpoints
 

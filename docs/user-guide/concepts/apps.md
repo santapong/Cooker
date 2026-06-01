@@ -56,7 +56,7 @@ When `buildPlan` is nil, `internal/buildplan` inspects the cloned source and pic
 
 ### App-run vs pipeline-run
 
-Runs created via `POST /apps/:id/deploy` are stored under a synthetic pipeline ID `app-<appId>`. This means they don't appear in the Pipelines list. Intentional today; a proper "App runs" view is a follow-up. See [`docs/UAT.md`](../../UAT.md#known-limitations-uat-compose).
+Runs created via `POST /apps/:id/deploy` are stored under a synthetic pipeline ID `app-<appId>`. This means they don't appear in the Pipelines list. Intentional today; a proper "App runs" view is a follow-up. See [`docs/UAT.md`](../../guides/UAT.md#known-limitations-uat-compose).
 
 ## Pipelines in detail
 

@@ -26,7 +26,7 @@ This is the **end-user operational** guide. It covers install, configuration, da
 
 It does NOT cover:
 
-- **Contributor docs.** See [`docs/design.md`](../design.md) for architecture-level patterns, layering rules, and the new-feature checklist.
+- **Contributor docs.** See [`docs/design.md`](../reference/design.md) for architecture-level patterns, layering rules, and the new-feature checklist.
 - **Security policy / threat model.** See [`SECURITY.md`](../../SECURITY.md). Where this guide and `SECURITY.md` overlap, `SECURITY.md` is authoritative.
 - **Marketing.** See [`docs/marketing/strategy.md`](../marketing/strategy.md).
 

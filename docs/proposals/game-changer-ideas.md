@@ -1,7 +1,7 @@
 # Game-changer ideas (post Phase 1 + Phase 2)
 
 **Status:** suggestions, not blessed roadmap items. To be reviewed
-by the PM, then either promoted into [`backlog.md`](../backlog.md)
+by the PM, then either promoted into [`backlog.md`](../../backlog.md)
 or moved to a parking-lot doc.
 
 The context: Phase 1 + Phase 2 (PR #89) made Cooker's **engine**
@@ -315,7 +315,7 @@ Before promoting any of these into `backlog.md`:
 
 When the PM blesses any of the above:
 
-1. Copy the chosen item's section into [`backlog.md`](../backlog.md)
+1. Copy the chosen item's section into [`backlog.md`](../../backlog.md)
    under an appropriate area heading.
 2. Drop the item from this file.
 3. Update the `Suggested sequence` table here to reflect what's

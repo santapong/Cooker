@@ -32,7 +32,7 @@ envelope):
 | `stage-logs:<runId>:<stageId>` | Live per-stage log lines |
 | `kube-watch:<ns>:<res>` | Kubernetes resource changes |
 
-> **Note:** the typed `CKR-LOG/1` binary protocol in [`../protocols.md`](../protocols.md) is a
+> **Note:** the typed `CKR-LOG/1` binary protocol in [`../protocols.md`](../reference/protocols.md) is a
 > **proposal**, not implemented. Today's frames are raw payloads.
 
 **Hub backend.** In a single replica the hub is in-memory. For multi-replica, set a Redis backend so

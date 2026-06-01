@@ -12,7 +12,7 @@ A stage is one node in the pipeline graph. Each stage has a **type** that determ
 | `StageTypeCustom` | Custom | Run an arbitrary shell script inside a container image. |
 | `StageTypeGitOpsCommit` | GitOps commit | Commit a rendered manifest to a Git repo. |
 
-If you add a new stage type, you must update both the Go enum and the React Flow node registry — see [`docs/design.md` §11](../../design.md#11-adding-a-new-feature--checklist).
+If you add a new stage type, you must update both the Go enum and the React Flow node registry — see [`docs/design.md` §11](../../reference/design.md#11-adding-a-new-feature--checklist).
 
 ## Common config
 
@@ -145,7 +145,7 @@ This requires Go code, not just config:
 3. Add a React Flow node component under `frontend/src/components/`.
 4. Register it in the toolbar.
 
-See [`docs/design.md` §11](../../design.md#11-adding-a-new-feature--checklist) for the contributor checklist.
+See [`docs/design.md` §11](../../reference/design.md#11-adding-a-new-feature--checklist) for the contributor checklist.
 
 ## Cross-references
 

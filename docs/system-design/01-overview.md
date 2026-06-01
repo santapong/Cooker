@@ -2,7 +2,7 @@
 
 > **Purpose:** the big picture — what Cooker is responsible for, how its core concepts relate, and
 > the single end-to-end "behind the scenes" story that the rest of this folder unpacks. **See also:**
-> [`../architecture.md`](../architecture.md) for the canonical component map.
+> [`../architecture.md`](../reference/architecture.md) for the canonical component map.
 
 ## System boundaries & responsibilities
 
@@ -135,7 +135,7 @@ sequenceDiagram
 Images are OCI-compliant regardless of which builder backend is selected; the registry push path uses
 standard OCI distribution APIs. For the canonical detail on the build/push contracts and how the
 backends differ, see [05-extension-points.md](05-extension-points.md) and
-[`../architecture.md`](../architecture.md).
+[`../architecture.md`](../reference/architecture.md).
 
 ---
 

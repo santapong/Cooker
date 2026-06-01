@@ -194,5 +194,5 @@ For Prometheus/Grafana:
 ## Cross-references
 
 - **[`SECURITY.md` § Audit logging](../../../SECURITY.md#audit-logging)** — what the audit log promises.
-- **[`docs/shipping-go.md` § 3](../../shipping-go.md#3-observability-that-ships-well)** — the gap analysis vs the rest of the Go OSS world.
+- **[`docs/shipping-go.md` § 3](../../reference/shipping-go.md#3-observability-that-ships-well)** — the gap analysis vs the rest of the Go OSS world.
 - **[Reference: env vars](../reference/env-vars.md#observability)** — observability variables enumerated.

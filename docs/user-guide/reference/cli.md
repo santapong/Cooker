@@ -2,7 +2,7 @@
 
 > **Honest disclosure.** The `cooker` binary currently has **no CLI flags or subcommands**. `main.go` accepts no `--version`, no `--config-print`, no `--migrate`. Configuration is purely environment-variable-based; the binary's sole job is to start the HTTP server.
 >
-> This page documents (a) what does exist today, (b) what's on the [shipping-go roadmap](../../shipping-go.md#1-release-engineering).
+> This page documents (a) what does exist today, (b) what's on the [shipping-go roadmap](../../reference/shipping-go.md#1-release-engineering).
 
 ## What exists today
 
@@ -47,7 +47,7 @@ The `Makefile` in the repo root has the operator-side ergonomics that the binary
 
 ## What's on the way (`shipping-go`)
 
-The full plan is in [`docs/shipping-go.md`](../../shipping-go.md). The operator-facing items:
+The full plan is in [`docs/shipping-go.md`](../../reference/shipping-go.md). The operator-facing items:
 
 ### Phase 0-30 days
 
@@ -113,6 +113,6 @@ cooker version
 
 ## Cross-references
 
-- **[`docs/shipping-go.md`](../../shipping-go.md)** — the full CLI / release roadmap.
+- **[`docs/shipping-go.md`](../../reference/shipping-go.md)** — the full CLI / release roadmap.
 - **[Configuration](../getting-started/configuration.md)** — env-var configuration today.
 - **[Postgres: migrations](../operations/postgres.md#migrations)** — what happens today instead of `cooker migrate`.

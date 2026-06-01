@@ -7,7 +7,7 @@
 > retry depth, caching, post-hooks) are already designed in `dag-adaptation-2026.md` — this doc does
 > **not** restate them.
 > Baseline: the verified current state is in
-> [`system-design/13-execution-pipeline.md`](system-design/13-execution-pipeline.md).
+> [`system-design/13-execution-pipeline.md`](../system-design/13-execution-pipeline.md).
 > No code changes here — this is a design + phased plan.
 
 ---

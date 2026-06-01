@@ -6,7 +6,7 @@ not replace — [`docs/architecture.md`](./architecture.md), which
 describes the rest of Cooker.
 
 If you want the high-level pitch ("what changed and why"), read
-[`docs/adapted-from-dokploy.md`](./adapted-from-dokploy.md) first.
+[`docs/adapted-from-dokploy.md`](../proposals/adapted-from-dokploy.md) first.
 
 ---
 
@@ -500,6 +500,6 @@ without `COOKER_JOBQUEUE_ENABLED=true`.
 
 ## See also
 
-- [`docs/adapted-from-dokploy.md`](./adapted-from-dokploy.md) — what came from Dokploy and what didn't
+- [`docs/adapted-from-dokploy.md`](../proposals/adapted-from-dokploy.md) — what came from Dokploy and what didn't
 - [`docs/architecture.md`](./architecture.md) — the rest of Cooker's architecture
-- [`docs/CHANGELOG-PHASE1-PHASE2.md`](./CHANGELOG-PHASE1-PHASE2.md) — ready-to-paste CHANGELOG entry
+- [`CHANGELOG.md`](../../CHANGELOG.md) — the Phase 1 + Phase 2 changelog entries
