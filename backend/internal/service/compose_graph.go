@@ -8,6 +8,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -38,6 +39,22 @@ type composeServiceDef struct {
 	Networks    []string    `yaml:"networks"`
 	Volumes     []string    `yaml:"volumes"`
 	Command     interface{} `yaml:"command"`
+	Labels      interface{} `yaml:"labels"`
+	// Top-level (Compose v2 short form) resource limits.
+	MemLimit string      `yaml:"mem_limit"`
+	Cpus     interface{} `yaml:"cpus"`
+	// Compose Deploy spec (`deploy.resources.limits`), which takes
+	// precedence over the top-level short form when present.
+	Deploy composeDeployDef `yaml:"deploy"`
+}
+
+type composeDeployDef struct {
+	Resources struct {
+		Limits struct {
+			Memory string      `yaml:"memory"`
+			CPUs   interface{} `yaml:"cpus"`
+		} `yaml:"limits"`
+	} `yaml:"resources"`
 }
 
 // ParseComposeGraph parses raw docker-compose YAML bytes into a
@@ -86,7 +103,10 @@ func ParseComposeGraph(data []byte) (*model.ComposeGraph, error) {
 			Volumes:     svc.Volumes,
 			Command:     parseCommand(svc.Command),
 			Status:      "unknown",
+			Labels:      parseLabels(svc.Labels),
+			Resources:   parseResources(svc),
 		}
+		service.Group = deriveGroup(service.Labels, service.Networks)
 
 		if svc.Build != nil {
 			service.Build = parseBuild(svc.Build)
@@ -155,6 +175,117 @@ func parseEnvToMap(env interface{}) map[string]string {
 		}
 	}
 	return result
+}
+
+// parseLabels normalizes the compose `labels` field, which (like
+// `environment`) may be a map (`{k: v}`) or a list (`["k=v"]`). The
+// dual-shape handling is identical to parseEnvToMap, so we delegate.
+func parseLabels(labels interface{}) map[string]string {
+	m := parseEnvToMap(labels)
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+// deriveGroup picks the deployment group-box for a service:
+//  1. the com.cooker.group label, if set;
+//  2. else the sole network name (Compose-idiomatic grouping), only
+//     when the service is on exactly one network;
+//  3. else "default".
+func deriveGroup(labels map[string]string, networks []string) string {
+	if g := labels[model.ComposeGroupLabel]; g != "" {
+		return g
+	}
+	if len(networks) == 1 && networks[0] != "" {
+		return networks[0]
+	}
+	return "default"
+}
+
+// parseResources extracts per-service CPU/memory limits. The Compose
+// Deploy spec (`deploy.resources.limits`) wins over the v2 short form
+// (`mem_limit`/`cpus`) when both are present. Returns nil when neither
+// memory nor CPU is set.
+func parseResources(svc composeServiceDef) *model.ResourceLimits {
+	mem := svc.Deploy.Resources.Limits.Memory
+	if mem == "" {
+		mem = svc.MemLimit
+	}
+	cpus := stringifyCPUs(svc.Deploy.Resources.Limits.CPUs)
+	if cpus == "" {
+		cpus = stringifyCPUs(svc.Cpus)
+	}
+	if mem == "" && cpus == "" {
+		return nil
+	}
+	return &model.ResourceLimits{
+		Memory:      mem,
+		MemoryBytes: parseMemoryBytes(mem),
+		CPUs:        cpus,
+		NanoCPUs:    parseNanoCPUs(cpus),
+	}
+}
+
+// stringifyCPUs accepts the YAML-decoded cpus value (string, int, or
+// float) and returns its canonical string form ("" when absent).
+func stringifyCPUs(v interface{}) string {
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(t)
+	case int64:
+		return strconv.FormatInt(t, 10)
+	default:
+		return ""
+	}
+}
+
+// parseMemoryBytes converts a compose memory string ("512m", "1g",
+// "1024k", "2gb", or a bare byte count) to bytes. Returns 0 on an
+// empty or unparsable value (the raw string is still preserved on the
+// model for the runtime to use verbatim).
+func parseMemoryBytes(s string) int64 {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return 0
+	}
+	mult := int64(1)
+	switch {
+	case strings.HasSuffix(s, "gb"), strings.HasSuffix(s, "g"):
+		mult = 1 << 30
+		s = strings.TrimSuffix(strings.TrimSuffix(s, "b"), "g")
+	case strings.HasSuffix(s, "mb"), strings.HasSuffix(s, "m"):
+		mult = 1 << 20
+		s = strings.TrimSuffix(strings.TrimSuffix(s, "b"), "m")
+	case strings.HasSuffix(s, "kb"), strings.HasSuffix(s, "k"):
+		mult = 1 << 10
+		s = strings.TrimSuffix(strings.TrimSuffix(s, "b"), "k")
+	case strings.HasSuffix(s, "b"):
+		s = strings.TrimSuffix(s, "b")
+	}
+	n, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return int64(n * float64(mult))
+}
+
+// parseNanoCPUs converts a CPU count string ("0.5", "1.5") to nanoCPUs
+// (1 CPU = 1e9). Returns 0 when empty or unparsable.
+func parseNanoCPUs(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	n, err := strconv.ParseFloat(s, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return int64(n * 1e9)
 }
 
 func parseDependsOn(dep interface{}) []string {

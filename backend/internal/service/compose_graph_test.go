@@ -420,3 +420,142 @@ volumes:
 		t.Errorf("volumes: got %v want [data]", g.Volumes)
 	}
 }
+
+// svcByName is a small test helper to fetch a parsed service by name.
+func svcByName(g *model.ComposeGraph, name string) *model.ComposeService {
+	for i := range g.Services {
+		if g.Services[i].Name == name {
+			return &g.Services[i]
+		}
+	}
+	return nil
+}
+
+// TestParseComposeGraph_Labels covers both the map and list label forms
+// and that an absent labels block yields nil (not an empty map).
+func TestParseComposeGraph_Labels(t *testing.T) {
+	yaml := `
+services:
+  mapform:
+    image: x
+    labels:
+      com.cooker.group: backend
+      team: payments
+  listform:
+    image: y
+    labels:
+      - com.cooker.group=frontend
+      - bare
+  nolabels:
+    image: z
+`
+	g, err := ParseComposeGraph([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s := svcByName(g, "mapform"); s == nil || s.Labels["com.cooker.group"] != "backend" || s.Labels["team"] != "payments" {
+		t.Errorf("mapform labels: got %+v", s)
+	}
+	if s := svcByName(g, "listform"); s == nil || s.Labels["com.cooker.group"] != "frontend" || s.Labels["bare"] != "" {
+		t.Errorf("listform labels: got %+v", s)
+	}
+	if s := svcByName(g, "nolabels"); s == nil || s.Labels != nil {
+		t.Errorf("nolabels: expected nil labels, got %+v", s)
+	}
+}
+
+// TestParseComposeGraph_GroupDerivation pins the 3-step precedence:
+// label > single network > "default".
+func TestParseComposeGraph_GroupDerivation(t *testing.T) {
+	yaml := `
+services:
+  bylabel:
+    image: x
+    networks: [n1]
+    labels: {com.cooker.group: chosen}
+  bynetwork:
+    image: y
+    networks: [onlynet]
+  multinet:
+    image: z
+    networks: [a, b]
+  bare:
+    image: w
+`
+	g, err := ParseComposeGraph([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cases := map[string]string{
+		"bylabel":   "chosen",  // label wins over network
+		"bynetwork": "onlynet", // single network
+		"multinet":  "default", // 2 networks → no network grouping
+		"bare":      "default", // nothing → default
+	}
+	for name, want := range cases {
+		if s := svcByName(g, name); s == nil || s.Group != want {
+			got := "<nil>"
+			if s != nil {
+				got = s.Group
+			}
+			t.Errorf("group(%s): got %q want %q", name, got, want)
+		}
+	}
+}
+
+// TestParseComposeGraph_Resources covers deploy.resources.limits taking
+// precedence over the short form, the short form alone, unit parsing,
+// and the nil case.
+func TestParseComposeGraph_Resources(t *testing.T) {
+	yaml := `
+services:
+  deployform:
+    image: x
+    mem_limit: 256m
+    cpus: 0.25
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: 1.5
+  shortform:
+    image: y
+    mem_limit: 1g
+    cpus: 2
+  noresources:
+    image: z
+`
+	g, err := ParseComposeGraph([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// deploy.resources.limits wins over mem_limit/cpus.
+	d := svcByName(g, "deployform")
+	if d == nil || d.Resources == nil {
+		t.Fatalf("deployform: expected resources, got %+v", d)
+	}
+	if d.Resources.Memory != "512m" || d.Resources.MemoryBytes != 512*(1<<20) {
+		t.Errorf("deployform memory: got %q/%d", d.Resources.Memory, d.Resources.MemoryBytes)
+	}
+	if d.Resources.CPUs != "1.5" || d.Resources.NanoCPUs != 1_500_000_000 {
+		t.Errorf("deployform cpus: got %q/%d", d.Resources.CPUs, d.Resources.NanoCPUs)
+	}
+
+	// short form alone.
+	s := svcByName(g, "shortform")
+	if s == nil || s.Resources == nil {
+		t.Fatalf("shortform: expected resources, got %+v", s)
+	}
+	if s.Resources.MemoryBytes != 1<<30 {
+		t.Errorf("shortform memoryBytes: got %d want %d", s.Resources.MemoryBytes, int64(1<<30))
+	}
+	if s.Resources.NanoCPUs != 2_000_000_000 {
+		t.Errorf("shortform nanoCpus: got %d", s.Resources.NanoCPUs)
+	}
+
+	// none → nil.
+	if n := svcByName(g, "noresources"); n == nil || n.Resources != nil {
+		t.Errorf("noresources: expected nil resources, got %+v", n)
+	}
+}
