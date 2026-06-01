@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,15 +41,21 @@ func NewAppDeployer(exec *Executor, registry string) *AppDeployer {
 	return &AppDeployer{Executor: exec, Registry: registry}
 }
 
-// Deploy runs Clone → Build → Push → Deploy for app. It returns
-// the synthesized PipelineRun as soon as execution finishes (or
-// immediately on context cancellation). The caller persists the
-// run via store.Runs if they want history.
+// Deploy runs Clone → Build → Push → Deploy for app. It returns the
+// synthesized Pipeline and PipelineRun as soon as execution finishes
+// (or immediately on context cancellation). The caller persists the
+// run via store.Runs (and, for the grouped compose DAG, the pipeline
+// via store.Pipelines) if they want history. The returned pipeline is
+// non-nil whenever synthesis succeeded, even if execution then failed.
 //
 // Deploy cleans up the cloned working tree before returning.
-func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, logW io.Writer) (*model.PipelineRun, error) {
+// runID, when non-empty, is used as the synthesized PipelineRun's ID so
+// it aligns with the stub run row the caller created and the
+// app-run:<runID> WebSocket channel. An empty runID falls back to a
+// fresh UUID (used by callers without a coordinator/stub row).
+func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, logW io.Writer) (*model.Pipeline, *model.PipelineRun, error) {
 	if app.GitHubRepo == "" {
-		return nil, fmt.Errorf("app %s: GitHubRepo is empty", app.ID)
+		return nil, nil, fmt.Errorf("app %s: GitHubRepo is empty", app.ID)
 	}
 	logW = fanOut(logW, d.LogSink)
 
@@ -60,7 +67,7 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, logW io.Writer
 		LogWriter: logW,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("clone: %w", err)
+		return nil, nil, fmt.Errorf("clone: %w", err)
 	}
 	defer func() {
 		if err := os.RemoveAll(workdir); err != nil {
@@ -84,9 +91,37 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, logW io.Writer
 	if registry == "" {
 		registry = d.Registry
 	}
-	tag := fmt.Sprintf("%s/%s:%d", registry, app.Name, time.Now().Unix())
+	ts := time.Now().Unix()
+	tag := fmt.Sprintf("%s/%s:%d", registry, app.Name, ts)
 
-	p, run := synthesizePipeline(app, plan, workdir, tag)
+	var p *model.Pipeline
+	var run *model.PipelineRun
+	if plan.Kind == model.BuildPlanCompose {
+		// Grouped per-service deployment DAG. Parse the compose file the
+		// build-plan detector pointed at, then synthesize one
+		// build→push→deploy sub-chain per service.
+		composePath := filepath.Join(workdir, plan.Path)
+		data, readErr := os.ReadFile(composePath)
+		if readErr != nil {
+			return nil, nil, fmt.Errorf("read compose %s: %w", plan.Path, readErr)
+		}
+		graph, parseErr := ParseComposeGraph(data)
+		if parseErr != nil {
+			return nil, nil, fmt.Errorf("parse compose: %w", parseErr)
+		}
+		fmt.Fprintf(logW, "[plan] compose: %d service(s) → per-service DAG\n", len(graph.Services))
+		pipelineID := fmt.Sprintf("app-%s-%d", app.ID, ts)
+		var synthErr error
+		p, run, synthErr = synthesizePipelineFromCompose(app, graph, workdir, registry, ts, pipelineID, runID)
+		if synthErr != nil {
+			return nil, nil, synthErr
+		}
+	} else {
+		p, run = synthesizePipeline(app, plan, workdir, tag)
+		if runID != "" {
+			run.ID = runID
+		}
+	}
 
 	// Hand the run to the executor. Log output from each stage is
 	// available via the stage runs' Logs field after Execute returns.
@@ -95,10 +130,10 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, logW io.Writer
 	// rather than the RunResult so callers that inspect run see the
 	// same terminal value.
 	if _, err := d.Executor.Execute(ctx, p, run); err != nil {
-		return run, fmt.Errorf("execute: %w", err)
+		return p, run, fmt.Errorf("execute: %w", err)
 	}
 	fmt.Fprintf(logW, "[done] run=%s status=%s\n", run.ID, run.Status)
-	return run, nil
+	return p, run, nil
 }
 
 // synthesizePipeline builds the four-stage Clone→Build→Push→Deploy
@@ -200,6 +235,261 @@ spec:
   selector: {app: %[1]s}
   ports: [{port: 80, targetPort: 80}]
 `, name, image)
+}
+
+// synthesizePipelineFromCompose turns a parsed ComposeGraph into a
+// per-service deployment DAG: each service gets a build→push→deploy
+// sub-chain (build/push skipped for image-only services), and a
+// service's deploy waits on its dependencies' deploys (depends_on).
+// Stages carry the service's Group (for group-box rendering), its
+// resource limits, and a DeployRuntime selected from the App's target.
+//
+// pipelineID is supplied by the caller so the synthesized pipeline can
+// be persisted and fetched (see handler.runAppDeployCtx). Returns an
+// error if the depends_on graph contains a cycle.
+func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, workdir, registry string, ts int64, pipelineID, runID string) (*model.Pipeline, *model.PipelineRun, error) {
+	runtime := deployRuntimeFor(app.DeployTarget.Kind)
+
+	// Assign each service a unique, sanitized slug for stage IDs,
+	// disambiguating collisions (two service names → same slug).
+	slugOf := make(map[string]string, len(graph.Services))
+	usedSlug := make(map[string]bool)
+	for _, svc := range graph.Services {
+		base := sanitize(svc.Name)
+		slug := base
+		for i := 2; usedSlug[slug]; i++ {
+			slug = fmt.Sprintf("%s-%d", base, i)
+		}
+		usedSlug[slug] = true
+		slugOf[svc.Name] = slug
+	}
+
+	var stages []model.Stage
+	var edges []model.Edge
+	deployStageID := make(map[string]string, len(graph.Services))
+
+	for _, svc := range graph.Services {
+		slug := slugOf[svc.Name]
+		hasBuild := svc.Build != nil
+		deployImage := svc.Image // image-only services deploy as-is
+
+		if hasBuild {
+			bctx := "."
+			df := "Dockerfile"
+			if svc.Build.Context != "" {
+				bctx = svc.Build.Context
+			}
+			if svc.Build.Dockerfile != "" {
+				df = svc.Build.Dockerfile
+			}
+			// Guard against path escape in operator-supplied context/df
+			// (mirrors the single-service guard in synthesizePipeline).
+			cleanCtx := filepath.Clean(bctx)
+			if filepath.IsAbs(cleanCtx) || cleanCtx == ".." || strings.HasPrefix(cleanCtx, ".."+string(filepath.Separator)) {
+				cleanCtx = "."
+			}
+			cleanDf := filepath.Clean(df)
+			if filepath.IsAbs(cleanDf) || cleanDf == ".." || strings.HasPrefix(cleanDf, ".."+string(filepath.Separator)) {
+				cleanDf = "Dockerfile"
+			}
+			deployImage = fmt.Sprintf("%s/%s-%s:%d", registry, sanitize(app.Name), slug, ts)
+
+			buildID := "build-" + slug
+			pushID := "push-" + slug
+			stages = append(stages,
+				model.Stage{
+					ID: buildID, Name: "Build " + svc.Name, Type: model.StageTypeBuild, Group: svc.Group,
+					Config: model.StageConfig{
+						Dockerfile:          cleanDf,
+						Context:             filepath.Join(workdir, cleanCtx),
+						Tags:                []string{deployImage},
+						ComposeServiceName:  svc.Name,
+						ComposeBuildContext: cleanCtx,
+						ComposeDockerfile:   cleanDf,
+					},
+				},
+				model.Stage{
+					ID: pushID, Name: "Push " + svc.Name, Type: model.StageTypePush, Group: svc.Group,
+					Config: model.StageConfig{
+						Image:              deployImage,
+						Repository:         deployImage,
+						ComposeServiceName: svc.Name,
+					},
+				},
+			)
+			edges = append(edges, model.Edge{ID: "e-" + buildID + "-" + pushID, Source: buildID, Target: pushID})
+		}
+
+		deployID := "deploy-" + slug
+		deployStageID[svc.Name] = deployID
+		deployCfg := model.StageConfig{
+			DeployRuntime:      string(runtime),
+			ComposeServiceName: svc.Name,
+			Resources:          svc.Resources,
+			Image:              deployImage,
+		}
+		if runtime == deployRuntimeKubernetes {
+			deployCfg.Namespace = app.DeployTarget.Namespace
+			deployCfg.ManifestPath = composeServiceManifest(&svc, deployImage)
+		}
+		stages = append(stages, model.Stage{
+			ID: deployID, Name: "Deploy " + svc.Name, Type: model.StageTypeDeploy, Group: svc.Group,
+			Config: deployCfg,
+		})
+		if hasBuild {
+			edges = append(edges, model.Edge{ID: "e-push-" + slug + "-" + deployID, Source: "push-" + slug, Target: deployID})
+		}
+	}
+
+	// Cross-service edges: deploy-<svc> waits on deploy-<dep>.
+	for _, svc := range graph.Services {
+		for _, dep := range svc.DependsOn {
+			depDeploy, ok := deployStageID[dep]
+			if !ok {
+				slog.Warn("compose synth: depends_on names unknown service", "service", svc.Name, "dep", dep)
+				continue
+			}
+			src := deployStageID[svc.Name]
+			edges = append(edges, model.Edge{ID: "e-dep-" + slugOf[dep] + "-" + slugOf[svc.Name], Source: depDeploy, Target: src})
+		}
+	}
+
+	now := time.Now()
+	p := &model.Pipeline{
+		ID:        pipelineID,
+		Name:      "Deploy " + app.Name,
+		Stages:    stages,
+		Edges:     edges,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	// Surface depends_on cycles with a friendly error before dispatch
+	// (the executor would also reject them, but later and less clearly).
+	if _, err := BuildDAGFromPipeline(p); err != nil {
+		return nil, nil, fmt.Errorf("compose deploy graph invalid: %w", err)
+	}
+
+	rid := runID
+	if rid == "" {
+		rid = uuid.New().String()
+	}
+	run := &model.PipelineRun{
+		ID:         rid,
+		PipelineID: p.ID,
+		Status:     model.RunStatusPending,
+		StageRuns:  make([]model.StageRun, 0, len(stages)),
+	}
+	for _, s := range stages {
+		run.StageRuns = append(run.StageRuns, model.StageRun{StageID: s.ID, Status: model.RunStatusPending})
+	}
+	return p, run, nil
+}
+
+// deployRuntime selects how a synthesized deploy stage runs.
+type deployRuntime string
+
+const (
+	deployRuntimeKubernetes deployRuntime = "kubernetes"
+	deployRuntimeDocker     deployRuntime = "docker"
+	deployRuntimeCompose    deployRuntime = "compose"
+)
+
+// deployRuntimeFor maps an App's deploy-target kind to the per-service
+// deploy runtime. Kubernetes → manifest apply; docker-host → per-
+// service docker run. Other targets default to kubernetes-manifest
+// semantics for now.
+func deployRuntimeFor(kind model.DeployTargetKind) deployRuntime {
+	switch kind {
+	case model.DeployTargetDockerHost:
+		return deployRuntimeDocker
+	default:
+		return deployRuntimeKubernetes
+	}
+}
+
+// composeServiceManifest synthesises a minimal Deployment + Service for
+// one compose service, parameterised by image, first published port,
+// and (optionally) resource limits. Mirrors defaultKubernetesManifest
+// but per-service and resource-aware.
+func composeServiceManifest(svc *model.ComposeService, image string) string {
+	name := sanitize(svc.Name)
+	port := firstContainerPort(svc.Ports)
+	resources := k8sResourceBlock(svc.Resources)
+	return fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %[1]s
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: %[1]s}
+  template:
+    metadata:
+      labels: {app: %[1]s}
+    spec:
+      containers:
+        - name: %[1]s
+          image: %[2]s
+          ports: [{containerPort: %[3]d}]%[4]s
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: %[1]s
+spec:
+  selector: {app: %[1]s}
+  ports: [{port: %[3]d, targetPort: %[3]d}]
+`, name, image, port, resources)
+}
+
+// k8sResourceBlock renders a resources.limits YAML fragment (indented
+// to sit under the container) or "" when no limits are set.
+func k8sResourceBlock(r *model.ResourceLimits) string {
+	if r == nil || (r.Memory == "" && r.CPUs == "") {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n          resources:\n            limits:")
+	if r.Memory != "" {
+		b.WriteString(fmt.Sprintf("\n              memory: %q", k8sMemory(r.Memory)))
+	}
+	if r.CPUs != "" {
+		b.WriteString(fmt.Sprintf("\n              cpu: %q", r.CPUs))
+	}
+	return b.String()
+}
+
+// k8sMemory maps a compose memory string to a K8s quantity. Compose
+// uses b/k/m/g; K8s uses Ki/Mi/Gi. Bare numbers pass through.
+func k8sMemory(s string) string {
+	low := strings.ToLower(strings.TrimSpace(s))
+	switch {
+	case strings.HasSuffix(low, "gb"), strings.HasSuffix(low, "g"):
+		return strings.TrimSuffix(strings.TrimSuffix(low, "b"), "g") + "Gi"
+	case strings.HasSuffix(low, "mb"), strings.HasSuffix(low, "m"):
+		return strings.TrimSuffix(strings.TrimSuffix(low, "b"), "m") + "Mi"
+	case strings.HasSuffix(low, "kb"), strings.HasSuffix(low, "k"):
+		return strings.TrimSuffix(strings.TrimSuffix(low, "b"), "k") + "Ki"
+	default:
+		return s
+	}
+}
+
+// firstContainerPort parses the container side of the first compose
+// port mapping ("8080:80" → 80, "80" → 80). Defaults to 80.
+func firstContainerPort(ports []string) int {
+	for _, p := range ports {
+		spec := p
+		if i := strings.LastIndex(p, ":"); i >= 0 {
+			spec = p[i+1:]
+		}
+		spec = strings.SplitN(spec, "/", 2)[0] // strip "/tcp"
+		if n, err := strconv.Atoi(strings.TrimSpace(spec)); err == nil && n > 0 && n <= 65535 {
+			return n
+		}
+	}
+	return 80
 }
 
 // sanitize returns a DNS-1123 safe slug of s. The rules here are
