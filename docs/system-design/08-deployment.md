@@ -1,7 +1,7 @@
 # 08 · Deployment
 
 > **Purpose:** the topology spectrum and the artifacts that ship Cooker. **See also:**
-> [`../UAT.md`](../UAT.md), [`../ROLLOUT.md`](../ROLLOUT.md), [`../RUNBOOK.md`](../RUNBOOK.md), and
+> [`../UAT.md`](../guides/UAT.md), [`../ROLLOUT.md`](../guides/ROLLOUT.md), [`../RUNBOOK.md`](../guides/RUNBOOK.md), and
 > [`../../backlog.md`](../../backlog.md) for the honest production-readiness verdict.
 
 ## Topology spectrum
@@ -120,7 +120,7 @@ service node is clicked.
 This system-design folder describes the *design*; it does not certify the system production-ready. The
 honest verdict and the open work live in [`../../backlog.md`](../../backlog.md)'s top section — read
 that before claiming anything is "done." Operational procedures are in
-[`../ROLLOUT.md`](../ROLLOUT.md) and [`../RUNBOOK.md`](../RUNBOOK.md).
+[`../ROLLOUT.md`](../guides/ROLLOUT.md) and [`../RUNBOOK.md`](../guides/RUNBOOK.md).
 
 ---
 

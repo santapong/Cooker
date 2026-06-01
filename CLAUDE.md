@@ -37,9 +37,10 @@ deploy/
 
 | File | Read when |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | You need the system map (what calls what) |
-| [`docs/design.md`](docs/design.md) | You're adding a new feature — patterns, conventions, "Adding a new feature" checklist at §11 |
-| [`docs/UAT.md`](docs/UAT.md) | You're touching anything that affects `make uat-up` |
+| [`docs/reference/architecture.md`](docs/reference/architecture.md) | You need the system map (what calls what) |
+| [`docs/reference/design.md`](docs/reference/design.md) | You're adding a new feature — patterns, conventions, "Adding a new feature" checklist at §11 |
+| [`docs/guides/UAT.md`](docs/guides/UAT.md) | You're touching anything that affects `make uat-up` |
+| [`docs/system-design/`](docs/system-design/README.md) | You want the consolidated 17-chapter system design (overview → C4) |
 | [`SECURITY.md`](SECURITY.md) | You're touching auth, CORS, secrets, or the Dockerfile |
 | [`backlog.md`](backlog.md) | You're picking the next thing to build, or want to know why something isn't done yet |
 
@@ -60,7 +61,7 @@ The honest production-readiness verdict and the open work are in `backlog.md`'s 
 - **Layering**: handler → service → store/strategy. Handlers do HTTP parsing only. Services hold business logic. Adapters implement narrow interfaces.
 - **Errors**: wrap with package prefix — `fmt.Errorf("oidc: discover: %w", err)`. The store package exposes typed `ErrNotFound`; check via `errors.Is`.
 - **Tests**: every `internal/<pkg>/*.go` ships with a `*_test.go` for non-trivial logic. Race detector is on in CI: `go test ./... -race`. `go vet ./...` runs before tests.
-- **Adding a new pluggable backend** (e.g. a new builder): implement the interface, add a constructor case to `selectXxx` in `server.go`, document the env-var value in `.env.uat.example` and `docs/UAT.md`.
+- **Adding a new pluggable backend** (e.g. a new builder): implement the interface, add a constructor case to `selectXxx` in `server.go`, document the env-var value in `.env.uat.example` and `docs/guides/UAT.md`.
 - **No business logic in handlers. No HTTP types in services. No `panic` outside startup.**
 
 ### Frontend (TypeScript)
@@ -84,11 +85,11 @@ The honest production-readiness verdict and the open work are in `backlog.md`'s 
 
 ## Workflow expectations
 
-1. **Read the relevant doc(s) above before writing code** — `docs/design.md` §11 has the "adding a feature" checklist.
+1. **Read the relevant doc(s) above before writing code** — `docs/reference/design.md` §11 has the "adding a feature" checklist.
 2. **Use `TodoWrite`** for any task with 3+ steps. Mark in-progress before starting, completed immediately after.
 3. **Run `make test` (or the targeted test command) before pushing**. Don't wait for CI to catch test failures.
 4. **For changes to auth, secrets, or the Dockerfile**, also update `SECURITY.md` so the threat model stays accurate.
-5. **For changes to UAT behaviour**, update `docs/UAT.md` in the same PR.
+5. **For changes to UAT behaviour**, update `docs/guides/UAT.md` in the same PR.
 6. **When a `backlog.md` item lands on `main`**: in the same PR, move the item from its priority section into the "Closed" log at the bottom and reference the merged PR number.
 
 ## What NOT to do without asking

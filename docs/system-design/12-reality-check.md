@@ -31,7 +31,7 @@ Don't assume these work just because the scaffolding or an ADR exists.
 
 | Feature | Status | Where |
 |---|---|---|
-| **`CKR-LOG/1` binary log protocol** | **Proposal only** ([`../protocols.md`](../protocols.md)). Today's WS frames are raw payloads. | [07](07-realtime-and-concurrency.md) |
+| **`CKR-LOG/1` binary log protocol** | **Proposal only** ([`../protocols.md`](../reference/protocols.md)). Today's WS frames are raw payloads. | [07](07-realtime-and-concurrency.md) |
 | **Multi-tenancy** | [ADR-0004](../adr/0004-multi-tenancy.md) **Accepted** (Q4-2026) but **not implemented** — resources are effectively single-tenant today. No tenant isolation. | [10](10-platform-subsystems.md) |
 | **Run-state FSM enforcement** | `internal/runstate` (wraps `looplab/fsm`) exists, but the executor still **writes statuses directly**; the FSM isn't yet the single source of transition enforcement. | [10](10-platform-subsystems.md) |
 | **Governance on pipeline deploys** | The admission hook gates **app-deploy only**. Pipeline-defined deploys are **not gated yet** (slated v1.1). | [10](10-platform-subsystems.md) |

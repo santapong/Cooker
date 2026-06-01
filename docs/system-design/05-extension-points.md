@@ -2,7 +2,7 @@
 
 > **Purpose:** the pluggable backends and how to add one. **See also:**
 > [ADR-0001](../adr/0001-strategy-pattern-interfaces.md) for the strategy-pattern decision and
-> [`../design.md`](../design.md) §11 for the "adding a feature" checklist.
+> [`../design.md`](../reference/design.md) §11 for the "adding a feature" checklist.
 
 ## The strategy pattern
 
@@ -58,11 +58,11 @@ a backend bulk-copy keys from one environment to the next. Only **KeepSave** imp
 
 ## Adding a new pluggable backend
 
-The recipe (mirrors [`../design.md`](../design.md) §11):
+The recipe (mirrors [`../design.md`](../reference/design.md) §11):
 
 1. **Implement the interface** in `internal/<kind>/` (e.g. a new pusher in `internal/pusher/`).
 2. **Add a `case`** to the relevant `selectXxx` switch in `server.go`.
-3. **Document the env-var value** in `.env.uat.example` and [`../UAT.md`](../UAT.md).
+3. **Document the env-var value** in `.env.uat.example` and [`../UAT.md`](../guides/UAT.md).
 4. **Add a contract test** exercising the interface (and keep memory/postgres parity if it touches the
    store).
 

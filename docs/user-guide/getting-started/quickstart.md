@@ -40,7 +40,7 @@ When the build finishes, open <http://localhost:8080>. You are signed in as the 
 
 ## Deploy your first App
 
-This walks through the happy-path scenario from [`docs/UAT.md`](../../UAT.md#scenario-1--happy-path-kubernetes-target).
+This walks through the happy-path scenario from [`docs/UAT.md`](../../guides/UAT.md#scenario-1--happy-path-kubernetes-target).
 
 1. In the UI, go to **Apps -> New App** and fill:
    - **Name:** `demo`
@@ -86,7 +86,7 @@ kubectl port-forward svc/demo 8000:80
 curl http://localhost:8000
 ```
 
-> **Partial.** The synthesised Kubernetes manifest is a minimal Deployment + Service on port 80. Custom manifests need a Pipeline (which isn't yet wired to the App's Deploy button). Tracked in [`docs/UAT.md`](../../UAT.md#known-limitations-uat-compose).
+> **Partial.** The synthesised Kubernetes manifest is a minimal Deployment + Service on port 80. Custom manifests need a Pipeline (which isn't yet wired to the App's Deploy button). Tracked in [`docs/UAT.md`](../../guides/UAT.md#known-limitations-uat-compose).
 
 ## Tear it down
 

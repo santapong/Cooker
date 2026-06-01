@@ -63,9 +63,9 @@
 
 Whether you're a solo developer deploying a side project to Fly.io or a platform team running multi-tenant Kubernetes clusters, Cooker scales with you — from a one-shot Docker Compose stack on your laptop to a HA Redis-backed multi-replica deployment in production.
 
-> **Status:** production-ready on single-replica and multi-replica (Redis-backed) deployments. `Config.Validate` refuses unsafe boots in production. See the [rollout playbook](docs/ROLLOUT.md) for the UAT → production cutover.
+> **Status:** production-ready on single-replica and multi-replica (Redis-backed) deployments. `Config.Validate` refuses unsafe boots in production. See the [rollout playbook](docs/guides/ROLLOUT.md) for the UAT → production cutover.
 
-> **Recently shipped (May 2026 W6):** Phase 1 + Phase 2 of the Dokploy adaptation work landed in PR #89 — a durable Postgres-backed job queue, formal run/stage state machine, resource-action permission middleware, multi-channel notifications (Slack/Discord/Email/Webhook), cron-triggered runs, GitLab/Bitbucket/Gitea webhook receivers, and a pipeline templates catalog. All gated behind default-off feature flags; merging is a no-op until an operator opts in. See [`docs/adapted-from-dokploy.md`](docs/adapted-from-dokploy.md) for the attribution matrix and [`docs/architecture-phase1-phase2.md`](docs/architecture-phase1-phase2.md) for the new subsystem deep-dive.
+> **Recently shipped (May 2026 W6):** Phase 1 + Phase 2 of the Dokploy adaptation work landed in PR #89 — a durable Postgres-backed job queue, formal run/stage state machine, resource-action permission middleware, multi-channel notifications (Slack/Discord/Email/Webhook), cron-triggered runs, GitLab/Bitbucket/Gitea webhook receivers, and a pipeline templates catalog. All gated behind default-off feature flags; merging is a no-op until an operator opts in. See [`docs/adapted-from-dokploy.md`](docs/proposals/adapted-from-dokploy.md) for the attribution matrix and [`docs/architecture-phase1-phase2.md`](docs/reference/architecture-phase1-phase2.md) for the new subsystem deep-dive.
 
 ## 🤔 Why Cooker?
 
@@ -210,7 +210,7 @@ Plus `POST /api/v1/environments/:id/secrets/promote` for cross-env promotion via
 - **Split health probes**:
   - `/health/live` — pod is alive
   - `/health/ready` — DB ping + Redis ping + JWKS age (per-check breakdown in response body)
-- **Recommended Alertmanager rules** in [`docs/RUNBOOK.md`](docs/RUNBOOK.md)
+- **Recommended Alertmanager rules** in [`docs/RUNBOOK.md`](docs/guides/RUNBOOK.md)
 
 </details>
 
@@ -335,8 +335,8 @@ curl localhost:8080/health/ready
 ```
 
 📖 **Full installation guide:** [docs/user-guide/getting-started/helm-install.md](docs/user-guide/getting-started/helm-install.md)
-📖 **TLS / cert-manager setup:** [docs/ROLLOUT.md](docs/ROLLOUT.md)
-📖 **Multi-replica configuration:** [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md)
+📖 **TLS / cert-manager setup:** [docs/ROLLOUT.md](docs/guides/ROLLOUT.md)
+📖 **Multi-replica configuration:** [docs/MULTI_REPLICA.md](docs/guides/MULTI_REPLICA.md)
 
 ## 🏗️ Architecture
 
@@ -390,9 +390,9 @@ store/       ← Postgres / memory adapters. Returns ErrNotFound etc.
 strategy/    ← Pluggable backends (builder, pusher, deployer, secrets, ...)
 ```
 
-See [`docs/design.md`](docs/design.md) for the full design conventions.
+See [`docs/design.md`](docs/reference/design.md) for the full design conventions.
 
-📖 **Full architecture document:** [docs/architecture.md](docs/architecture.md)
+📖 **Full architecture document:** [docs/architecture.md](docs/reference/architecture.md)
 📖 **Design decisions (ADRs):** [docs/adr/](docs/adr/)
 
 ## 🔧 Configuration
@@ -566,7 +566,7 @@ COOKER_WS_HUB_BACKEND=redis
 COOKER_REDIS_URL=redis://cooker-redis:6379
 ```
 
-📖 **Snippets for NGINX / ALB / Traefik / HAProxy / Envoy:** [docs/MULTI_REPLICA.md](docs/MULTI_REPLICA.md)
+📖 **Snippets for NGINX / ALB / Traefik / HAProxy / Envoy:** [docs/MULTI_REPLICA.md](docs/guides/MULTI_REPLICA.md)
 
 ## 🛠️ Builders & Deploy Targets
 
@@ -896,7 +896,7 @@ cd frontend && npm test
 make test-e2e
 ```
 
-📖 **Contributor checklist:** [docs/design.md](docs/design.md#11-adding-a-new-feature)
+📖 **Contributor checklist:** [docs/design.md](docs/reference/design.md#11-adding-a-new-feature)
 
 ## 📚 Documentation
 
@@ -914,10 +914,10 @@ make test-e2e
 
 | Document | Description |
 |----------|-------------|
-| [Rollout Playbook](docs/ROLLOUT.md) | UAT → production cutover (single source of truth) |
-| [Runbook](docs/RUNBOOK.md) | Incident response — symptom → checks → cause → mitigation |
-| [Multi-Replica Guide](docs/MULTI_REPLICA.md) | Sticky sessions + Redis-shared-state |
-| [UAT Runbook](docs/UAT.md) | How to enable OIDC for testers |
+| [Rollout Playbook](docs/guides/ROLLOUT.md) | UAT → production cutover (single source of truth) |
+| [Runbook](docs/guides/RUNBOOK.md) | Incident response — symptom → checks → cause → mitigation |
+| [Multi-Replica Guide](docs/guides/MULTI_REPLICA.md) | Sticky sessions + Redis-shared-state |
+| [UAT Runbook](docs/guides/UAT.md) | How to enable OIDC for testers |
 | [Security Policy](SECURITY.md) | Auth architecture · production hardening checklist |
 | [Backlog](backlog.md) | Open work · effort estimates · readiness matrix |
 
@@ -925,22 +925,22 @@ make test-e2e
 
 | Document | Description |
 |----------|-------------|
-| [Architecture](docs/architecture.md) | System architecture · component map · data flow · OCI integration |
-| [Architecture — Phase 1 + Phase 2](docs/architecture-phase1-phase2.md) | New subsystems: jobqueue, runstate FSM, permission middleware, notifier, scheduler |
-| [Adapted from Dokploy](docs/adapted-from-dokploy.md) | What was adapted, what was skipped, what was deferred — with paths into both codebases |
-| [Design Patterns](docs/design.md) | Layering · error wrapping · test strategy · contributor checklist (§11) |
+| [Architecture](docs/reference/architecture.md) | System architecture · component map · data flow · OCI integration |
+| [Architecture — Phase 1 + Phase 2](docs/reference/architecture-phase1-phase2.md) | New subsystems: jobqueue, runstate FSM, permission middleware, notifier, scheduler |
+| [Adapted from Dokploy](docs/proposals/adapted-from-dokploy.md) | What was adapted, what was skipped, what was deferred — with paths into both codebases |
+| [Design Patterns](docs/reference/design.md) | Layering · error wrapping · test strategy · contributor checklist (§11) |
 | [ADRs](docs/adr/) | Architecture decision records |
-| [Roadmap 2026](docs/roadmap-2026.md) | Strategic themes for the year |
-| [DAG Adaptation Plan](docs/dag-adaptation-2026.md) | 20-week primitives roadmap |
-| [Protocols](docs/protocols.md) | CKR-LOG/1 (binary log stream) + CKR-DSL (pipeline DSL) |
+| [Roadmap 2026](docs/proposals/roadmap-2026.md) | Strategic themes for the year |
+| [DAG Adaptation Plan](docs/proposals/dag-adaptation-2026.md) | 20-week primitives roadmap |
+| [Protocols](docs/reference/protocols.md) | CKR-LOG/1 (binary log stream) + CKR-DSL (pipeline DSL) |
 | [CHANGELOG](CHANGELOG.md) | Keep a Changelog format |
 
 ### For release engineers
 
 | Document | Description |
 |----------|-------------|
-| [Release Playbook](docs/RELEASING.md) | Tag → workflow → verify |
-| [Publish Verification](docs/SECURITY-RELEASE-VERIFY.md) | Cosign + permissions + non-root + port surface |
+| [Release Playbook](docs/guides/RELEASING.md) | Tag → workflow → verify |
+| [Publish Verification](docs/guides/SECURITY-RELEASE-VERIFY.md) | Cosign + permissions + non-root + port surface |
 
 ## 📊 Observability
 
@@ -964,7 +964,7 @@ Key metrics:
 | `cooker_jwks_fetch_failures_total` | Counter | OIDC JWKS fetch failures |
 | `cooker_pipeline_runs_orphaned_total` | Counter | Stale runs reaped by orphan sweep |
 
-📖 **Recommended Alertmanager rules:** [docs/RUNBOOK.md](docs/RUNBOOK.md#alertmanager-rules)
+📖 **Recommended Alertmanager rules:** [docs/RUNBOOK.md](docs/guides/RUNBOOK.md#alertmanager-rules)
 
 ### OpenTelemetry traces
 
@@ -1054,7 +1054,7 @@ Production mode (`COOKER_ENV=production`) runs strict validation at boot. Check 
 </details>
 
 📖 **Full troubleshooting guide:** [docs/user-guide/operations/troubleshooting.md](docs/user-guide/operations/troubleshooting.md)
-📖 **Incident response:** [docs/RUNBOOK.md](docs/RUNBOOK.md)
+📖 **Incident response:** [docs/RUNBOOK.md](docs/guides/RUNBOOK.md)
 
 ## ❓ FAQ
 
@@ -1096,7 +1096,7 @@ Yes for single-replica and multi-replica (Redis-backed) shapes. `Config.Validate
 <details>
 <summary><b>Does Cooker support pipeline-as-code?</b></summary>
 
-Today the canonical representation is the visual DAG (stored as JSONB). A custom YAML DSL (CKR-DSL) is on the roadmap — see [`docs/protocols.md`](docs/protocols.md) for the proposal.
+Today the canonical representation is the visual DAG (stored as JSONB). A custom YAML DSL (CKR-DSL) is on the roadmap — see [`docs/protocols.md`](docs/reference/protocols.md) for the proposal.
 
 </details>
 
@@ -1141,7 +1141,7 @@ git push -u origin feature/my-feature
 
 ### Before larger changes
 
-1. **Read [docs/design.md](docs/design.md)** — it covers the layering rules, error wrapping, test patterns, and the "adding a feature" checklist (§11)
+1. **Read [docs/design.md](docs/reference/design.md)** — it covers the layering rules, error wrapping, test patterns, and the "adding a feature" checklist (§11)
 2. **Open an issue** to discuss approach before writing significant code
 3. **Follow the layering rules**: handler → service → store; no business logic in handlers, no HTTP types in services
 4. **Add tests** — race detector is on in CI; every non-trivial change needs `*_test.go`
@@ -1164,9 +1164,9 @@ Found a security issue? Please follow the [responsible disclosure policy](SECURI
 | **Git providers** | GitLab + Bitbucket Server + Gitea webhook receivers alongside GitHub |
 | **Templates v1** | Pipeline-template catalog + create-from-template with fresh stage IDs + DAG re-validation |
 
-Full attribution + design rationale: [`docs/adapted-from-dokploy.md`](docs/adapted-from-dokploy.md)
-Full Phase 1+2 architecture: [`docs/architecture-phase1-phase2.md`](docs/architecture-phase1-phase2.md)
-Ready-to-paste CHANGELOG entry: [`docs/CHANGELOG-PHASE1-PHASE2.md`](docs/CHANGELOG-PHASE1-PHASE2.md)
+Full attribution + design rationale: [`docs/adapted-from-dokploy.md`](docs/proposals/adapted-from-dokploy.md)
+Full Phase 1+2 architecture: [`docs/architecture-phase1-phase2.md`](docs/reference/architecture-phase1-phase2.md)
+Ready-to-paste CHANGELOG entry: [`CHANGELOG.md`](CHANGELOG.md)
 
 ### 🚀 Upcoming
 
@@ -1182,9 +1182,9 @@ Ready-to-paste CHANGELOG entry: [`docs/CHANGELOG-PHASE1-PHASE2.md`](docs/CHANGEL
 | **Builder breadth** | Nixpacks · Railpack · Paketo · Heroku Buildpacks |
 
 - 📋 **Active backlog** with effort estimates: [`backlog.md`](backlog.md)
-- 🗓️ **Strategic plan:** [`docs/roadmap-2026.md`](docs/roadmap-2026.md)
-- 🧱 **DAG primitives roadmap:** [`docs/dag-adaptation-2026.md`](docs/dag-adaptation-2026.md)
-- 🤝 **PM brief + decisions:** [`docs/pm-brief-2026-05.md`](docs/pm-brief-2026-05.md)
+- 🗓️ **Strategic plan:** [`docs/roadmap-2026.md`](docs/proposals/roadmap-2026.md)
+- 🧱 **DAG primitives roadmap:** [`docs/dag-adaptation-2026.md`](docs/proposals/dag-adaptation-2026.md)
+- 🤝 **PM brief + decisions:** [`docs/pm-brief-2026-05.md`](docs/proposals/pm-brief-2026-05.md)
 
 ## 💬 Community
 

@@ -9,7 +9,7 @@
 > (`COOKER_JOBQUEUE_ENABLED`, `COOKER_SCHEDULER_ENABLED`) so this
 > document remains accurate for any deployment that hasn't opted
 > in. The full Dokploy attribution matrix is in
-> [`docs/adapted-from-dokploy.md`](./adapted-from-dokploy.md).
+> [`docs/adapted-from-dokploy.md`](../proposals/adapted-from-dokploy.md).
 
 ## Overview
 
@@ -335,7 +335,7 @@ INSERT jobs + NOTIFY cooker_jobs_new ──────▼
 ```
 
 Deep-dive: [`docs/architecture-phase1-phase2.md`](./architecture-phase1-phase2.md).
-Attribution: [`docs/adapted-from-dokploy.md`](./adapted-from-dokploy.md).
+Attribution: [`docs/adapted-from-dokploy.md`](../proposals/adapted-from-dokploy.md).
 
 ## Design Decisions
 

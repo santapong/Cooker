@@ -43,7 +43,7 @@ COOKER_SECRETS_KEEPSAVE_API_KEY=ks_xxxx
 
 With this backend, `COOKER_SECRET_KEY` is not required — KeepSave handles encryption. `Config.Validate()` rejects partial KeepSave config in production (any one of the three vars missing is fatal).
 
-KeepSave is a Cooker-team product. See [`docs/shipping-go.md` §4.5](../../shipping-go.md#4-configuration-story) for the candid take.
+KeepSave is a Cooker-team product. See [`docs/shipping-go.md` §4.5](../../reference/shipping-go.md#4-configuration-story) for the candid take.
 
 ### Promotion
 

@@ -1,6 +1,6 @@
 # Architecture (operator's view)
 
-A condensed map of the system, for people running Cooker. For the full architecture document, see [`docs/architecture.md`](../../architecture.md).
+A condensed map of the system, for people running Cooker. For the full architecture document, see [`docs/architecture.md`](../../reference/architecture.md).
 
 ## High-level
 
@@ -82,7 +82,7 @@ The binary serves both the API and the static frontend on port 8080. Static asse
 
 Higher layers depend on **interfaces** defined by lower layers, not on concrete types. Concrete adapters are wired together once at startup in `backend/cmd/cooker/main.go`.
 
-This is documented in detail in [`docs/design.md`](../../design.md) — read that one if you're hacking on Cooker itself.
+This is documented in detail in [`docs/design.md`](../../reference/design.md) — read that one if you're hacking on Cooker itself.
 
 ## Where state lives
 
@@ -146,7 +146,7 @@ A run that doesn't finish within the drain window has its `status` left as `runn
 
 ## Cross-references
 
-- **Full architecture document:** [`docs/architecture.md`](../../architecture.md).
-- **Design patterns and conventions:** [`docs/design.md`](../../design.md).
+- **Full architecture document:** [`docs/architecture.md`](../../reference/architecture.md).
+- **Design patterns and conventions:** [`docs/design.md`](../../reference/design.md).
 - **Auth flow specifics:** [Auth & RBAC](auth-and-rbac.md).
 - **Observability hooks:** [Observability](observability.md).

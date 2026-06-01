@@ -6,7 +6,7 @@ Scope: invoked the moment a `v0.1.0` tag is pushed and the `release.yml` workflo
 
 Findings closed by this checklist:
 
-- `[S26-05-15]` GitHub Actions SHA-pinning — verification step in §3 enforces that every `uses:` in the running `release.yml` is a 40-char SHA, per [`docs/audits/2026-05-action-pinning.md`](audits/2026-05-action-pinning.md).
+- `[S26-05-15]` GitHub Actions SHA-pinning — verification step in §3 enforces that every `uses:` in the running `release.yml` is a 40-char SHA, per [`docs/audits/2026-05-action-pinning.md`](../audits/2026-05-action-pinning.md).
 - Reinforces (does not close) `[S26-05-04]` — the published image is verified to run as UID 65532 and to bind only port 8080.
 
 ---
@@ -44,7 +44,7 @@ Open the run in the GitHub Actions UI. Tail the log; do not just watch the green
      packages: write       # GHCR push (image + chart)
    ```
    No `pull-requests:`, no `actions:`, no `security-events:`. If the running workflow has more, abort (§5) and patch the YAML.
-2. **Every `uses:` in `release.yml` is a 40-char SHA.** Per [`docs/audits/2026-05-action-pinning.md`](audits/2026-05-action-pinning.md), floating tags are forbidden in any privileged workflow. Quick visual check from the run page: every line is `owner/repo@<40-hex> # vN.M.P`. `release.yml` carries `contents: write` + `packages: write`, so it sits in the same threat class as `cooker-weekly.yml` — pin it equally hard.
+2. **Every `uses:` in `release.yml` is a 40-char SHA.** Per [`docs/audits/2026-05-action-pinning.md`](../audits/2026-05-action-pinning.md), floating tags are forbidden in any privileged workflow. Quick visual check from the run page: every line is `owner/repo@<40-hex> # vN.M.P`. `release.yml` carries `contents: write` + `packages: write`, so it sits in the same threat class as `cooker-weekly.yml` — pin it equally hard.
 3. **`cosign sign-blob` runs for each binary in `dist/`.** Search the log for `Signature pushed to:` lines — expect one per OS/arch tarball, plus checksums.txt. Empty list means signing was skipped silently; do not promote.
 4. **`cosign sign` runs against the docker manifest, not just one arch.** The log should contain `Signing <ref>@sha256:<digest>` where the digest is the manifest list (multi-arch index), and the `cosign verify` smoke (next step in workflow) covers the manifest.
 5. **`helm push oci://ghcr.io/santapong/charts/cooker` succeeds.** Look for `Pushed: ghcr.io/santapong/charts/cooker:0.1.0` and the SHA-256 digest line. If the chart push 404s, the GHCR package didn't exist yet and the workflow's `packages: write` is fine — the second run after the package is created will succeed. Don't switch permissions to `admin`.
@@ -120,6 +120,6 @@ These are operator decisions, not engineering ones. They block "release is polic
 ## Cross-references
 
 - [`docs/RELEASING.md`](RELEASING.md) — operational release procedure (shipped by W3 #1).
-- [`docs/audits/2026-05-security-review.md`](audits/2026-05-security-review.md) §`S26-05-15` — SHA-pinning gap this checklist enforces.
-- [`docs/audits/2026-05-action-pinning.md`](audits/2026-05-action-pinning.md) — migration plan + canonical SHA inventory.
-- [`SECURITY.md`](../SECURITY.md) — threat model; supply-chain section should reference this doc.
+- [`docs/audits/2026-05-security-review.md`](../audits/2026-05-security-review.md) §`S26-05-15` — SHA-pinning gap this checklist enforces.
+- [`docs/audits/2026-05-action-pinning.md`](../audits/2026-05-action-pinning.md) — migration plan + canonical SHA inventory.
+- [`SECURITY.md`](../../SECURITY.md) — threat model; supply-chain section should reference this doc.

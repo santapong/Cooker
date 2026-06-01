@@ -163,7 +163,7 @@ helm install cooker deploy/helm/cooker/ \
 
 Two pieces of state are per-process by default: the rate limiter and the WebSocket ticket store. Running two or more replicas requires either:
 
-- **Sticky sessions** at the ingress (simpler) — set `COOKER_STICKY_SESSIONS=true`, add the ingress annotations from [`docs/MULTI_REPLICA.md`](../../MULTI_REPLICA.md), and you're done.
+- **Sticky sessions** at the ingress (simpler) — set `COOKER_STICKY_SESSIONS=true`, add the ingress annotations from [`docs/MULTI_REPLICA.md`](../../guides/MULTI_REPLICA.md), and you're done.
 - **Redis-backed state** (proper HA) — set `rateLimit.backend=redis`, `wsTickets.backend=redis`, `wsHub.backend=redis`. The chart provisions a Redis sidecar by default; an external `REDIS_URL` works too.
 
 `Config.Validate()` will refuse to start if `replicaCount>1` without one of these.

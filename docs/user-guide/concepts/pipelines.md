@@ -92,7 +92,7 @@ pipelines (
 )
 ```
 
-This is intentional — pipelines are atomic documents. See [`docs/architecture.md` design decisions](../../architecture.md#design-decisions) for the rationale.
+This is intentional — pipelines are atomic documents. See [`docs/architecture.md` design decisions](../../reference/architecture.md#design-decisions) for the rationale.
 
 ## Limits
 

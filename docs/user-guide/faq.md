@@ -33,7 +33,7 @@ Today (pre-v1.0), Cooker:
 
 Today, Cooker also:
 
-- Does not yet have a tagged release stream or a published Docker image. You build from source. See [`docs/shipping-go.md`](../shipping-go.md).
+- Does not yet have a tagged release stream or a published Docker image. You build from source. See [`docs/shipping-go.md`](../reference/shipping-go.md).
 - Is single-tenant. Every authenticated user sees every Pipeline / App / Environment's metadata (RBAC gates writes, not reads). Tenant scoping is roadmap `C1`.
 - Has open known security findings — see [`docs/audits/2026-05-security-review.md`](../audits/2026-05-security-review.md).
 
@@ -70,7 +70,7 @@ If you need isolation today, run separate Cooker installs per team.
 
 ## How do I add a new builder / pusher / deployer / deploy target?
 
-Implement the relevant interface in `backend/internal/<kind>/`, register it in `selectXxx` in `server.go`, and document the env var. See [`docs/design.md` §11](../design.md#11-adding-a-new-feature--checklist). This requires a code change and a rebuild; there's no plugin system.
+Implement the relevant interface in `backend/internal/<kind>/`, register it in `selectXxx` in `server.go`, and document the env var. See [`docs/design.md` §11](../reference/design.md#11-adding-a-new-feature--checklist). This requires a code change and a rebuild; there's no plugin system.
 
 ## Does Cooker store any data outside Postgres?
 
@@ -124,7 +124,7 @@ MIT. See [LICENSE](https://github.com/santapong/cooker/blob/main/LICENSE).
 
 ## Who maintains Cooker?
 
-See [`docs/design.md`](../design.md) for governance and code-organization conventions. Contributions welcome.
+See [`docs/design.md`](../reference/design.md) for governance and code-organization conventions. Contributions welcome.
 
 ## Where do I get help?
 

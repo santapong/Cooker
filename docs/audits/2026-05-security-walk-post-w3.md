@@ -131,7 +131,7 @@ Severity legend: **Correct** / **Drift** / **Missing**.
 - Claim (per task brief): SECURITY.md should link to `docs/SECURITY-RELEASE-VERIFY.md`.
 - Source: file exists at `docs/SECURITY-RELEASE-VERIFY.md`. `grep -n "SECURITY-RELEASE-VERIFY" SECURITY.md docs/RELEASING.md` returns **zero matches** — orphaned from the doc graph.
 - **Drift (MEDIUM, discoverability).** Walking from SECURITY.md only reaches `RELEASING.md §Step 4` (operator how-to); the security-side post-publish checklist is unreachable.
-- Remediation: under §"Verifying a release" (`SECURITY.md:109-111`) add: "For the security-side post-publish checklist, see [`docs/SECURITY-RELEASE-VERIFY.md`](docs/SECURITY-RELEASE-VERIFY.md)."
+- Remediation: under §"Verifying a release" (`SECURITY.md:109-111`) add: "For the security-side post-publish checklist, see [`docs/SECURITY-RELEASE-VERIFY.md`](../guides/SECURITY-RELEASE-VERIFY.md)."
 
 ---
 

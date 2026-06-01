@@ -34,7 +34,7 @@ metadata:
 
 For ALB, set `idle_timeout.timeout_seconds` on the target group. For Traefik, set `transport.lifeCycle.requestAcceptGraceTimeout`. For Envoy, set `stream_idle_timeout`.
 
-[`docs/MULTI_REPLICA.md`](../../MULTI_REPLICA.md) has the full per-controller annotation snippets.
+[`docs/MULTI_REPLICA.md`](../../guides/MULTI_REPLICA.md) has the full per-controller annotation snippets.
 
 ## 2. WS ticket already consumed
 
@@ -141,5 +141,5 @@ If the run-level channel works but the stage-log channel doesn't (or vice versa)
 ## Cross-references
 
 - **[Self-hosting: multi-replica](../guides/self-hosting-tips.md#multi-replica)** — ingress affinity and Redis backends.
-- **[`docs/MULTI_REPLICA.md`](../../MULTI_REPLICA.md)** — per-controller annotation snippets.
+- **[`docs/MULTI_REPLICA.md`](../../guides/MULTI_REPLICA.md)** — per-controller annotation snippets.
 - **[Builds stuck](builds-stuck.md)** — when the issue is the run, not the stream.

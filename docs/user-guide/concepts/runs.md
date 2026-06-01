@@ -110,7 +110,7 @@ Two ways to read logs:
 
 `POST /pipelines/:id/run` and `POST /apps/:id/deploy` support the `Idempotency-Key` header. Send the same key within 5 minutes and you get back the original run, not a duplicate. This is essential for retry safety — without it, a double-click can spawn two parallel builds against the same commit.
 
-The middleware lives at `internal/idempotency` and runs against an in-memory bounded LRU (32 MiB resident set). See [`docs/RUNBOOK.md`](../../RUNBOOK.md) for cache-miss diagnostics.
+The middleware lives at `internal/idempotency` and runs against an in-memory bounded LRU (32 MiB resident set). See [`docs/RUNBOOK.md`](../../guides/RUNBOOK.md) for cache-miss diagnostics.
 
 ## Run statuses and the UI
 

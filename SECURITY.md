@@ -36,7 +36,7 @@ Cooker offers two authentication paths. Operators can enable either or both:
 - **Supported providers**: Keycloak, Okta, Azure AD, Google, GitHub
 - **Generic verify-failure response** (S26-05-01): on a verify error the API returns `{"error":"authentication failed"}` with `401`, and `{"error":"provider unavailable"}` with `503 + Retry-After` when the IdP itself is unreachable. The upstream library's diagnostic detail (`iss mismatch`, `kid not found`, signature parse errors, etc.) is logged at `slog.Warn` / `slog.Error` server-side only — clients do not get an oracle for crafting valid-shaped tokens or fingerprinting JWKS rotation cadence.
 
-> **Default in local & UAT:** OIDC is **disabled** (`COOKER_OIDC_ENABLED=false`) and the backend injects a dev admin user so contributors and testers can exercise the API without an IdP. Production deployments should enable OIDC — see the checklist below and [docs/UAT.md](docs/UAT.md#enabling-oidc-sign-in-for-uat) for how to wire Google or another provider.
+> **Default in local & UAT:** OIDC is **disabled** (`COOKER_OIDC_ENABLED=false`) and the backend injects a dev admin user so contributors and testers can exercise the API without an IdP. Production deployments should enable OIDC — see the checklist below and [docs/UAT.md](docs/guides/UAT.md#enabling-oidc-sign-in-for-uat) for how to wire Google or another provider.
 
 #### Path 2: Local email + password (homelab / single-user / fallback)
 
@@ -111,7 +111,7 @@ Cooker releases are signed using **cosign keyless signing** via the Sigstore / R
 
 #### Verifying a release
 
-See [`docs/RELEASING.md`](RELEASING.md#step-4--verify-the-release-artifacts) for the exact `cosign verify-blob` and `cosign verify` commands. For the security-side post-publish checklist (Rekor lookup, identity drift checks, expected workflow subjects), see [`docs/SECURITY-RELEASE-VERIFY.md`](docs/SECURITY-RELEASE-VERIFY.md).
+See [`docs/RELEASING.md`](docs/guides/RELEASING.md#step-4--verify-the-release-artifacts) for the exact `cosign verify-blob` and `cosign verify` commands. For the security-side post-publish checklist (Rekor lookup, identity drift checks, expected workflow subjects), see [`docs/SECURITY-RELEASE-VERIFY.md`](docs/guides/SECURITY-RELEASE-VERIFY.md).
 
 ### OCI Registry Security
 

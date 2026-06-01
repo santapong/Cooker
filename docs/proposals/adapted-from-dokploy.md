@@ -365,5 +365,5 @@ directory was read or referenced.
 
 - **Plan file:** `/root/.claude/plans/so-can-you-deep-polished-brooks.md`
 - **PR #89:** the 16-commit branch landing all of Phase 1 + Phase 2
-- **Phase 1+2 architecture:** [docs/architecture-phase1-phase2.md](./architecture-phase1-phase2.md)
-- **Changelog snippet for Phase 1+2:** [docs/CHANGELOG-PHASE1-PHASE2.md](./CHANGELOG-PHASE1-PHASE2.md) (paste into the main CHANGELOG.md under `## [Unreleased]`)
+- **Phase 1+2 architecture:** [docs/architecture-phase1-phase2.md](../reference/architecture-phase1-phase2.md)
+- **Changelog for Phase 1+2:** [`CHANGELOG.md`](../../CHANGELOG.md) (the former snippet has been merged in)

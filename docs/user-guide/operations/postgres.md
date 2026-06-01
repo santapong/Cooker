@@ -2,7 +2,7 @@
 
 Cooker uses PostgreSQL as its source of truth. This page is the operator-side view: setup, migrations, backup, the boot-time advisory lock.
 
-For schema details, see [`docs/architecture.md`](../../architecture.md#database-schema).
+For schema details, see [`docs/architecture.md`](../../reference/architecture.md#database-schema).
 
 ## Setup
 
@@ -156,4 +156,4 @@ Almost all "data" lives in JSONB columns: `pipelines.stages`, `pipelines.edges`,
 
 - **[Self-hosting tips](../guides/self-hosting-tips.md)** — sizing guidance.
 - **[Troubleshooting: pg-migration-errors](../troubleshooting/pg-migration-errors.md)** — symptom-driven.
-- **[`docs/RUNBOOK.md`](../../RUNBOOK.md)** — full incident response playbook.
+- **[`docs/RUNBOOK.md`](../../guides/RUNBOOK.md)** — full incident response playbook.

@@ -55,7 +55,7 @@ Two paths:
 
 ### 1. Sticky sessions (simpler)
 
-Set `COOKER_STICKY_SESSIONS=true` and configure ingress affinity. The full annotation snippets for NGINX / ALB / Traefik / HAProxy / Envoy are in [`docs/MULTI_REPLICA.md`](../../MULTI_REPLICA.md).
+Set `COOKER_STICKY_SESSIONS=true` and configure ingress affinity. The full annotation snippets for NGINX / ALB / Traefik / HAProxy / Envoy are in [`docs/MULTI_REPLICA.md`](../../guides/MULTI_REPLICA.md).
 
 Symptoms if you skip the annotations:
 
@@ -147,6 +147,6 @@ The chart's middleware adds most of these for in-app responses already; the ingr
 ## Cross-references
 
 - **[Helm install](../getting-started/helm-install.md)** — TLS, OIDC, the production install.
-- **[`docs/MULTI_REPLICA.md`](../../MULTI_REPLICA.md)** — ingress affinity snippets per controller.
-- **[`docs/RUNBOOK.md`](../../RUNBOOK.md)** — symptom-driven incident response.
+- **[`docs/MULTI_REPLICA.md`](../../guides/MULTI_REPLICA.md)** — ingress affinity snippets per controller.
+- **[`docs/RUNBOOK.md`](../../guides/RUNBOOK.md)** — symptom-driven incident response.
 - **[Postgres](../operations/postgres.md)** — DB setup and backup.

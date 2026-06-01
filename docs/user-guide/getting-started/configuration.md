@@ -65,7 +65,7 @@ Cooker picks adapters at boot from env vars. Unknown values fall back to `noop` 
 | WS hub | `COOKER_WS_HUB_BACKEND` | `memory` *(default)*, `redis` |
 | Audit destination | `COOKER_AUDIT_DESTINATION` | `stdout` *(default)*, `file` |
 
-Stub-only at the moment: `buildkit` is partially implemented (not wired) per [`docs/UAT.md`](../../UAT.md#what-works-right-now).
+Stub-only at the moment: `buildkit` is partially implemented (not wired) per [`docs/UAT.md`](../../guides/UAT.md#what-works-right-now).
 
 ## Secrets backend selection
 
@@ -113,7 +113,7 @@ See [Observability](../operations/observability.md) for the metric and span name
 
 ## Reload semantics
 
-There is no hot reload. Every change to a `COOKER_*` env var requires a process restart (in K8s, a pod rollout). This is intentional — see [`docs/shipping-go.md` §4](../../shipping-go.md#4-configuration-story).
+There is no hot reload. Every change to a `COOKER_*` env var requires a process restart (in K8s, a pod rollout). This is intentional — see [`docs/shipping-go.md` §4](../../reference/shipping-go.md#4-configuration-story).
 
 ## Cross-references
 

@@ -188,7 +188,7 @@ Key properties:
 - **PKCE, no client secret** — the browser is a public client. Even if the JS bundle is intercepted, no static secret leaks.
 - **Backend never sees the auth code** — the code → token exchange happens in the browser. There is no `/auth/callback` server-side handler. The static-file `NoRoute` serves the SPA, which then completes the flow client-side.
 - **Provider-agnostic** — `coreos/go-oidc/v3` discovers JWKS, issuer, and supported algorithms from `<issuer>/.well-known/openid-configuration`. Works with Google, Keycloak, KeepSave, Okta, Azure AD without code changes.
-- **Auth-off mode** — `COOKER_OIDC_ENABLED=false` swaps in `devHandler`, which injects a static admin claim. UAT defaults to this so smoke tests don't need an IdP. Documented in [UAT.md](UAT.md#enabling-oidc-sign-in-for-uat) and [SECURITY.md](../SECURITY.md).
+- **Auth-off mode** — `COOKER_OIDC_ENABLED=false` swaps in `devHandler`, which injects a static admin claim. UAT defaults to this so smoke tests don't need an IdP. Documented in [UAT.md](../guides/UAT.md#enabling-oidc-sign-in-for-uat) and [SECURITY.md](../../SECURITY.md).
 
 ### 4.2 RBAC
 
@@ -395,8 +395,8 @@ For a new pluggable backend (e.g., a new pusher):
 ## 12. References
 
 - [architecture.md](architecture.md) — system architecture and component map
-- [../SECURITY.md](../SECURITY.md) — security policy and threat model
-- [UAT.md](UAT.md) — UAT runbook and OIDC enablement
+- [../SECURITY.md](../../SECURITY.md) — security policy and threat model
+- [UAT.md](../guides/UAT.md) — UAT runbook and OIDC enablement
 - [OCI image-spec v1.1](https://github.com/opencontainers/image-spec)
 - [OCI distribution-spec v1.1](https://github.com/opencontainers/distribution-spec)
 - [OAuth 2.0 PKCE — RFC 7636](https://datatracker.ietf.org/doc/html/rfc7636)

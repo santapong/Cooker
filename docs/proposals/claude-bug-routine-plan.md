@@ -537,6 +537,6 @@ below makes it repeatable for bug-fixing rather than feature work.
 See:
 
 - [`docs/adapted-from-dokploy.md`](./adapted-from-dokploy.md)
-- [`docs/architecture-phase1-phase2.md`](./architecture-phase1-phase2.md)
+- [`docs/architecture-phase1-phase2.md`](../reference/architecture-phase1-phase2.md)
 - [`docs/game-changer-ideas.md`](./game-changer-ideas.md)
 - [Claude Code Action docs](https://github.com/anthropics/claude-code-action) (external)

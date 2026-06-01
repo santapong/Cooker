@@ -98,11 +98,11 @@ you need the authoritative detail, follow the pointers:
 
 | Existing doc | Authoritative for |
 |---|---|
-| [`../architecture.md`](../architecture.md) | The canonical system map (what calls what) |
-| [`../design.md`](../design.md) | Feature patterns, conventions, the §11 "adding a feature" checklist |
+| [`../architecture.md`](../reference/architecture.md) | The canonical system map (what calls what) |
+| [`../design.md`](../reference/design.md) | Feature patterns, conventions, the §11 "adding a feature" checklist |
 | [`../../SECURITY.md`](../../SECURITY.md) | The threat model: CORS, WS tickets, rate limiting, container hardening |
 | [`../adr/`](../adr/) | Accepted decisions (ADR-0001 strategy pattern, 0002 secrets, 0003 JSONB, 0004 multi-tenancy) |
-| [`../architecture-phase1-phase2.md`](../architecture-phase1-phase2.md) | The feature-flagged platform subsystems |
+| [`../architecture-phase1-phase2.md`](../reference/architecture-phase1-phase2.md) | The feature-flagged platform subsystems |
 | [`../audits/`](../audits/) | Known bugs, SPOFs, and chain-error findings |
 | [`../../backlog.md`](../../backlog.md) | The honest production-readiness verdict and open work |
 
