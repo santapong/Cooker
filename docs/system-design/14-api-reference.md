@@ -23,7 +23,8 @@
   | 🛡️ | **admin + MFA** (`adminRole` + `RequireMFA`) |
   | 🛠️ | **admin** only (no MFA) |
 - **Extra gates:** ⏱️ = rate-limited (expensive route) · ♻️ = honors `Idempotency-Key` · 🔐 = additional
-  fine-grained permission check (`RequirePermission`) · 🚦 = governance admission hook.
+  fine-grained permission check (`RequirePermission`) · 🚦 = governance admission hook · ‡ = role
+  enforced **in-handler**, not by route middleware.
 - **Error envelope:** failures return a flat `{"error": "<message>"}`. `404` for not-found, `409`
   `{"error":"version conflict; refetch and retry"}` for optimistic-concurrency conflicts, `429` +
   `Retry-After: 60` when rate-limited, `503` when a backend (secrets/store) is unconfigured.
@@ -78,7 +79,7 @@ All 🔓 but **HMAC/token-verified** per provider; all ♻️ idempotent (`X-Git
 | GET | `/api/v1/pipelines/:id/runs/:runId/logs/:stageId` | 🔑 | Final logs for a stage (REST) |
 | POST | `/api/v1/pipelines/from-template/:id` | ✏️ | Create a pipeline from a catalog template |
 | POST | `/api/v1/pipelines/:id/runs/:runId/promote` | ✏️ | Promote a run to the next environment |
-| POST | `/api/v1/pipelines/:id/runs/:runId/approve` | 🔑 | Approve a manual promotion gate (`approver`) |
+| POST | `/api/v1/pipelines/:id/runs/:runId/approve` | 🔑 ‡ | Approve a manual promotion gate. **No route-level role gate**; the handler requires **admin or approver** via `CanApprovePromotion` |
 | GET | `/api/v1/pipelines/:id/runs/:runId/env-status` | 🔑 | Per-environment status of a run |
 
 ## Apps
@@ -250,3 +251,7 @@ First obtain a single-use 60s ticket, then connect with `?ticket=<value>` (see
 | Templates + Settings | 7 | |
 | Admin catalogs | 13 | All 🛡️ |
 | WebSocket | 6 | Ticket-gated |
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

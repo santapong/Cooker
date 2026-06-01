@@ -71,6 +71,9 @@ flowchart TB
 | [12-reality-check.md](12-reality-check.md) | You want the honest list of defaults, gotchas, and what's designed-but-not-yet-real |
 | [13-execution-pipeline.md](13-execution-pipeline.md) | You're working on (or redesigning) the DAG runner, live logging, or tracing |
 | [14-api-reference.md](14-api-reference.md) | You want the complete list of HTTP + WebSocket endpoints with auth requirements |
+| [15-supporting-subsystems.md](15-supporting-subsystems.md) | You're touching OCI validation, git source-clone/webhooks, the secret codec, build-plan detection, input validation, or the Tailscale transport |
+| [16-non-functional.md](16-non-functional.md) | You're operating Cooker and need tunables, scale limits, and the single- vs multi-replica boundary |
+| [17-c4-model.md](17-c4-model.md) | You think in C4 — Context / Container / Component / Code levels, mapped to the chapters above |
 
 ## Glossary
 
@@ -102,3 +105,21 @@ you need the authoritative detail, follow the pointers:
 | [`../architecture-phase1-phase2.md`](../architecture-phase1-phase2.md) | The feature-flagged platform subsystems |
 | [`../audits/`](../audits/) | Known bugs, SPOFs, and chain-error findings |
 | [`../../backlog.md`](../../backlog.md) | The honest production-readiness verdict and open work |
+
+## Coverage & verification
+
+This set is **package-complete**: every `backend/internal/*`, `backend/pkg/*`, and `frontend/src/*`
+package has a home chapter (the supporting/cross-cutting packages — OCI, source-clone, crypto,
+buildplan, validate, tsnet — live in [15-supporting-subsystems.md](15-supporting-subsystems.md)).
+
+A tech-lead documentation audit (2026-05) cross-checked the chapters against source: boot sequence,
+middleware order, migration list, optimistic-concurrency scope, RBAC matrix, WebSocket channel names,
+secrets backends, platform-subsystem config, and route auth gates. Corrections from that audit
+(boot-order phases, the 4-table version scope, and the in-handler `/approve` gate) are folded into
+chapters 02/04/06/12/14. Claims are written to match `main` as of the audit; when behaviour changes,
+update the relevant chapter in the same PR (the reality-check chapter, [12](12-reality-check.md), is
+the canonical place for "designed-but-not-real" caveats).
+
+---
+
+> _Index verified against `main` @ `dd93402` on 2026-05-30._

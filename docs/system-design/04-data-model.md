@@ -130,8 +130,9 @@ own transaction**.
 **Connection pool.** Defaults: `MaxOpenConns` 25, `MaxIdleConns` 5, `ConnMaxLifetime` 1h — tunable via
 `COOKER_DB_{MAX_OPEN_CONNS,MAX_IDLE_CONNS,CONN_MAX_LIFETIME}`.
 
-**Optimistic concurrency.** Pipelines and apps (only) carry a `version` column. Updates run
-`UPDATE … WHERE id=$1 AND version=$2`; if 0 rows change, the write lost a race and the API returns
+**Optimistic concurrency.** Four tables carry a `version` column (migration `007`): **pipelines,
+environments, apps, and hosts** (not runs). Updates run `UPDATE … WHERE id=$1 AND version=$2`; if 0
+rows change, the write lost a race and the store returns `ErrConflict`, which the handler maps to
 **409** `{"error":"version conflict; refetch and retry"}`.
 
 ```mermaid
@@ -151,3 +152,7 @@ sequenceDiagram
 sweep** (`Runs.SweepOrphans`) marks any `running` run whose heartbeat is older than the threshold as
 `failed`, so a crashed replica doesn't leave runs stuck forever. Transient DB errors are retried with
 jitter.
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

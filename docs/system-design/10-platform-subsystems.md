@@ -99,3 +99,7 @@ flowchart LR
 
 Designed in [ADR-0004](../adr/0004-multi-tenancy.md) (**Accepted**, Q4-2026) but **not implemented** —
 resources are effectively single-tenant today. Don't assume tenant isolation exists.
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

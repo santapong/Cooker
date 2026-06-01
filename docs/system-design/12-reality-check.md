@@ -17,7 +17,7 @@ aspirational/non-blocking.
 | "With the default secrets backend, secret endpoints just work." | The `database` backend needs `COOKER_SECRET_KEY`; without it the codec is inactive and secret endpoints return **503** (fail-safe, not fail-open). | [05](05-extension-points.md), [06](06-auth-and-security.md) |
 | "Secret promotion works for any backend." | Only **KeepSave** implements `secrets.Promoter`. The `database` backend returns **501** (`ErrPromotionUnsupported`). | [09](09-environments-and-promotion.md) |
 | "Environments are hardcoded alpha/beta/prod." | Environments are **user-defined** by `Name` and sequenced by an integer **`Order`**. There are no hardcoded tier names anywhere. | [09](09-environments-and-promotion.md) |
-| "All entities use optimistic concurrency." | Only **pipelines and apps** carry a `version` column / 409 conflict path. Runs don't. | [04](04-data-model.md) |
+| "All entities use optimistic concurrency." | Four tables carry a `version` column / 409 conflict path: **pipelines, environments, apps, hosts**. Runs don't. | [04](04-data-model.md) |
 | "Idempotency caches every response." | Only **2xx** responses are cached (TTL **24h**); replays set `Idempotency-Replayed: true`. Non-2xx is never cached. | [02](02-backend.md) |
 | "WebSocket messages are structured JSON." | Frames carry the **raw payload**; the client infers meaning from the channel name. No envelope. | [07](07-realtime-and-concurrency.md) |
 | "It uses golang-migrate." | The migration runner is **custom** (`//go:embed` + `pg_advisory_lock` + `schema_migrations`, per-migration transaction). | [04](04-data-model.md) |
@@ -55,3 +55,7 @@ When you change one of these realities (e.g. flip golangci-lint to blocking, imp
 generate the OpenAPI spec), **move the entry** out of this page in the same PR — update the relevant
 chapter and delete/relocate the row here. A stale reality-check page is worse than none. For the open
 work backlog that feeds bucket B, see [`../../backlog.md`](../../backlog.md).
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

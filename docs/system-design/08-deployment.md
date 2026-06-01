@@ -89,3 +89,7 @@ This system-design folder describes the *design*; it does not certify the system
 honest verdict and the open work live in [`../../backlog.md`](../../backlog.md)'s top section — read
 that before claiming anything is "done." Operational procedures are in
 [`../ROLLOUT.md`](../ROLLOUT.md) and [`../RUNBOOK.md`](../RUNBOOK.md).
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._
