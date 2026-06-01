@@ -282,6 +282,15 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 	var stages []model.Stage
 	var edges []model.Edge
 	deployStageID := make(map[string]string, len(graph.Services))
+	// edgeID returns a guaranteed-unique edge ID. Slugs contain '-', so
+	// concatenating them with a '-' separator is ambiguous (two distinct
+	// src/tgt pairs can collide). A monotonic counter sidesteps the
+	// ambiguity entirely — the source/target fields carry the semantics.
+	edgeSeq := 0
+	edgeID := func() string {
+		edgeSeq++
+		return fmt.Sprintf("e%d", edgeSeq)
+	}
 
 	for _, svc := range graph.Services {
 		slug := slugOf[svc.Name]
@@ -332,7 +341,7 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 					},
 				},
 			)
-			edges = append(edges, model.Edge{ID: "e-" + buildID + "-" + pushID, Source: buildID, Target: pushID})
+			edges = append(edges, model.Edge{ID: edgeID(), Source: buildID, Target: pushID})
 		}
 
 		deployID := "deploy-" + slug
@@ -356,7 +365,7 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 			Config: deployCfg,
 		})
 		if hasBuild {
-			edges = append(edges, model.Edge{ID: "e-push-" + slug + "-" + deployID, Source: "push-" + slug, Target: deployID})
+			edges = append(edges, model.Edge{ID: edgeID(), Source: "push-" + slug, Target: deployID})
 		}
 	}
 
@@ -369,7 +378,7 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 				continue
 			}
 			src := deployStageID[svc.Name]
-			edges = append(edges, model.Edge{ID: "e-dep-" + slugOf[dep] + "-" + slugOf[svc.Name], Source: depDeploy, Target: src})
+			edges = append(edges, model.Edge{ID: edgeID(), Source: depDeploy, Target: src})
 		}
 	}
 

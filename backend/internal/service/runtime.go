@@ -135,11 +135,29 @@ func (r *RuntimeService) kubeStatus(ctx context.Context, app *model.App, name st
 		return RuntimeStatus{Runtime: "kubernetes", Ref: name, State: "unknown", Message: "not found"}, nil
 	}
 	fields := strings.Fields(strings.TrimSpace(string(out)))
-	st := RuntimeStatus{Runtime: "kubernetes", Ref: name}
+	st := RuntimeStatus{Runtime: "kubernetes", Ref: name, State: "unknown"}
 	if len(fields) > 0 {
-		st.State = fields[0] // "ready/total"
-		rt := strings.SplitN(fields[0], "/", 2)
-		st.Healthy = len(rt) == 2 && rt[0] == rt[1] && rt[0] != "0" && rt[0] != ""
+		// fields[0] is "<readyReplicas>/<replicas>" from the jsonpath
+		// template. Only treat it as a replica ratio when it actually
+		// contains the "/" the template emits — otherwise leave State as
+		// "unknown" rather than surfacing a stray token (e.g. the image)
+		// as the state.
+		if rt := strings.SplitN(fields[0], "/", 2); len(rt) == 2 {
+			st.Healthy = rt[0] == rt[1] && rt[0] != "0" && rt[0] != ""
+			ready, total := rt[0], rt[1]
+			if ready == "" {
+				ready = "0"
+			}
+			if total == "" {
+				total = "0"
+			}
+			if st.Healthy {
+				st.State = "running"
+			} else {
+				st.State = "degraded"
+			}
+			st.Message = "ready " + ready + "/" + total
+		}
 	}
 	if len(fields) > 1 {
 		st.Image = fields[1]

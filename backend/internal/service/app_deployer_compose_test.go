@@ -151,6 +151,36 @@ func TestSynthesizeFromCompose_PerServiceDAG(t *testing.T) {
 	}
 }
 
+// Edge IDs must be unique even when service slugs contain dashes — the
+// old "e-dep-<dep>-<svc>" format was ambiguous (distinct pairs could
+// collide), which would drop edges in the xyflow canvas (duplicate
+// React keys). Regression guard for the audit HIGH finding.
+func TestSynthesizeFromCompose_UniqueEdgeIDs(t *testing.T) {
+	graph := &model.ComposeGraph{
+		Services: []model.ComposeService{
+			{Name: "a-b", Image: "x"},
+			{Name: "c", Image: "y", DependsOn: []string{"a-b"}},
+			{Name: "a", Image: "z"},
+			{Name: "b-c", Image: "w", DependsOn: []string{"a"}},
+		},
+	}
+	p, _, err := synthesizePipelineFromCompose(k8sApp(), graph, "/w", "reg", 1, "p", "")
+	if err != nil {
+		t.Fatalf("synth error: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, e := range p.Edges {
+		if seen[e.ID] {
+			t.Errorf("duplicate edge ID %q (source=%s target=%s)", e.ID, e.Source, e.Target)
+		}
+		seen[e.ID] = true
+	}
+	// Two cross-service edges, both unique.
+	if len(p.Edges) != 2 {
+		t.Errorf("expected 2 edges, got %d", len(p.Edges))
+	}
+}
+
 // Env + ports from a compose service must reach the docker deploy stage
 // so a docker-host deploy injects/publishes them (regression guard for
 // the port/env carry-through fix).

@@ -25,7 +25,7 @@ flowchart LR
 |---|---|---|---|
 | **Builder** (`internal/builder`) | `Build(ctx, Request) (Result, error)` | `docker` (DockerSock), `kaniko`, `buildah`, `buildkit`, `noop` | `COOKER_BUILDER` (default `noop`) |
 | **Pusher** (`internal/pusher`) | `Push(ctx, Request) (Result, error)` | `docker` (DockerSock), `crane`, `noop` | `COOKER_PUSHER` (default `noop`) |
-| **Deployer** (`internal/deployer`) | `Deploy(ctx, Request) (Result, error)` | `kubectl`, `clientgo`, `noop` | `COOKER_DEPLOYER` (default `noop`) |
+| **Deployer** (`internal/deployer`) | `Deploy(ctx, Request) (Result, error)` | `kubectl`, `clientgo`, `noop` (K8s); `docker-run`, `compose` (Docker host) | `COOKER_DEPLOYER` (K8s); per-service `DeployRuntime` for the Docker pair |
 | **Target** (`internal/deploytarget`) | `Deploy(ctx, Spec) error` | k8s · cloudrun · ecs · flyio · render | per-app `DeployTarget.type` |
 
 The wiring lives in `selectBuilder` / `selectPusher` / `selectDeployer` in
