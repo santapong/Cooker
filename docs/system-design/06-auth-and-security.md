@@ -105,3 +105,7 @@ The authoritative threat model is [`../../SECURITY.md`](../../SECURITY.md). Head
 
 When you change anything in this doc's scope, update [`../../SECURITY.md`](../../SECURITY.md) in the
 same PR so the threat model stays accurate.
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

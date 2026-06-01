@@ -88,3 +88,7 @@ flowchart TB
 - **No autoscaling guidance** beyond the connection-ceiling math above.
 
 These are honest omissions, not hidden ones — capturing them here is the point of this chapter.
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

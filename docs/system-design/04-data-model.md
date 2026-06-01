@@ -152,3 +152,7 @@ sequenceDiagram
 sweep** (`Runs.SweepOrphans`) marks any `running` run whose heartbeat is older than the threshold as
 `failed`, so a crashed replica doesn't leave runs stuck forever. Transient DB errors are retried with
 jitter.
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

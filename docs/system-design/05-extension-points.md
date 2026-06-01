@@ -76,3 +76,7 @@ flowchart LR
 A new `StageType` on the backend has a frontend counterpart: register a node component under
 `frontend/src/components/pipeline/nodes/` and map it in `PipelineCanvas` so the new stage type is
 draggable and configurable — see [03-frontend.md](03-frontend.md).
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

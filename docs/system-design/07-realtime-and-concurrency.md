@@ -89,3 +89,7 @@ Per-user limits guard the three expensive routes (`pipelines/:id/run`, `docker/i
 - **Redis sorted-set** — required for multi-replica, so the limit is global not per-pod.
 
 Configured via `COOKER_RATE_LIMIT_{ENABLED,PER_MINUTE,BURST,BACKEND}`.
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

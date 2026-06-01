@@ -176,3 +176,7 @@ sequenceDiagram
 
 The async dispatch path, batched persistence, and DAG execution are detailed in
 [07-realtime-and-concurrency.md](07-realtime-and-concurrency.md).
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

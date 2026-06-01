@@ -93,3 +93,7 @@ copy); the `database` backend returns **501** (`ErrPromotionUnsupported`). See
 | `POST /api/v1/pipelines/:id/runs/:runId/approve` | Clear a manual approval gate (approver) |
 | `GET /api/v1/pipelines/:id/runs/:runId/env-status` | Per-environment status of a run |
 | `POST /api/v1/environments/:id/secrets/promote` | Copy secrets to the next environment (KeepSave) |
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

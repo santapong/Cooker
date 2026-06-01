@@ -112,3 +112,7 @@ The pipeline editor is the signature feature:
 Vite with lazy chunking (the heavy `@xyflow/react` graph is code-split out of the initial bundle) and a
 dev proxy to the backend. CI runs `tsc --noEmit`, `npm run lint` (ESLint), `npm run build`, and
 `vitest` — see [11-code-patterns-and-conventions.md](11-code-patterns-and-conventions.md).
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

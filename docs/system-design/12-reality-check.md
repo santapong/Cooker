@@ -55,3 +55,7 @@ When you change one of these realities (e.g. flip golangci-lint to blocking, imp
 generate the OpenAPI spec), **move the entry** out of this page in the same PR — update the relevant
 chapter and delete/relocate the row here. A stale reality-check page is worse than none. For the open
 work backlog that feeds bucket B, see [`../../backlog.md`](../../backlog.md).
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

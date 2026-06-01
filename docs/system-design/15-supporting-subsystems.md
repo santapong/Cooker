@@ -84,3 +84,7 @@ None of these is a "feature" a user selects; they're the connective tissue. They
 contributor completeness — a reviewer auditing "is every in-use package described somewhere?" should
 find them. For the feature-flagged *platform* subsystems (queue, scheduler, notifier, audit,
 observability, governance) see [10-platform-subsystems.md](10-platform-subsystems.md).
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

@@ -145,3 +145,7 @@ Addressed in the proposal: [`../execution-observability-redesign-2026.md`](../ex
 | **DAG** | Sound (topo sort, bounded fan-out, retry/timeout, FSM, panic-safe) | Conditional edges, outputs, retry depth, caching, post-hooks — **already designed** in `dag-adaptation-2026.md` | Extend per the existing plan; don't rewrite the engine |
 | **Logging** | Live path works for all three execution stages | History/replay, drop signalling, cross-replica continuity | The one genuine *defect*; see the proposal |
 | **Tracing** | Correct but minimal (HTTP spans + good metrics) | Execution spans, builder propagation, sampling | Additive extension, not a redesign |
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

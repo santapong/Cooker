@@ -80,3 +80,7 @@ Be honest about what actually blocks a merge:
 - **Never push to `main` directly.**
 - For stacked work, a parent PR's branch is a fine base — but rebase forward as parents merge
   (`git rebase --onto main <parent>` or cherry-pick).
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

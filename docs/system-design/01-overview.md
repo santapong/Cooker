@@ -136,3 +136,7 @@ Images are OCI-compliant regardless of which builder backend is selected; the re
 standard OCI distribution APIs. For the canonical detail on the build/push contracts and how the
 backends differ, see [05-extension-points.md](05-extension-points.md) and
 [`../architecture.md`](../architecture.md).
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._

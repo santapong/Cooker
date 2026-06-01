@@ -73,6 +73,7 @@ flowchart TB
 | [14-api-reference.md](14-api-reference.md) | You want the complete list of HTTP + WebSocket endpoints with auth requirements |
 | [15-supporting-subsystems.md](15-supporting-subsystems.md) | You're touching OCI validation, git source-clone/webhooks, the secret codec, build-plan detection, input validation, or the Tailscale transport |
 | [16-non-functional.md](16-non-functional.md) | You're operating Cooker and need tunables, scale limits, and the single- vs multi-replica boundary |
+| [17-c4-model.md](17-c4-model.md) | You think in C4 — Context / Container / Component / Code levels, mapped to the chapters above |
 
 ## Glossary
 
@@ -118,3 +119,7 @@ secrets backends, platform-subsystem config, and route auth gates. Corrections f
 chapters 02/04/06/12/14. Claims are written to match `main` as of the audit; when behaviour changes,
 update the relevant chapter in the same PR (the reality-check chapter, [12](12-reality-check.md), is
 the canonical place for "designed-but-not-real" caveats).
+
+---
+
+> _Index verified against `main` @ `dd93402` on 2026-05-30._

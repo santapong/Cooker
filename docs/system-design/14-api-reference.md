@@ -251,3 +251,7 @@ First obtain a single-use 60s ticket, then connect with `?ticket=<value>` (see
 | Templates + Settings | 7 | |
 | Admin catalogs | 13 | All 🛡️ |
 | WebSocket | 6 | Ticket-gated |
+
+---
+
+> _Verified against `main` @ `dd93402` on 2026-05-30. If you change the described behaviour, update this chapter in the same PR._
