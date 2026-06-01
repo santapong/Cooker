@@ -19,6 +19,7 @@ import (
 	"github.com/santapong/cooker/internal/governance"
 	"github.com/santapong/cooker/internal/handler"
 	"github.com/santapong/cooker/internal/idempotency"
+	"github.com/santapong/cooker/internal/logstore"
 	"github.com/santapong/cooker/internal/observability"
 	"github.com/santapong/cooker/internal/pusher"
 	"github.com/santapong/cooker/internal/secrets"
@@ -144,6 +145,14 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	cleanups = append(cleanups, func() { _ = wsHub.Close() })
 
+	// Per-stage log history for replay-on-connect (execution-observability
+	// redesign Part A). Single instance shared by the hub (serves the
+	// backlog on WS connect) and the executor (appends stamped lines).
+	// Defaults to the in-memory backend; single-replica only, like the
+	// in-memory WS hub and rate limiter.
+	logStore := logstore.FromEnv()
+	wsHub.SetLogStore(logStore)
+
 	var wsTickets ticketStore
 	switch cfg.WSTicket.Backend {
 	case "redis":
@@ -215,6 +224,7 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithDockerDeployer(deployer.NewDockerRun()),
 		service.WithComposeDeployer(deployer.NewCompose()),
 		service.WithLogBroadcaster(wsHub.Broadcast),
+		service.WithLogStore(logStore),
 		service.WithStatusBroadcaster(wsHub.Broadcast),
 		service.WithDeployGovernanceHook(govDeployHook),
 	)

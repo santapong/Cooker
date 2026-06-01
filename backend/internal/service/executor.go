@@ -16,6 +16,7 @@ import (
 	"github.com/santapong/cooker/internal/builder"
 	"github.com/santapong/cooker/internal/deployer"
 	"github.com/santapong/cooker/internal/gitops"
+	"github.com/santapong/cooker/internal/logstore"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/observability"
 	"github.com/santapong/cooker/internal/pusher"
@@ -335,6 +336,7 @@ type Executor struct {
 	gitops          gitops.Writer
 	runUpdater      RunUpdater
 	logBroadcast    LogBroadcaster
+	logStore        logstore.Store
 	statusBroadcast StatusBroadcaster
 	govHook         DeployGovernanceHook
 }
@@ -445,6 +447,18 @@ func WithRunUpdater(u RunUpdater) Option {
 func WithLogBroadcaster(b LogBroadcaster) Option {
 	return func(e *Executor) {
 		e.logBroadcast = b
+	}
+}
+
+// WithLogStore installs the per-stage log history used for replay-on-
+// connect (execution-observability redesign Part A). When set, each
+// stage's complete log lines are appended (seq+ts stamped) so a WS
+// subscriber that joins mid-run or reconnects with ?since=<seq> receives
+// the backlog. Pass nil (or skip the option) to disable replay — live
+// streaming via WithLogBroadcaster is unaffected.
+func WithLogStore(s logstore.Store) Option {
+	return func(e *Executor) {
+		e.logStore = s
 	}
 }
 
@@ -878,6 +892,23 @@ func (e *Executor) persistProgress(ctx context.Context, run *model.PipelineRun) 
 	}
 }
 
+// newStageLineWriter returns the per-line tee for a stage's adapter
+// output, or nil when neither live broadcast nor replay storage is
+// configured (in which case the caller writes only to the capped on-disk
+// buffer). The lineWriter stamps seq+ts, appends to the log store for
+// replay-on-connect, AND broadcasts the wire envelope — either leg may be
+// nil. Production callers always pass non-empty runID + stage.ID; the
+// guard keeps direct test callers (which may omit them) safe (W10-7).
+func (e *Executor) newStageLineWriter(runID string, stage *model.Stage) *lineWriter {
+	if e.logBroadcast == nil && e.logStore == nil {
+		return nil
+	}
+	if runID == "" || stage == nil || stage.ID == "" {
+		return nil
+	}
+	return newLineWriter(e.logBroadcast, e.logStore, runID, stage.ID)
+}
+
 func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
 	logs := newCappedBuffer(stageLogCap)
 	// LogWriter receives the on-disk capture by default. When a
@@ -887,11 +918,8 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 	// instead of polling. The broadcaster is best-effort: backpressure
 	// at the hub drops on the far side, never on the executor goroutine.
 	var writer io.Writer = logs
-	var lw *lineWriter
-	// Production callers always pass non-empty runID + stage.ID; the gate
-	// keeps direct test callers (which may omit them) safe (W10-7).
-	if e.logBroadcast != nil && runID != "" && stage != nil && stage.ID != "" {
-		lw = newLineWriter(e.logBroadcast, StageLogChannel(runID, stage.ID))
+	lw := e.newStageLineWriter(runID, stage)
+	if lw != nil {
 		writer = io.MultiWriter(logs, lw)
 	}
 	defer func() {
@@ -987,9 +1015,8 @@ func (e *Executor) executePush(ctx context.Context, runID string, stage *model.S
 	// dag-performance.md §4 High #2 for the push half. T2.
 	logs := newCappedBuffer(stageLogCap)
 	var writer io.Writer = logs
-	var lw *lineWriter
-	if e.logBroadcast != nil && runID != "" && stage != nil && stage.ID != "" {
-		lw = newLineWriter(e.logBroadcast, StageLogChannel(runID, stage.ID))
+	lw := e.newStageLineWriter(runID, stage)
+	if lw != nil {
 		writer = io.MultiWriter(logs, lw)
 	}
 	defer func() {
@@ -1055,9 +1082,8 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 	// deploy half. T2.
 	logs := newCappedBuffer(stageLogCap)
 	var writer io.Writer = logs
-	var lw *lineWriter
-	if e.logBroadcast != nil && runID != "" && stage != nil && stage.ID != "" {
-		lw = newLineWriter(e.logBroadcast, StageLogChannel(runID, stage.ID))
+	lw := e.newStageLineWriter(runID, stage)
+	if lw != nil {
 		writer = io.MultiWriter(logs, lw)
 	}
 	defer func() {

@@ -6,9 +6,12 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/santapong/cooker/internal/logstore"
 )
 
 // WebSocket idle / ping-pong tunables. pongWait should be larger
@@ -30,6 +33,12 @@ type Client struct {
 	// closeOnce guards close(send) so it can fire from at most one
 	// path (broadcast-backpressure or unregister) without panicking.
 	closeOnce sync.Once
+	// truncated is set by the hub's drop path (slow client, send buffer
+	// full) before it closes send, so writePump can emit one final
+	// {"control":"stream-truncated"} frame instead of a silent close. It
+	// is NOT set on a clean unregister. Read in writePump (a different
+	// goroutine than the hub), so it must be atomic.
+	truncated atomic.Bool
 }
 
 // closeSend is the single-path-safe close on the send channel.
@@ -51,6 +60,10 @@ type WebSocketHub struct {
 	backend    HubBackend
 	register   chan *Client
 	unregister chan *Client
+	// logStore, when set, supplies the per-stage backlog replayed on
+	// connect by HandleStageLogs (?since=<seq>). nil disables replay so
+	// the handler degrades to live-only streaming (back-compat).
+	logStore logstore.Store
 }
 
 // BroadcastMessage is a message sent to a specific channel. Tagged for
@@ -90,6 +103,14 @@ func NewWebSocketHubWithBackend(allowedOrigins []string, backend HubBackend) *We
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 	}
+}
+
+// SetLogStore installs the per-stage log history used by HandleStageLogs
+// for replay-on-connect. Call once during server construction, before the
+// hub serves traffic; nil leaves replay disabled. Not safe to call
+// concurrently with HandleStageLogs.
+func (h *WebSocketHub) SetLogStore(s logstore.Store) {
+	h.logStore = s
 }
 
 // Run processes WebSocket hub events. Reads broadcasts from the
@@ -141,6 +162,12 @@ func (h *WebSocketHub) Run() {
 				if clients, ok := h.clients[msg.Channel]; ok {
 					for _, client := range dropped {
 						delete(clients, client)
+						// Slow client: flag truncation so writePump emits a
+						// {"control":"stream-truncated"} frame before the
+						// CloseMessage. This is the backpressure-drop path
+						// ONLY — a clean unregister (above) leaves the flag
+						// unset so a normal disconnect stays silent.
+						client.truncated.Store(true)
 						client.closeSend()
 					}
 				}
@@ -282,9 +309,17 @@ func (c *Client) writePump() {
 		case msg, ok := <-c.send:
 			_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
 			if !ok {
-				// Hub closed our send channel — politely close the
-				// connection rather than letting the proxy time us
-				// out.
+				// Hub closed our send channel. If this was the
+				// backpressure-drop path the hub set truncated; emit one
+				// final control frame so the UI can show "logs truncated —
+				// reload" instead of silently missing lines. Reuses the
+				// write deadline already set above (single conn-writer —
+				// writePump is the only goroutine writing this conn).
+				if c.truncated.Load() {
+					_ = c.conn.WriteMessage(websocket.TextMessage, []byte(`{"control":"stream-truncated"}`))
+					_ = c.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+				}
+				// Politely close rather than letting the proxy time us out.
 				_ = c.conn.WriteMessage(websocket.CloseMessage, nil)
 				return
 			}

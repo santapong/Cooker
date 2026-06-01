@@ -45,6 +45,7 @@ export default function RunPage() {
   });
   const stageLogs = useMemo(() => stageLogStream.lines.join('\n'), [stageLogStream.lines]);
   const logsLoading = !!selectedStageId && !stageLogStream.backfillLoaded;
+  const streamTruncated = stageLogStream.streamTruncated;
 
   // Fetch run + pipeline + env status. Refresh env status every 5s
   // to pick up promotions/approvals while you're watching.
@@ -147,6 +148,7 @@ export default function RunPage() {
         logs={stageLogs}
         loading={logsLoading}
         run={run}
+        streamTruncated={streamTruncated}
       />
       {mode === 'pro' && (
         <RightRail
@@ -366,12 +368,14 @@ function LogsPanel({
   logs,
   loading,
   run,
+  streamTruncated,
 }: {
   stage: Stage | null;
   stageRun: StageRun | null;
   logs: string;
   loading: boolean;
   run: PipelineRun | null;
+  streamTruncated: boolean;
 }) {
   const t = useTheme();
   const [filter, setFilter] = useState<'all' | 'info' | 'warn' | 'error'>('all');
@@ -467,6 +471,25 @@ function LogsPanel({
         </div>
         <KBD>/</KBD>
       </div>
+
+      {streamTruncated && (
+        <div
+          style={{
+            padding: '7px 18px',
+            background: hexA(t.warn, 0.12),
+            borderBottom: `1px solid ${hexA(t.warn, 0.35)}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            fontFamily: t.mono,
+            fontSize: 11,
+            color: t.warn,
+          }}
+        >
+          <Pill tone="warn">stream truncated</Pill>
+          live logs truncated — reload to see full history
+        </div>
+      )}
 
       <div
         style={{

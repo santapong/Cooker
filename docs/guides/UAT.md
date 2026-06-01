@@ -273,6 +273,7 @@ curl -s http://localhost:5001/v2/cooker/demo/tags/list | jq
 | App CRUD | Real — Postgres |
 | Deploy button (Clone→Build→Push→Deploy) | Real — uses `git`, `docker`, `kubectl` |
 | Live build log over WebSocket | Real |
+| Stage-log replay / `?since=` reconnect | Real — in-memory backend (single-replica); see [Stage-log replay config](#stage-log-replay-config) |
 | GitHub webhook HMAC | Real — SHA-256 constant-time compare |
 | Secret seal/reveal (admin-only) | Real — AES-GCM |
 | RBAC: approver vs operator vs viewer | Real |
@@ -284,6 +285,32 @@ curl -s http://localhost:5001/v2/cooker/demo/tags/list | jq
 | BuildKit gRPC, Crane push, client-go deploy | **Stubbed** — rely on CLI fallbacks for UAT |
 | Tailscale tsnet transport | **Build-tagged** — needs `-tags tsnet` |
 | GitOps commit (go-git) | **Stubbed** — Noop gives a deterministic fake SHA |
+
+<a id="stage-log-replay-config"></a>
+## Stage-log replay config
+
+A WebSocket subscriber on `/ws/runs/:runId/stages/:stageId/logs` now
+receives the **backlog so far** on connect, then live frames, and can
+**resume after a known line** by passing `?since=<seq>` (the `seq` of the
+last frame it saw). Each frame is a JSON envelope
+`{"runId","stageId","seq","ts","line"}`; a dropped slow client gets one
+`{"control":"stream-truncated"}` frame before the socket closes.
+
+The backing store is selected at boot:
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `COOKER_LOGSTORE_BACKEND` | `memory` | Log-history backend. `memory` is the only implemented value; an unknown value logs a warning and falls back to `memory`. |
+| `COOKER_LOGSTORE_MAX_BYTES` | `1048576` (1 MiB) | Per-stage retained-line byte cap. Oldest lines are dropped (ring buffer) once a stage exceeds it. |
+| `COOKER_LOGSTORE_MAX_STREAMS` | `256` | Max concurrently retained stage streams. The least-recently-appended whole stream is evicted past this. |
+
+**Single-replica only.** The `memory` backend lives in one process, so
+replay only covers stages handled by *this* replica — exactly the same
+constraint as the in-memory WS hub and rate limiter. Durable / multi-replica
+`postgres` and `redis` backends are described as future work in
+`docs/proposals/execution-observability-redesign-2026.md` (Part A Phase 3)
+and are not implemented yet. The default UAT compose is single-replica, so
+no configuration is required.
 
 ## What's scaffolded (don't file bugs about these)
 

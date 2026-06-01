@@ -216,8 +216,11 @@ In the deployment DAG (§4c), **clicking a service node** opens a panel that tai
 container/pod logs** and shows live runtime info (state, image, applied resource limits) — Docker via
 `docker inspect`/`logs`, Kubernetes via `kubectl`.
 
-> ⚠️ **No stage-log replay yet:** connect mid-run → only *future* lines; refresh after a stage ends →
-> use the REST snapshot. See 🚧 §13.
+> ✅ **Stage-log replay (memory backend, single-replica):** connect mid-run → you get the backlog so
+> far, then live lines; reconnect with `?since=<seq>` → only the lines after `seq`. A dropped slow
+> client gets a `stream-truncated` signal rather than silence. History survives stage completion in a
+> bounded in-memory buffer (lost on restart; the REST snapshot remains the durable record). Durable /
+> multi-replica `postgres`/`redis` backends are still future (§13).
 
 ---
 
@@ -239,7 +242,7 @@ Several subsystems default to in-memory (per-replica). For multi-replica, switch
 | **Conditional edges** (`failure` / `always`) | Rejected at save; only success-edges run (§1) |
 | **Build caching** (Kaniko/BuildKit cache) | Not wired — every build is cold |
 | **Post-stage hooks** (`always`/`failure` cleanup) | Not built |
-| **Stage-log replay / history over WS** | Not built (REST snapshot only) (§11a) |
+| **Stage-log replay / history over WS** | Live now via the **memory** backend (mid-run join + `?since=` reconnect, single-replica, §11a); durable/multi-replica `postgres`/`redis` backends still pending |
 | **Docker/K8s list & inspect REST endpoints** | Stubs — return empty/sample data |
 | **Multi-tenancy** | Designed (ADR-0004), not implemented — single-tenant today |
 

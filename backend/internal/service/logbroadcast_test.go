@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 
 	"github.com/santapong/cooker/internal/builder"
+	"github.com/santapong/cooker/internal/logstore"
 	"github.com/santapong/cooker/internal/model"
 )
 
@@ -35,28 +37,40 @@ func (b *streamingBuilder) Build(_ context.Context, req builder.Request) (builde
 	return b.res, nil
 }
 
-// recordedBroadcasts is a thread-safe slice of (channel, line) pairs
-// captured from the executor's LogBroadcaster.
+// recordedBroadcasts is a thread-safe slice of (channel, frame) pairs
+// captured from the executor's LogBroadcaster. Frames are now JSON
+// envelopes (logstore.EncodeFrame), so the helpers decode the seq+line.
 type recordedBroadcasts struct {
 	mu  sync.Mutex
-	got []recordedLine
+	got []recordedFrame
 }
 
-type recordedLine struct {
+// recordedFrame is the decoded view of one wire envelope: the fields the
+// tests assert on. Mirrors the pinned envelope shape.
+type recordedFrame struct {
 	channel string
+	seq     int
 	line    string
 }
 
-func (r *recordedBroadcasts) record(ch string, line []byte) {
+func (r *recordedBroadcasts) record(ch string, data []byte) {
+	var f struct {
+		Seq  int    `json:"seq"`
+		Line string `json:"line"`
+	}
+	// Frames must be valid JSON envelopes; a decode failure is a test
+	// bug we want to surface as a zero-value frame rather than silently
+	// dropping.
+	_ = json.Unmarshal(data, &f)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.got = append(r.got, recordedLine{channel: ch, line: string(line)})
+	r.got = append(r.got, recordedFrame{channel: ch, seq: f.Seq, line: f.Line})
 }
 
-func (r *recordedBroadcasts) snapshot() []recordedLine {
+func (r *recordedBroadcasts) snapshot() []recordedFrame {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]recordedLine, len(r.got))
+	out := make([]recordedFrame, len(r.got))
 	copy(out, r.got)
 	return out
 }
@@ -94,10 +108,12 @@ func TestExecutor_BuildStage_BroadcastsLogLines(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := []recordedLine{
-		{channel: "stage-logs:run-1:b", line: "hello\n"},
-		{channel: "stage-logs:run-1:b", line: "world\n"},
-		{channel: "stage-logs:run-1:b", line: "last partial\n"}, // flushed on stage exit
+	// The envelope's line carries NO trailing newline; seq increments
+	// 1,2,3 with the partial flushed on stage exit as seq 3.
+	want := []recordedFrame{
+		{channel: "stage-logs:run-1:b", seq: 1, line: "hello"},
+		{channel: "stage-logs:run-1:b", seq: 2, line: "world"},
+		{channel: "stage-logs:run-1:b", seq: 3, line: "last partial"}, // flushed on stage exit
 	}
 
 	got := rec.snapshot()
@@ -152,7 +168,7 @@ func TestExecutor_BuildStage_NoBroadcasterIsNoOp(t *testing.T) {
 
 func TestLineWriter_BuffersAcrossWrites(t *testing.T) {
 	rec := &recordedBroadcasts{}
-	lw := newLineWriter(rec.record, "stage-logs:r:s")
+	lw := newLineWriter(rec.record, nil, "r", "s")
 
 	// First write: a complete line plus a partial.
 	if _, err := lw.Write([]byte("alpha\nbeta")); err != nil {
@@ -166,17 +182,46 @@ func TestLineWriter_BuffersAcrossWrites(t *testing.T) {
 	lw.flush()
 
 	got := rec.snapshot()
-	want := []recordedLine{
-		{channel: "stage-logs:r:s", line: "alpha\n"},
-		{channel: "stage-logs:r:s", line: "beta continued\n"},
-		{channel: "stage-logs:r:s", line: "gamma\n"},
+	// Lines carry no trailing newline on the wire; seq increments 1,2,3
+	// across the Write boundary (single-writer invariant).
+	want := []recordedFrame{
+		{channel: "stage-logs:r:s", seq: 1, line: "alpha"},
+		{channel: "stage-logs:r:s", seq: 2, line: "beta continued"},
+		{channel: "stage-logs:r:s", seq: 3, line: "gamma"},
 	}
 	if len(got) != len(want) {
-		t.Fatalf("broadcast count: got %d want %d", len(got), len(want))
+		t.Fatalf("broadcast count: got %d want %d (%v)", len(got), len(want), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("[%d] got %+v want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+// TestLineWriter_StoreOnlyAppendsWithoutBroadcast asserts the spec's
+// "Append happens even when broadcast is nil" rule: a store-only
+// lineWriter records stamped entries that Read can replay.
+func TestLineWriter_StoreOnlyAppendsWithoutBroadcast(t *testing.T) {
+	store := logstore.NewMemory(1<<20, 16)
+	lw := newLineWriter(nil, store, "r", "s")
+
+	if _, err := lw.Write([]byte("one\ntwo\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	lw.flush() // no partial; no-op
+
+	got, err := store.Read(context.Background(), "r", "s", 0)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("store entries = %d, want 2 (%v)", len(got), got)
+	}
+	if got[0].Seq != 1 || got[0].Line != "one" {
+		t.Errorf("entry[0] = %+v, want {Seq:1 Line:one}", got[0])
+	}
+	if got[1].Seq != 2 || got[1].Line != "two" {
+		t.Errorf("entry[1] = %+v, want {Seq:2 Line:two}", got[1])
 	}
 }
