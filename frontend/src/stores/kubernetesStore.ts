@@ -1,6 +1,25 @@
 import { create } from 'zustand';
 import type { KubeNamespace, KubeWorkload } from '../types/kubernetes';
 import { kubernetesApi } from '../api/kubernetes';
+import { ApiError } from '../api/client';
+
+// clusterUnavailable means "no cluster configured or unreachable" and
+// maps to HTTP 503 ONLY. The k8s read routes are gated at operator role,
+// so a 403 (not permitted), a 500 (server fault), or a network timeout
+// must surface as a plain error — not the misleading "cluster
+// unreachable" banner. This helper sets the right state for either case.
+function applyFetchError(e: unknown): {
+  error: string;
+  loading: false;
+  clusterUnavailable: boolean;
+} {
+  const is503 = e instanceof ApiError && e.status === 503;
+  return {
+    error: e instanceof Error ? e.message : String(e),
+    loading: false,
+    clusterUnavailable: is503,
+  };
+}
 
 interface KubernetesStore {
   namespaces: KubeNamespace[];
@@ -32,8 +51,7 @@ export const useKubernetesStore = create<KubernetesStore>((set, get) => ({
       const namespaces = await kubernetesApi.listNamespaces();
       set({ namespaces, loading: false, clusterUnavailable: false });
     } catch (e) {
-      const msg = (e as Error).message;
-      set({ error: msg, loading: false, clusterUnavailable: true });
+      set(applyFetchError(e));
     }
   },
 
@@ -44,8 +62,7 @@ export const useKubernetesStore = create<KubernetesStore>((set, get) => ({
       const workloads = await kubernetesApi.listWorkloads(ns);
       set({ workloads, loading: false, clusterUnavailable: false });
     } catch (e) {
-      const msg = (e as Error).message;
-      set({ error: msg, loading: false, clusterUnavailable: true });
+      set(applyFetchError(e));
     }
   },
 

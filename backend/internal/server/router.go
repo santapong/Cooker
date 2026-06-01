@@ -133,10 +133,17 @@ func (s *Server) registerRoutes() {
 	{
 		// Read-only list/inspect: real client-go reads against the
 		// server's configured cluster (Handler methods, h.Kube-backed).
-		kubernetes.GET("/namespaces", h.ListNamespaces)
-		kubernetes.GET("/workloads", h.ListWorkloads)
-		kubernetes.GET("/workloads/:ns/:kind/:name", h.GetWorkload)
-		kubernetes.GET("/pods/:ns/:name/logs", h.GetPodLogs)
+		// Gated at writeRole (operator+): these expose live cluster state
+		// — namespaces, workloads, and especially pod logs, which can
+		// contain tokens/PII across every namespace the (cluster-wide by
+		// chart default) ServiceAccount can see. A plain viewer must not be
+		// able to read arbitrary cluster pod logs, so cluster introspection
+		// requires the same operator role as the k8s write path below.
+		// See SECURITY.md "Kubernetes Access".
+		kubernetes.GET("/namespaces", writeRole, h.ListNamespaces)
+		kubernetes.GET("/workloads", writeRole, h.ListWorkloads)
+		kubernetes.GET("/workloads/:ns/:kind/:name", writeRole, h.GetWorkload)
+		kubernetes.GET("/pods/:ns/:name/logs", writeRole, h.GetPodLogs)
 		// Write path: still package-level stubs (scale/restart/apply/
 		// delete) — separate work, does not use h.Kube.
 		kubernetes.POST("/workloads/:ns/:kind/:name/scale", writeRole, handler.ScaleWorkload)

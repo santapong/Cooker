@@ -116,14 +116,6 @@ export function useStageLogs({
   // from since=0 and is authoritative).
   const seededFromRestRef = useRef<boolean>(false);
 
-  // reconnectTriggerRef: incrementing this causes useWebSocket to
-  // disconnect and reconnect (used to refill after stream-truncated).
-  // We drive this via the wsUrl construction — appending a nonce that
-  // changes on demand — rather than calling disconnect/connect
-  // manually, which would require exposing those from useWebSocket.
-  // Instead we keep a separate reconnect gate via the `connect` return.
-  const reconnectRef = useRef<(() => Promise<void>) | null>(null);
-
   // Reset state whenever the target stage changes. Keeps the React
   // tree's mounted component but tears down its buffer cleanly.
   useEffect(() => {
@@ -147,6 +139,15 @@ export function useStageLogs({
       .getStageLogs(pipelineId, runId, stageId)
       .then((res) => {
         if (ctrl.signal.aborted) return;
+        // If a seq'd WS frame already arrived, the WS replay (since=0)
+        // has already seeded the authoritative buffer — discard the REST
+        // result entirely. Seeding here would duplicate the full history
+        // alongside the WS lines (the WS frames won't reset the buffer
+        // because seededFromRestRef would never get set in this ordering).
+        if (lastSeqRef.current > 0) {
+          setBackfillLoaded(true);
+          return;
+        }
         const initial = (res.logs ?? '').split('\n');
         // split('') keeps the trailing empty string after a final
         // newline; drop it so the rendered list doesn't end with a
@@ -194,21 +195,30 @@ export function useStageLogs({
       if (isLogFrame(data)) {
         const { seq, line } = data;
 
-        // Dedupe: ignore any frame we've already rendered.
+        // Dedupe: ignore any frame we've already rendered. Backend `seq`
+        // is 1-based (the first frame has seq=1), so the initial
+        // lastSeqRef value of 0 correctly admits the very first frame.
         if (seq <= lastSeqRef.current) return;
 
-        // First seq'd frame after REST backfill: reset the buffer.
-        // The seq'd stream is authoritative and replays from since=0.
-        if (seededFromRestRef.current) {
+        // First seq'd frame after REST backfill: the seq'd stream is
+        // authoritative and replays from since=0, so discard the
+        // REST-seeded lines. Capture the decision synchronously and flip
+        // the ref now, then fold the reset INTO the functional setLines
+        // update. If two frames arrive in the same tick, only the first
+        // sees seededFromRestRef=true; doing the reset inside the updater
+        // means the second frame appends to the already-reset buffer
+        // rather than racing a separate setLines([]) against stale state.
+        const resetForReplay = seededFromRestRef.current;
+        if (resetForReplay) {
           seededFromRestRef.current = false;
-          setLines([]);
           setTruncated(false);
         }
 
         lastSeqRef.current = seq;
 
         setLines((prev) => {
-          const next = prev.concat(line);
+          const base = resetForReplay ? [] : prev;
+          const next = base.concat(line);
           if (next.length > MAX_LINES) {
             setTruncated(true);
             return next.slice(next.length - MAX_LINES);
@@ -232,11 +242,6 @@ export function useStageLogs({
       });
     },
   });
-
-  // Expose connect via ref so the control-frame handler can call it.
-  // The ref is updated every render so we always close over the latest
-  // connect identity (useCallback stable, but re-declared on url change).
-  reconnectRef.current = connect;
 
   return { lines, backfillLoaded, connected, truncated, streamTruncated };
 }

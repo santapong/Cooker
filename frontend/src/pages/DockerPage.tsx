@@ -80,6 +80,12 @@ export default function DockerPage() {
         }
       />
 
+      {/*
+        Always shown by design: the Docker host transport is never wired
+        in this build (honest-501 / P9.4), so the banner is unconditional
+        rather than gated on a store flag. List endpoints return 200 + []
+        and mutating actions reject with 501 until COOKER_DOCKER_HOST is set.
+      */}
       <DockerTransportBanner />
 
       <div

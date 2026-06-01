@@ -141,7 +141,15 @@ func hasDisallowedControl(v string) bool {
 		if r == '\t' {
 			continue
 		}
+		// C0 controls (incl. CR/LF/NUL/ESC) and DEL.
 		if r < 0x20 || r == 0x7f {
+			return true
+		}
+		// C1 controls (0x80-0x9f) and the Unicode line/paragraph
+		// separators (U+2028/U+2029) have no legitimate place in an output
+		// value and can corrupt log/terminal/JSON-line/UI rendering.
+		// Reject wholesale (defence in depth, audit finding L1).
+		if (r >= 0x80 && r <= 0x9f) || r == '\u2028' || r == '\u2029' {
 			return true
 		}
 	}

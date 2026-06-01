@@ -680,7 +680,10 @@ function StageOutputsTable({ stageRun }: { stageRun: StageRun | null }) {
                     wordBreak: 'break-all',
                   }}
                 >
-                  {value}
+                  {/* Coerce defensively: outputs is typed Record<string,string>,
+                      but a widened / non-string value (e.g. a rollout object)
+                      would otherwise render as [object Object] or throw. */}
+                  {String(value)}
                 </td>
               </tr>
             ))}

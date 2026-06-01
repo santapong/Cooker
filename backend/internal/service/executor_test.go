@@ -1183,6 +1183,34 @@ func TestExecutor_Outputs_CapTruncation(t *testing.T) {
 	}
 }
 
+// TestHasDisallowedControl covers the output-value sanitizer, including the
+// audit-L1 hardening (C1 controls + Unicode line/paragraph separators).
+func TestHasDisallowedControl(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"plain", "sha256:abcd1234", false},
+		{"with space", "reg/app v1", false},
+		{"with tab", "a\tb", false},
+		{"newline", "a\nb", true},
+		{"carriage return", "a\rb", true},
+		{"nul", "a\x00b", true},
+		{"escape", "a\x1bb", true},
+		{"del", "a\x7fb", true},
+		{"c1 control", "a\u0085b", true},        // NEL (U+0085) in the C1 range
+		{"line separator", "a\u2028b", true},    // U+2028
+		{"paragraph separator", "a\u2029b", true}, // U+2029
+		{"unicode text", "café-π", false},
+	}
+	for _, tc := range cases {
+		if got := hasDisallowedControl(tc.in); got != tc.want {
+			t.Errorf("%s: hasDisallowedControl(%q) = %v, want %v", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
+
 // TestExecutor_Outputs_DisabledPassesThrough verifies that with
 // COOKER_OUTPUTS_ENABLED=false the ${stages.*} token is passed through to
 // the adapter literally — no interpolation, no error, no ingestion.

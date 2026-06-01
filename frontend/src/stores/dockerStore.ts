@@ -7,13 +7,6 @@ interface DockerStore {
   containers: ContainerInfo[];
   loading: boolean;
   error: string | null;
-  /**
-   * True when the backend returned HTTP 501 — the Docker host transport is
-   * not configured (COOKER_DOCKER_HOST is unset / P9.4 not wired up).
-   * List endpoints still return 200 + [] so this flag is only set when an
-   * inspect or mutating action is attempted.
-   */
-  transportUnconfigured: boolean;
 
   fetchImages: () => Promise<void>;
   fetchContainers: () => Promise<void>;
@@ -28,7 +21,6 @@ export const useDockerStore = create<DockerStore>((set) => ({
   containers: [],
   loading: false,
   error: null,
-  transportUnconfigured: false,
 
   fetchImages: async () => {
     set({ loading: true, error: null });
@@ -51,16 +43,13 @@ export const useDockerStore = create<DockerStore>((set) => ({
   },
 
   buildImage: async (config) => {
-    try {
-      const result = await dockerApi.buildImage(config);
-      return result.buildId;
-    } catch (e) {
-      const msg = (e as Error).message;
-      if (msg.includes('not configured') || msg.includes('transport')) {
-        set({ transportUnconfigured: true });
-      }
-      throw e;
-    }
+    // The Docker host transport is intentionally not wired in this build
+    // (honest-501 by design / P9.4), so buildImage will reject. We don't
+    // track a "transport unconfigured" flag here: DockerPage shows its
+    // banner unconditionally, so there's nothing to gate. Let the error
+    // propagate to the caller, which surfaces a toast.
+    const result = await dockerApi.buildImage(config);
+    return result.buildId;
   },
 
   deleteImage: async (id: string) => {

@@ -92,6 +92,25 @@ export function useWebSocket({
       // gate don't silently connect to the wrong endpoint.
       return;
     }
+    // Supersede any existing socket before opening a new one. A caller
+    // can invoke connect() while a socket is still live (e.g. useStageLogs
+    // calls connect() on a `stream-truncated` control frame). Without this
+    // the old socket stays open and, because we reset closedByCallerRef
+    // below, its onclose would fire scheduleReconnect() — a reconnect
+    // storm plus a leaked socket. Detach the old socket's handlers so its
+    // onclose is a no-op, then close it. We can't reuse closedByCallerRef
+    // for this (that flag also guards unmount-during-ticket-fetch and
+    // gates scheduleReconnect for the *new* attempt), so we neutralise the
+    // superseded socket per-instance.
+    const stale = wsRef.current;
+    if (stale && stale.readyState !== WebSocket.CLOSED) {
+      stale.onopen = null;
+      stale.onclose = null;
+      stale.onerror = null;
+      stale.onmessage = null;
+      stale.close();
+    }
+    wsRef.current = null;
     closedByCallerRef.current = false;
     const ticket = await fetchWSTicket();
     if (closedByCallerRef.current) return; // FH-03: guard against unmount during ticket fetch
