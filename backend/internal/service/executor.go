@@ -86,8 +86,17 @@ type Executor struct {
 	gitops          gitops.Writer
 	runUpdater      RunUpdater
 	logBroadcast    LogBroadcaster
+	statusBroadcast StatusBroadcaster
 	govHook         DeployGovernanceHook
 }
+
+// StatusBroadcaster publishes a per-stage status transition to a
+// channel so the canvas can tint nodes live. The payload is the JSON
+// `{"nodeId":"<stageID>","status":"<status>"}` the frontend
+// usePipelineExecution hook consumes. The executor publishes on the
+// run channel ("pipeline-run:<runID>"); callers wire this to the WS
+// hub. Nil disables live status (logs still stream independently).
+type StatusBroadcaster func(channel string, data []byte)
 
 // DeployGovernanceHook is the executor's pre-stage admission check for
 // StageTypeDeploy. Called once per deploy stage. The implementation captures
@@ -154,6 +163,14 @@ func WithComposeDeployer(d deployer.Deployer) Option {
 	}
 }
 
+// WithStatusBroadcaster installs a per-stage status broadcaster so the
+// canvas tints nodes live as a run progresses. Pass nil to disable.
+func WithStatusBroadcaster(b StatusBroadcaster) Option {
+	return func(e *Executor) {
+		e.statusBroadcast = b
+	}
+}
+
 // WithGitOps injects the GitOps writer used by gitops-commit stages.
 func WithGitOps(g gitops.Writer) Option {
 	return func(e *Executor) {
@@ -204,6 +221,18 @@ func NewExecutor(opts ...Option) *Executor {
 		opt(e)
 	}
 	return e
+}
+
+// broadcastStatus publishes a {nodeId,status} frame on the run's
+// status channel so the canvas tints the node live. No-op when no
+// broadcaster is wired or the IDs are empty.
+func (e *Executor) broadcastStatus(runID, stageID, status string) {
+	if e.statusBroadcast == nil || runID == "" || stageID == "" {
+		return
+	}
+	if data := encodeStatusUpdate(stageID, status); data != nil {
+		e.statusBroadcast(RunStatusChannel(runID), data)
+	}
 }
 
 // Execute runs a pipeline and returns the terminal RunResult plus
@@ -322,6 +351,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		}
 		// Progress is now persisted by the drain goroutine below via
 		// runner.Updates(). No explicit persistProgress call here.
+		e.broadcastStatus(run.ID, stage.ID, string(stageRun.Status))
 
 		logger.Info("pipeline executing stage",
 			"stage", stage.Name, "type", stage.Type, "timeout", timeout)
@@ -391,6 +421,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			}
 			stageRun.Error = stageErr.Error()
 			observability.ObserveStageDuration(string(stage.Type), "failed", duration)
+			e.broadcastStatus(run.ID, stage.ID, string(stageRun.Status))
 			// Terminal status: the drain goroutine flushes immediately
 			// when it receives the "failed" StatusUpdate from the runner.
 			return stageErr
@@ -402,6 +433,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			stageRun.Status = model.RunStatusSuccess
 		}
 		observability.ObserveStageDuration(string(stage.Type), "success", duration)
+		e.broadcastStatus(run.ID, stage.ID, string(stageRun.Status))
 		// Terminal status: the drain goroutine flushes immediately
 		// when it receives the "success" StatusUpdate from the runner.
 		return nil

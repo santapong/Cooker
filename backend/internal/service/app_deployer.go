@@ -110,7 +110,10 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 			return nil, nil, fmt.Errorf("parse compose: %w", parseErr)
 		}
 		fmt.Fprintf(logW, "[plan] compose: %d service(s) → per-service DAG\n", len(graph.Services))
-		pipelineID := fmt.Sprintf("app-%s-%d", app.ID, ts)
+		// Deterministic per-deploy pipeline ID derived from the runID so
+		// the handler can return it in the 202 (the deployment view needs
+		// both). runID is unique per deploy; fall back to ts when absent.
+		pipelineID := ComposePipelineID(runID, app.ID, ts)
 		var synthErr error
 		p, run, synthErr = synthesizePipelineFromCompose(app, graph, workdir, registry, ts, pipelineID, runID)
 		if synthErr != nil {
@@ -235,6 +238,18 @@ spec:
   selector: {app: %[1]s}
   ports: [{port: 80, targetPort: 80}]
 `, name, image)
+}
+
+// ComposePipelineID returns the deterministic pipeline ID for a
+// compose deploy so the handler (which knows runID before Deploy runs)
+// and the synthesizer agree. Prefers the runID (unique per deploy);
+// falls back to app+timestamp when runID is empty (coordinator-less
+// callers).
+func ComposePipelineID(runID, appID string, ts int64) string {
+	if runID != "" {
+		return "app-" + appID + "-" + runID
+	}
+	return fmt.Sprintf("app-%s-%d", appID, ts)
 }
 
 // synthesizePipelineFromCompose turns a parsed ComposeGraph into a

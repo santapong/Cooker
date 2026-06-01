@@ -14,6 +14,7 @@ import (
 
 	"github.com/santapong/cooker/internal/auth"
 	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/source/github"
 	"github.com/santapong/cooker/internal/validate"
 )
@@ -218,6 +219,11 @@ func (h *Handler) DeployApp(c *gin.Context) {
 		"stream":  "/ws/app-run/" + runID,
 		"repo":    a.GitHubRepo,
 		"branch":  a.Branch,
+		// pipelineId is the deterministic ID the compose deploy will
+		// persist; the deployment view loads the grouped DAG from it.
+		// Meaningful only for compose-based apps (harmless otherwise).
+		"pipelineId":     service.ComposePipelineID(runID, a.ID, 0),
+		"deploymentView": "/apps/" + a.ID + "/deployments/" + service.ComposePipelineID(runID, a.ID, 0) + "/" + runID,
 	})
 }
 

@@ -215,6 +215,7 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithDockerDeployer(deployer.NewDockerRun()),
 		service.WithComposeDeployer(deployer.NewCompose()),
 		service.WithLogBroadcaster(wsHub.Broadcast),
+		service.WithStatusBroadcaster(wsHub.Broadcast),
 		service.WithDeployGovernanceHook(govDeployHook),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
@@ -230,6 +231,10 @@ func New(cfg *config.Config) (*Server, error) {
 	h.WSBroadcast = wsHub.Broadcast
 	h.Executor = exec
 	h.Runs = runs
+	// Runtime panel: inspect/tail the live container or pod backing a
+	// deployed compose service. CLI-backed (docker/kubectl); harmless
+	// when those binaries are absent (returns "not found").
+	h.Runtime = service.NewRuntimeService(cfg.Kubernetes.Namespace)
 	// HostService coordinates the PEM-bytes-to-secrets-manager
 	// translation for SSH hosts. nil-safe handler-side: when secMgr
 	// is nil (dev without a secrets backend), SSH host create/update

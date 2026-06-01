@@ -22,6 +22,7 @@ const NewAppWizard = lazy(() => import('./pages/NewAppWizard'))
 const PipelinesPage = lazy(() => import('./pages/PipelinesPage'))
 const PipelineEditorPage = lazy(() => import('./pages/PipelineEditorPage'))
 const RunPage = lazy(() => import('./pages/RunPage'))
+const DeploymentPage = lazy(() => import('./pages/DeploymentPage'))
 const DockerPage = lazy(() => import('./pages/DockerPage'))
 const ComposePage = lazy(() => import('./pages/ComposePage'))
 const KubernetesPage = lazy(() => import('./pages/KubernetesPage'))
@@ -62,6 +63,7 @@ export default function App() {
                   <Routes>
                     <Route path="/pipelines/:id/edit" element={<MainLayout fullBleed><PipelineEditorPage /></MainLayout>} />
                     <Route path="/pipelines/:id/runs/:runId" element={<MainLayout fullBleed><RunPage /></MainLayout>} />
+                    <Route path="/apps/:appId/deployments/:pipelineId/:runId" element={<MainLayout fullBleed><DeploymentPage /></MainLayout>} />
                     <Route path="/apps/new" element={<MainLayout><NewAppWizard /></MainLayout>} />
                     <Route path="/" element={<MainLayout><AppsPage /></MainLayout>} />
                     <Route path="/apps" element={<MainLayout><AppsPage /></MainLayout>} />

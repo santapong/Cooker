@@ -183,6 +183,9 @@ func (s *Server) registerRoutes() {
 			adminRole, mfa,
 			auth.RequirePermission(auth.ResourceWebhook, auth.ActionUpdate),
 			h.SetAppWebhookSecret)
+		// Deployment-view runtime panel: live container/pod state for one
+		// service of the app's compose deployment DAG.
+		apps.GET("/:id/services/:svc/runtime", h.GetServiceRuntime)
 	}
 
 	hosts := api.Group("/hosts")
@@ -244,6 +247,16 @@ func (s *Server) registerRoutes() {
 		})
 		ws.GET("/runs/:runId/stages/:stageId/logs", func(c *gin.Context) {
 			s.wsHub.HandleStageLogs(c.Writer, c.Request, c.Param("runId"), c.Param("stageId"))
+		})
+		// Live container/pod logs for a deployed service (runtime panel).
+		ws.GET("/runtime/:appId/:serviceId/logs", func(c *gin.Context) {
+			appID, svc := c.Param("appId"), c.Param("serviceId")
+			produce, ok := h.RuntimeLogsProducer(appID, svc)
+			if !ok {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime logs not available"})
+				return
+			}
+			s.wsHub.HandleRuntimeLogs(c.Writer, c.Request, appID, svc, produce)
 		})
 		ws.GET("/kubernetes/watch", func(c *gin.Context) {
 			s.wsHub.HandleKubeWatch(c.Writer, c.Request, c.Query("namespace"), c.Query("resource"))

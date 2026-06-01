@@ -39,7 +39,7 @@ type JobEnqueuer interface {
 
 // Handler owns the dependencies shared by request handlers.
 type Handler struct {
-	Store *store.Store
+	Store       *store.Store
 	Codec       *crypto.Codec
 	Secrets     secrets.Manager
 	AppDeployer *service.AppDeployer
@@ -49,8 +49,8 @@ type Handler struct {
 	// update with a key body returns 503).
 	Hosts       *service.HostService
 	WSBroadcast func(channel string, data []byte)
-	Executor *service.Executor
-	Runs RunSpawner
+	Executor    *service.Executor
+	Runs        RunSpawner
 	// Enqueuer routes pipeline runs through the durable async queue
 	// (Phase-1 / A1). nil falls back to the inline Runs path. Set by
 	// server.New when COOKER_JOBQUEUE_ENABLED=true.
@@ -68,6 +68,10 @@ type Handler struct {
 	// Set by server.New when COOKER_JOBQUEUE_ENABLED=true (the
 	// dispatcher only fires when the queue is running anyway).
 	NotificationTargets notifier.TargetStore
+	// Runtime inspects/tails the live container or pod backing a
+	// deployed compose service (deployment-view runtime panel). Set by
+	// server.New; nil returns 503 from the runtime endpoints.
+	Runtime *service.RuntimeService
 }
 
 // New constructs a Handler bound to the given store. secs may be nil
