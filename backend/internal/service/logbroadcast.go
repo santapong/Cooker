@@ -2,7 +2,33 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
 )
+
+// RunStatusChannel returns the canonical WebSocket channel name on
+// which per-stage status updates are published for a run. Matches the
+// frontend usePipelineExecution hook's subscription
+// (/ws/pipeline-run/:runId → "pipeline-run:<runID>").
+func RunStatusChannel(runID string) string {
+	return "pipeline-run:" + runID
+}
+
+// statusUpdate is the wire shape the canvas consumes to tint nodes.
+type statusUpdate struct {
+	NodeID string `json:"nodeId"`
+	Status string `json:"status"`
+}
+
+// encodeStatusUpdate marshals a {nodeId,status} frame. Marshal of two
+// strings never fails; on the impossible error path it returns nil and
+// the caller simply skips the broadcast.
+func encodeStatusUpdate(stageID, status string) []byte {
+	b, err := json.Marshal(statusUpdate{NodeID: stageID, Status: status})
+	if err != nil {
+		return nil
+	}
+	return b
+}
 
 // LogBroadcaster pushes a single log line to a named WebSocket
 // channel. Implementations are expected to be non-blocking — the

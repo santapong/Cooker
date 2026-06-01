@@ -54,7 +54,7 @@ type Server struct {
 	// when the jobqueue is off; nil when templates share the
 	// jobqueue's pool or when the templates feature is disabled.
 	// Closed in Server.Close after the WS hub.
-	templatesDB *struct{ closer func() error }
+	templatesDB  *struct{ closer func() error }
 	healthCancel context.CancelFunc
 	healthDone   chan struct{}
 }
@@ -209,7 +209,13 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithBuilder(bld),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
 		service.WithDeployer(selectDeployer(cfg.DeployerBackend, cfg.Kubernetes.Kubeconfig)),
+		// Docker-host per-service deploy runtimes (compose deployment DAGs
+		// targeting DeployTargetDockerHost). They shell out to the local
+		// docker CLI; harmless when unused.
+		service.WithDockerDeployer(deployer.NewDockerRun()),
+		service.WithComposeDeployer(deployer.NewCompose()),
 		service.WithLogBroadcaster(wsHub.Broadcast),
+		service.WithStatusBroadcaster(wsHub.Broadcast),
 		service.WithDeployGovernanceHook(govDeployHook),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
@@ -225,6 +231,10 @@ func New(cfg *config.Config) (*Server, error) {
 	h.WSBroadcast = wsHub.Broadcast
 	h.Executor = exec
 	h.Runs = runs
+	// Runtime panel: inspect/tail the live container or pod backing a
+	// deployed compose service. CLI-backed (docker/kubectl); harmless
+	// when those binaries are absent (returns "not found").
+	h.Runtime = service.NewRuntimeService(cfg.Kubernetes.Namespace)
 	// HostService coordinates the PEM-bytes-to-secrets-manager
 	// translation for SSH hosts. nil-safe handler-side: when secMgr
 	// is nil (dev without a secrets backend), SSH host create/update

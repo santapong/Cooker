@@ -83,6 +83,38 @@ CI runs on PRs to `main` and `claude/**`. See
 [11-code-patterns-and-conventions.md](11-code-patterns-and-conventions.md) for which gates are
 enforced vs aspirational.
 
+## Per-service compose deployment DAGs
+
+Deploying an **App whose repo has a `docker-compose.yml`** no longer collapses to a single
+build→push→deploy line. `AppDeployer` parses the compose file and synthesizes a **per-service DAG**
+(`synthesizePipelineFromCompose`, `backend/internal/service/app_deployer.go`):
+
+- one `build → push → deploy` sub-chain **per service** (build/push skipped for `image:`-only
+  services);
+- cross-service `deploy → deploy` edges from `depends_on` (build/push parallelize; only deploy ordering
+  follows `depends_on`);
+- each service tagged into a **group box** in the UI, derived from the `com.cooker.group` label → else
+  the service's sole network → else `"default"`;
+- per-service **resource limits** (`mem_limit`/`cpus`/`deploy.resources.limits`) applied as K8s
+  `resources.limits` (manifest path) **or** `docker run --memory/--cpus` (Docker-host path).
+
+**Two deploy runtimes**, selected by the App's deploy target (`StageConfig.DeployRuntime`):
+
+| Target | Runtime | How a service deploys |
+|---|---|---|
+| `kubernetes` | manifest apply via `clientgo` | synthesized per-service Deployment+Service with limits |
+| `docker-host` | `docker run` (or `docker compose up`) | `deployer.DockerRun` / `deployer.Compose` against `DOCKER_HOST` |
+
+The synthesized pipeline is persisted (new row per deploy, `app-<id>-<runId>`); the deploy `202`
+returns `pipelineId` + a `deploymentView` URL. The read-only **deployment view**
+(`/apps/:appId/deployments/:pipelineId/:runId`) renders the grouped DAG, tints nodes live from the run
+channel, and opens a **runtime panel** (container/pod state + tailing logs via `RuntimeService`) when a
+service node is clicked.
+
+> **Security:** the Docker-host runtime shells out to the Docker daemon — same root-equivalent
+> RCE-to-host posture as the `docker` builder. Dev / single-node only; use a Kubernetes target in
+> clusters. See [`../../SECURITY.md`](../../SECURITY.md).
+
 ## Production readiness
 
 This system-design folder describes the *design*; it does not certify the system production-ready. The

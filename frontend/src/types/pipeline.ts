@@ -19,6 +19,16 @@ export interface Stage {
   config: StageConfig;
   environmentId?: string;
   position: { x: number; y: number };
+  // group is the deployment group-box this stage belongs to (compose
+  // deployment DAGs). Empty/undefined means ungrouped.
+  group?: string;
+}
+
+export interface ResourceLimits {
+  memory?: string;
+  memoryBytes?: number;
+  cpus?: string;
+  nanoCpus?: number;
 }
 
 export interface StageConfig {
@@ -43,6 +53,12 @@ export interface StageConfig {
   script?: string;
   timeout?: string;
   retries?: number;
+  // Compose deployment DAG provenance + per-service deploy runtime.
+  deployRuntime?: 'kubernetes' | 'docker' | 'compose';
+  composeServiceName?: string;
+  composeBuildContext?: string;
+  composeDockerfile?: string;
+  resources?: ResourceLimits;
 }
 
 export interface PipelineEdge {

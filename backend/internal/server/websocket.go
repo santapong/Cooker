@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -180,6 +182,52 @@ func (h *WebSocketHub) HandleDockerBuild(w http.ResponseWriter, r *http.Request,
 func (h *WebSocketHub) HandleKubeWatch(w http.ResponseWriter, r *http.Request, namespace, resource string) {
 	channel := "kube-watch:" + namespace + ":" + resource
 	h.handleConnection(w, r, channel)
+}
+
+// HandleRuntimeLogs upgrades the connection, subscribes it to the
+// runtime-logs channel for (appID, serviceID), and starts a producer
+// goroutine that tails the live container/pod logs into the hub. The
+// producer is bound to the request context, so it stops when the
+// client disconnects. `produce` is the RuntimeService.Logs call wired
+// by the handler; it receives an io.Writer that broadcasts each line.
+func (h *WebSocketHub) HandleRuntimeLogs(w http.ResponseWriter, r *http.Request, appID, serviceID string, produce func(ctx context.Context, out io.Writer) error) {
+	channel := "runtime-logs:" + appID + ":" + serviceID
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		slog.Warn("websocket upgrade failed", "err", err)
+		return
+	}
+	client := &Client{hub: h, conn: conn, send: make(chan []byte, 256), channel: channel}
+	h.register <- client
+	go client.writePump()
+	go client.readPump()
+
+	// Producer: tail logs into the hub on this channel until the client
+	// (request context) goes away. Runs in its own goroutine so the
+	// handler returns and the WS pumps stay live.
+	go func() {
+		ctx := r.Context()
+		writer := &hubLineWriter{hub: h, channel: channel}
+		if perr := produce(ctx, writer); perr != nil {
+			slog.Warn("runtime logs producer ended", "app", appID, "service", serviceID, "err", perr)
+		}
+	}()
+}
+
+// hubLineWriter adapts io.Writer to a hub broadcast on a fixed channel,
+// one Write == one broadcast. Used to fan runtime log output to WS
+// subscribers.
+type hubLineWriter struct {
+	hub     *WebSocketHub
+	channel string
+}
+
+func (w *hubLineWriter) Write(p []byte) (int, error) {
+	// Copy: Broadcast may retain the slice past this call.
+	b := make([]byte, len(p))
+	copy(b, p)
+	w.hub.Broadcast(w.channel, b)
+	return len(p), nil
 }
 
 func (h *WebSocketHub) handleConnection(w http.ResponseWriter, r *http.Request, channel string) {

@@ -74,14 +74,29 @@ type RunUpdater func(ctx context.Context, run *model.PipelineRun) error
 // Production wiring injects real Builder/Pusher/Deployer; tests
 // inject mocks.
 type Executor struct {
-	builder      builder.Builder
-	pusher       pusher.Pusher
-	deployer     deployer.Deployer
-	gitops       gitops.Writer
-	runUpdater   RunUpdater
-	logBroadcast LogBroadcaster
-	govHook      DeployGovernanceHook
+	builder  builder.Builder
+	pusher   pusher.Pusher
+	deployer deployer.Deployer
+	// dockerDeployer and composeDeployer back per-service deploy stages
+	// whose DeployRuntime is "docker"/"compose" (Docker-host targets).
+	// Nil falls back to the default deployer, so non-Docker installs are
+	// unaffected.
+	dockerDeployer  deployer.Deployer
+	composeDeployer deployer.Deployer
+	gitops          gitops.Writer
+	runUpdater      RunUpdater
+	logBroadcast    LogBroadcaster
+	statusBroadcast StatusBroadcaster
+	govHook         DeployGovernanceHook
 }
+
+// StatusBroadcaster publishes a per-stage status transition to a
+// channel so the canvas can tint nodes live. The payload is the JSON
+// `{"nodeId":"<stageID>","status":"<status>"}` the frontend
+// usePipelineExecution hook consumes. The executor publishes on the
+// run channel ("pipeline-run:<runID>"); callers wire this to the WS
+// hub. Nil disables live status (logs still stream independently).
+type StatusBroadcaster func(channel string, data []byte)
 
 // DeployGovernanceHook is the executor's pre-stage admission check for
 // StageTypeDeploy. Called once per deploy stage. The implementation captures
@@ -125,6 +140,34 @@ func WithDeployer(d deployer.Deployer) Option {
 		if d != nil {
 			e.deployer = d
 		}
+	}
+}
+
+// WithDockerDeployer injects the deployer used by per-service deploy
+// stages whose DeployRuntime is "docker" (Docker-host targets).
+func WithDockerDeployer(d deployer.Deployer) Option {
+	return func(e *Executor) {
+		if d != nil {
+			e.dockerDeployer = d
+		}
+	}
+}
+
+// WithComposeDeployer injects the deployer used by deploy stages whose
+// DeployRuntime is "compose" (whole-stack docker compose up).
+func WithComposeDeployer(d deployer.Deployer) Option {
+	return func(e *Executor) {
+		if d != nil {
+			e.composeDeployer = d
+		}
+	}
+}
+
+// WithStatusBroadcaster installs a per-stage status broadcaster so the
+// canvas tints nodes live as a run progresses. Pass nil to disable.
+func WithStatusBroadcaster(b StatusBroadcaster) Option {
+	return func(e *Executor) {
+		e.statusBroadcast = b
 	}
 }
 
@@ -178,6 +221,18 @@ func NewExecutor(opts ...Option) *Executor {
 		opt(e)
 	}
 	return e
+}
+
+// broadcastStatus publishes a {nodeId,status} frame on the run's
+// status channel so the canvas tints the node live. No-op when no
+// broadcaster is wired or the IDs are empty.
+func (e *Executor) broadcastStatus(runID, stageID, status string) {
+	if e.statusBroadcast == nil || runID == "" || stageID == "" {
+		return
+	}
+	if data := encodeStatusUpdate(stageID, status); data != nil {
+		e.statusBroadcast(RunStatusChannel(runID), data)
+	}
 }
 
 // Execute runs a pipeline and returns the terminal RunResult plus
@@ -296,6 +351,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		}
 		// Progress is now persisted by the drain goroutine below via
 		// runner.Updates(). No explicit persistProgress call here.
+		e.broadcastStatus(run.ID, stage.ID, string(stageRun.Status))
 
 		logger.Info("pipeline executing stage",
 			"stage", stage.Name, "type", stage.Type, "timeout", timeout)
@@ -365,6 +421,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			}
 			stageRun.Error = stageErr.Error()
 			observability.ObserveStageDuration(string(stage.Type), "failed", duration)
+			e.broadcastStatus(run.ID, stage.ID, string(stageRun.Status))
 			// Terminal status: the drain goroutine flushes immediately
 			// when it receives the "failed" StatusUpdate from the runner.
 			return stageErr
@@ -376,6 +433,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			stageRun.Status = model.RunStatusSuccess
 		}
 		observability.ObserveStageDuration(string(stage.Type), "success", duration)
+		e.broadcastStatus(run.ID, stage.ID, string(stageRun.Status))
 		// Terminal status: the drain goroutine flushes immediately
 		// when it receives the "success" StatusUpdate from the runner.
 		return nil
@@ -655,14 +713,32 @@ func (e *Executor) executePush(ctx context.Context, runID string, stage *model.S
 }
 
 func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
+	// Select the deployer + request kind. DeployRuntime (set by compose
+	// per-service synthesis) routes docker/compose stages to the Docker
+	// deployers; everything else keeps the legacy manifest/helm dispatch
+	// on the default deployer.
+	dep := e.deployer
 	var kind deployer.Kind
-	switch {
-	case stage.Config.HelmChart != "":
-		kind = deployer.KindHelm
-	case stage.Config.ManifestPath != "":
-		kind = deployer.KindManifest
+	switch stage.Config.DeployRuntime {
+	case "docker":
+		kind = deployer.KindDockerRun
+		if e.dockerDeployer != nil {
+			dep = e.dockerDeployer
+		}
+	case "compose":
+		kind = deployer.KindCompose
+		if e.composeDeployer != nil {
+			dep = e.composeDeployer
+		}
 	default:
-		return fmt.Errorf("deploy stage %q: need ManifestPath or HelmChart", stage.Name)
+		switch {
+		case stage.Config.HelmChart != "":
+			kind = deployer.KindHelm
+		case stage.Config.ManifestPath != "":
+			kind = deployer.KindManifest
+		default:
+			return fmt.Errorf("deploy stage %q: need ManifestPath or HelmChart", stage.Name)
+		}
 	}
 
 	// Mirror executeBuild's LogWriter wiring (see executor.go executeBuild
@@ -697,22 +773,49 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 		HelmChart:   stage.Config.HelmChart,
 		HelmValues:  stage.Config.HelmValues,
 		ReleaseName: stage.Name,
+		Image:       stage.Config.Image,
 		LogWriter:   writer,
 	}
-	if kind == deployer.KindManifest {
+	switch kind {
+	case deployer.KindManifest:
 		req.Manifest = []byte(stage.Config.ManifestPath)
+	case deployer.KindDockerRun:
+		// Per-service docker run: name from the compose service, with
+		// resource limits and the build/image tag from the stage.
+		req.Name = stage.Config.ComposeServiceName
+		req.Ports = composePortsToPublish(stage.Config)
+		req.Env = stage.Config.Env
+		if r := stage.Config.Resources; r != nil {
+			req.Resources = &deployer.ResourceLimits{Memory: r.Memory, CPUs: r.CPUs}
+		}
+	case deployer.KindCompose:
+		req.Name = stage.Config.ComposeServiceName
+		req.ComposeFile = stage.Config.ManifestPath // reused field: compose-file path
 	}
-	res, err := e.deployer.Deploy(ctx, req)
+	res, err := dep.Deploy(ctx, req)
 	if err != nil {
 		return fmt.Errorf("deploy: %w", err)
 	}
+	resType := "k8s-resource"
+	if kind == deployer.KindDockerRun || kind == deployer.KindCompose {
+		resType = "container"
+	}
 	for _, r := range res.AppliedResources {
 		sr.Artifacts = append(sr.Artifacts, model.Artifact{
-			Type: "k8s-resource",
+			Type: resType,
 			Ref:  r,
 		})
 	}
 	return nil
+}
+
+// composePortsToPublish returns the port specs a docker-run deploy
+// should publish, carried from the compose service's `ports:` during
+// synthesis (StageConfig.ComposePorts). The docker deployer normalizes
+// a bare "80" to "80:80". (K8s deploys publish via the synthesized
+// manifest's port instead.)
+func composePortsToPublish(cfg model.StageConfig) []string {
+	return cfg.ComposePorts
 }
 
 // hasRegistryHost returns true when ref already includes a registry

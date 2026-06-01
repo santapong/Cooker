@@ -23,3 +23,20 @@ export const pipelineApi = {
     get<EnvironmentStatus[]>(`/pipelines/${pipelineId}/runs/${runId}/env-status`),
 };
 
+export interface ServiceRuntimeStatus {
+  runtime: string;
+  ref: string;
+  state: string;
+  healthy: boolean;
+  image?: string;
+  message?: string;
+}
+
+export const runtimeApi = {
+  // Live container/pod state for one deployed compose service.
+  serviceStatus: (appId: string, svc: string) =>
+    get<ServiceRuntimeStatus>(`/apps/${appId}/services/${svc}/runtime`),
+  // WebSocket path for live runtime logs (used by useRuntimeLogs).
+  logsPath: (appId: string, svc: string) => `/ws/runtime/${appId}/${svc}/logs`,
+};
+

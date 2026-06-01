@@ -39,6 +39,11 @@ type Stage struct {
 	Config        StageConfig `json:"config"`
 	EnvironmentID string      `json:"environmentId,omitempty"`
 	Position      Position    `json:"position"`
+	// Group names the deployment group-box this stage belongs to,
+	// rendered as a container node in the deployment DAG view. Empty
+	// means "ungrouped" (backward compatible with hand-built
+	// pipelines). Populated by compose-driven synthesis.
+	Group string `json:"group,omitempty"`
 }
 
 // StageConfig holds type-specific configuration for a pipeline stage.
@@ -63,6 +68,28 @@ type StageConfig struct {
 	ManifestPath string                 `json:"manifestPath,omitempty"`
 	HelmChart    string                 `json:"helmChart,omitempty"`
 	HelmValues   map[string]interface{} `json:"helmValues,omitempty"`
+
+	// Deploy runtime selection for compose-synthesized per-service
+	// deploy stages: "kubernetes" (manifest apply), "docker" (per-
+	// service docker run), or "compose" (docker compose up). Empty
+	// preserves the legacy manifest/helm dispatch.
+	DeployRuntime string `json:"deployRuntime,omitempty"`
+
+	// Compose provenance — set on stages synthesized from a compose
+	// service so the executor/runtime layer can correlate a stage back
+	// to its originating service (and re-derive a manifest/run command).
+	ComposeServiceName  string `json:"composeServiceName,omitempty"`
+	ComposeBuildContext string `json:"composeBuildContext,omitempty"`
+	ComposeDockerfile   string `json:"composeDockerfile,omitempty"`
+	// ComposePorts carries the compose service's `ports:` so a
+	// docker-run deploy can publish them (-p). Format is compose-native
+	// ("host:container" or bare "port"). K8s deploys use the synthesized
+	// manifest's port instead, so this is docker-runtime-specific.
+	ComposePorts []string `json:"composePorts,omitempty"`
+
+	// Resources carries per-service CPU/memory limits to apply at
+	// deploy time (K8s resources.limits, or docker --memory/--cpus).
+	Resources *ResourceLimits `json:"resources,omitempty"`
 
 	// Custom
 	Script  string `json:"script,omitempty"`

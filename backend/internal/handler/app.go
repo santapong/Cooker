@@ -14,6 +14,7 @@ import (
 
 	"github.com/santapong/cooker/internal/auth"
 	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/source/github"
 	"github.com/santapong/cooker/internal/validate"
 )
@@ -218,6 +219,11 @@ func (h *Handler) DeployApp(c *gin.Context) {
 		"stream":  "/ws/app-run/" + runID,
 		"repo":    a.GitHubRepo,
 		"branch":  a.Branch,
+		// pipelineId is the deterministic ID the compose deploy will
+		// persist; the deployment view loads the grouped DAG from it.
+		// Meaningful only for compose-based apps (harmless otherwise).
+		"pipelineId":     service.ComposePipelineID(runID, a.ID, 0),
+		"deploymentView": "/apps/" + a.ID + "/deployments/" + service.ComposePipelineID(runID, a.ID, 0) + "/" + runID,
 	})
 }
 
@@ -240,9 +246,17 @@ func (h *Handler) runAppDeployCtx(ctx context.Context, a *model.App, runID, chan
 	sink := &wsLogSink{channel: channel, broadcast: h.WSBroadcast}
 	sink.writef("[start] app=%s repo=%s branch=%s run=%s\n", a.Name, a.GitHubRepo, a.Branch, runID)
 
-	run, err := h.AppDeployer.Deploy(deployCtx, a, sink)
+	pipeline, run, err := h.AppDeployer.Deploy(deployCtx, a, runID, sink)
 	if err != nil {
 		sink.writef("[error] %v\n", err)
+	}
+	// Persist the synthesized pipeline for the grouped compose DAG so the
+	// deployment view can fetch its stages/edges/groups. Best-effort:
+	// the run is the source of truth, the pipeline is for visualization.
+	if pipeline != nil {
+		if createErr := h.Store.Pipelines.Create(deployCtx, pipeline); createErr != nil {
+			sink.writef("[warn] persist pipeline: %v\n", createErr)
+		}
 	}
 	if run != nil {
 		// The stub run row was Created before Spawn (F-07 fix), so
