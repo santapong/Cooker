@@ -74,13 +74,19 @@ type RunUpdater func(ctx context.Context, run *model.PipelineRun) error
 // Production wiring injects real Builder/Pusher/Deployer; tests
 // inject mocks.
 type Executor struct {
-	builder      builder.Builder
-	pusher       pusher.Pusher
-	deployer     deployer.Deployer
-	gitops       gitops.Writer
-	runUpdater   RunUpdater
-	logBroadcast LogBroadcaster
-	govHook      DeployGovernanceHook
+	builder  builder.Builder
+	pusher   pusher.Pusher
+	deployer deployer.Deployer
+	// dockerDeployer and composeDeployer back per-service deploy stages
+	// whose DeployRuntime is "docker"/"compose" (Docker-host targets).
+	// Nil falls back to the default deployer, so non-Docker installs are
+	// unaffected.
+	dockerDeployer  deployer.Deployer
+	composeDeployer deployer.Deployer
+	gitops          gitops.Writer
+	runUpdater      RunUpdater
+	logBroadcast    LogBroadcaster
+	govHook         DeployGovernanceHook
 }
 
 // DeployGovernanceHook is the executor's pre-stage admission check for
@@ -124,6 +130,26 @@ func WithDeployer(d deployer.Deployer) Option {
 	return func(e *Executor) {
 		if d != nil {
 			e.deployer = d
+		}
+	}
+}
+
+// WithDockerDeployer injects the deployer used by per-service deploy
+// stages whose DeployRuntime is "docker" (Docker-host targets).
+func WithDockerDeployer(d deployer.Deployer) Option {
+	return func(e *Executor) {
+		if d != nil {
+			e.dockerDeployer = d
+		}
+	}
+}
+
+// WithComposeDeployer injects the deployer used by deploy stages whose
+// DeployRuntime is "compose" (whole-stack docker compose up).
+func WithComposeDeployer(d deployer.Deployer) Option {
+	return func(e *Executor) {
+		if d != nil {
+			e.composeDeployer = d
 		}
 	}
 }
@@ -655,14 +681,32 @@ func (e *Executor) executePush(ctx context.Context, runID string, stage *model.S
 }
 
 func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
+	// Select the deployer + request kind. DeployRuntime (set by compose
+	// per-service synthesis) routes docker/compose stages to the Docker
+	// deployers; everything else keeps the legacy manifest/helm dispatch
+	// on the default deployer.
+	dep := e.deployer
 	var kind deployer.Kind
-	switch {
-	case stage.Config.HelmChart != "":
-		kind = deployer.KindHelm
-	case stage.Config.ManifestPath != "":
-		kind = deployer.KindManifest
+	switch stage.Config.DeployRuntime {
+	case "docker":
+		kind = deployer.KindDockerRun
+		if e.dockerDeployer != nil {
+			dep = e.dockerDeployer
+		}
+	case "compose":
+		kind = deployer.KindCompose
+		if e.composeDeployer != nil {
+			dep = e.composeDeployer
+		}
 	default:
-		return fmt.Errorf("deploy stage %q: need ManifestPath or HelmChart", stage.Name)
+		switch {
+		case stage.Config.HelmChart != "":
+			kind = deployer.KindHelm
+		case stage.Config.ManifestPath != "":
+			kind = deployer.KindManifest
+		default:
+			return fmt.Errorf("deploy stage %q: need ManifestPath or HelmChart", stage.Name)
+		}
 	}
 
 	// Mirror executeBuild's LogWriter wiring (see executor.go executeBuild
@@ -697,21 +741,48 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 		HelmChart:   stage.Config.HelmChart,
 		HelmValues:  stage.Config.HelmValues,
 		ReleaseName: stage.Name,
+		Image:       stage.Config.Image,
 		LogWriter:   writer,
 	}
-	if kind == deployer.KindManifest {
+	switch kind {
+	case deployer.KindManifest:
 		req.Manifest = []byte(stage.Config.ManifestPath)
+	case deployer.KindDockerRun:
+		// Per-service docker run: name from the compose service, with
+		// resource limits and the build/image tag from the stage.
+		req.Name = stage.Config.ComposeServiceName
+		req.Ports = composePortsToPublish(stage.Config)
+		req.Env = stage.Config.Env
+		if r := stage.Config.Resources; r != nil {
+			req.Resources = &deployer.ResourceLimits{Memory: r.Memory, CPUs: r.CPUs}
+		}
+	case deployer.KindCompose:
+		req.Name = stage.Config.ComposeServiceName
+		req.ComposeFile = stage.Config.ManifestPath // reused field: compose-file path
 	}
-	res, err := e.deployer.Deploy(ctx, req)
+	res, err := dep.Deploy(ctx, req)
 	if err != nil {
 		return fmt.Errorf("deploy: %w", err)
 	}
+	resType := "k8s-resource"
+	if kind == deployer.KindDockerRun || kind == deployer.KindCompose {
+		resType = "container"
+	}
 	for _, r := range res.AppliedResources {
 		sr.Artifacts = append(sr.Artifacts, model.Artifact{
-			Type: "k8s-resource",
+			Type: resType,
 			Ref:  r,
 		})
 	}
+	return nil
+}
+
+// composePortsToPublish returns the port specs a docker-run deploy
+// should publish. For now the synthesized stage doesn't carry the raw
+// compose ports separately, so we publish nothing by default; the
+// container's own EXPOSE governs reachability. (Ports are surfaced in
+// the K8s manifest path via firstContainerPort.)
+func composePortsToPublish(cfg model.StageConfig) []string {
 	return nil
 }
 
