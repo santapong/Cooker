@@ -22,18 +22,18 @@ const schedulerLockKey int64 = 0x434f4f4b45525343 // "COOKERSC"
 // job per due schedule, and bumps next_run_at. On lock loss it
 // backs off and retries; on ctx cancel it returns cleanly.
 type Runner struct {
-	db          *sql.DB
-	store       Store
-	enqueuer    *service.JobQueueEnqueuer
-	tickEvery   time.Duration
-	nowFn       func() time.Time
+	db        *sql.DB
+	store     Store
+	enqueuer  *service.JobQueueEnqueuer
+	tickEvery time.Duration
+	nowFn     func() time.Time
 }
 
 // Options configures a Runner.
 type Options struct {
-	DB        *sql.DB
-	Store     Store
-	Enqueuer  *service.JobQueueEnqueuer
+	DB       *sql.DB
+	Store    Store
+	Enqueuer *service.JobQueueEnqueuer
 	// TickEvery is the wakeup interval when this replica holds the
 	// lock. Default 30s. Smaller values catch overdue schedules
 	// faster at the cost of more queries.

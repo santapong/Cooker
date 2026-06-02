@@ -28,33 +28,33 @@ func (e Env) IsProduction() bool { return e == EnvProduction }
 
 // Config holds all application configuration.
 type Config struct {
-	Env             Env
-	Port            int
-	DatabaseURL     string
-	RedisURL        string
-	AllowedOrigins  []string
-	SecretKey       string
-	Registry        string
-	BuilderBackend  string
-	PusherBackend   string
-	DeployerBackend string
-	SecretsBackend  string
-	ReplicaCount    int
-	StickySessions  bool
-	RateLimit       RateLimitConfig
-	WSTicket        WSTicketConfig
-	WSHub           WSHubConfig
-	OIDC            OIDCConfig
-	LocalAuth       LocalAuthConfig
-	Docker          DockerConfig
-	Kubernetes      KubernetesConfig
-	KeepSave        KeepSaveConfig
-	Vault           VaultConfig
-	AWSSecrets      AWSSecretsConfig
-	GCPSecrets      GCPSecretsConfig
-	DeployTargets   DeployTargetsConfig
-	Audit           AuditConfig
-	Observability   ObservabilityConfig
+	Env               Env
+	Port              int
+	DatabaseURL       string
+	RedisURL          string
+	AllowedOrigins    []string
+	SecretKey         string
+	Registry          string
+	BuilderBackend    string
+	PusherBackend     string
+	DeployerBackend   string
+	SecretsBackend    string
+	ReplicaCount      int
+	StickySessions    bool
+	RateLimit         RateLimitConfig
+	WSTicket          WSTicketConfig
+	WSHub             WSHubConfig
+	OIDC              OIDCConfig
+	LocalAuth         LocalAuthConfig
+	Docker            DockerConfig
+	Kubernetes        KubernetesConfig
+	KeepSave          KeepSaveConfig
+	Vault             VaultConfig
+	AWSSecrets        AWSSecretsConfig
+	GCPSecrets        GCPSecretsConfig
+	DeployTargets     DeployTargetsConfig
+	Audit             AuditConfig
+	Observability     ObservabilityConfig
 	AppHealthInterval time.Duration
 	JobQueue          JobQueueConfig
 	// Scheduler configures the Phase-2 cron-triggered runs loop. Default

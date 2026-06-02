@@ -10,10 +10,10 @@ import (
 // specific config lives inside Config (channel adapters decode
 // their fields from it).
 type Target struct {
-	ID         string          `json:"id"`
-	Name       string          `json:"name"`
-	Kind       string          `json:"kind"`
-	Config     json.RawMessage `json:"config"`
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Kind   string          `json:"kind"`
+	Config json.RawMessage `json:"config"`
 	// EventTypes filters which events this target receives. Empty
 	// list means "all events" (least surprise: a freshly configured
 	// target with no filter set fires on everything).

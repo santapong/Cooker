@@ -368,7 +368,10 @@ func TestDeploy_RunsPullStopRmRunInOrder(t *testing.T) {
 	if len(got) != 4 {
 		t.Fatalf("want 4 commands (pull/stop/rm/run), got %d: %#v", len(got), got)
 	}
-	checks := []struct{ idx int; want string }{
+	checks := []struct {
+		idx  int
+		want string
+	}{
 		{0, "docker pull 'nginx:1.25'"},
 		{1, "docker stop 'cooker-app-1'"},
 		{2, "docker rm 'cooker-app-1'"},

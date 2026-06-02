@@ -12,10 +12,10 @@ import (
 
 // Template mirrors a row in pipeline_templates.
 type Template struct {
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Category    string          `json:"category,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Category    string `json:"category,omitempty"`
 	// Schema is the embedded Pipeline JSON. Channels that consume
 	// the catalog (UI gallery) need only Name + Description +
 	// Category; the Schema is fetched lazily on "Use template".

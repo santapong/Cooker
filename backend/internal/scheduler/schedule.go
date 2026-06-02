@@ -16,17 +16,17 @@ import "time"
 
 // Schedule mirrors a row in the schedules table.
 type Schedule struct {
-	ID         string    `json:"id"`
-	PipelineID string    `json:"pipelineId"`
-	Name       string    `json:"name,omitempty"`
-	CronExpr   string    `json:"cronExpr"`
-	Timezone   string    `json:"timezone"` // IANA name; default "UTC"
+	ID         string     `json:"id"`
+	PipelineID string     `json:"pipelineId"`
+	Name       string     `json:"name,omitempty"`
+	CronExpr   string     `json:"cronExpr"`
+	Timezone   string     `json:"timezone"` // IANA name; default "UTC"
 	LastRunAt  *time.Time `json:"lastRunAt,omitempty"`
-	LastRunID  string    `json:"lastRunId,omitempty"`
-	NextRunAt  time.Time `json:"nextRunAt"`
-	Enabled    bool      `json:"enabled"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	LastRunID  string     `json:"lastRunId,omitempty"`
+	NextRunAt  time.Time  `json:"nextRunAt"`
+	Enabled    bool       `json:"enabled"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
 }
 
 // LoadLocation returns the IANA location named on the schedule.

@@ -1,8 +1,8 @@
 package logstore
 
 import (
-	"context"
 	"container/list"
+	"context"
 	"log/slog"
 	"os"
 	"strconv"

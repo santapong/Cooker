@@ -13,9 +13,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/santapong/cooker/internal/secrets"
 	"github.com/hashicorp/vault-client-go"
 	"github.com/hashicorp/vault-client-go/schema"
+	"github.com/santapong/cooker/internal/secrets"
 )
 
 // Manager satisfies secrets.Manager using Vault KV v2 under

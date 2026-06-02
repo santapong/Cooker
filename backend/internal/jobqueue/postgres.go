@@ -78,13 +78,13 @@ func (p *Postgres) Enqueue(ctx context.Context, kind string, payload json.RawMes
 
 // Dequeue implements Store. The query:
 //
-//	1. Picks the oldest pending job whose run_at <= NOW().
-//	2. Filters by kind when the caller supplied a non-empty list.
-//	3. Skips jobs whose concurrency_key is already held by a running
-//	   job (NOT EXISTS subquery; partial index keeps it cheap).
-//	4. Locks the row with FOR UPDATE SKIP LOCKED so concurrent workers
-//	   don't contend.
-//	5. UPDATE ... RETURNING flips it to running and returns the row.
+//  1. Picks the oldest pending job whose run_at <= NOW().
+//  2. Filters by kind when the caller supplied a non-empty list.
+//  3. Skips jobs whose concurrency_key is already held by a running
+//     job (NOT EXISTS subquery; partial index keeps it cheap).
+//  4. Locks the row with FOR UPDATE SKIP LOCKED so concurrent workers
+//     don't contend.
+//  5. UPDATE ... RETURNING flips it to running and returns the row.
 func (p *Postgres) Dequeue(ctx context.Context, workerID string, kinds []string) (*Job, error) {
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {

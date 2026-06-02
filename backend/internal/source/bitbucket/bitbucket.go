@@ -28,9 +28,9 @@ type PushEvent struct {
 	EventKey string `json:"eventKey"` // "repo:refs_changed"
 	Changes  []struct {
 		Ref struct {
-			ID        string `json:"id"`   // "refs/heads/<branch>"
+			ID        string `json:"id"`        // "refs/heads/<branch>"
 			DisplayID string `json:"displayId"` // "<branch>"
-			Type      string `json:"type"` // "BRANCH" | "TAG"
+			Type      string `json:"type"`      // "BRANCH" | "TAG"
 		} `json:"ref"`
 		ToHash   string `json:"toHash"`
 		FromHash string `json:"fromHash"`

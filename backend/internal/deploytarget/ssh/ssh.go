@@ -84,9 +84,9 @@ func (r *realClient) Close() error { return r.c.Close() }
 
 type realSession struct{ s *gossh.Session }
 
-func (r *realSession) SetStdout(w io.Writer)            { r.s.Stdout = w }
-func (r *realSession) SetStderr(w io.Writer)            { r.s.Stderr = w }
-func (r *realSession) Run(cmd string) error             { return r.s.Run(cmd) }
+func (r *realSession) SetStdout(w io.Writer) { r.s.Stdout = w }
+func (r *realSession) SetStderr(w io.Writer) { r.s.Stderr = w }
+func (r *realSession) Run(cmd string) error  { return r.s.Run(cmd) }
 func (r *realSession) CombinedOutput(c string) ([]byte, error) {
 	return r.s.CombinedOutput(c)
 }

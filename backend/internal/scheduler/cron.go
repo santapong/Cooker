@@ -13,12 +13,12 @@ import (
 //
 // Supported syntax:
 //
-//	*        any value
-//	5        exactly 5
-//	1,3,5    list
-//	1-5      inclusive range
-//	*/5      step (every 5 starting from min)
-//	1-10/2   range with step
+//   - any value
+//     5        exactly 5
+//     1,3,5    list
+//     1-5      inclusive range
+//     */5      step (every 5 starting from min)
+//     1-10/2   range with step
 //
 // Not supported: @hourly, @daily, ?, L, W, # — swap in robfig/cron in
 // a follow-up if these matter (see scheduler.go package docstring).

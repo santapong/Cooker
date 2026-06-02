@@ -1199,8 +1199,8 @@ func TestHasDisallowedControl(t *testing.T) {
 		{"nul", "a\x00b", true},
 		{"escape", "a\x1bb", true},
 		{"del", "a\x7fb", true},
-		{"c1 control", "a\u0085b", true},        // NEL (U+0085) in the C1 range
-		{"line separator", "a\u2028b", true},    // U+2028
+		{"c1 control", "a\u0085b", true},          // NEL (U+0085) in the C1 range
+		{"line separator", "a\u2028b", true},      // U+2028
 		{"paragraph separator", "a\u2029b", true}, // U+2029
 		{"unicode text", "café-π", false},
 	}

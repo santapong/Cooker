@@ -32,7 +32,7 @@ func (s *stubStore) Enqueue(_ context.Context, kind string, payload []byte, opts
 func (s *stubStore) Dequeue(context.Context, string, []string) (*jobqueue.Job, error) {
 	panic("not used in enqueuer tests")
 }
-func (s *stubStore) Complete(context.Context, string, string) error   { panic("not used") }
+func (s *stubStore) Complete(context.Context, string, string) error     { panic("not used") }
 func (s *stubStore) Fail(context.Context, string, string, string) error { panic("not used") }
 func (s *stubStore) Reschedule(context.Context, string, string, time.Time, string) error {
 	panic("not used")
