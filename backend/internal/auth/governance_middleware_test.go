@@ -119,8 +119,8 @@ func TestMiddleware_AdvisoryDeny_PassesAndLogs(t *testing.T) {
 	r.POST("/deploy", auth.RequireGovernanceAllow(client, fixedExtractor("svc-x", "prod")), func(c *gin.Context) {
 		sawAdvisoryDeny = c.GetBool("governance.advisory_deny")
 		c.JSON(200, gin.H{
-			"audit_id":       c.GetString("governance.audit_id"),
-			"advisory_deny":  c.GetBool("governance.advisory_deny"),
+			"audit_id":      c.GetString("governance.audit_id"),
+			"advisory_deny": c.GetBool("governance.advisory_deny"),
 		})
 	})
 

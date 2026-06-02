@@ -381,6 +381,15 @@ Back-compat: the JSON unmarshaller for `StageConfig` accepts either `retries: in
 
 ### 7.3 Primitive #3 — Inter-stage data flow / outputs
 
+> **Status: LANDED** on `claude/fervent-sagan-q50XA`. Implemented as designed below:
+> `model.StageRun.Outputs` (JSONB, no migration); pure interpolation engine at
+> `backend/internal/buildplan/interpolate.go` (`Interpolate`/`InterpolateSlice`/`InterpolateMap`
+> plus a `References` scanner used by validation); executor derives a baseline (build: `digest`/`tag`/`tags`,
+> push: `digest`/`ref`, deploy: `resources`, gitops: `commit`/`ref`) overlaid by adapter `Result.Outputs`;
+> caps + control-char sanitization enforced in `applyStageOutputs`; `ValidatePipelineDAG` rejects
+> unknown / non-ancestor stage references at save time (key existence stays runtime-only); `Script` is
+> not interpolated. Feature-flagged off via `COOKER_OUTPUTS_ENABLED=false`.
+
 **Model.** `backend/internal/model/run.go:34-42` adds:
 
 ```go

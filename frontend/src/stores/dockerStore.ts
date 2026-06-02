@@ -43,6 +43,11 @@ export const useDockerStore = create<DockerStore>((set) => ({
   },
 
   buildImage: async (config) => {
+    // The Docker host transport is intentionally not wired in this build
+    // (honest-501 by design / P9.4), so buildImage will reject. We don't
+    // track a "transport unconfigured" flag here: DockerPage shows its
+    // banner unconditionally, so there's nothing to gate. Let the error
+    // propagate to the caller, which surfaces a toast.
     const result = await dockerApi.buildImage(config);
     return result.buildId;
   },

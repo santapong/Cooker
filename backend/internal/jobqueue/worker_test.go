@@ -186,9 +186,9 @@ func TestPoolNotifierWakesIdleWorker(t *testing.T) {
 	})
 	not := NewChanNotifier()
 	pool, _ := NewPool(PoolOptions{
-		Store:     store,
-		Registry:  reg,
-		Size:      1,
+		Store:    store,
+		Registry: reg,
+		Size:     1,
 		// Long poll so the only way the worker picks up the job
 		// promptly is via the Notifier wake-up.
 		PollEvery: 30 * time.Second,

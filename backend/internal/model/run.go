@@ -56,10 +56,10 @@ type PipelineRun struct {
 	// hand). The token hash is for audit forensics — the raw token is
 	// never persisted. Empty StartedByUserSub means the run pre-dates the
 	// capture (legacy rows) and the executor skips the governance hook.
-	StartedByUserSub    string   `json:"startedByUserSub,omitempty" db:"started_by_user_sub"`
-	StartedByEmail      string   `json:"startedByEmail,omitempty" db:"started_by_email"`
-	StartedByGroups     []string `json:"startedByGroups,omitempty"`
-	StartedByTokenHash  string   `json:"startedByTokenHash,omitempty" db:"started_by_token_hash"`
+	StartedByUserSub   string   `json:"startedByUserSub,omitempty" db:"started_by_user_sub"`
+	StartedByEmail     string   `json:"startedByEmail,omitempty" db:"started_by_email"`
+	StartedByGroups    []string `json:"startedByGroups,omitempty"`
+	StartedByTokenHash string   `json:"startedByTokenHash,omitempty" db:"started_by_token_hash"`
 }
 
 // StageRun tracks the execution of a single stage within a pipeline run.
@@ -71,6 +71,11 @@ type StageRun struct {
 	Logs       string     `json:"logs,omitempty"`
 	Error      string     `json:"error,omitempty"`
 	Artifacts  []Artifact `json:"artifacts,omitempty"`
+	// Outputs are string key/value pairs a stage exposes for downstream
+	// stages to consume via ${stages.<id>.<key>} interpolation. Persisted
+	// in the existing stage_runs JSONB column (no migration). Capped:
+	// per-key value <= 4 KiB, per-stage total <= 32 KiB.
+	Outputs map[string]string `json:"outputs,omitempty"`
 }
 
 // Artifact represents a pipeline output, tracked as an OCI content-addressable reference.

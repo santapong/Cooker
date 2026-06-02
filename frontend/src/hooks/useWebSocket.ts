@@ -13,6 +13,11 @@ interface UseWebSocketOptions {
     maxDelayMs?: number;
     maxAttempts?: number;
   };
+  // getExtraParams is called just before each (re)connect and its
+  // return value is appended to the WS URL as additional query params.
+  // Use a ref-backed getter to avoid stale closures (the connect
+  // callback reads it at call time, not at hook-mount time).
+  getExtraParams?: () => Record<string, string>;
 }
 
 // fetchWSTicket exchanges the user's bearer token for a single-use
@@ -37,6 +42,7 @@ export function useWebSocket({
   onMessage,
   autoConnect = true,
   reconnect,
+  getExtraParams,
 }: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
@@ -56,6 +62,13 @@ export function useWebSocket({
   const onMessageRef = useRef(onMessage);
   useEffect(() => {
     onMessageRef.current = onMessage;
+  });
+
+  // Keep getExtraParams in a ref so the connect callback always reads
+  // the latest getter without it being in connect's dep array.
+  const getExtraParamsRef = useRef(getExtraParams);
+  useEffect(() => {
+    getExtraParamsRef.current = getExtraParams;
   });
 
   // Mutable refs so the connect callback's identity doesn't churn on
@@ -79,6 +92,25 @@ export function useWebSocket({
       // gate don't silently connect to the wrong endpoint.
       return;
     }
+    // Supersede any existing socket before opening a new one. A caller
+    // can invoke connect() while a socket is still live (e.g. useStageLogs
+    // calls connect() on a `stream-truncated` control frame). Without this
+    // the old socket stays open and, because we reset closedByCallerRef
+    // below, its onclose would fire scheduleReconnect() — a reconnect
+    // storm plus a leaked socket. Detach the old socket's handlers so its
+    // onclose is a no-op, then close it. We can't reuse closedByCallerRef
+    // for this (that flag also guards unmount-during-ticket-fetch and
+    // gates scheduleReconnect for the *new* attempt), so we neutralise the
+    // superseded socket per-instance.
+    const stale = wsRef.current;
+    if (stale && stale.readyState !== WebSocket.CLOSED) {
+      stale.onopen = null;
+      stale.onclose = null;
+      stale.onerror = null;
+      stale.onmessage = null;
+      stale.close();
+    }
+    wsRef.current = null;
     closedByCallerRef.current = false;
     const ticket = await fetchWSTicket();
     if (closedByCallerRef.current) return; // FH-03: guard against unmount during ticket fetch
@@ -90,8 +122,15 @@ export function useWebSocket({
       return;
     }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const sep = url.includes('?') ? '&' : '?';
-    const wsUrl = `${protocol}//${window.location.host}${url}${sep}ticket=${encodeURIComponent(ticket)}`;
+    // Build extra params from the caller's getter (read at connect
+    // time so reconnects always see the latest values, e.g. lastSeq).
+    const extraParams = getExtraParamsRef.current?.() ?? {};
+    const extraParamStr = Object.entries(extraParams)
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('&');
+    const base = extraParamStr ? `${url}?${extraParamStr}` : url;
+    const sep = base.includes('?') ? '&' : '?';
+    const wsUrl = `${protocol}//${window.location.host}${base}${sep}ticket=${encodeURIComponent(ticket)}`;
 
     const ws = new WebSocket(wsUrl);
 

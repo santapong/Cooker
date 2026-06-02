@@ -18,11 +18,11 @@ import (
 // stored opaquely; the channel adapter parses it on send. Empty
 // EventTypes means "all events" — matches notifier.Target.Matches.
 type adminNotificationTargetRequest struct {
-	Name       string                  `json:"name" binding:"required"`
-	Kind       string                  `json:"kind" binding:"required"`
-	Config     json.RawMessage         `json:"config" binding:"required"`
-	EventTypes []notifier.EventType    `json:"eventTypes,omitempty"`
-	Enabled    *bool                   `json:"enabled,omitempty"`
+	Name       string               `json:"name" binding:"required"`
+	Kind       string               `json:"kind" binding:"required"`
+	Config     json.RawMessage      `json:"config" binding:"required"`
+	EventTypes []notifier.EventType `json:"eventTypes,omitempty"`
+	Enabled    *bool                `json:"enabled,omitempty"`
 }
 
 func validateTargetRequest(req *adminNotificationTargetRequest) error {

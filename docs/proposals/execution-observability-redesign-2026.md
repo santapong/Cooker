@@ -1,6 +1,10 @@
 # Cooker execution observability redesign — log history/replay + execution tracing
 
-> Status: **proposal, not approved.** Written 2026-05-30.
+> Status: **proposal.** Written 2026-05-30.
+> **Update (landed):** Part A **Phases 1-2** shipped on `claude/fervent-sagan-q50XA` — the log
+> `seq`+`ts` envelope, the `internal/logstore` interface + **memory** backend, replay-on-connect
+> (`?since=<seq>`), and the `stream-truncated` drop signal. Part A **Phase 3** (postgres/redis backends)
+> and **all of Part B** (execution tracing) remain unimplemented proposals. See the sequencing table in §4.
 > Scope: the two execution-observability gaps **not** covered by
 > [`dag-adaptation-2026.md`](dag-adaptation-2026.md): (1) run/stage **log history & replay**, and
 > (2) **distributed tracing of the execution path**. The DAG primitives (conditional edges, outputs,
@@ -207,9 +211,9 @@ small to large:
 
 | Phase | Item | Effort | Notes |
 |---|---|---|---|
-| 1 | Log **envelope** (`seq`+`ts`) + executor/adapter **spans** | S (~3–4 d) | Pure additive; immediate trace value; unblocks replay |
-| 2 | `logstore` interface + **memory** backend + **replay-on-connect** + drop signalling | M (~1 wk) | The defect fix; default backend, no new dependency |
-| 3 | `logstore` **postgres** + **redis** backends | M (~1 wk) | Durable + multi-replica continuity |
+| 1 ✅ | Log **envelope** (`seq`+`ts`) (**landed**); executor/adapter **spans** still pending (Part B) | S (~3–4 d) | Envelope shipped on `claude/fervent-sagan-q50XA`; spans deferred to Part B |
+| 2 ✅ | `logstore` interface + **memory** backend + **replay-on-connect** + drop signalling | M (~1 wk) | **Landed** — the defect fix; default `memory` backend, no new dependency |
+| 3 | `logstore` **postgres** + **redis** backends | M (~1 wk) | Durable + multi-replica continuity — **not yet implemented** |
 | 4 | **Sampling** config, `CarrierEnv` into Kaniko/Buildah Jobs, `/metrics` auth, retry/timeout metrics | S (~3–4 d) | Operational hardening |
 
 Dependency note: Part B Phase 1 should land alongside or just after the DAG plan's Primitive #2

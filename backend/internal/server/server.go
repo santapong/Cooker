@@ -19,6 +19,8 @@ import (
 	"github.com/santapong/cooker/internal/governance"
 	"github.com/santapong/cooker/internal/handler"
 	"github.com/santapong/cooker/internal/idempotency"
+	"github.com/santapong/cooker/internal/kube"
+	"github.com/santapong/cooker/internal/logstore"
 	"github.com/santapong/cooker/internal/observability"
 	"github.com/santapong/cooker/internal/pusher"
 	"github.com/santapong/cooker/internal/secrets"
@@ -144,6 +146,14 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	cleanups = append(cleanups, func() { _ = wsHub.Close() })
 
+	// Per-stage log history for replay-on-connect (execution-observability
+	// redesign Part A). Single instance shared by the hub (serves the
+	// backlog on WS connect) and the executor (appends stamped lines).
+	// Defaults to the in-memory backend; single-replica only, like the
+	// in-memory WS hub and rate limiter.
+	logStore := logstore.FromEnv()
+	wsHub.SetLogStore(logStore)
+
 	var wsTickets ticketStore
 	switch cfg.WSTicket.Backend {
 	case "redis":
@@ -215,6 +225,7 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithDockerDeployer(deployer.NewDockerRun()),
 		service.WithComposeDeployer(deployer.NewCompose()),
 		service.WithLogBroadcaster(wsHub.Broadcast),
+		service.WithLogStore(logStore),
 		service.WithStatusBroadcaster(wsHub.Broadcast),
 		service.WithDeployGovernanceHook(govDeployHook),
 	)
@@ -235,6 +246,12 @@ func New(cfg *config.Config) (*Server, error) {
 	// deployed compose service. CLI-backed (docker/kubectl); harmless
 	// when those binaries are absent (returns "not found").
 	h.Runtime = service.NewRuntimeService(cfg.Kubernetes.Namespace)
+	// Kube backs the read-only Kubernetes list/inspect endpoints. Built
+	// from the SAME kubeconfig source as the ClientGo deployer
+	// (cfg.Kubernetes.Kubeconfig; empty => in-cluster) so reads target
+	// exactly the cluster the pipeline deploys to. Lazy: a server with no
+	// cluster configured still boots and the read endpoints return 503.
+	h.Kube = kube.New(cfg.Kubernetes.Kubeconfig)
 	// HostService coordinates the PEM-bytes-to-secrets-manager
 	// translation for SSH hosts. nil-safe handler-side: when secMgr
 	// is nil (dev without a secrets backend), SSH host create/update

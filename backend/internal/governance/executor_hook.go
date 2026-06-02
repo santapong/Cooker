@@ -14,14 +14,14 @@ import (
 // PipelineDeployHook builds the executor's pre-stage governance check for
 // pipeline-defined deploy stages (Milestone C). The hook:
 //
-//   1. Resolves the (service, env) target from the stage. Service name is
-//      the pipeline's name (matches the existing AppDeployExtractor convention).
-//      Env name is the Environment.Name keyed off Stage.EnvironmentID.
-//   2. Constructs a PreresolvedActor from the run's StartedBy* fields.
-//   3. Calls client.AuthorizeOnBehalf.
-//   4. On enforce-deny returns an error so the executor fails the stage
-//      with the policy reason. On advisory-deny (Enforced=false) returns
-//      nil after logging the would-have-blocked event.
+//  1. Resolves the (service, env) target from the stage. Service name is
+//     the pipeline's name (matches the existing AppDeployExtractor convention).
+//     Env name is the Environment.Name keyed off Stage.EnvironmentID.
+//  2. Constructs a PreresolvedActor from the run's StartedBy* fields.
+//  3. Calls client.AuthorizeOnBehalf.
+//  4. On enforce-deny returns an error so the executor fails the stage
+//     with the policy reason. On advisory-deny (Enforced=false) returns
+//     nil after logging the would-have-blocked event.
 //
 // Returns nil (no hook) when client is nil or delegation is disabled.
 // In both cases the executor's WithDeployGovernanceHook(nil) path runs —

@@ -42,6 +42,10 @@ type Result struct {
 	ImageID string
 	// Tags that were actually applied (usually equal to Request.Tags).
 	Tags []string
+	// Outputs are optional adapter-emitted outputs, merged over the
+	// executor's derived baseline (the executor sets digest/tag/tags from
+	// ImageID/Tags; an adapter may add or override keys here).
+	Outputs map[string]string
 }
 
 // Builder produces container images from a source context.

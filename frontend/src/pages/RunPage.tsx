@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { pipelineApi } from '../api/pipelines';
 import { useEnvironmentStore } from '../stores/environmentStore';
-import type { PipelineRun, Pipeline, Stage, EnvironmentStatus } from '../types/pipeline';
+import type { PipelineRun, Pipeline, Stage, StageRun, EnvironmentStatus } from '../types/pipeline';
 import { useTheme } from '../theme/ThemeProvider';
 import { useUIStore } from '../stores/uiStore';
 import { hexA } from '../theme/tokens';
@@ -45,6 +45,7 @@ export default function RunPage() {
   });
   const stageLogs = useMemo(() => stageLogStream.lines.join('\n'), [stageLogStream.lines]);
   const logsLoading = !!selectedStageId && !stageLogStream.backfillLoaded;
+  const streamTruncated = stageLogStream.streamTruncated;
 
   // Fetch run + pipeline + env status. Refresh env status every 5s
   // to pick up promotions/approvals while you're watching.
@@ -143,9 +144,11 @@ export default function RunPage() {
       />
       <LogsPanel
         stage={stages.find((s) => s.id === selectedStageId) ?? null}
+        stageRun={run?.stageRuns?.find((sr) => sr.stageId === selectedStageId) ?? null}
         logs={stageLogs}
         loading={logsLoading}
         run={run}
+        streamTruncated={streamTruncated}
       />
       {mode === 'pro' && (
         <RightRail
@@ -361,14 +364,18 @@ function StepDot({ tone }: { tone: Tone }) {
 
 function LogsPanel({
   stage,
+  stageRun,
   logs,
   loading,
   run,
+  streamTruncated,
 }: {
   stage: Stage | null;
+  stageRun: StageRun | null;
   logs: string;
   loading: boolean;
   run: PipelineRun | null;
+  streamTruncated: boolean;
 }) {
   const t = useTheme();
   const [filter, setFilter] = useState<'all' | 'info' | 'warn' | 'error'>('all');
@@ -465,6 +472,25 @@ function LogsPanel({
         <KBD>/</KBD>
       </div>
 
+      {streamTruncated && (
+        <div
+          style={{
+            padding: '7px 18px',
+            background: hexA(t.warn, 0.12),
+            borderBottom: `1px solid ${hexA(t.warn, 0.35)}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            fontFamily: t.mono,
+            fontSize: 11,
+            color: t.warn,
+          }}
+        >
+          <Pill tone="warn">stream truncated</Pill>
+          live logs truncated — reload to see full history
+        </div>
+      )}
+
       <div
         style={{
           flex: 1,
@@ -548,6 +574,8 @@ function LogsPanel({
         )}
       </div>
 
+      <StageOutputsTable stageRun={stageRun} />
+
       <div
         style={{
           padding: '8px 18px',
@@ -571,6 +599,98 @@ function LogsPanel({
         <span>{run?.status ?? 'idle'}</span>
       </div>
     </section>
+  );
+}
+
+function StageOutputsTable({ stageRun }: { stageRun: StageRun | null }) {
+  const t = useTheme();
+
+  const outputs = stageRun?.outputs;
+  if (!outputs) return null;
+
+  const visibleEntries = Object.entries(outputs).filter(([k]) => !k.startsWith('_'));
+  const isTruncated = '_truncated' in outputs;
+  const hasInvalid = '_invalid' in outputs;
+
+  if (visibleEntries.length === 0 && !isTruncated && !hasInvalid) return null;
+
+  return (
+    <div
+      style={{
+        borderTop: `1px solid ${t.line}`,
+        background: t.surface,
+        padding: '10px 18px',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          marginBottom: visibleEntries.length > 0 ? 8 : 0,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: t.mono,
+            fontSize: 11,
+            letterSpacing: 1.4,
+            textTransform: 'uppercase',
+            color: t.textMute,
+          }}
+        >
+          Outputs
+        </span>
+        <span style={{ flex: 1, height: 1, background: t.line }} />
+        {isTruncated && (
+          <Pill tone="warn">outputs truncated</Pill>
+        )}
+        {hasInvalid && (
+          <Pill tone="bad">some outputs rejected</Pill>
+        )}
+      </div>
+
+      {visibleEntries.length > 0 && (
+        <table
+          style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontFamily: t.mono,
+            fontSize: 11.5,
+          }}
+        >
+          <tbody>
+            {visibleEntries.map(([key, value]) => (
+              <tr key={key}>
+                <td
+                  style={{
+                    padding: '3px 12px 3px 0',
+                    color: t.textMute,
+                    whiteSpace: 'nowrap',
+                    verticalAlign: 'top',
+                    width: '1%',
+                  }}
+                >
+                  {key}
+                </td>
+                <td
+                  style={{
+                    padding: '3px 0',
+                    color: t.text,
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {/* Coerce defensively: outputs is typed Record<string,string>,
+                      but a widened / non-string value (e.g. a rollout object)
+                      would otherwise render as [object Object] or throw. */}
+                  {String(value)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 

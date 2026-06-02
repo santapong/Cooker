@@ -8,11 +8,15 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/santapong/cooker/internal/builder"
+	"github.com/santapong/cooker/internal/buildplan"
 	"github.com/santapong/cooker/internal/deployer"
 	"github.com/santapong/cooker/internal/gitops"
+	"github.com/santapong/cooker/internal/logstore"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/observability"
 	"github.com/santapong/cooker/internal/pusher"
@@ -63,6 +67,260 @@ func dagMaxParallel() int {
 	return defaultMaxParallel
 }
 
+// outputsEnabled reports whether inter-stage outputs (Primitive #3,
+// dag-adaptation-2026.md §7.3) are active. Defaults to true; only the
+// explicit values "false" / "0" disable it. Mirrors how dagMaxParallel
+// reads its env var. The flag short-circuits BOTH the interpolation pass
+// (stage config never sees ${stages.*} substitution) AND the ingestion
+// pass (StageRun.Outputs is never populated), matching the §7.3
+// "Risk + rollback" rollback knob.
+func outputsEnabled() bool {
+	switch os.Getenv("COOKER_OUTPUTS_ENABLED") {
+	case "false", "0":
+		return false
+	default:
+		return true
+	}
+}
+
+// Output caps (dag-adaptation-2026.md §7.3, DR-2). A single output value
+// is truncated to outputKeyMax bytes; the running per-stage total is
+// bounded at outputStageMax bytes, after which further keys are dropped
+// and a "_truncated" marker is set.
+const (
+	outputKeyMax   = 4 << 10  // 4 KiB per value
+	outputStageMax = 32 << 10 // 32 KiB per stage
+)
+
+// deriveBuildOutputs produces the executor's baseline outputs for a build
+// stage from the adapter Result. Empty fields are omitted so a downstream
+// ${stages.<id>.digest} on a backend that reports no digest fails loud
+// (unknown output) rather than resolving to "".
+func deriveBuildOutputs(res builder.Result) map[string]string {
+	out := map[string]string{}
+	if res.ImageID != "" {
+		out["digest"] = res.ImageID
+	}
+	if len(res.Tags) > 0 {
+		out["tags"] = strings.Join(res.Tags, ",")
+		out["tag"] = res.Tags[0]
+	}
+	return out
+}
+
+// derivePushOutputs produces the executor's baseline outputs for a push
+// stage. target is the fully-qualified destination ref the executor
+// resolved (registry + repository).
+func derivePushOutputs(res pusher.Result, target string) map[string]string {
+	out := map[string]string{}
+	if res.Digest != "" {
+		out["digest"] = res.Digest
+	}
+	if target != "" {
+		out["ref"] = target
+	}
+	return out
+}
+
+// deriveDeployOutputs produces the executor's baseline outputs for a
+// deploy stage from the applied-resources list.
+func deriveDeployOutputs(res deployer.Result) map[string]string {
+	out := map[string]string{}
+	if len(res.AppliedResources) > 0 {
+		out["resources"] = strings.Join(res.AppliedResources, ",")
+	}
+	return out
+}
+
+// hasDisallowedControl reports whether v contains a control character
+// other than a horizontal tab. Outputs are interpolated into config
+// fields (and may surface in logs / the UI); newlines, NULs and other
+// control bytes are rejected wholesale to avoid downstream injection.
+func hasDisallowedControl(v string) bool {
+	for _, r := range v {
+		if r == '\t' {
+			continue
+		}
+		// C0 controls (incl. CR/LF/NUL/ESC) and DEL.
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+		// C1 controls (0x80-0x9f) and the Unicode line/paragraph
+		// separators (U+2028/U+2029) have no legitimate place in an output
+		// value and can corrupt log/terminal/JSON-line/UI rendering.
+		// Reject wholesale (defence in depth, audit finding L1).
+		if (r >= 0x80 && r <= 0x9f) || r == '\u2028' || r == '\u2029' {
+			return true
+		}
+	}
+	return false
+}
+
+// applyStageOutputs merges the executor-derived baseline outputs with any
+// adapter-emitted outputs (adapter wins on key collision) and stores the
+// sanitized, capped result on sr.Outputs. Allocation is lazy: if nothing
+// survives sanitization, sr.Outputs is left nil.
+//
+// Enforcement (dag-adaptation-2026.md §7.3 / DR-2):
+//   - a value containing a disallowed control character is rejected (not
+//     stored) and sets sr.Outputs["_invalid"]="true";
+//   - a value longer than outputKeyMax bytes is truncated to outputKeyMax
+//     with a marker appended and sets sr.Outputs["_truncated"]="true";
+//   - once the running total exceeds outputStageMax bytes no further keys
+//     are added and sr.Outputs["_truncated"]="true" is set.
+func applyStageOutputs(sr *model.StageRun, derived, adapter map[string]string) {
+	if sr == nil {
+		return
+	}
+	// Merge derived first, then overlay adapter so adapter values win.
+	merged := make(map[string]string, len(derived)+len(adapter))
+	for k, v := range derived {
+		merged[k] = v
+	}
+	for k, v := range adapter {
+		merged[k] = v
+	}
+	if len(merged) == 0 {
+		return
+	}
+
+	// Deterministic iteration so the cap cutoff (and which keys land
+	// before the total is exhausted) is stable across runs.
+	keys := make([]string, 0, len(merged))
+	for k := range merged {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	const truncMarker = "...[truncated]"
+	total := 0
+	for _, k := range keys {
+		v := merged[k]
+		if hasDisallowedControl(v) {
+			ensureOutputs(sr)["_invalid"] = "true"
+			continue
+		}
+		if len(v) > outputKeyMax {
+			v = v[:outputKeyMax] + truncMarker
+			ensureOutputs(sr)["_truncated"] = "true"
+		}
+		// Stop adding once the running total would exceed the per-stage
+		// cap. Marker keys ("_invalid"/"_truncated") are tiny and exempt.
+		if total+len(k)+len(v) > outputStageMax {
+			ensureOutputs(sr)["_truncated"] = "true"
+			break
+		}
+		ensureOutputs(sr)[k] = v
+		total += len(k) + len(v)
+	}
+}
+
+// ensureOutputs lazily allocates sr.Outputs and returns it.
+func ensureOutputs(sr *model.StageRun) map[string]string {
+	if sr.Outputs == nil {
+		sr.Outputs = map[string]string{}
+	}
+	return sr.Outputs
+}
+
+// collectStageOutputs builds the resolver view over completed ancestor
+// stages: stageID -> (outputKey -> value), for ancestors that succeeded and
+// actually produced outputs. allowed is the set of stage IDs that are
+// ancestors of the stage being resolved (precomputed in Execute).
+//
+// Concurrency: this runs inside the runner task closure for a stage at DAG
+// level N. We MUST read only ancestors. An ancestor completed at a level
+// < N, and pkg/dagrunner joins each level with a sync.WaitGroup before
+// starting the next (runner.go Run: wg.Wait() per level), so that barrier
+// gives a happens-before edge and the read is race-free. Reading a
+// non-ancestor — in particular a sibling at the SAME level — would read its
+// StageRun.Status while its goroutine is still writing it, an unsynchronised
+// data race (caught by TestExecutor_Outputs_ParallelSiblingsNoRace under
+// -race). The allowed filter is what keeps this safe.
+func collectStageOutputs(m map[string]*model.StageRun, allowed map[string]bool) map[string]map[string]string {
+	out := make(map[string]map[string]string, len(allowed))
+	for id, sr := range m {
+		if !allowed[id] {
+			continue
+		}
+		if sr == nil || sr.Status != model.RunStatusSuccess || len(sr.Outputs) == 0 {
+			continue
+		}
+		cp := make(map[string]string, len(sr.Outputs))
+		for k, v := range sr.Outputs {
+			cp[k] = v
+		}
+		out[id] = cp
+	}
+	return out
+}
+
+// interpolateStageConfig returns a shallow copy of s with its
+// ${stages.<id>.<key>} references resolved against r in the data-bearing
+// StageConfig string fields. The original Stage / StageConfig is never
+// mutated (the copy is what the adapter dispatch uses).
+//
+// Script is intentionally not interpolated — it is exec'd; outputs are
+// data, not code. HelmValues is skipped: it is a nested interface{} tree,
+// out of scope for this primitive.
+//
+// On the first field error the copy is discarded and (nil, error) is
+// returned; the caller treats that as a (non-retryable) stage failure.
+func interpolateStageConfig(s *model.Stage, r buildplan.OutputResolver) (*model.Stage, error) {
+	if s == nil {
+		return nil, fmt.Errorf("buildplan: nil stage")
+	}
+	cp := *s
+	cfg := s.Config // value copy of the config struct
+
+	type strField struct {
+		name string
+		ptr  *string
+	}
+	strFields := []strField{
+		{"registry", &cfg.Registry},
+		{"repository", &cfg.Repository},
+		{"image", &cfg.Image},
+		{"context", &cfg.Context},
+		{"dockerfile", &cfg.Dockerfile},
+		{"manifestPath", &cfg.ManifestPath},
+		{"helmChart", &cfg.HelmChart},
+		{"namespace", &cfg.Namespace},
+		{"gitopsRepo", &cfg.GitOpsRepo},
+		{"gitopsBranch", &cfg.GitOpsBranch},
+		{"gitopsPath", &cfg.GitOpsPath},
+		{"gitopsMessage", &cfg.GitOpsMessage},
+		{"gitopsContent", &cfg.GitOpsContent},
+	}
+	for _, f := range strFields {
+		v, err := buildplan.Interpolate(*f.ptr, r)
+		if err != nil {
+			return nil, fmt.Errorf("svc: interpolate %s: %w", f.name, err)
+		}
+		*f.ptr = v
+	}
+
+	var err error
+	if cfg.Tags, err = buildplan.InterpolateSlice(cfg.Tags, r); err != nil {
+		return nil, fmt.Errorf("svc: interpolate tags: %w", err)
+	}
+	if cfg.Command, err = buildplan.InterpolateSlice(cfg.Command, r); err != nil {
+		return nil, fmt.Errorf("svc: interpolate command: %w", err)
+	}
+	if cfg.Platforms, err = buildplan.InterpolateSlice(cfg.Platforms, r); err != nil {
+		return nil, fmt.Errorf("svc: interpolate platforms: %w", err)
+	}
+	if cfg.BuildArgs, err = buildplan.InterpolateMap(cfg.BuildArgs, r); err != nil {
+		return nil, fmt.Errorf("svc: interpolate buildArgs: %w", err)
+	}
+	if cfg.Env, err = buildplan.InterpolateMap(cfg.Env, r); err != nil {
+		return nil, fmt.Errorf("svc: interpolate env: %w", err)
+	}
+
+	cp.Config = cfg
+	return &cp, nil
+}
+
 // RunUpdater persists in-progress run state. Called by the executor
 // after every stage transition (start + finish) so a crash mid-run
 // leaves a row that reflects what was completed instead of "still
@@ -86,6 +344,7 @@ type Executor struct {
 	gitops          gitops.Writer
 	runUpdater      RunUpdater
 	logBroadcast    LogBroadcaster
+	logStore        logstore.Store
 	statusBroadcast StatusBroadcaster
 	govHook         DeployGovernanceHook
 }
@@ -199,6 +458,18 @@ func WithLogBroadcaster(b LogBroadcaster) Option {
 	}
 }
 
+// WithLogStore installs the per-stage log history used for replay-on-
+// connect (execution-observability redesign Part A). When set, each
+// stage's complete log lines are appended (seq+ts stamped) so a WS
+// subscriber that joins mid-run or reconnects with ?since=<seq> receives
+// the backlog. Pass nil (or skip the option) to disable replay — live
+// streaming via WithLogBroadcaster is unaffected.
+func WithLogStore(s logstore.Store) Option {
+	return func(e *Executor) {
+		e.logStore = s
+	}
+}
+
 // WithDeployGovernanceHook installs the pre-stage governance check for
 // deploy stages (Milestone C executor hook). Nil disables it; pre-Milestone-C
 // behaviour resumes.
@@ -281,6 +552,21 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		stageRunMap[run.StageRuns[i].StageID] = &run.StageRuns[i]
 	}
 
+	// Inter-stage outputs (Primitive #3): precompute each stage's ancestor
+	// set once. The interpolation resolver reads outputs ONLY from a stage's
+	// ancestors — never from a concurrent sibling at the same DAG level,
+	// which would be a data race on that sibling's StageRun (see
+	// collectStageOutputs / TestExecutor_Outputs_ParallelSiblingsNoRace).
+	// Reuses ancestorsOf, shared with the save-time validator (pipeline.go).
+	outDeps := make(map[string][]string, len(p.Edges))
+	for _, edge := range p.Edges {
+		outDeps[edge.Target] = append(outDeps[edge.Target], edge.Source)
+	}
+	ancestorSets := make(map[string]map[string]bool, len(p.Stages))
+	for i := range p.Stages {
+		ancestorSets[p.Stages[i].ID] = ancestorsOf(p.Stages[i].ID, outDeps)
+	}
+
 	// F2 cancellation lock-in: snapshot whether the caller pre-marked
 	// the run Cancelled (e.g. a CancelPipelineRun call that landed on
 	// the row before Spawn-ed work started). We stamp Running below
@@ -318,6 +604,25 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		stageRun, ok := stageRunMap[nodeID]
 		if !ok || stageRun == nil {
 			return fmt.Errorf("stage run %q not allocated", nodeID)
+		}
+
+		// Inter-stage outputs (Primitive #3, dag-adaptation-2026.md §7.3).
+		// Resolve ${stages.<id>.<key>} references in this stage's config
+		// against completed upstream outputs BEFORE dispatch. The result is
+		// a copy (execStage) — the shared stage/stageMap is never mutated.
+		// A resolution failure (unknown stage/key) is a deterministic stage
+		// failure that must NOT be retried: ierrInterp carries it past the
+		// retry.Do block into the existing terminal failure handler below.
+		execStage := stage
+		var ierrInterp error
+		if outputsEnabled() {
+			resolver := buildplan.OutputResolver{Stages: collectStageOutputs(stageRunMap, ancestorSets[nodeID])}
+			cp, ierr := interpolateStageConfig(stage, resolver)
+			if ierr != nil {
+				ierrInterp = ierr
+			} else {
+				execStage = cp
+			}
 		}
 
 		// Apply per-stage timeout. stage.Config.Timeout is a Go-format
@@ -377,36 +682,46 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			retryPolicy.MaxAttempts = 1
 		}
 
-		stageErr := retry.Do(stageCtx, retryPolicy, func(ctx context.Context) error {
-			switch stage.Type {
-			case model.StageTypeBuild:
-				return e.executeBuild(ctx, run.ID, stage, stageRun)
-			case model.StageTypeTest:
-				return e.executeTest(ctx, stage)
-			case model.StageTypePush:
-				return e.executePush(ctx, run.ID, stage, stageRun)
-			case model.StageTypeDeploy:
-				// Pre-stage governance check (Milestone C). Runs once
-				// per stage attempt — retries don't re-prompt the gate.
-				// On enforce-deny the stage fails immediately with the
-				// policy reason. On advisory-deny the hook returns nil
-				// and slog-logs the would-have-blocked event itself.
-				if e.govHook != nil {
-					if err := e.govHook(ctx, run, stage); err != nil {
-						return err
+		// Config interpolation failure (above) is deterministic: bypass
+		// retry.Do entirely and route ierrInterp through the same terminal
+		// failure-handling block below. Otherwise dispatch the (possibly
+		// interpolated) execStage — but always pass the real stageRun
+		// pointer so artifacts/outputs/logs land on the persisted row.
+		var stageErr error
+		if ierrInterp != nil {
+			stageErr = ierrInterp
+		} else {
+			stageErr = retry.Do(stageCtx, retryPolicy, func(ctx context.Context) error {
+				switch execStage.Type {
+				case model.StageTypeBuild:
+					return e.executeBuild(ctx, run.ID, execStage, stageRun)
+				case model.StageTypeTest:
+					return e.executeTest(ctx, execStage)
+				case model.StageTypePush:
+					return e.executePush(ctx, run.ID, execStage, stageRun)
+				case model.StageTypeDeploy:
+					// Pre-stage governance check (Milestone C). Runs once
+					// per stage attempt — retries don't re-prompt the gate.
+					// On enforce-deny the stage fails immediately with the
+					// policy reason. On advisory-deny the hook returns nil
+					// and slog-logs the would-have-blocked event itself.
+					if e.govHook != nil {
+						if err := e.govHook(ctx, run, execStage); err != nil {
+							return err
+						}
 					}
+					return e.executeDeploy(ctx, run.ID, execStage, stageRun)
+				case model.StageTypeApproval:
+					return e.executeApproval(ctx, execStage)
+				case model.StageTypeCustom:
+					return e.executeCustom(ctx, execStage)
+				case model.StageTypeGitOpsCommit:
+					return e.executeGitOpsCommit(ctx, execStage, stageRun)
+				default:
+					return fmt.Errorf("unknown stage type: %s", execStage.Type)
 				}
-				return e.executeDeploy(ctx, run.ID, stage, stageRun)
-			case model.StageTypeApproval:
-				return e.executeApproval(ctx, stage)
-			case model.StageTypeCustom:
-				return e.executeCustom(ctx, stage)
-			case model.StageTypeGitOpsCommit:
-				return e.executeGitOpsCommit(ctx, stage, stageRun)
-			default:
-				return fmt.Errorf("unknown stage type: %s", stage.Type)
-			}
-		})
+			})
+		}
 
 		endTime := time.Now()
 		stageRun.FinishedAt = &endTime
@@ -585,6 +900,23 @@ func (e *Executor) persistProgress(ctx context.Context, run *model.PipelineRun) 
 	}
 }
 
+// newStageLineWriter returns the per-line tee for a stage's adapter
+// output, or nil when neither live broadcast nor replay storage is
+// configured (in which case the caller writes only to the capped on-disk
+// buffer). The lineWriter stamps seq+ts, appends to the log store for
+// replay-on-connect, AND broadcasts the wire envelope — either leg may be
+// nil. Production callers always pass non-empty runID + stage.ID; the
+// guard keeps direct test callers (which may omit them) safe (W10-7).
+func (e *Executor) newStageLineWriter(runID string, stage *model.Stage) *lineWriter {
+	if e.logBroadcast == nil && e.logStore == nil {
+		return nil
+	}
+	if runID == "" || stage == nil || stage.ID == "" {
+		return nil
+	}
+	return newLineWriter(e.logBroadcast, e.logStore, runID, stage.ID)
+}
+
 func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
 	logs := newCappedBuffer(stageLogCap)
 	// LogWriter receives the on-disk capture by default. When a
@@ -594,11 +926,8 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 	// instead of polling. The broadcaster is best-effort: backpressure
 	// at the hub drops on the far side, never on the executor goroutine.
 	var writer io.Writer = logs
-	var lw *lineWriter
-	// Production callers always pass non-empty runID + stage.ID; the gate
-	// keeps direct test callers (which may omit them) safe (W10-7).
-	if e.logBroadcast != nil && runID != "" && stage != nil && stage.ID != "" {
-		lw = newLineWriter(e.logBroadcast, StageLogChannel(runID, stage.ID))
+	lw := e.newStageLineWriter(runID, stage)
+	if lw != nil {
 		writer = io.MultiWriter(logs, lw)
 	}
 	defer func() {
@@ -625,6 +954,13 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 			Ref:    tag,
 			Digest: res.ImageID,
 		})
+	}
+	// Inter-stage outputs (Primitive #3): expose digest/tag/tags for
+	// downstream ${stages.<id>.<key>} references. Adapter-emitted outputs
+	// (res.Outputs) overlay the derived baseline. Gated by the same flag
+	// as the interpolation pass so the rollback knob disables both halves.
+	if outputsEnabled() {
+		applyStageOutputs(sr, deriveBuildOutputs(res), res.Outputs)
 	}
 	return nil
 }
@@ -687,9 +1023,8 @@ func (e *Executor) executePush(ctx context.Context, runID string, stage *model.S
 	// dag-performance.md §4 High #2 for the push half. T2.
 	logs := newCappedBuffer(stageLogCap)
 	var writer io.Writer = logs
-	var lw *lineWriter
-	if e.logBroadcast != nil && runID != "" && stage != nil && stage.ID != "" {
-		lw = newLineWriter(e.logBroadcast, StageLogChannel(runID, stage.ID))
+	lw := e.newStageLineWriter(runID, stage)
+	if lw != nil {
 		writer = io.MultiWriter(logs, lw)
 	}
 	defer func() {
@@ -709,6 +1044,12 @@ func (e *Executor) executePush(ctx context.Context, runID string, stage *model.S
 		Ref:    target,
 		Digest: res.Digest,
 	})
+	// Inter-stage outputs (Primitive #3): expose digest/ref. target is the
+	// resolved destination ref (already interpolated upstream when it
+	// contained a ${stages.*} token). Adapter outputs overlay the baseline.
+	if outputsEnabled() {
+		applyStageOutputs(sr, derivePushOutputs(res, target), res.Outputs)
+	}
 	return nil
 }
 
@@ -749,9 +1090,8 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 	// deploy half. T2.
 	logs := newCappedBuffer(stageLogCap)
 	var writer io.Writer = logs
-	var lw *lineWriter
-	if e.logBroadcast != nil && runID != "" && stage != nil && stage.ID != "" {
-		lw = newLineWriter(e.logBroadcast, StageLogChannel(runID, stage.ID))
+	lw := e.newStageLineWriter(runID, stage)
+	if lw != nil {
 		writer = io.MultiWriter(logs, lw)
 	}
 	defer func() {
@@ -805,6 +1145,11 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 			Type: resType,
 			Ref:  r,
 		})
+	}
+	// Inter-stage outputs (Primitive #3): expose the applied resources as a
+	// comma-joined list. Adapter outputs overlay the derived baseline.
+	if outputsEnabled() {
+		applyStageOutputs(sr, deriveDeployOutputs(res), res.Outputs)
 	}
 	return nil
 }
@@ -867,12 +1212,23 @@ func (e *Executor) executeGitOpsCommit(ctx context.Context, stage *model.Stage, 
 	if err != nil {
 		return fmt.Errorf("gitops: %w", err)
 	}
+	ref := stage.Config.GitOpsRepo + "@" + stage.Config.GitOpsBranch
 	sr.Artifacts = append(sr.Artifacts, model.Artifact{
 		Type: "gitops-commit",
-		Ref:  stage.Config.GitOpsRepo + "@" + stage.Config.GitOpsBranch,
+		Ref:  ref,
 		// Digest holds the commit SHA — naming is approximate but
 		// keeps one artifact shape across backends.
 		Digest: res.CommitSHA,
 	})
+	// Inter-stage outputs (Primitive #3): expose commit/ref derived from
+	// the existing result fields. GitOps has no adapter Outputs field.
+	if outputsEnabled() {
+		derived := map[string]string{}
+		if res.CommitSHA != "" {
+			derived["commit"] = res.CommitSHA
+		}
+		derived["ref"] = ref
+		applyStageOutputs(sr, derived, nil)
+	}
 	return nil
 }

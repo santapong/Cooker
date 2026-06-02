@@ -253,11 +253,11 @@ func TestPgTextArray(t *testing.T) {
 		in   []string
 		want string
 	}{
-		"empty":         {nil, "{}"},
-		"one":           {[]string{"alpha"}, `{"alpha"}`},
-		"two":           {[]string{"alpha", "beta"}, `{"alpha","beta"}`},
-		"quote":         {[]string{`a"b`}, `{"a\"b"}`},
-		"backslash":     {[]string{`a\b`}, `{"a\\b"}`},
+		"empty":     {nil, "{}"},
+		"one":       {[]string{"alpha"}, `{"alpha"}`},
+		"two":       {[]string{"alpha", "beta"}, `{"alpha","beta"}`},
+		"quote":     {[]string{`a"b`}, `{"a\"b"}`},
+		"backslash": {[]string{`a\b`}, `{"a\\b"}`},
 	}
 	for name, c := range cases {
 		if got := pgTextArray(c.in); got != c.want {

@@ -35,10 +35,10 @@ func TestParseInvalid(t *testing.T) {
 		"* * * 13 *",
 		"* * * * 7",
 		"abc * * * *",
-		"5-1 * * * *",   // bad range
-		"*/0 * * * *",   // zero step
-		",1 * * * *",    // empty list element
-		"1, * * * *",    // trailing empty element
+		"5-1 * * * *", // bad range
+		"*/0 * * * *", // zero step
+		",1 * * * *",  // empty list element
+		"1, * * * *",  // trailing empty element
 	}
 	for _, expr := range cases {
 		_, err := Parse(expr)

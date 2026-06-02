@@ -186,8 +186,8 @@ var ErrGovernanceUnreachable = errors.New("governance unreachable (fail-closed)"
 
 type authorizeRequest struct {
 	Actor struct {
-		Token       string             `json:"token,omitempty"`
-		Preresolved *preresolvedActor  `json:"preresolved,omitempty"`
+		Token       string            `json:"token,omitempty"`
+		Preresolved *preresolvedActor `json:"preresolved,omitempty"`
 	} `json:"actor"`
 	Action   string `json:"action"`
 	Resource struct {
@@ -203,7 +203,7 @@ type authorizeRequest struct {
 // the Grovernance request DTO; exported so the executor hook can construct
 // one from a PipelineRun without needing a parallel type.
 type PreresolvedActor struct {
-	Kind   string   `json:"kind"`   // "human" | "service"
+	Kind   string   `json:"kind"` // "human" | "service"
 	ID     string   `json:"id"`
 	Groups []string `json:"groups,omitempty"`
 	Scopes []string `json:"scopes,omitempty"`

@@ -2,6 +2,24 @@ import { getAccessToken, triggerSignIn } from '../auth/OIDCProvider';
 
 const API_BASE = '/api/v1';
 
+/**
+ * ApiError is thrown for any non-2xx response that isn't handled inline
+ * (401 sign-in redirect, MFA 403). It carries the HTTP `status` so
+ * callers can branch on it — e.g. the Kubernetes store treats only 503
+ * as "cluster unavailable" and everything else (403/500/timeout) as a
+ * plain error. The `message` is still the backend's `error` field (or a
+ * sensible fallback), so existing `(e as Error).message` consumers are
+ * unaffected.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -40,7 +58,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(error.error || `Request failed: ${res.status}`);
+    throw new ApiError(res.status, error.error || `Request failed: ${res.status}`);
   }
 
   return res.json();
