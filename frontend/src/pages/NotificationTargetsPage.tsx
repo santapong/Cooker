@@ -282,7 +282,7 @@ export default function NotificationTargetsPage() {
                           borderRadius: 999,
                           border: `1px solid ${active ? t.accent : t.line}`,
                           background: active ? t.accent : 'transparent',
-                          color: active ? '#FFF8EE' : t.textSoft,
+                          color: active ? '#fff' : t.textSoft,
                           fontFamily: t.mono,
                           fontSize: 11,
                           cursor: 'pointer',

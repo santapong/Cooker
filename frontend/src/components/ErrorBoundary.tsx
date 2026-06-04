@@ -42,15 +42,15 @@ export default class ErrorBoundary extends Component<Props, State> {
           alignItems: 'center',
           justifyContent: 'center',
           padding: '2rem',
-          background: '#16130F',
-          color: '#F2EBDD',
+          background: '#06061A',
+          color: '#ECEBFF',
           fontFamily: '"Inter Tight", "Inter", system-ui, sans-serif',
         }}
       >
         <div style={{ maxWidth: 560 }}>
           <h1
             style={{
-              fontFamily: '"Fraunces", "Source Serif 4", Georgia, serif',
+              fontFamily: '"Space Grotesk", "Inter Tight", system-ui, sans-serif',
               fontSize: 32,
               fontWeight: 500,
               margin: '0 0 12px',
@@ -58,7 +58,7 @@ export default class ErrorBoundary extends Component<Props, State> {
               lineHeight: 1.05,
             }}
           >
-            Something broke in the kitchen.
+            Something broke in orbit.
           </h1>
           <p style={{ opacity: 0.75, marginBottom: 16, lineHeight: 1.5 }}>
             Cooker hit an unexpected error and couldn't render this page. The error has been
@@ -69,11 +69,11 @@ export default class ErrorBoundary extends Component<Props, State> {
               background: 'rgba(0,0,0,0.35)',
               padding: 12,
               borderRadius: 8,
-              border: '1px solid #3A332A',
+              border: '1px solid rgba(138,126,230,0.32)',
               overflowX: 'auto',
               fontSize: 12,
               fontFamily: '"JetBrains Mono", ui-monospace, monospace',
-              color: '#D87060',
+              color: '#FF6B8A',
               marginBottom: 16,
             }}
           >
@@ -85,9 +85,9 @@ export default class ErrorBoundary extends Component<Props, State> {
               onClick={this.reset}
               style={{
                 padding: '10px 16px',
-                background: '#C2410C',
-                color: '#FFF8EE',
-                border: '1px solid #9A2F08',
+                background: 'linear-gradient(135deg, #8B6DFF, #7C5CFF)',
+                color: '#fff',
+                border: '1px solid rgba(124,92,255,0.6)',
                 borderRadius: 8,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
@@ -106,7 +106,7 @@ export default class ErrorBoundary extends Component<Props, State> {
                 padding: '10px 16px',
                 background: 'transparent',
                 color: 'inherit',
-                border: '1px solid #3A332A',
+                border: '1px solid rgba(138,126,230,0.32)',
                 borderRadius: 8,
                 cursor: 'pointer',
                 fontFamily: 'inherit',

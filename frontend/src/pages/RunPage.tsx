@@ -5,17 +5,20 @@ import { useEnvironmentStore } from '../stores/environmentStore';
 import type { PipelineRun, Pipeline, Stage, StageRun, EnvironmentStatus } from '../types/pipeline';
 import { useTheme } from '../theme/ThemeProvider';
 import { useUIStore } from '../stores/uiStore';
-import { hexA } from '../theme/tokens';
+import { hexA, CONSOLE } from '../theme/tokens';
 import {
   Btn,
   KBD,
   KindBadge,
   Pill,
   SectionLabel,
+  StatusDot,
   statusTone,
+  toneColor,
   type Tone,
 } from '../components/ui/atoms';
 import { Icon } from '../components/ui/Icon';
+import { Starfield } from '../components/ui/Starfield';
 import { useToastStore } from '../stores/toastStore';
 import { useStageLogs } from '../hooks/useStageLogs';
 
@@ -235,7 +238,7 @@ function StepRail({
             top: 18,
             bottom: 18,
             width: 1,
-            background: t.line,
+            background: `linear-gradient(${t.good}, ${t.ember}, ${t.line})`,
           }}
         />
         {stages.map((s) => {
@@ -319,16 +322,7 @@ function StepRail({
 
 function StepDot({ tone }: { tone: Tone }) {
   const t = useTheme();
-  const palette: Record<Tone, string> = {
-    good: t.good,
-    warn: t.warn,
-    bad: t.bad,
-    cool: t.cool,
-    ember: t.ember,
-    accent: t.accent,
-    neutral: t.textMute,
-  };
-  const c = palette[tone];
+  const c = toneColor(t, tone);
   return (
     <div
       style={{
@@ -343,17 +337,7 @@ function StepDot({ tone }: { tone: Tone }) {
       }}
     >
       {tone === 'good' && <Icon name="check" size={12} style={{ color: c }} />}
-      {tone === 'ember' && (
-        <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 999,
-            background: c,
-            animation: 'cookerPulse 1.4s ease-in-out infinite',
-          }}
-        />
-      )}
+      {tone === 'ember' && <StatusDot tone="ember" pulse size={8} />}
       {tone === 'bad' && <Icon name="close" size={12} style={{ color: c }} />}
       {(tone === 'neutral' || tone === 'warn') && (
         <span style={{ width: 6, height: 6, borderRadius: 999, background: t.textMute }} />
@@ -432,8 +416,8 @@ function LogsPanel({
               style={{
                 padding: '4px 10px',
                 borderRadius: 4,
-                background: filter === f ? t.surface : 'transparent',
-                color: filter === f ? t.text : t.textMute,
+                background: filter === f ? hexA(t.violet, 0.18) : 'transparent',
+                color: filter === f ? t.violet : t.textMute,
                 fontFamily: t.mono,
                 textTransform: 'uppercase',
                 letterSpacing: 0.6,
@@ -495,11 +479,14 @@ function LogsPanel({
         style={{
           flex: 1,
           overflow: 'auto',
-          padding: '10px 0',
+          position: 'relative',
+          background: CONSOLE.bg,
           fontFamily: t.mono,
           fontSize: 12,
         }}
       >
+        <Starfield seed={3} density={26} nebula={false} />
+        <div style={{ position: 'relative', padding: '10px 0' }}>
         {loading && lines.length === 0 ? (
           <div style={{ padding: 18, color: t.textMute, fontStyle: 'italic' }}>
             Fetching logs…
@@ -521,7 +508,7 @@ function LogsPanel({
                   ? t.warn
                   : l.level === 'error'
                     ? t.bad
-                    : t.textSoft;
+                    : CONSOLE.dim;
             return (
               <div
                 key={i}
@@ -533,7 +520,7 @@ function LogsPanel({
                   lineHeight: 1.55,
                 }}
               >
-                <span style={{ color: t.textMute }}>{l.timestamp ?? ''}</span>
+                <span style={{ color: CONSOLE.faint }}>{l.timestamp ?? ''}</span>
                 <span
                   style={{
                     color: lvlColor,
@@ -545,7 +532,7 @@ function LogsPanel({
                 >
                   {l.level ?? ''}
                 </span>
-                <span style={{ color: t.text }}>{l.message}</span>
+                <span style={{ color: CONSOLE.text }}>{l.message}</span>
               </div>
             );
           })
@@ -566,12 +553,14 @@ function LogsPanel({
                 height: 6,
                 background: t.ember,
                 borderRadius: 999,
-                animation: 'cookerPulse 1.2s infinite',
+                boxShadow: `0 0 8px ${t.ember}`,
+                animation: 'ccPulse 1.2s infinite',
               }}
             />
-            <span style={{ animation: 'cookerBlink 1s steps(2) infinite' }}>▌</span>
+            <span style={{ animation: 'ccBlink 1s steps(2) infinite' }}>▌</span>
           </div>
         )}
+        </div>
       </div>
 
       <StageOutputsTable stageRun={stageRun} />

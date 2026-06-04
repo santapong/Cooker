@@ -24,6 +24,9 @@ import ConditionalEdge from './edges/ConditionalEdge';
 import { usePipelineStore } from '../../stores/pipelineStore';
 import { useTheme } from '../../theme/ThemeProvider';
 import { hexA } from '../../theme/tokens';
+import { Starfield } from '../ui/Starfield';
+import { planetKindOf } from '../ui/atoms';
+import type { Node } from '@xyflow/react';
 import type { StageType } from '../../types/pipeline';
 
 const nodeTypes: NodeTypes = {
@@ -49,21 +52,14 @@ export default function PipelineCanvas() {
 
   const onConnect = useCallback(
     (params: Connection) => {
-      setEdges((eds) =>
-        addEdge(
-          {
-            ...params,
-            type: 'conditional',
-            style: { stroke: t.textMute, strokeWidth: 1.6 },
-          },
-          eds,
-        ),
-      );
+      // the trajectory's look is derived inside ConditionalEdge from the
+      // source node's run status — no per-edge style needed here.
+      setEdges((eds) => addEdge({ ...params, type: 'conditional' }, eds));
       if (params.source && params.target) {
         store.connectStages(params.source, params.target);
       }
     },
-    [setEdges, store, t.textMute],
+    [setEdges, store],
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -98,8 +94,21 @@ export default function PipelineCanvas() {
     [store],
   );
 
+  const dark = t.mode === 'dark';
+
   return (
-    <div ref={reactFlowWrapper} style={{ flex: 1, height: '100%' }}>
+    <div
+      ref={reactFlowWrapper}
+      style={{
+        flex: 1,
+        height: '100%',
+        position: 'relative',
+        overflow: 'hidden',
+        background: `radial-gradient(120% 100% at 50% -20%, ${t.canvasTop} 0%, ${t.canvasBot} 100%)`,
+      }}
+    >
+      {/* drifting starfield behind the graph */}
+      <Starfield seed={42} density={dark ? 90 : 22} nebula />
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -111,32 +120,31 @@ export default function PipelineCanvas() {
         onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        defaultEdgeOptions={{
-          type: 'conditional',
-          style: { stroke: t.textMute, strokeWidth: 1.6 },
-        }}
+        defaultEdgeOptions={{ type: 'conditional' }}
         fitView
         proOptions={{ hideAttribution: true }}
-        style={{ background: t.bg }}
+        style={{ background: 'transparent' }}
       >
         <Controls
           style={{
-            background: t.surface,
+            background: t.panelGlass,
             border: `1px solid ${t.line}`,
-            borderRadius: 8,
+            borderRadius: 10,
             color: t.textSoft,
+            backdropFilter: 'blur(10px)',
           }}
         />
         <MiniMap
-          nodeColor={() => t.accent}
-          maskColor={hexA(t.bg, 0.7)}
+          nodeColor={(n: Node) => t.planets[planetKindOf(n.type)].glow}
+          maskColor={hexA(t.void, 0.7)}
           style={{
-            background: t.surface,
+            background: t.panelGlass,
             border: `1px solid ${t.line}`,
-            borderRadius: 8,
+            borderRadius: 10,
           }}
         />
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1} color={hexA(t.text, 0.08)} />
+        {/* faint dotted grid (violet-tinted), pans with the canvas */}
+        <Background variant={BackgroundVariant.Dots} gap={34} size={1} color={hexA(t.violet, 0.1)} />
       </ReactFlow>
     </div>
   );

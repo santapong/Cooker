@@ -96,7 +96,7 @@ export default function NewAppWizard() {
                   height: 28,
                   borderRadius: 999,
                   background: s.done ? t.good : s.current ? t.accent : t.surfaceAlt,
-                  color: s.done || s.current ? '#FFF8EE' : t.textMute,
+                  color: s.done || s.current ? '#fff' : t.textMute,
                   display: 'grid',
                   placeItems: 'center',
                   fontFamily: t.mono,
@@ -608,7 +608,7 @@ function TipCard({ children }: { children: React.ReactNode }) {
           borderRadius: 999,
           flexShrink: 0,
           background: t.accent,
-          color: '#FFF8EE',
+          color: '#fff',
           display: 'grid',
           placeItems: 'center',
         }}

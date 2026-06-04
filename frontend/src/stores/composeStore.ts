@@ -16,12 +16,6 @@ interface ComposeStore {
   updateServiceConfig: (name: string, config: Partial<ComposeService>) => Promise<void>;
 }
 
-const connectionColors: Record<string, string> = {
-  depends_on: '#3b82f6',
-  env_reference: '#f97316',
-  network: '#22c55e',
-};
-
 function layoutNodes(services: ComposeGraph['services'], connections: ComposeGraph['connections']): Node[] {
   // Build adjacency for topological sort
   const deps = new Map<string, string[]>();
@@ -110,7 +104,7 @@ function buildEdges(connections: ComposeGraph['connections']): Edge[] {
     target: conn.target,
     type: 'serviceConnection',
     label: conn.label,
-    style: { stroke: connectionColors[conn.type] || '#475569' },
+    // colour is derived from connectionType inside ServiceConnectionEdge (themed)
     data: { connectionType: conn.type },
   }));
 }

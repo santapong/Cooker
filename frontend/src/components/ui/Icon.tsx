@@ -1,4 +1,6 @@
 import type { CSSProperties } from 'react';
+import { useTheme } from '../../theme/ThemeProvider';
+import { hexA } from '../../theme/tokens';
 
 export type IconName =
   | 'apps'
@@ -79,14 +81,50 @@ export function Icon({ name, size = 16, stroke = 1.6, style }: Props) {
   );
 }
 
-export function CookerMark({ color, size = 28 }: { color: string; size?: number }) {
+/**
+ * CookerMark — the brand mark as a ringed planet: a cyan→violet world with a
+ * violet glow and an ember orbit ring. CSS/SVG only (no raster). The `color`
+ * prop is retained for back-compat but the cosmic palette is read from theme.
+ */
+export function CookerMark({ size = 30 }: { color?: string; size?: number }) {
+  const t = useTheme();
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden>
-      <circle cx="16" cy="18" r="11" fill="none" stroke={color} strokeWidth="2.2" />
-      <path d="M5 11h22" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
-      <circle cx="11" cy="11" r="1.6" fill={color} />
-      <circle cx="16" cy="11" r="1.6" fill={color} />
-      <circle cx="21" cy="11" r="1.6" fill={color} />
-    </svg>
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      {/* outer glow */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: -size * 0.18,
+          borderRadius: 999,
+          background: `radial-gradient(circle, ${hexA(t.violetGlow, 0.5)} 0%, transparent 70%)`,
+        }}
+      />
+      {/* planet body */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: size * 0.14,
+          borderRadius: 999,
+          background: `radial-gradient(circle at 34% 30%, ${t.cyan}, ${t.violet} 70%)`,
+          boxShadow: `inset -2px -3px 5px ${hexA('#000', 0.4)}, 0 0 ${size * 0.5}px ${hexA(t.violetGlow, 0.6)}`,
+        }}
+      />
+      {/* ember orbit ring */}
+      <div
+        style={{
+          position: 'absolute',
+          left: -size * 0.06,
+          top: '50%',
+          width: size * 1.12,
+          height: size * 0.42,
+          marginTop: -size * 0.21,
+          borderRadius: '50%',
+          transform: 'rotate(-22deg)',
+          border: `2px solid ${hexA(t.ember, 0.85)}`,
+          borderTopColor: hexA(t.ember, 0.2),
+          borderLeftColor: hexA(t.ember, 0.3),
+        }}
+      />
+    </div>
   );
 }
