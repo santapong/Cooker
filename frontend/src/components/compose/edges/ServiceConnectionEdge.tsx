@@ -1,18 +1,27 @@
 import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/react';
 import { useTheme } from '../../../theme/ThemeProvider';
-import { hexA } from '../../../theme/tokens';
+import { hexA, type CookerTheme } from '../../../theme/tokens';
+
+// compose connection type → cosmic tone color
+function connectionColor(t: CookerTheme, connectionType: string): string {
+  switch (connectionType) {
+    case 'env_reference':
+      return t.ember;
+    case 'network':
+      return t.good;
+    case 'depends_on':
+      return t.cool;
+    default:
+      return t.textMute;
+  }
+}
 
 export default function ServiceConnectionEdge(props: EdgeProps) {
   const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, label, data } = props;
   const t = useTheme();
 
-  const typeColors: Record<string, string> = {
-    depends_on: t.cool,
-    env_reference: t.ember,
-    network: t.good,
-  };
   const connectionType = (data?.connectionType as string) || 'depends_on';
-  const color = typeColors[connectionType] || t.textMute;
+  const color = connectionColor(t, connectionType);
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,

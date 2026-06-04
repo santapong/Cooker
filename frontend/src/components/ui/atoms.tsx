@@ -7,7 +7,7 @@ import { Icon, type IconName } from './Icon';
 export type Tone = 'neutral' | 'accent' | 'good' | 'warn' | 'bad' | 'cool' | 'ember';
 
 // tone → base accent color, resolved against the active (cosmic) theme
-function toneColor(t: CookerTheme, tone: Tone): string {
+export function toneColor(t: CookerTheme, tone: Tone): string {
   const map: Record<Tone, string> = {
     neutral: t.textMute,
     accent: t.violet,

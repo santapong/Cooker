@@ -1,7 +1,8 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { hexA } from '../../../theme/tokens';
-import { PlanetOrb, planetKindOf, statusTone } from '../../ui/atoms';
+import { PlanetOrb, planetKindOf, statusTone, toneColor } from '../../ui/atoms';
+import { nodeShellStyle, portHandleStyle } from '../../ui/nodeStyles';
 
 interface StageNodeData {
   label?: string;
@@ -22,47 +23,25 @@ export default function StageNode({ data, kind, selected, detailFromConfig, fall
   const t = useTheme();
   const d = data as StageNodeData & { config?: Record<string, unknown> };
   const status = d.status || 'pending';
+  const pk = planetKindOf(kind);
   const tone = statusTone(status);
   const isLive = tone === 'ember';
   const dim = status === 'pending' || status === 'queued';
-  const ring = planetKindOf(kind) === 'approval';
-  const statusColor =
-    tone === 'good' ? t.good
-    : tone === 'bad' ? t.bad
-    : tone === 'ember' ? t.ember
-    : tone === 'warn' ? t.warn
-    : tone === 'cool' ? t.cool
-    : t.textMute;
+  const ring = pk === 'approval';
+  const statusColor = toneColor(t, tone);
 
   const detail =
     d.detail ?? (detailFromConfig && d.config ? detailFromConfig(d.config) : undefined) ?? fallbackDetail ?? 'configure…';
 
-  const portColor = t.violetGlow;
-  const portStyle: React.CSSProperties = {
-    width: 9,
-    height: 9,
-    background: portColor,
-    border: `1.5px solid ${t.mode === 'dark' ? t.bg : '#fff'}`,
-    boxShadow: `0 0 8px ${hexA(portColor, 0.8)}`,
-  };
+  const portStyle = portHandleStyle(t);
 
   return (
     <div
       style={{
+        ...nodeShellStyle(t, { selected, live: isLive }),
         width: 214,
-        background: t.surface,
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        border: `1px solid ${selected ? t.violet : isLive ? hexA(t.ember, 0.5) : t.line}`,
-        borderRadius: 14,
         padding: '11px 13px',
         opacity: dim ? 0.62 : 1,
-        boxShadow: selected
-          ? `0 0 0 3px ${hexA(t.violet, 0.28)}, 0 14px 40px ${hexA('#000', t.mode === 'dark' ? 0.5 : 0.14)}`
-          : isLive
-            ? `0 0 26px ${hexA(t.ember, 0.3)}, 0 14px 38px ${hexA('#000', t.mode === 'dark' ? 0.5 : 0.14)}`
-            : `0 12px 30px ${hexA('#000', t.mode === 'dark' ? 0.42 : 0.1)}`,
-        color: t.text,
         position: 'relative',
       }}
     >
@@ -84,7 +63,7 @@ export default function StageNode({ data, kind, selected, detailFromConfig, fall
             top: 0,
             bottom: 0,
             width: 46,
-            background: `radial-gradient(ellipse at left center, ${hexA(isLive ? t.ember : t.planets[planetKindOf(kind)].glow, 0.3)} 0%, transparent 75%)`,
+            background: `radial-gradient(ellipse at left center, ${hexA(isLive ? t.ember : t.planets[pk].glow, 0.3)} 0%, transparent 75%)`,
           }}
         />
       </div>

@@ -61,6 +61,16 @@ export interface PlanetStyle {
   label: string;
 }
 
+// The live-log "console" surface is deliberately near-black in BOTH modes
+// (it reads as a terminal). Centralised here so the values live in one place
+// rather than as magic hexes at page altitude.
+export const CONSOLE = {
+  bg: '#05050F',
+  text: '#D6D8FF',
+  dim: '#ADB0E4',
+  faint: '#5A5C8A',
+} as const;
+
 export const PLANET_KINDS: Record<PlanetKind, PlanetStyle> = {
   source: { ch: '◐', from: '#7FD0FF', to: '#3B82C4', glow: '#5BB6FF', label: 'Source' },
   build: { ch: '✦', from: '#FFC36B', to: '#E8702A', glow: '#FF9D45', label: 'Build' },

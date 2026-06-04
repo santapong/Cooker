@@ -5,24 +5,22 @@ import { useEnvironmentStore } from '../stores/environmentStore';
 import type { PipelineRun, Pipeline, Stage, StageRun, EnvironmentStatus } from '../types/pipeline';
 import { useTheme } from '../theme/ThemeProvider';
 import { useUIStore } from '../stores/uiStore';
-import { hexA } from '../theme/tokens';
+import { hexA, CONSOLE } from '../theme/tokens';
 import {
   Btn,
   KBD,
   KindBadge,
   Pill,
   SectionLabel,
+  StatusDot,
   statusTone,
+  toneColor,
   type Tone,
 } from '../components/ui/atoms';
 import { Icon } from '../components/ui/Icon';
 import { Starfield } from '../components/ui/Starfield';
 import { useToastStore } from '../stores/toastStore';
 import { useStageLogs } from '../hooks/useStageLogs';
-
-// the live log stream is a "console" surface — deliberately near-black in both
-// Deep Field and Daybreak, like a terminal.
-const CONSOLE_BG = '#05050F';
 
 export default function RunPage() {
   const t = useTheme();
@@ -324,16 +322,7 @@ function StepRail({
 
 function StepDot({ tone }: { tone: Tone }) {
   const t = useTheme();
-  const palette: Record<Tone, string> = {
-    good: t.good,
-    warn: t.warn,
-    bad: t.bad,
-    cool: t.cool,
-    ember: t.ember,
-    accent: t.accent,
-    neutral: t.textMute,
-  };
-  const c = palette[tone];
+  const c = toneColor(t, tone);
   return (
     <div
       style={{
@@ -348,18 +337,7 @@ function StepDot({ tone }: { tone: Tone }) {
       }}
     >
       {tone === 'good' && <Icon name="check" size={12} style={{ color: c }} />}
-      {tone === 'ember' && (
-        <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 999,
-            background: c,
-            boxShadow: `0 0 8px ${c}`,
-            animation: 'ccPulse 1.4s ease-in-out infinite',
-          }}
-        />
-      )}
+      {tone === 'ember' && <StatusDot tone="ember" pulse size={8} />}
       {tone === 'bad' && <Icon name="close" size={12} style={{ color: c }} />}
       {(tone === 'neutral' || tone === 'warn') && (
         <span style={{ width: 6, height: 6, borderRadius: 999, background: t.textMute }} />
@@ -502,7 +480,7 @@ function LogsPanel({
           flex: 1,
           overflow: 'auto',
           position: 'relative',
-          background: CONSOLE_BG,
+          background: CONSOLE.bg,
           fontFamily: t.mono,
           fontSize: 12,
         }}
@@ -530,7 +508,7 @@ function LogsPanel({
                   ? t.warn
                   : l.level === 'error'
                     ? t.bad
-                    : '#ADB0E4';
+                    : CONSOLE.dim;
             return (
               <div
                 key={i}
@@ -542,7 +520,7 @@ function LogsPanel({
                   lineHeight: 1.55,
                 }}
               >
-                <span style={{ color: '#5A5C8A' }}>{l.timestamp ?? ''}</span>
+                <span style={{ color: CONSOLE.faint }}>{l.timestamp ?? ''}</span>
                 <span
                   style={{
                     color: lvlColor,
@@ -554,7 +532,7 @@ function LogsPanel({
                 >
                   {l.level ?? ''}
                 </span>
-                <span style={{ color: '#D6D8FF' }}>{l.message}</span>
+                <span style={{ color: CONSOLE.text }}>{l.message}</span>
               </div>
             );
           })

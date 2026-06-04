@@ -1,8 +1,23 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ComposeService } from '../../../types/compose';
 import { useTheme } from '../../../theme/ThemeProvider';
-import { hexA } from '../../../theme/tokens';
+import { hexA, type CookerTheme } from '../../../theme/tokens';
 import { PlanetOrb } from '../../ui/atoms';
+import { nodeShellStyle, portHandleStyle } from '../../ui/nodeStyles';
+
+// docker status → cosmic tone color
+function serviceStatusColor(t: CookerTheme, status: string): string {
+  switch (status) {
+    case 'running':
+      return t.good;
+    case 'exited':
+      return t.bad;
+    case 'paused':
+      return t.warn;
+    default:
+      return t.textMute;
+  }
+}
 
 export default function DockerServiceNode({ data, selected }: NodeProps) {
   const t = useTheme();
@@ -11,42 +26,19 @@ export default function DockerServiceNode({ data, selected }: NodeProps) {
   const imageLabel = service.image || (service.build ? `build: ${service.build.context}` : 'no image');
   const ports = service.ports?.length ? service.ports.join(', ') : null;
 
-  const statusColors: Record<string, string> = {
-    running: t.good,
-    exited: t.bad,
-    paused: t.warn,
-    unknown: t.textMute,
-  };
-  const sc = statusColors[status] || t.textMute;
+  const sc = serviceStatusColor(t, status);
   const live = status === 'running';
-
-  const portColor = t.violetGlow;
-  const handleStyle: React.CSSProperties = {
-    width: 9,
-    height: 9,
-    background: portColor,
-    border: `1.5px solid ${t.mode === 'dark' ? t.bg : '#fff'}`,
-    boxShadow: `0 0 8px ${hexA(portColor, 0.8)}`,
-  };
 
   return (
     <div
       style={{
+        ...nodeShellStyle(t, { selected, live }),
         padding: '11px 13px',
-        borderRadius: 14,
         minWidth: 200,
-        background: t.surface,
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        border: `1px solid ${selected ? t.violet : live ? hexA(t.ember, 0.5) : t.line}`,
-        color: t.text,
         cursor: 'pointer',
-        boxShadow: live
-          ? `0 0 22px ${hexA(t.ember, 0.28)}, 0 12px 30px ${hexA('#000', t.mode === 'dark' ? 0.42 : 0.1)}`
-          : `0 12px 30px ${hexA('#000', t.mode === 'dark' ? 0.42 : 0.1)}`,
       }}
     >
-      <Handle type="target" position={Position.Left} style={handleStyle} />
+      <Handle type="target" position={Position.Left} style={portHandleStyle(t)} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <PlanetOrb kind="custom" size={28} status={status} />
         <span style={{ fontSize: 13, fontWeight: 600, flex: 1, letterSpacing: -0.1 }}>
@@ -81,7 +73,7 @@ export default function DockerServiceNode({ data, selected }: NodeProps) {
           {ports}
         </div>
       )}
-      <Handle type="source" position={Position.Right} style={handleStyle} />
+      <Handle type="source" position={Position.Right} style={portHandleStyle(t)} />
     </div>
   );
 }
