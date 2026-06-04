@@ -63,21 +63,31 @@ export default function StageNode({ data, kind, selected, detailFromConfig, fall
             ? `0 0 26px ${hexA(t.ember, 0.3)}, 0 14px 38px ${hexA('#000', t.mode === 'dark' ? 0.5 : 0.14)}`
             : `0 12px 30px ${hexA('#000', t.mode === 'dark' ? 0.42 : 0.1)}`,
         color: t.text,
-        overflow: 'hidden',
+        position: 'relative',
       }}
     >
-      {/* atmosphere edge glow */}
+      {/* atmosphere edge glow — clipped to the rounded card in its own layer so
+          the React Flow ports (which straddle the border) are NOT clipped. */}
       <div
         style={{
           position: 'absolute',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: 46,
-          background: `radial-gradient(ellipse at left center, ${hexA(isLive ? t.ember : t.planets[planetKindOf(kind)].glow, 0.3)} 0%, transparent 75%)`,
+          inset: 0,
+          borderRadius: 14,
+          overflow: 'hidden',
           pointerEvents: 'none',
         }}
-      />
+      >
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 46,
+            background: `radial-gradient(ellipse at left center, ${hexA(isLive ? t.ember : t.planets[planetKindOf(kind)].glow, 0.3)} 0%, transparent 75%)`,
+          }}
+        />
+      </div>
 
       <Handle type="target" position={Position.Left} style={portStyle} />
 

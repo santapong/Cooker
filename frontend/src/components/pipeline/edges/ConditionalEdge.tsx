@@ -1,4 +1,4 @@
-import { getBezierPath, useNodes, type EdgeProps, type Node } from '@xyflow/react';
+import { BaseEdge, getBezierPath, useStore, type EdgeProps } from '@xyflow/react';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { hexA } from '../../../theme/tokens';
 import { statusTone } from '../../ui/atoms';
@@ -21,13 +21,15 @@ function stateFromStatus(status?: string): TrajectoryState {
  * violet marching gradient with a travelling comet.
  */
 export default function ConditionalEdge(props: EdgeProps) {
-  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, source, label } = props;
+  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, source, label, markerEnd } = props;
   const t = useTheme();
   const reduced = useReducedMotion();
-  const nodes = useNodes();
 
-  const sourceNode = nodes.find((n: Node) => n.id === source);
-  const sourceStatus = (sourceNode?.data as { status?: string } | undefined)?.status;
+  // Subscribe ONLY to this edge's source-node status (not the whole nodes
+  // array) so dragging unrelated nodes doesn't re-render every edge.
+  const sourceStatus = useStore(
+    (s) => (s.nodeLookup.get(source)?.data as { status?: string } | undefined)?.status,
+  );
   const state = stateFromStatus(sourceStatus);
   const active = state === 'active';
   const done = state === 'done';
@@ -65,16 +67,20 @@ export default function ConditionalEdge(props: EdgeProps) {
         />
       )}
 
-      {/* the trajectory itself */}
-      <path
-        className="react-flow__edge-path"
-        d={edgePath}
-        fill="none"
-        stroke={`url(#${gradId})`}
-        strokeWidth={active ? 2.4 : 1.6}
-        strokeLinecap="round"
-        strokeDasharray={state === 'idle' ? '1 7' : active ? '8 6' : 'none'}
-        style={{ animation: active && !reduced ? 'ccDash 0.9s linear infinite' : 'none' }}
+      {/* the trajectory itself — BaseEdge keeps the ~20px interaction hit-area
+          (so the edge stays clickable/selectable/deletable) and honours markerEnd. */}
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerEnd={markerEnd}
+        interactionWidth={20}
+        style={{
+          stroke: `url(#${gradId})`,
+          strokeWidth: active ? 2.4 : 1.6,
+          strokeLinecap: 'round',
+          strokeDasharray: state === 'idle' ? '1 7' : active ? '8 6' : undefined,
+          animation: active && !reduced ? 'ccDash 0.9s linear infinite' : 'none',
+        }}
       />
 
       {/* travelling comet (decorative; skipped under reduced motion) */}

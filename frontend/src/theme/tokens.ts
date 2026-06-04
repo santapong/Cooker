@@ -191,9 +191,17 @@ export function cookerTheme(mode: ThemeMode = 'dark'): CookerTheme {
   };
 }
 
-// hex with alpha helper
-export function hexA(hex: string, a: number): string {
-  const h = hex.replace('#', '');
+// Color-with-alpha helper. Accepts both `#rrggbb` hex AND `rgb()/rgba()`
+// strings — several cosmic tokens (line, lineStrong, lineSoft, surface,
+// panelGlass) are authored as rgba(), and callers pass them straight in to
+// re-tint at a new alpha, so a hex-only parser would yield rgba(NaN,…).
+export function hexA(color: string, a: number): string {
+  const c = color.trim();
+  const rgb = c.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i);
+  if (rgb) {
+    return `rgba(${rgb[1]},${rgb[2]},${rgb[3]},${a})`;
+  }
+  const h = c.replace('#', '');
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);
   const b = parseInt(h.slice(4, 6), 16);

@@ -52,21 +52,14 @@ export default function PipelineCanvas() {
 
   const onConnect = useCallback(
     (params: Connection) => {
-      setEdges((eds) =>
-        addEdge(
-          {
-            ...params,
-            type: 'conditional',
-            style: { stroke: t.textMute, strokeWidth: 1.6 },
-          },
-          eds,
-        ),
-      );
+      // the trajectory's look is derived inside ConditionalEdge from the
+      // source node's run status — no per-edge style needed here.
+      setEdges((eds) => addEdge({ ...params, type: 'conditional' }, eds));
       if (params.source && params.target) {
         store.connectStages(params.source, params.target);
       }
     },
-    [setEdges, store, t.textMute],
+    [setEdges, store],
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
