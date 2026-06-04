@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cooker — Launch console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="cosmic-site.css" rel="stylesheet" />
+<style>
+  body { min-height:100vh; }
+  .auth { display:grid; grid-template-columns:1.05fr 0.95fr; min-height:100vh; position:relative; z-index:1; }
+
+  /* left brand panel */
+  .brandside { position:relative; overflow:hidden; padding:48px 56px; display:flex; flex-direction:column;
+    border-right:1px solid var(--line);
+    background:radial-gradient(120% 100% at 20% 10%, #16123e, #08071c 70%); }
+  .brandside .topbrand { display:flex; align-items:center; gap:12px; position:relative; z-index:2; }
+  .brandside .mid { margin-top:auto; margin-bottom:auto; position:relative; z-index:2; }
+  .brandside h2 { font-size:clamp(30px,3.6vw,44px); line-height:1.08; max-width:460px; }
+  .brandside h2 .grad { background:linear-gradient(120deg,var(--cyan),var(--violet) 60%,var(--ember));
+    -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .brandside .quote { color:var(--soft); font-size:16px; margin-top:22px; max-width:440px; }
+  .brandside .foot { position:relative; z-index:2; font-family:var(--mono); font-size:12px; color:var(--mute);
+    display:flex; gap:18px; }
+  .bigplanet { position:absolute; right:-120px; bottom:-120px; width:420px; height:420px; border-radius:50%;
+    background:radial-gradient(circle at 36% 30%, #7CF2FF, #7C5CFF 60%, #3a1d8a 100%);
+    box-shadow:inset -30px -40px 90px rgba(0,0,0,0.5), 0 0 120px rgba(124,92,255,0.5); opacity:0.85; }
+  .bigring { position:absolute; right:-180px; bottom:-70px; width:560px; height:170px; border-radius:50%;
+    border:3px solid rgba(255,180,84,0.6); border-top-color:rgba(255,180,84,0.12);
+    transform:rotate(-24deg); }
+
+  /* right form */
+  .formside { display:flex; align-items:center; justify-content:center; padding:48px; }
+  .formcard { width:100%; max-width:400px; }
+  .formcard h1 { font-size:30px; }
+  .formcard .sub { color:var(--soft); font-size:15px; margin-top:10px; }
+  .oidc { display:flex; flex-direction:column; gap:10px; margin-top:30px; }
+  .oidc-btn { display:flex; align-items:center; gap:12px; width:100%; padding:13px 16px; border-radius:12px;
+    background:rgba(255,255,255,0.04); border:1px solid var(--line-2); color:var(--text);
+    font-family:var(--sans); font-size:14.5px; font-weight:500; cursor:pointer; transition:background .15s,transform .15s; }
+  .oidc-btn:hover { background:rgba(255,255,255,0.08); transform:translateY(-1px); }
+  .oidc-btn .pi { width:22px; height:22px; border-radius:6px; display:grid; place-items:center; font-size:12px;
+    font-weight:700; color:#fff; flex-shrink:0; }
+  .oidc-btn .arr { margin-left:auto; color:var(--mute); }
+  .divider { display:flex; align-items:center; gap:14px; margin:26px 0; color:var(--mute);
+    font-family:var(--mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; }
+  .divider::before,.divider::after { content:""; flex:1; height:1px; background:var(--line); }
+  .field { margin-bottom:16px; }
+  .field label { display:block; font-family:var(--mono); font-size:11px; letter-spacing:0.1em;
+    text-transform:uppercase; color:var(--mute); margin-bottom:7px; }
+  .field input { width:100%; padding:12px 14px; border-radius:11px; background:rgba(0,0,0,0.3);
+    border:1px solid var(--line-2); color:var(--text); font-family:var(--sans); font-size:14.5px; outline:none;
+    transition:border-color .15s, box-shadow .15s; }
+  .field input:focus { border-color:var(--violet); box-shadow:0 0 0 3px rgba(139,109,255,0.22); }
+  .field input::placeholder { color:var(--faint); }
+  .row { display:flex; align-items:center; justify-content:space-between; margin:6px 0 22px; font-size:13px; }
+  .row a { color:var(--violet); }
+  .check { display:flex; align-items:center; gap:8px; color:var(--soft); }
+  .check span { width:16px; height:16px; border-radius:5px; border:1px solid var(--line-2);
+    display:grid; place-items:center; background:rgba(139,109,255,0.16); color:var(--violet); font-size:11px; }
+  .signup { text-align:center; margin-top:24px; color:var(--soft); font-size:14px; }
+  .signup a { color:var(--violet); font-weight:600; }
+  .secur { margin-top:30px; display:flex; align-items:center; gap:8px; justify-content:center;
+    font-family:var(--mono); font-size:11px; color:var(--mute); }
+
+  @media (max-width:880px){ .auth{ grid-template-columns:1fr; } .brandside{ display:none; } }
+</style>
+</head>
+<body>
+<canvas id="starfield"></canvas>
+<div class="bg-nebula"></div>
+<div class="auth">
+  <!-- BRAND SIDE -->
+  <div class="brandside">
+    <a class="topbrand" href="cosmic-home.html">
+      <span class="mark"><span class="halo"></span><span class="body"></span><span class="ring"></span></span>
+      <span class="brand-name">Cooker</span>
+    </a>
+    <div class="mid">
+      <span class="eyebrow">✦ mission console</span>
+      <h2 style="margin-top:20px;">Your pipelines are <span class="grad">waiting in orbit</span>.</h2>
+      <p class="quote">Sign in to the star map — watch every world build, push, and roll out to production in real time. Drag a planet, draw a trajectory, ship.</p>
+      <div style="display:flex;gap:10px;margin-top:28px;flex-wrap:wrap;">
+        <span class="chip">● 1 run live</span>
+        <span class="chip">6 apps in orbit</span>
+        <span class="chip">all systems nominal</span>
+      </div>
+    </div>
+    <div class="foot"><span>build · ship · orbit</span><span style="margin-left:auto;">OIDC + PKCE secured</span></div>
+    <div class="bigring"></div>
+    <div class="bigplanet"></div>
+  </div>
+
+  <!-- FORM SIDE -->
+  <div class="formside">
+    <div class="formcard">
+      <h1>Launch console</h1>
+      <p class="sub">Sign in to <b style="color:var(--text);">cooker.acme.io</b> to continue.</p>
+
+      <div class="oidc">
+        <button class="oidc-btn"><span class="pi" style="background:#4a7fe0;">K</span> Continue with Keycloak <span class="arr">→</span></button>
+        <button class="oidc-btn"><span class="pi" style="background:#20bbaa;">O</span> Continue with Okta <span class="arr">→</span></button>
+        <div style="display:flex;gap:10px;">
+          <button class="oidc-btn" style="flex:1;justify-content:center;"><span class="pi" style="background:#e25241;">G</span> Google</button>
+          <button class="oidc-btn" style="flex:1;justify-content:center;"><span class="pi" style="background:#2b3137;">⌥</span> GitHub</button>
+        </div>
+      </div>
+
+      <div class="divider">or with email</div>
+
+      <div class="field">
+        <label>Work email</label>
+        <input type="email" placeholder="you@acme.io" />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" placeholder="••••••••••••" />
+      </div>
+      <div class="row">
+        <span class="check"><span>✓</span> Keep me in orbit</span>
+        <a href="#">Forgot password?</a>
+      </div>
+      <a href="Cosmic Cooker.html" class="btn btn-primary btn-lg" style="width:100%;justify-content:center;">Launch console ↗</a>
+
+      <div class="signup">New crew? <a href="cosmic-signup.html">Create a workspace</a></div>
+      <div class="secur">⚿ Secured with OIDC + PKCE · step-up MFA on destructive routes</div>
+    </div>
+  </div>
+</div>
+<script src="starfield.js"></script>
+</body>
+</html>

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cooker — Create a workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="cosmic-site.css" rel="stylesheet" />
+<style>
+  body { min-height:100vh; }
+  .auth { display:grid; grid-template-columns:0.95fr 1.05fr; min-height:100vh; position:relative; z-index:1; }
+  .formside { display:flex; align-items:center; justify-content:center; padding:48px; }
+  .formcard { width:100%; max-width:404px; }
+  .formcard h1 { font-size:30px; }
+  .formcard .sub { color:var(--soft); font-size:15px; margin-top:10px; }
+  .oidc { display:flex; gap:10px; margin-top:26px; }
+  .oidc-btn { display:flex; align-items:center; justify-content:center; gap:9px; flex:1; padding:12px; border-radius:12px;
+    background:rgba(255,255,255,0.04); border:1px solid var(--line-2); color:var(--text);
+    font-family:var(--sans); font-size:14px; font-weight:500; cursor:pointer; transition:background .15s,transform .15s; }
+  .oidc-btn:hover { background:rgba(255,255,255,0.08); transform:translateY(-1px); }
+  .oidc-btn .pi { width:20px; height:20px; border-radius:6px; display:grid; place-items:center; font-size:11px; font-weight:700; color:#fff; }
+  .divider { display:flex; align-items:center; gap:14px; margin:24px 0; color:var(--mute); font-family:var(--mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; }
+  .divider::before,.divider::after { content:""; flex:1; height:1px; background:var(--line); }
+  .field { margin-bottom:15px; }
+  .field label { display:block; font-family:var(--mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--mute); margin-bottom:7px; }
+  .field input { width:100%; padding:12px 14px; border-radius:11px; background:rgba(0,0,0,0.3); border:1px solid var(--line-2); color:var(--text); font-family:var(--sans); font-size:14.5px; outline:none; transition:border-color .15s,box-shadow .15s; }
+  .field input:focus { border-color:var(--violet); box-shadow:0 0 0 3px rgba(139,109,255,0.22); }
+  .field input::placeholder { color:var(--faint); }
+  .field .hint { font-family:var(--mono); font-size:10.5px; color:var(--mute); margin-top:6px; }
+  .signup { text-align:center; margin-top:22px; color:var(--soft); font-size:14px; }
+  .signup a { color:var(--violet); font-weight:600; }
+  .terms { font-size:12px; color:var(--mute); text-align:center; margin-top:16px; line-height:1.5; }
+  .terms a { color:var(--soft); }
+
+  .brandside { position:relative; overflow:hidden; padding:48px 56px; display:flex; flex-direction:column; border-left:1px solid var(--line);
+    background:radial-gradient(120% 100% at 80% 10%, #16123e, #08071c 70%); }
+  .brandside .mid { margin:auto 0; position:relative; z-index:2; }
+  .brandside h2 { font-size:clamp(28px,3.4vw,40px); line-height:1.1; max-width:440px; }
+  .brandside h2 .grad { background:linear-gradient(120deg,var(--cyan),var(--violet) 60%,var(--ember)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .perk { display:flex; align-items:center; gap:12px; margin-top:16px; color:var(--soft); font-size:15px; }
+  .perk .pk { width:26px; height:26px; border-radius:8px; display:grid; place-items:center; font-size:13px; background:rgba(139,109,255,0.16); color:var(--violet); flex-shrink:0; }
+  .bigplanet { position:absolute; left:-120px; top:-100px; width:380px; height:380px; border-radius:50%;
+    background:radial-gradient(circle at 36% 30%,#FFC36B,#E8702A 58%,#7a2f0c 100%); box-shadow:inset -30px -40px 90px rgba(0,0,0,0.5),0 0 110px rgba(255,157,69,0.45); opacity:0.8; }
+  @media (max-width:880px){ .auth{ grid-template-columns:1fr; } .brandside{ display:none; } }
+</style>
+</head>
+<body>
+<canvas id="starfield"></canvas>
+<div class="bg-nebula"></div>
+<div class="auth">
+  <div class="formside">
+    <div class="formcard">
+      <a class="brand" href="cosmic-home.html" style="margin-bottom:30px;">
+        <span class="mark"><span class="halo"></span><span class="body"></span><span class="ring"></span></span>
+        <span class="brand-name">Cooker</span>
+      </a>
+      <h1>Create a workspace</h1>
+      <p class="sub">Start free on a single binary — no card required.</p>
+      <div class="oidc">
+        <button class="oidc-btn"><span class="pi" style="background:#e25241;">G</span> Google</button>
+        <button class="oidc-btn"><span class="pi" style="background:#2b3137;">⌥</span> GitHub</button>
+      </div>
+      <div class="divider">or with email</div>
+      <div class="field"><label>Full name</label><input type="text" placeholder="Ada Lovelace" /></div>
+      <div class="field"><label>Work email</label><input type="email" placeholder="you@acme.io" /></div>
+      <div class="field"><label>Workspace</label><input type="text" placeholder="acme" /><div class="hint">cooker.acme.io · you can change this later</div></div>
+      <div class="field"><label>Password</label><input type="password" placeholder="at least 12 characters" /></div>
+      <a href="cosmic-signin.html" class="btn btn-primary btn-lg" style="width:100%;justify-content:center;margin-top:6px;">Launch workspace ↗</a>
+      <div class="terms">By continuing you agree to the <a href="#">Terms</a> &amp; <a href="#">Privacy Policy</a>.</div>
+      <div class="signup">Already have a workspace? <a href="cosmic-signin.html">Sign in</a></div>
+    </div>
+  </div>
+  <div class="brandside">
+    <div class="bigplanet"></div>
+    <div class="mid">
+      <span class="eyebrow">✦ free forever tier</span>
+      <h2 style="margin-top:20px;">Your first <span class="grad">constellation</span> is on us.</h2>
+      <div style="margin-top:28px;">
+        <div class="perk"><span class="pk">✓</span> Unlimited pipelines &amp; runs</div>
+        <div class="perk"><span class="pk">✓</span> Visual DAG editor + live logs</div>
+        <div class="perk"><span class="pk">✓</span> Deploy to Kubernetes, Fly &amp; Render</div>
+        <div class="perk"><span class="pk">✓</span> One <span class="mono" style="color:var(--cyan);">docker compose up</span> to start</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="starfield.js"></script>
+</body>
+</html>
