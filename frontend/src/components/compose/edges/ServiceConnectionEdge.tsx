@@ -1,23 +1,31 @@
-import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/react';
-
-const typeColors: Record<string, string> = {
-  depends_on: '#3b82f6',
-  env_reference: '#f97316',
-  network: '#22c55e',
-};
+import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/react';
+import { useTheme } from '../../../theme/ThemeProvider';
+import { hexA } from '../../../theme/tokens';
 
 export default function ServiceConnectionEdge(props: EdgeProps) {
   const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, label, data } = props;
-  const connectionType = (data?.connectionType as string) || 'depends_on';
-  const color = typeColors[connectionType] || '#475569';
+  const t = useTheme();
 
-  const [edgePath, labelX, labelY] = getSmoothStepPath({
-    sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition,
+  const typeColors: Record<string, string> = {
+    depends_on: t.cool,
+    env_reference: t.ember,
+    network: t.good,
+  };
+  const connectionType = (data?.connectionType as string) || 'depends_on';
+  const color = typeColors[connectionType] || t.textMute;
+
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
   });
 
   return (
     <>
-      <BaseEdge path={edgePath} style={{ stroke: color, strokeWidth: 2 }} />
+      <BaseEdge path={edgePath} style={{ stroke: color, strokeWidth: 1.8, strokeDasharray: '6 5' }} />
       {label && (
         <foreignObject
           x={labelX - 40}
@@ -26,18 +34,21 @@ export default function ServiceConnectionEdge(props: EdgeProps) {
           height={20}
           requiredExtensions="http://www.w3.org/1999/xhtml"
         >
-          <div style={{
-            fontSize: 9,
-            color: color,
-            backgroundColor: '#1e293b',
-            padding: '2px 6px',
-            borderRadius: 3,
-            textAlign: 'center',
-            border: `1px solid ${color}33`,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}>
+          <div
+            style={{
+              fontFamily: t.mono,
+              fontSize: 9,
+              color,
+              background: hexA(t.surfaceSolid, 0.85),
+              padding: '2px 6px',
+              borderRadius: 999,
+              textAlign: 'center',
+              border: `1px solid ${hexA(color, 0.35)}`,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
             {label}
           </div>
         </foreignObject>

@@ -107,6 +107,23 @@ select {
   }
 }
 
+/* Reduced-motion guard. The cosmic motion (starfield twinkle, planet halo,
+   orbit spin, status pulse, node shimmer, trajectory dash + comet) is purely
+   decorative — every animated element's BASE style is already the visible
+   end-state, so freezing animation to the first frame leaves the UI intact.
+   The SMIL trajectory comet (SVG <animateMotion>) is unreachable from CSS and
+   is gated separately in JS via useReducedMotion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* violet focus ring for inputs/selects/textareas (theme-independent glow) */
 .cc-field:focus {
   border-color: #7c5cff !important;
