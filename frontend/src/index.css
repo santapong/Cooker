@@ -143,6 +143,20 @@ select {
   }
 }
 
+/* violet focus ring for inputs/selects/textareas (theme-independent glow) */
+.cc-field:focus {
+  border-color: #7c5cff !important;
+  box-shadow: 0 0 0 3px rgba(139, 109, 255, 0.22);
+}
+
+/* button hover lift — base state is the visible end-state for reduced motion */
+@media (prefers-reduced-motion: no-preference) {
+  .cc-btn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+  }
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

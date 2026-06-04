@@ -72,6 +72,7 @@ export const PLANET_KINDS: Record<PlanetKind, PlanetStyle> = {
 };
 
 export interface CookerTheme {
+  mode: ThemeMode; // 'dark' = Deep Field, 'light' = Daybreak
   // ── canvas / surfaces ──
   void: string; // page/root background, letterbox
   bg: string; // app background
@@ -117,6 +118,7 @@ export function cookerTheme(mode: ThemeMode = 'dark'): CookerTheme {
   if (mode === 'dark') {
     // ── Deep Field (primary) ──
     return {
+      mode,
       void: '#06061A',
       bg: '#08081F',
       canvasTop: '#0C0B28',
@@ -153,6 +155,7 @@ export function cookerTheme(mode: ThemeMode = 'dark'): CookerTheme {
   }
   // ── Daybreak (light) ──
   return {
+    mode,
     void: '#EEF1FB',
     bg: '#F3EEF0',
     canvasTop: '#E9EEFC',
