@@ -16,7 +16,15 @@ import {
   PageHeader,
   Pill,
 } from '../components/ui/atoms';
+import { ConstellationThumb } from '../components/ui/ConstellationThumb';
+import { hexA } from '../theme/tokens';
 import { useToastStore } from '../stores/toastStore';
+
+// best-effort extraction of stage kinds from a template's Pipeline-shaped schema
+function templateKinds(tpl: Template): string[] {
+  const stages = (tpl.schema as { stages?: Array<{ type?: string }> } | undefined)?.stages;
+  return Array.isArray(stages) ? stages.map((s) => s.type ?? 'custom') : [];
+}
 
 const EMPTY_FORM: TemplateInput = {
   name: '',
@@ -185,24 +193,42 @@ export default function TemplatesGalleryPage() {
               </Card>
             ) : (
               items.map((tpl) => (
-                <Card key={tpl.id} pad={18}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <h4 style={{ margin: 0, fontSize: 15 }}>{tpl.name}</h4>
+                <Card key={tpl.id} pad={18} style={{ position: 'relative', overflow: 'hidden' }}>
+                  {/* nebula corner glow */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: -40,
+                      right: -40,
+                      width: 130,
+                      height: 130,
+                      borderRadius: 999,
+                      background: `radial-gradient(circle, ${hexA(t.cyan, 0.16)} 0%, transparent 70%)`,
+                      pointerEvents: 'none',
+                    }}
+                  />
+                  <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <h4 style={{ margin: 0, fontFamily: t.display, fontSize: 16, fontWeight: 600, letterSpacing: -0.3 }}>
+                      {tpl.name}
+                    </h4>
                     <Pill tone={tpl.enabled ? 'good' : 'neutral'}>
                       {tpl.enabled ? 'live' : 'draft'}
                     </Pill>
                   </div>
                   {tpl.category && (
-                    <div style={{ color: t.accent, fontFamily: t.mono, fontSize: 11, marginBottom: 8 }}>
-                      {tpl.category}
+                    <div style={{ position: 'relative', marginBottom: 8 }}>
+                      <Pill tone="accent">{tpl.category}</Pill>
                     </div>
                   )}
+                  <div style={{ position: 'relative', margin: '4px -4px 10px' }}>
+                    <ConstellationThumb kinds={templateKinds(tpl)} height={72} />
+                  </div>
                   {tpl.description && (
-                    <p style={{ color: t.textSoft, fontSize: 13, lineHeight: 1.5, margin: '0 0 12px' }}>
+                    <p style={{ position: 'relative', color: t.textSoft, fontSize: 13, lineHeight: 1.5, margin: '0 0 12px' }}>
                       {tpl.description}
                     </p>
                   )}
-                  <div style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ position: 'relative', display: 'grid', gap: 8 }}>
                     <Input
                       placeholder="New pipeline name…"
                       value={useFromName[tpl.id] ?? ''}

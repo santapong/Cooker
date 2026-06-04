@@ -393,7 +393,7 @@ export default function AppsPage() {
                         height: 22,
                         borderRadius: 999,
                         background: t.accentDeep,
-                        color: '#FFF8EE',
+                        color: '#fff',
                         display: 'grid',
                         placeItems: 'center',
                         fontFamily: t.mono,

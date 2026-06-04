@@ -16,8 +16,13 @@ import {
   type Tone,
 } from '../components/ui/atoms';
 import { Icon } from '../components/ui/Icon';
+import { Starfield } from '../components/ui/Starfield';
 import { useToastStore } from '../stores/toastStore';
 import { useStageLogs } from '../hooks/useStageLogs';
+
+// the live log stream is a "console" surface — deliberately near-black in both
+// Deep Field and Daybreak, like a terminal.
+const CONSOLE_BG = '#05050F';
 
 export default function RunPage() {
   const t = useTheme();
@@ -235,7 +240,7 @@ function StepRail({
             top: 18,
             bottom: 18,
             width: 1,
-            background: t.line,
+            background: `linear-gradient(${t.good}, ${t.ember}, ${t.line})`,
           }}
         />
         {stages.map((s) => {
@@ -350,7 +355,8 @@ function StepDot({ tone }: { tone: Tone }) {
             height: 8,
             borderRadius: 999,
             background: c,
-            animation: 'cookerPulse 1.4s ease-in-out infinite',
+            boxShadow: `0 0 8px ${c}`,
+            animation: 'ccPulse 1.4s ease-in-out infinite',
           }}
         />
       )}
@@ -432,8 +438,8 @@ function LogsPanel({
               style={{
                 padding: '4px 10px',
                 borderRadius: 4,
-                background: filter === f ? t.surface : 'transparent',
-                color: filter === f ? t.text : t.textMute,
+                background: filter === f ? hexA(t.violet, 0.18) : 'transparent',
+                color: filter === f ? t.violet : t.textMute,
                 fontFamily: t.mono,
                 textTransform: 'uppercase',
                 letterSpacing: 0.6,
@@ -495,11 +501,14 @@ function LogsPanel({
         style={{
           flex: 1,
           overflow: 'auto',
-          padding: '10px 0',
+          position: 'relative',
+          background: CONSOLE_BG,
           fontFamily: t.mono,
           fontSize: 12,
         }}
       >
+        <Starfield seed={3} density={26} nebula={false} />
+        <div style={{ position: 'relative', padding: '10px 0' }}>
         {loading && lines.length === 0 ? (
           <div style={{ padding: 18, color: t.textMute, fontStyle: 'italic' }}>
             Fetching logs…
@@ -521,7 +530,7 @@ function LogsPanel({
                   ? t.warn
                   : l.level === 'error'
                     ? t.bad
-                    : t.textSoft;
+                    : '#ADB0E4';
             return (
               <div
                 key={i}
@@ -533,7 +542,7 @@ function LogsPanel({
                   lineHeight: 1.55,
                 }}
               >
-                <span style={{ color: t.textMute }}>{l.timestamp ?? ''}</span>
+                <span style={{ color: '#5A5C8A' }}>{l.timestamp ?? ''}</span>
                 <span
                   style={{
                     color: lvlColor,
@@ -545,7 +554,7 @@ function LogsPanel({
                 >
                   {l.level ?? ''}
                 </span>
-                <span style={{ color: t.text }}>{l.message}</span>
+                <span style={{ color: '#D6D8FF' }}>{l.message}</span>
               </div>
             );
           })
@@ -566,12 +575,14 @@ function LogsPanel({
                 height: 6,
                 background: t.ember,
                 borderRadius: 999,
-                animation: 'cookerPulse 1.2s infinite',
+                boxShadow: `0 0 8px ${t.ember}`,
+                animation: 'ccPulse 1.2s infinite',
               }}
             />
-            <span style={{ animation: 'cookerBlink 1s steps(2) infinite' }}>▌</span>
+            <span style={{ animation: 'ccBlink 1s steps(2) infinite' }}>▌</span>
           </div>
         )}
+        </div>
       </div>
 
       <StageOutputsTable stageRun={stageRun} />
