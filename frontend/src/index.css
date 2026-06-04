@@ -176,12 +176,11 @@ select {
   background: transparent;
 }
 
-/* React Flow overrides — keep workshop palette */
+/* React Flow overrides — cosmic glowing ports. Colors come from each Handle's
+   inline style (StageNode), so no !important background here. */
 .react-flow__handle {
-  width: 9px !important;
-  height: 9px !important;
-  background: #c2410c !important;
-  border: 1.5px solid #16130f !important;
+  width: 9px;
+  height: 9px;
 }
 .react-flow__edge-path {
   stroke-width: 1.6;
