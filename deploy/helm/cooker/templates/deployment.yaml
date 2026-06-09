@@ -64,6 +64,10 @@ spec:
             {{- end }}
             - name: COOKER_BUILDER
               value: {{ .Values.builder.kind | quote }}
+            {{- if and .Values.builder.cache .Values.builder.cache.enabled }}
+            - name: COOKER_BUILD_CACHE_REPO
+              value: {{ required "builder.cache.ref is required when builder.cache.enabled" .Values.builder.cache.ref | quote }}
+            {{- end }}
             {{- if eq .Values.builder.kind "kaniko" }}
             - name: COOKER_K8S_NAMESPACE
               value: {{ .Values.builder.kaniko.namespace | default .Release.Namespace | quote }}

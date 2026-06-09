@@ -164,6 +164,28 @@ jobs:
             cat /tmp/fail-stderr >&2
             exit 1
           }
+      - name: helm template (builder cache)
+        run: |
+          # Default values: COOKER_BUILD_CACHE_REPO must not render.
+          if grep -q 'COOKER_BUILD_CACHE_REPO' /tmp/default.yaml; then
+            echo "ERROR: COOKER_BUILD_CACHE_REPO rendered without builder.cache.enabled" >&2
+            exit 1
+          fi
+          helm template cooker deploy/helm/cooker \
+            --set builder.cache.enabled=true \
+            --set builder.cache.ref=reg.example.com/cooker/buildcache \
+            > /tmp/cache.yaml
+          grep -q 'COOKER_BUILD_CACHE_REPO' /tmp/cache.yaml || {
+            echo "ERROR: COOKER_BUILD_CACHE_REPO did not render with builder.cache.enabled" >&2
+            exit 1
+          }
+          # enabled without ref must fail (required guard).
+          if helm template cooker deploy/helm/cooker \
+            --set builder.cache.enabled=true \
+            > /dev/null 2>&1; then
+            echo "ERROR: builder.cache.enabled without ref should fail to render" >&2
+            exit 1
+          fi
       - name: helm template (kaniko builder)
         run: |
           helm template cooker deploy/helm/cooker \

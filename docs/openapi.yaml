@@ -408,6 +408,53 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/App" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/apps/detect-build:
+    post:
+      summary: Detect a repo's build plan + suggested wizard recipe (pre-import)
+      description: >-
+        Shallow-clones the repo and runs the same build-plan detection an
+        App deploy would, plus a recipe heuristic for the New-App wizard.
+        Rate-limited (network-bound). Clone failures (private repo, typo,
+        unreachable remote) return 422 with the reason.
+      tags: [apps]
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [githubRepo]
+              properties:
+                githubRepo: { type: string, example: octocat/Hello-World }
+                branch: { type: string, example: main }
+      responses:
+        "200":
+          description: Detected plan and suggested recipe
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan:
+                    type: object
+                    properties:
+                      kind: { type: string, enum: [dockerfile, compose, buildpack] }
+                      path: { type: string }
+                  suggestedRecipe: { type: string, enum: [go, node-static, worker] }
+        "400":
+          description: Malformed repo or branch
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: Clone failed (private/unreachable/nonexistent repo)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Detection not available on this deployment
   /api/v1/apps/{id}:
     parameters:
       - $ref: "#/components/parameters/PathId"
@@ -1269,6 +1316,20 @@ components:
         config:
           type: object
           additionalProperties: true
+          properties:
+            cache:
+              type: object
+              description: >-
+                Build-stage layer cache. mode registry/oci requires ref —
+                a registry image ref the builder pushes and pulls layer
+                cache through (Kaniko --cache-repo, Buildah --cache-from/to,
+                BuildKit cache import/export). Omitted or disabled means
+                cold builds. Refs are validated server-side (strict
+                registry-ref grammar).
+              properties:
+                mode: { type: string, enum: [registry, oci, disabled] }
+                ref: { type: string }
+                inline: { type: boolean, description: BuildKit-only mode=max cache export }
     Edge:
       type: object
       properties:

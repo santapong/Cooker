@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -43,7 +44,9 @@ func validatePipelineInput(p *model.Pipeline) error {
 		if err := validate.StageType(s.Type); err != nil {
 			return err
 		}
-		_ = i
+		if err := validate.CacheSpec(s.Config.Cache); err != nil {
+			return fmt.Errorf("stage %d: %w", i, err)
+		}
 	}
 	return nil
 }

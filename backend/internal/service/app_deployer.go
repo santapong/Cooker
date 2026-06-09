@@ -34,6 +34,19 @@ type AppDeployer struct {
 	// the deployer itself (clone/detect messages). The executor
 	// writes stage logs into the returned run's stage runs.
 	LogSink io.Writer
+	// CacheRef, when non-empty, is the registry layer-cache ref stamped
+	// onto every synthesized build stage (CacheSpec{Mode:"registry"}).
+	// Wired from COOKER_BUILD_CACHE_REPO.
+	CacheRef string
+}
+
+// cacheSpec returns the CacheSpec for synthesized build stages, or
+// nil when no cache repo is configured.
+func (d *AppDeployer) cacheSpec() *model.CacheSpec {
+	if d.CacheRef == "" {
+		return nil
+	}
+	return &model.CacheSpec{Mode: "registry", Ref: d.CacheRef}
 }
 
 // NewAppDeployer builds a deployer bound to exec and registry.
@@ -115,12 +128,12 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 		// both). runID is unique per deploy; fall back to ts when absent.
 		pipelineID := ComposePipelineID(runID, app.ID, ts)
 		var synthErr error
-		p, run, synthErr = synthesizePipelineFromCompose(app, graph, workdir, registry, ts, pipelineID, runID)
+		p, run, synthErr = synthesizePipelineFromCompose(app, graph, workdir, registry, ts, pipelineID, runID, d.cacheSpec())
 		if synthErr != nil {
 			return nil, nil, synthErr
 		}
 	} else {
-		p, run = synthesizePipeline(app, plan, workdir, tag)
+		p, run = synthesizePipeline(app, plan, workdir, tag, d.cacheSpec())
 		if runID != "" {
 			run.ID = runID
 		}
@@ -142,7 +155,7 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 // synthesizePipeline builds the four-stage Clone→Build→Push→Deploy
 // DAG for an App deploy. Clone already ran by the time we call this,
 // so Stage 1 ("Checkout") is marked succeeded and left as a record.
-func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag string) (*model.Pipeline, *model.PipelineRun) {
+func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag string, cache *model.CacheSpec) (*model.Pipeline, *model.PipelineRun) {
 	dockerfile := "Dockerfile"
 	if plan != nil && plan.Kind == model.BuildPlanDockerfile && plan.Path != "" {
 		// BuildPlan.Path is operator-supplied via App config; reject
@@ -161,6 +174,7 @@ func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag stri
 				Dockerfile: dockerfile,
 				Context:    workdir,
 				Tags:       []string{tag},
+				Cache:      cache,
 			},
 		},
 		{
@@ -262,7 +276,7 @@ func ComposePipelineID(runID, appID string, ts int64) string {
 // pipelineID is supplied by the caller so the synthesized pipeline can
 // be persisted and fetched (see handler.runAppDeployCtx). Returns an
 // error if the depends_on graph contains a cycle.
-func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, workdir, registry string, ts int64, pipelineID, runID string) (*model.Pipeline, *model.PipelineRun, error) {
+func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, workdir, registry string, ts int64, pipelineID, runID string, cache *model.CacheSpec) (*model.Pipeline, *model.PipelineRun, error) {
 	runtime := deployRuntimeFor(app.DeployTarget.Kind)
 
 	// Assign each service a unique, sanitized slug for stage IDs,
@@ -327,6 +341,7 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 						Dockerfile:          cleanDf,
 						Context:             filepath.Join(workdir, cleanCtx),
 						Tags:                []string{deployImage},
+						Cache:               cache,
 						ComposeServiceName:  svc.Name,
 						ComposeBuildContext: cleanCtx,
 						ComposeDockerfile:   cleanDf,

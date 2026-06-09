@@ -230,6 +230,7 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithDeployGovernanceHook(govDeployHook),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
+	appDeployer.CacheRef = cfg.BuildCacheRepo
 
 	runs := NewRunCoordinator(st)
 
@@ -239,6 +240,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	h := handler.New(st, codec, secMgr)
 	h.AppDeployer = appDeployer
+	h.AppDetector = service.NewAppDetector()
 	h.WSBroadcast = wsHub.Broadcast
 	h.Executor = exec
 	h.Runs = runs

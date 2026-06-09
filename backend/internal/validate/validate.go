@@ -37,6 +37,11 @@ var (
 	// no `..`, no leading slash, no leading dot. Liberal but blocks
 	// the obvious paste mistakes.
 	gitRefRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+	// Cache image ref: host[:port]/path[:tag]. Deliberately strict —
+	// the value reaches builder CLIs (buildah argv), so beyond
+	// correctness this is a shell-safety gate: no whitespace, quotes,
+	// $, ;, backticks or other metacharacters can pass.
+	cacheRefRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)+(:[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})?$`)
 )
 
 // Name caps the length of a free-text name and rejects empty.
@@ -56,6 +61,31 @@ func Description(field, s string) error {
 		return fmt.Errorf("%s exceeds %d characters", field, MaxDescriptionLen)
 	}
 	return nil
+}
+
+// CacheSpec validates a build stage's layer-cache configuration.
+// Nil is fine (cache off).
+func CacheSpec(c *model.CacheSpec) error {
+	if c == nil {
+		return nil
+	}
+	switch c.Mode {
+	case "", "disabled":
+		return nil
+	case "registry", "oci":
+		if c.Ref == "" {
+			return fmt.Errorf("cache.ref is required when cache.mode is %q", c.Mode)
+		}
+		if len(c.Ref) > MaxNameLen {
+			return fmt.Errorf("cache.ref exceeds %d characters", MaxNameLen)
+		}
+		if !cacheRefRe.MatchString(c.Ref) {
+			return fmt.Errorf("cache.ref %q is not a valid registry image ref", c.Ref)
+		}
+		return nil
+	default:
+		return fmt.Errorf("cache.mode %q is not one of registry, oci, disabled", c.Mode)
+	}
 }
 
 // StageType rejects any value that isn't a known model.StageType.

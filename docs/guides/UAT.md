@@ -304,6 +304,18 @@ The backing store is selected at boot:
 | `COOKER_LOGSTORE_MAX_BYTES` | `1048576` (1 MiB) | Per-stage retained-line byte cap. Oldest lines are dropped (ring buffer) once a stage exceeds it. |
 | `COOKER_LOGSTORE_MAX_STREAMS` | `256` | Max concurrently retained stage streams. The least-recently-appended whole stream is evicted past this. |
 
+## Build layer cache
+
+`COOKER_BUILD_CACHE_REPO` (unset by default) stamps a registry
+layer-cache ref onto the build stages of app-deploy synthesized
+pipelines — Kaniko gets `--cache=true --cache-repo=`, Buildah gets
+`--layers --cache-from/--cache-to`, BuildKit gets registry cache
+import/export. Hand-built pipelines configure cache per build stage in
+the editor instead ("Layer cache" section). The UAT compose's `noop`
+builder ignores it, so this is only observable with a real builder.
+See [`docs/build-cache.md`](../build-cache.md) for credentials and
+per-builder semantics.
+
 **Single-replica only.** The `memory` backend lives in one process, so
 replay only covers stages handled by *this* replica — exactly the same
 constraint as the in-memory WS hub and rate limiter. Durable / multi-replica

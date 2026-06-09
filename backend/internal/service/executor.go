@@ -943,6 +943,7 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 		BuildArgs:  stage.Config.BuildArgs,
 		Platforms:  stage.Config.Platforms,
 		LogWriter:  writer,
+		Cache:      builderCacheSpec(stage.Config.Cache),
 	}
 	res, err := e.builder.Build(ctx, req)
 	if err != nil {
@@ -963,6 +964,16 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 		applyStageOutputs(sr, deriveBuildOutputs(res), res.Outputs)
 	}
 	return nil
+}
+
+// builderCacheSpec maps the stage's cache config onto the builder
+// package's mirror type. The save-time validator already rejected
+// malformed refs; a nil spec maps to the zero value (cache off).
+func builderCacheSpec(c *model.CacheSpec) builder.CacheSpec {
+	if c == nil {
+		return builder.CacheSpec{}
+	}
+	return builder.CacheSpec{Mode: c.Mode, Ref: c.Ref, Inline: c.Inline}
 }
 
 // cappedBuffer is a write-capped bytes.Buffer. Writes after the cap
