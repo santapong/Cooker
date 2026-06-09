@@ -626,6 +626,8 @@ export function statusTone(status?: string): Tone {
     case 'warn':
     case 'cancelled':
       return 'warn';
+    case 'skipped':
+      return 'neutral';
     case 'cool':
     case 'info':
       return 'cool';

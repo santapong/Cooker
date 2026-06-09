@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,6 +27,10 @@ import (
 // tests inject a fake.
 type RunSpawner interface {
 	Spawn(ctx context.Context, runID string, work func(context.Context) error)
+	// SpawnWithDeadline is Spawn with an explicit run deadline
+	// (per-pipeline RunDeadline override); deadline <= 0 means "use
+	// the cluster default".
+	SpawnWithDeadline(ctx context.Context, runID string, deadline time.Duration, work func(context.Context) error)
 }
 
 // JobEnqueuer enqueues a pipeline-run job onto an async durable queue
@@ -49,6 +54,9 @@ type Handler struct {
 	// the route returning 503 and hides the frontend button via
 	// /capabilities.
 	Triage TriageRunner
+	// AppDetector backs POST /apps/detect-build (New-App wizard recipe
+	// suggestion). Set by server.New; nil returns 503.
+	AppDetector *service.AppDetector
 	// Hosts coordinates host-CRUD side-effects (writing SSH private
 	// keys through secrets.Manager). Set by server.New; nil-safe in
 	// dev when no secrets backend is configured (SSH host create/

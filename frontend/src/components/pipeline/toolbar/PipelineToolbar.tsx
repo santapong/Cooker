@@ -1,6 +1,7 @@
 import { useTheme } from '../../../theme/ThemeProvider';
-import { Btn, KindBadge, Pill, SectionLabel } from '../../ui/atoms';
+import { Btn, Input, KindBadge, Pill, SectionLabel } from '../../ui/atoms';
 import { hexA } from '../../../theme/tokens';
+import { usePipelineStore } from '../../../stores/pipelineStore';
 import type { StageType } from '../../../types/pipeline';
 
 interface StageDef {
@@ -26,6 +27,8 @@ interface Props {
 
 export default function PipelineToolbar({ onSave, onValidate, onRun }: Props) {
   const t = useTheme();
+  const runDeadline = usePipelineStore((s) => s.pipeline?.runDeadline ?? '');
+  const setRunDeadline = usePipelineStore((s) => s.setRunDeadline);
   const onDragStart = (event: React.DragEvent, nodeType: string) => {
     event.dataTransfer.setData('application/cooker-node', nodeType);
     event.dataTransfer.effectAllowed = 'move';
@@ -80,6 +83,19 @@ export default function PipelineToolbar({ onSave, onValidate, onRun }: Props) {
             </div>
           </div>
         ))}
+      </div>
+
+      <div style={{ height: 8 }} />
+      <SectionLabel>Run deadline</SectionLabel>
+      <Input
+        value={runDeadline}
+        onChange={(e) => setRunDeadline(e.target.value)}
+        placeholder="cluster default (e.g. 45m)"
+        style={{ fontFamily: t.mono, fontSize: 12 }}
+      />
+      <div style={{ fontSize: 10.5, color: t.textMute, lineHeight: 1.5 }}>
+        Go duration between 10s and 24h. Saved with the pipeline; overrides
+        COOKER_RUN_DEADLINE for this pipeline's runs.
       </div>
 
       <div style={{ height: 8 }} />

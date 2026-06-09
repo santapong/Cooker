@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -40,11 +41,19 @@ func validatePipelineInput(p *model.Pipeline) error {
 	if err := validate.Description("description", p.Description); err != nil {
 		return err
 	}
+	if err := validate.RunDeadline(p.RunDeadline); err != nil {
+		return err
+	}
 	for i, s := range p.Stages {
 		if err := validate.StageType(s.Type); err != nil {
 			return err
 		}
-		_ = i
+		if err := validate.RetryPolicy(s.Config.Retry); err != nil {
+			return fmt.Errorf("stage %d: %w", i, err)
+		}
+		if err := validate.CacheSpec(s.Config.Cache); err != nil {
+			return fmt.Errorf("stage %d: %w", i, err)
+		}
 	}
 	return nil
 }
@@ -195,6 +204,9 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 		Status:     model.RunStatusPending,
 		StageRuns:  make([]model.StageRun, 0, len(p.Stages)),
 		Variables:  p.Variables,
+		// Definition stamp for run-diff: which pipeline version this
+		// run executed. 0 only on rows predating migration 017.
+		PipelineVersion: p.Version,
 	}
 
 	// Capture the actor that started the run so the deploy-stage executor
@@ -255,7 +267,9 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 	// Do NOT re-derive run.Status from runCopy.Status here — Execute
 	// guarantees a terminal value and Cancelled stays Cancelled.
 	if h.Runs != nil && h.Executor != nil {
-		h.Runs.Spawn(context.Background(), run.ID, func(ctx context.Context) error {
+		// Per-pipeline RunDeadline override; 0 falls back to the
+		// cluster default inside the coordinator.
+		h.Runs.SpawnWithDeadline(context.Background(), run.ID, service.PipelineRunDeadline(p), func(ctx context.Context) error {
 			runCopy := run
 			_, execErr := h.Executor.Execute(ctx, p, runCopy)
 			if err := h.Store.Runs.Update(ctx, runCopy); err != nil {
@@ -267,8 +281,37 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 	c.JSON(http.StatusAccepted, run)
 }
 
+// Run-history pagination bounds. The default keeps the common "recent
+// activity" view to one page; the max stops a single request from
+// dragging the whole history (runs carry three JSONB blobs each).
+const (
+	listRunsDefaultLimit = 50
+	listRunsMaxLimit     = 200
+)
+
+// intQuery parses an integer query param, falling back to def when the
+// param is absent or malformed (cosmetic params don't 400, matching
+// the tailLines convention) and clamping the result to [min, max].
+func intQuery(c *gin.Context, name string, def, min, max int) int {
+	out := def
+	if v := c.Query(name); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			out = n
+		}
+	}
+	if out < min {
+		out = min
+	}
+	if out > max {
+		out = max
+	}
+	return out
+}
+
 func (h *Handler) ListPipelineRuns(c *gin.Context) {
-	runs, err := h.Store.Runs.List(c.Request.Context(), c.Param("id"))
+	limit := intQuery(c, "limit", listRunsDefaultLimit, 1, listRunsMaxLimit)
+	offset := intQuery(c, "offset", 0, 0, 1<<30)
+	runs, err := h.Store.Runs.List(c.Request.Context(), c.Param("id"), limit, offset)
 	if abortStoreErr(c, err, "runs not found") {
 		return
 	}
@@ -337,14 +380,13 @@ func (h *Handler) GetPipelineAnalytics(c *gin.Context) {
 	if n > 200 {
 		n = 200
 	}
-	runs, err := h.Store.Runs.List(c.Request.Context(), pipelineID)
+	// List is newest-first and bounds the window in SQL (logs are
+	// stripped on the list path — analytics only reads timestamps,
+	// statuses and outputs).
+	runs, err := h.Store.Runs.List(c.Request.Context(), pipelineID, n, 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-	// List returns newest-first; bound the sample window.
-	if len(runs) > n {
-		runs = runs[:n]
 	}
 	c.JSON(http.StatusOK, service.ComputeAnalytics(p, runs))
 }

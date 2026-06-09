@@ -74,7 +74,7 @@ All 🔓 but **HMAC/token-verified** per provider; all ♻️ idempotent (`X-Git
 | DELETE | `/api/v1/pipelines/:id` | 🛡️ | Delete pipeline |
 | POST | `/api/v1/pipelines/:id/validate` | 🔑 | Validate the DAG (cycle/type check) |
 | POST | `/api/v1/pipelines/:id/run` | ✏️ ⏱️ ♻️ 🔐 | Start a run (returns 202 + runId) |
-| GET | `/api/v1/pipelines/:id/runs` | 🔑 | List runs for a pipeline |
+| GET | `/api/v1/pipelines/:id/runs` | 🔑 | List runs, newest first. `?limit=` (default 50, max 200) + `?offset=` paginate; per-stage `logs` omitted from list rows — fetch a single run for logs |
 | GET | `/api/v1/pipelines/:id/runs/:runId` | 🔑 | Get a run (with stage runs) |
 | POST | `/api/v1/pipelines/:id/runs/:runId/cancel` | ✏️ | Cancel a running run |
 | GET | `/api/v1/pipelines/:id/runs/:runId/logs/:stageId` | 🔑 | Final logs for a stage (REST) |
@@ -91,6 +91,7 @@ All 🔓 but **HMAC/token-verified** per provider; all ♻️ idempotent (`X-Git
 |---|---|---|---|
 | GET | `/api/v1/apps` | 🔑 | List apps |
 | POST | `/api/v1/apps` | ✏️ | Create app |
+| POST | `/api/v1/apps/detect-build` | ✏️ ⏱️ | Pre-import build detection: shallow-clone `{githubRepo, branch}` → `{plan, suggestedRecipe}` (New-App wizard) |
 | GET | `/api/v1/apps/:id` | 🔑 | Get app |
 | PUT | `/api/v1/apps/:id` | ✏️ | Update app |
 | DELETE | `/api/v1/apps/:id` | 🛡️ | Delete app |
@@ -245,7 +246,7 @@ First obtain a single-use 60s ticket, then connect with `?ticket=<value>` (see
 | Auth | 4 | OIDC + optional local |
 | Webhooks | 4 | HMAC-verified, idempotent |
 | Pipelines & runs | 17 | Core surface + triage + analytics |
-| Apps | 7 | Build→push→deploy + webhook |
+| Apps | 8 | Build→push→deploy + webhook + detect-build |
 | Environments & secrets | 8 | Secret reveal/promote gated 🛡️ |
 | Docker | 20 | List/inspect are stubs |
 | Kubernetes | 8 | Stubs; real deploy via executor |

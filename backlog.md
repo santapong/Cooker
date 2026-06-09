@@ -47,15 +47,9 @@ What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-
 
 Items deferred from the W2–W5 cycle. Sequenced for the next session.
 
-#### W6.1 — Primitive #1: per-stage retry policies (~3 days)
+#### W6.1 — Primitive #1: per-stage retry policies
 
-- [ ] Per-stage `RetryPolicy` on `model.Stage` (`MaxAttempts`, `BackoffStrategy: fixed|exponential`, `BackoffSeconds`, `RetryOn: error|timeout|always`).
-- [ ] Executor honours the policy with bounded retry helper from `internal/retry/`.
-- [ ] Frontend stage-node UI exposes the policy (Pro-mode toggle).
-- [ ] Schema migration `011_stage_retry.up.sql` adds the field to JSONB stages (no DDL — CHECK constraint as in P#3 sketch).
-- [ ] Tests: retry-on-error, retry-on-timeout, max-attempts-reached, exponential-backoff timing.
-- [ ] **Prerequisite already on main:** T5 batched persistProgress (PR #75 squash) — without T5, retry attempts triple the JSONB write rate per stage.
-- [ ] **Audit closure:** `docs/dag-adaptation-2026.md` §3.1 Primitive #1, `docs/audits/2026-05-p1-context-pack.md`.
+✅ **Shipped** on `claude/feat-pipeline-power` (roadmap M2) — see "Closed (recent)". Field shape landed as `StageConfig.Retry {maxAttempts, initialMs, maxMs, exponential}` (JSONB — no migration needed; legacy `retries` int still honoured); `RetryOn` classification stayed with the executor's existing transient-vs-ctx classifier.
 
 #### W6.2 — useStageLogs reconnect backfill (~1 hour, HIGH severity)
 
@@ -288,15 +282,11 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 
 - [ ] **In-product audit-log viewer.** Filter by user / route / date / app. Reads from existing `audit.Sink`. Surfaced by SaaS team (SOC 2 Lite) + Enterprise SRE (SOC 2 / ISO 27001). W11 §SaaS step 6 + §Enterprise step 6.
 - [ ] **Tenant scoping** — design-doc gate first. Either data-scoped (`owner_team_id` on every Pipeline / App / Environment) or namespace-scoped (a "Cooker namespace" wrapping a slice of resources visible to a subset of OIDC groups). Multi-week feature; needs an ADR before code. Surfaced by Enterprise SRE. W11 §Enterprise step 4.
-- [ ] **Per-Pipeline / per-App `runDeadline` override.** Cluster-level `COOKER_RUN_DEADLINE` is too coarse. Promote to a per-resource setting on `model.Pipeline` and `model.App`. Surfaced by AI/ML engineer; also helps large-monorepo Go shops. W11 §ML step 5.
-- [ ] **Build-cache plumbing.** Surface Kaniko `--cache=true --cache-repo=...` (and Buildah equivalents) as Pipeline / App config. Massive ROI for ML and any iterative-build workload. Surfaced by AI/ML engineer. W11 §ML step 4 + step 9.
+- [ ] **Per-App `runDeadline` override.** The per-Pipeline half shipped in roadmap M2 (`Pipeline.RunDeadline`, clamped [10s,24h], editor field). App deploys still use the cluster default — promote to `model.App` when a real app-deploy exceeds it. W11 §ML step 5.
 
 ### P2 — single-persona high-value
 
 - [ ] **First-run empty-state CTAs** on Apps / Pipelines / Environments. Narrate the "create deploy target → import app → see deploy" sequence. Surfaced by Indie hacker (acute) + SaaS team (less acute). W11 §Indie step 2.
-- [ ] **Build-recipe auto-detect** on `NewAppWizard`. Read `package.json` / `go.mod` / `pyproject.toml` / `Dockerfile` from the connected repo and pre-select Step 3. Surfaced by Indie hacker. W11 §Indie step 3.
-- [ ] **Webhook URL surfaced on `AppDetailPage`** next to the AutoDeploy toggle, with a copy button. Surfaced by Indie hacker. W11 §Indie step 5.
-- [ ] **Surface deployed `URL` on `AppDetailPage`** after a successful deploy (read from `DeployTarget.Status.URL`). Surfaced by Indie hacker. W11 §Indie step 6.
 - [ ] **Bulk import** "import all repos from this GitHub org as Apps". Surfaced by SaaS team. W11 §SaaS step 4.
 - [ ] **Per-environment secret diff view** (`Staging vs Prod`). Same UX shape as `git diff` for env-vars. Surfaced by SaaS team. W11 §SaaS step 7.
 - [ ] **Approver pre-warning** for step-up MFA. Show a badge before they click "approve" so the 403 → re-auth round-trip isn't a surprise. Surfaced by SaaS team. W11 §SaaS step 3.
@@ -331,6 +321,18 @@ Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cook
 
 - ✅ **AI failure triage (opt-in)** — new `internal/triage` Anthropic Messages API client (keepsave-pattern: TLS≥1.2, 90s timeout, typed `APIError` + sentinels, one retry on 429/5xx; request omits sampling/thinking params). `BuildRequest` sends stage summary + error + last-32KiB log tail with env values/secret refs stripped. `POST /pipelines/:id/runs/:runId/stages/:stageId/triage` (writeRole + rate limit; failed stages only → 409 otherwise; 503 when disabled). Config `COOKER_AI_TRIAGE_ENABLED` / `COOKER_AI_TRIAGE_MODEL` (default `claude-fable-5`) / `ANTHROPIC_API_KEY` with a fail-fast Validate gate. `GET /api/v1/capabilities` advertises the feature; RunPage shows "Why did this fail?" on failed stages with a dismissible advisory card. SECURITY.md documents the egress posture.
 - ✅ **Stage-duration analytics** — pure `service.ComputeAnalytics` (per-stage p50/p95/avg nearest-rank percentiles + success rates + per-run series; running/skipped excluded from samples); `GET /pipelines/:id/analytics?runs=N`; new dependency-free `Sparkline` SVG component + `/analytics` Insights page (pro-mode sidebar entry).
+
+### `claude/feat-pipeline-power` — retry policies + run deadline + edge conditions (roadmap M2)
+
+- ✅ **Primitive #1 — structured retry policies (W6.1)** — `StageConfig.Retry {maxAttempts, initialMs, maxMs, exponential}` (JSONB, no migration; legacy `retries` int still honoured, structured policy wins). Executor `policyFromStage` clamps to [1,10] attempts / [100ms,60s] initial / [initial,5m] max; `exponential=false` pins constant delay; approval/custom/test never retry. `validate.RetryPolicy` rejects out-of-range payloads at save. Editor: "Retry" section on build/push/deploy panels.
+- ✅ **Per-Pipeline `runDeadline` override (W11 §ML step 5, pipeline half)** — migration 017 adds `pipelines.run_deadline` + `pipeline_runs.pipeline_version` (the version stamp feeds M3's run-diff). `validate.RunDeadline` ([10s,24h]); `service.PipelineRunDeadline` clamps; `RunCoordinator.SpawnWithDeadline` (additive — `Spawn` unchanged) applies it on the inline path and `jobqueue_runner` wraps Execute's ctx on the durable path. Editor toolbar "Run deadline" field.
+- ✅ **Primitive #2 — edge conditions + skipped status** — `EdgeAllows`/`StageShouldRun` (AND-join; skip propagates through success/failure edges; only `always` passes a skipped upstream) in `internal/buildplan/edges.go`; `dagrunner.ErrSkipped` + `NewRunnerBoundedContinue` (continue-through-failure, first error returned at the end, ctx-cancel still aborts); executor gates each taskFunc and stamps terminal `RunStatusSkipped` (runstate gains Pending→Skipped). Validation now accepts success/failure/always and rejects unknowns (replaces T4's refusal). Editor: click an edge to cycle the condition; RunPage renders `skipped` neutral. Rollback knob `COOKER_EDGE_CONDITIONS_ENABLED=false` restores legacy abort-on-first-failure. **Behaviour change:** parallel branches now complete after an unrelated failure.
+
+### `claude/feat-build-cache` — build layer cache + recipe auto-detect (roadmap M1)
+
+- ✅ **Build-cache plumbing (W11 §ML step 4 + 9)** — `CacheSpec{mode,ref,inline}` on `StageConfig.Cache` + `builder.Request.Cache`; Kaniko appends `--cache=true --cache-repo=`, Buildah appends `--layers --cache-from/--cache-to` as discrete `$@` argv entries (a single env var would not word-split under the script's `IFS=$'\n'`), BuildKit sets registry `CacheImports/CacheExports` (`inline` → `mode=max` export; image-exporter `push` deliberately untouched), docker-sock logs "unsupported" and ignores. `validate.CacheSpec` enforces a strict registry-ref grammar (shell-safety gate, same class as T1). App-deploy synthesized build stages pick up `COOKER_BUILD_CACHE_REPO` (chart: `builder.cache.{enabled,ref}` with a `required` guard + CI render-matrix case). Editor: build-stage "Layer cache" section. Docs: `docs/build-cache.md`.
+- ✅ **Build-recipe auto-detect (W11 §Indie step 3)** — `POST /api/v1/apps/detect-build` (writeRole + rate-limited): shallow clone via `internal/source/github` + the existing `buildplan.Detect`; `NewAppWizard` fires it when leaving the repo step and pre-selects the matching recipe with a "detected" badge; clone failures degrade to an info toast and the default recipe.
+- ✅ **Webhook URL + deployed URL on `AppDetailPage` (W11 §Indie steps 5–6)** — verified already shipped at `AppDetailPage.tsx` (webhook row with copy button; deployed-URL chip fed by the app-health prober); backlog rows retired without code change.
 
 ### `claude/fervent-sagan-q50XA` — DAG Primitive #3 (inter-stage outputs) + log history/replay
 

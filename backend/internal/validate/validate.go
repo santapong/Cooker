@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/santapong/cooker/internal/model"
 )
@@ -37,6 +38,11 @@ var (
 	// no `..`, no leading slash, no leading dot. Liberal but blocks
 	// the obvious paste mistakes.
 	gitRefRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+	// Cache image ref: host[:port]/path[:tag]. Deliberately strict —
+	// the value reaches builder CLIs (buildah argv), so beyond
+	// correctness this is a shell-safety gate: no whitespace, quotes,
+	// $, ;, backticks or other metacharacters can pass.
+	cacheRefRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)+(:[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})?$`)
 )
 
 // Name caps the length of a free-text name and rejects empty.
@@ -56,6 +62,69 @@ func Description(field, s string) error {
 		return fmt.Errorf("%s exceeds %d characters", field, MaxDescriptionLen)
 	}
 	return nil
+}
+
+// RunDeadline validates a pipeline's per-run deadline override.
+// Empty is fine (cluster default applies). Otherwise it must be a Go
+// duration within [10s, 24h].
+func RunDeadline(s string) error {
+	if s == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return fmt.Errorf("runDeadline %q is not a Go duration (e.g. \"45m\", \"2h\")", s)
+	}
+	if d < 10*time.Second || d > 24*time.Hour {
+		return fmt.Errorf("runDeadline %q is outside [10s, 24h]", s)
+	}
+	return nil
+}
+
+// RetryPolicy validates a stage's structured retry policy. Nil is
+// fine (legacy Retries int applies).
+func RetryPolicy(r *model.RetryPolicy) error {
+	if r == nil {
+		return nil
+	}
+	if r.MaxAttempts < 0 || r.MaxAttempts > 10 {
+		return fmt.Errorf("retry.maxAttempts %d is outside [0, 10]", r.MaxAttempts)
+	}
+	if r.InitialMS < 0 || r.InitialMS > 60_000 {
+		return fmt.Errorf("retry.initialMs %d is outside [0, 60000]", r.InitialMS)
+	}
+	if r.MaxMS < 0 || r.MaxMS > 300_000 {
+		return fmt.Errorf("retry.maxMs %d is outside [0, 300000]", r.MaxMS)
+	}
+	if r.MaxMS > 0 && r.InitialMS > 0 && r.MaxMS < r.InitialMS {
+		return fmt.Errorf("retry.maxMs %d is below retry.initialMs %d", r.MaxMS, r.InitialMS)
+	}
+	return nil
+}
+
+// CacheSpec validates a build stage's layer-cache configuration.
+// Nil is fine (cache off).
+func CacheSpec(c *model.CacheSpec) error {
+	if c == nil {
+		return nil
+	}
+	switch c.Mode {
+	case "", "disabled":
+		return nil
+	case "registry", "oci":
+		if c.Ref == "" {
+			return fmt.Errorf("cache.ref is required when cache.mode is %q", c.Mode)
+		}
+		if len(c.Ref) > MaxNameLen {
+			return fmt.Errorf("cache.ref exceeds %d characters", MaxNameLen)
+		}
+		if !cacheRefRe.MatchString(c.Ref) {
+			return fmt.Errorf("cache.ref %q is not a valid registry image ref", c.Ref)
+		}
+		return nil
+	default:
+		return fmt.Errorf("cache.mode %q is not one of registry, oci, disabled", c.Mode)
+	}
 }
 
 // StageType rejects any value that isn't a known model.StageType.

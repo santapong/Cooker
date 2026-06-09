@@ -231,6 +231,7 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithDeployGovernanceHook(govDeployHook),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
+	appDeployer.CacheRef = cfg.BuildCacheRepo
 
 	runs := NewRunCoordinator(st)
 
@@ -246,6 +247,7 @@ func New(cfg *config.Config) (*Server, error) {
 		h.Triage = triage.New(cfg.Triage.APIKey, cfg.Triage.Model)
 		slog.Info("ai triage enabled", "model", h.Triage.(*triage.Client).Model)
 	}
+	h.AppDetector = service.NewAppDetector()
 	h.WSBroadcast = wsHub.Broadcast
 	h.Executor = exec
 	h.Runs = runs

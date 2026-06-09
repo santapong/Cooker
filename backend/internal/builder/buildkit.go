@@ -45,33 +45,7 @@ func (b *BuildKit) Build(ctx context.Context, req Request) (Result, error) {
 	}
 	defer c.Close()
 
-	dockerfile := req.Dockerfile
-	if dockerfile == "" {
-		dockerfile = "Dockerfile"
-	}
-	tagAttr := strings.Join(req.Tags, ",")
-	if tagAttr == "" {
-		tagAttr = "cooker:local"
-	}
-	frontendAttrs := map[string]string{"filename": dockerfile}
-	for k, v := range req.BuildArgs {
-		frontendAttrs["build-arg:"+k] = v
-	}
-	if len(req.Platforms) > 0 {
-		frontendAttrs["platform"] = strings.Join(req.Platforms, ",")
-	}
-	solveOpt := client.SolveOpt{
-		Frontend:      "dockerfile.v0",
-		FrontendAttrs: frontendAttrs,
-		LocalDirs: map[string]string{
-			"context":    req.ContextDir,
-			"dockerfile": req.ContextDir,
-		},
-		Exports: []client.ExportEntry{{
-			Type:  client.ExporterImage,
-			Attrs: map[string]string{"name": tagAttr, "push": "false"},
-		}},
-	}
+	solveOpt := solveOptions(req)
 	statusCh := make(chan *client.SolveStatus, 8)
 	logsDone := make(chan struct{})
 	go func() {
@@ -103,6 +77,55 @@ func (b *BuildKit) Build(ctx context.Context, req Request) (Result, error) {
 		ImageID: digest,
 		Tags:    req.Tags,
 	}, nil
+}
+
+// solveOptions assembles the SolveOpt without talking to buildkitd so
+// tests can assert the cache wiring shape directly.
+func solveOptions(req Request) client.SolveOpt {
+	dockerfile := req.Dockerfile
+	if dockerfile == "" {
+		dockerfile = "Dockerfile"
+	}
+	tagAttr := strings.Join(req.Tags, ",")
+	if tagAttr == "" {
+		tagAttr = "cooker:local"
+	}
+	frontendAttrs := map[string]string{"filename": dockerfile}
+	for k, v := range req.BuildArgs {
+		frontendAttrs["build-arg:"+k] = v
+	}
+	if len(req.Platforms) > 0 {
+		frontendAttrs["platform"] = strings.Join(req.Platforms, ",")
+	}
+	opt := client.SolveOpt{
+		Frontend:      "dockerfile.v0",
+		FrontendAttrs: frontendAttrs,
+		LocalDirs: map[string]string{
+			"context":    req.ContextDir,
+			"dockerfile": req.ContextDir,
+		},
+		Exports: []client.ExportEntry{{
+			Type:  client.ExporterImage,
+			Attrs: map[string]string{"name": tagAttr, "push": "false"},
+		}},
+	}
+	if req.Cache.enabled() {
+		// Import and export use separate attr maps — SolveOpt mutates
+		// neither, but sharing one map across entries invites aliasing
+		// bugs if a future change does.
+		importAttrs := map[string]string{"ref": req.Cache.Ref}
+		exportAttrs := map[string]string{"ref": req.Cache.Ref}
+		if req.Cache.Mode == "oci" {
+			importAttrs["oci-mediatypes"] = "true"
+			exportAttrs["oci-mediatypes"] = "true"
+		}
+		if req.Cache.Inline {
+			exportAttrs["mode"] = "max"
+		}
+		opt.CacheImports = []client.CacheOptionsEntry{{Type: "registry", Attrs: importAttrs}}
+		opt.CacheExports = []client.CacheOptionsEntry{{Type: "registry", Attrs: exportAttrs}}
+	}
+	return opt
 }
 
 var _ Builder = (*BuildKit)(nil)

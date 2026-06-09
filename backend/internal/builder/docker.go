@@ -42,6 +42,11 @@ func (d *DockerSock) Build(ctx context.Context, req Request) (Result, error) {
 	if _, err := exec.LookPath(bin); err != nil {
 		return Result{}, fmt.Errorf("%w: docker CLI not found: %v", ErrUnavailable, err)
 	}
+	if req.Cache.enabled() && req.LogWriter != nil {
+		// Classic docker build has no registry layer-cache transport;
+		// the daemon's local cache applies implicitly instead.
+		fmt.Fprintln(req.LogWriter, "cache: registry layer cache not supported on the docker builder; ignoring cache config")
+	}
 
 	args := []string{"build"}
 	if req.Dockerfile != "" {

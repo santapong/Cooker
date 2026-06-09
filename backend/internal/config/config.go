@@ -28,13 +28,18 @@ func (e Env) IsProduction() bool { return e == EnvProduction }
 
 // Config holds all application configuration.
 type Config struct {
-	Env               Env
-	Port              int
-	DatabaseURL       string
-	RedisURL          string
-	AllowedOrigins    []string
-	SecretKey         string
-	Registry          string
+	Env            Env
+	Port           int
+	DatabaseURL    string
+	RedisURL       string
+	AllowedOrigins []string
+	SecretKey      string
+	Registry       string
+	// BuildCacheRepo, when non-empty, stamps a registry layer-cache
+	// ref (CacheSpec{Mode:"registry"}) onto the build stages of
+	// app-deploy synthesized pipelines. Hand-built pipelines configure
+	// cache per stage instead.
+	BuildCacheRepo    string
 	BuilderBackend    string
 	PusherBackend     string
 	DeployerBackend   string
@@ -247,6 +252,7 @@ func Load() *Config {
 		AllowedOrigins:  getEnvCSV("COOKER_ALLOWED_ORIGINS", originDefault),
 		SecretKey:       getEnv("COOKER_SECRET_KEY", ""),
 		Registry:        getEnv("COOKER_REGISTRY", "localhost:5000/cooker"),
+		BuildCacheRepo:  getEnv("COOKER_BUILD_CACHE_REPO", ""),
 		BuilderBackend:  getEnv("COOKER_BUILDER", "noop"),
 		PusherBackend:   getEnv("COOKER_PUSHER", "noop"),
 		DeployerBackend: getEnv("COOKER_DEPLOYER", "noop"),

@@ -75,6 +75,14 @@ RUN apk add --no-cache ca-certificates git docker-cli \
 COPY --from=backend-build --chown=65532:65532 /cooker /usr/local/bin/cooker
 COPY --from=frontend-build --chown=65532:65532 /app/frontend/dist /usr/share/cooker/static
 
+# Precompress the hashed bundle once at build time; assetsHandler
+# (internal/server/static.go) serves the .gz sibling to clients that
+# accept gzip. -k keeps the originals for clients that don't.
+RUN find /usr/share/cooker/static/assets -type f \
+      \( -name '*.js' -o -name '*.css' -o -name '*.svg' -o -name '*.json' \) \
+      -exec gzip -9 -k {} \; \
+ && chown -R 65532:65532 /usr/share/cooker/static
+
 EXPOSE 8080
 
 # Liveness signal for runtimes that don't define their own probe

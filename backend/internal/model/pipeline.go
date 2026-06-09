@@ -16,6 +16,11 @@ type Pipeline struct {
 	// every successful Update; clients echo it back on PUT/PATCH so
 	// concurrent edits are detected and rejected with 409.
 	Version int `json:"version" db:"version"`
+	// RunDeadline overrides the cluster-wide COOKER_RUN_DEADLINE for
+	// this pipeline's runs. Go duration string ("45m", "2h"); empty
+	// means "use the cluster default". Validated to [10s, 24h] at the
+	// API layer; clamped again at spawn time.
+	RunDeadline string `json:"runDeadline,omitempty" db:"run_deadline"`
 }
 
 // StageType identifies the kind of pipeline stage.
@@ -54,6 +59,10 @@ type StageConfig struct {
 	BuildArgs  map[string]string `json:"buildArgs,omitempty"`
 	Tags       []string          `json:"tags,omitempty"`
 	Platforms  []string          `json:"platforms,omitempty"` // Multi-arch OCI Image Index
+	// Cache configures build layer-cache reuse. Nil means no cache —
+	// every build is cold (the pre-cache behaviour). See
+	// docs/build-cache.md for per-builder semantics.
+	Cache *CacheSpec `json:"cache,omitempty"`
 
 	// Test
 	Image   string   `json:"image,omitempty"`
@@ -94,7 +103,13 @@ type StageConfig struct {
 	// Custom
 	Script  string `json:"script,omitempty"`
 	Timeout string `json:"timeout,omitempty"`
-	Retries int    `json:"retries,omitempty"`
+	// Retries is the legacy retry knob: N extra attempts with the
+	// executor's default backoff. Still honoured; Retry (below) wins
+	// when both are set.
+	Retries int `json:"retries,omitempty"`
+	// Retry is the structured retry policy (dag-adaptation Primitive
+	// #1). Nil falls back to Retries.
+	Retry *RetryPolicy `json:"retry,omitempty"`
 
 	// Env overrides the stage's environment variables. Values here win
 	// over anything inherited from the Pipeline.Variables or the
@@ -114,6 +129,40 @@ type StageConfig struct {
 	// should commit at GitOpsPath. Templating (${IMAGE}, etc.)
 	// happens at run time.
 	GitOpsContent string `json:"gitopsContent,omitempty"`
+}
+
+// RetryPolicy configures per-stage retry behaviour (dag-adaptation
+// Primitive #1). All fields optional; the executor clamps them to
+// sane bounds (MaxAttempts ≤ 10, delays within [100ms, 5m]).
+type RetryPolicy struct {
+	// MaxAttempts is the total number of attempts (1 = no retry).
+	MaxAttempts int `json:"maxAttempts,omitempty"`
+	// InitialMS is the delay before the first retry, in milliseconds.
+	InitialMS int `json:"initialMs,omitempty"`
+	// MaxMS caps the per-iteration delay, in milliseconds.
+	MaxMS int `json:"maxMs,omitempty"`
+	// Exponential selects exponential backoff (the default when nil).
+	// False pins every delay to InitialMS.
+	Exponential *bool `json:"exponential,omitempty"`
+}
+
+// CacheSpec configures build layer caching for a build stage.
+// Implemented by the Kaniko (--cache-repo), Buildah (--cache-from/to)
+// and BuildKit (CacheImports/Exports) builders; the docker-sock
+// builder ignores it.
+type CacheSpec struct {
+	// Mode selects the cache transport: "registry" pushes the layer
+	// cache to an OCI registry ref, "oci" does the same with OCI media
+	// types forced (BuildKit), "disabled" is an explicit off. Empty
+	// means no cache.
+	Mode string `json:"mode,omitempty"`
+	// Ref is the fully-qualified cache image ref, e.g.
+	// "registry.example.com/org/app:buildcache". Required when Mode is
+	// "registry" or "oci".
+	Ref string `json:"ref,omitempty"`
+	// Inline additionally embeds cache metadata into the built image
+	// (BuildKit only; maps to mode=max on the cache export).
+	Inline bool `json:"inline,omitempty"`
 }
 
 // Edge connects two stages in the pipeline graph.

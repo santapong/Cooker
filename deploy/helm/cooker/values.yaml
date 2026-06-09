@@ -133,6 +133,15 @@ builder:
     # is faster but needs fuse-overlayfs on the nodes. Default vfs
     # for portability.
     storageDriver: vfs
+  # Registry layer cache for app-deploy synthesized builds. When
+  # enabled, Cooker stamps cache.mode=registry + this ref onto every
+  # synthesized build stage (Kaniko --cache-repo / Buildah --cache-to /
+  # BuildKit cache exports). The builder's ServiceAccount needs push
+  # access to the ref. Hand-built pipelines configure cache per stage
+  # in the editor instead. See docs/build-cache.md.
+  cache:
+    enabled: false
+    ref: ""
 
 # Host-Docker access. Used only when builder.kind=docker; the
 # templates skip rendering the volume + mount otherwise.

@@ -54,7 +54,11 @@ function DockerTransportBanner() {
 
 export default function DockerPage() {
   const t = useTheme();
-  const { images, containers, loading, fetchImages, fetchContainers } = useDockerStore();
+  const images = useDockerStore((s) => s.images);
+  const containers = useDockerStore((s) => s.containers);
+  const loading = useDockerStore((s) => s.loading);
+  const fetchImages = useDockerStore((s) => s.fetchImages);
+  const fetchContainers = useDockerStore((s) => s.fetchContainers);
   const [tab, setTab] = useState<Tab>('images');
 
   useEffect(() => {

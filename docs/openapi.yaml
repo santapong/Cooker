@@ -282,10 +282,24 @@ paths:
       - $ref: "#/components/parameters/PathId"
     get:
       summary: List runs for a pipeline
+      description: >-
+        Returns run summaries newest-first. Per-stage `logs` are omitted
+        from list responses — fetch a single run (or the stage-logs
+        endpoint) for full logs. Malformed `limit`/`offset` values fall
+        back to their defaults rather than erroring.
       tags: [runs]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+          description: Page size, clamped to [1, 200].
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0, minimum: 0 }
+          description: Number of newest runs to skip.
       responses:
         "200":
-          description: Array of runs
+          description: Array of run summaries (per-stage logs omitted)
           content:
             application/json:
               schema:
@@ -473,6 +487,53 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/App" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/apps/detect-build:
+    post:
+      summary: Detect a repo's build plan + suggested wizard recipe (pre-import)
+      description: >-
+        Shallow-clones the repo and runs the same build-plan detection an
+        App deploy would, plus a recipe heuristic for the New-App wizard.
+        Rate-limited (network-bound). Clone failures (private repo, typo,
+        unreachable remote) return 422 with the reason.
+      tags: [apps]
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [githubRepo]
+              properties:
+                githubRepo: { type: string, example: octocat/Hello-World }
+                branch: { type: string, example: main }
+      responses:
+        "200":
+          description: Detected plan and suggested recipe
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan:
+                    type: object
+                    properties:
+                      kind: { type: string, enum: [dockerfile, compose, buildpack] }
+                      path: { type: string }
+                  suggestedRecipe: { type: string, enum: [go, node-static, worker] }
+        "400":
+          description: Malformed repo or branch
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: Clone failed (private/unreachable/nonexistent repo)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Detection not available on this deployment
   /api/v1/apps/{id}:
     parameters:
       - $ref: "#/components/parameters/PathId"
@@ -1317,6 +1378,12 @@ components:
         id: { type: string }
         name: { type: string }
         version: { type: integer }
+        runDeadline:
+          type: string
+          description: >-
+            Per-pipeline run deadline override (Go duration, e.g. "45m").
+            Empty uses the cluster default (COOKER_RUN_DEADLINE). Validated
+            to [10s, 24h].
         stages:
           type: array
           items: { $ref: "#/components/schemas/Stage" }
@@ -1334,6 +1401,32 @@ components:
         config:
           type: object
           additionalProperties: true
+          properties:
+            retry:
+              type: object
+              description: >-
+                Structured per-stage retry policy. Wins over the legacy
+                integer `retries`. Clamped server-side (maxAttempts <= 10,
+                delays within [100ms, 5m]); exponential=false pins every
+                delay to initialMs.
+              properties:
+                maxAttempts: { type: integer, minimum: 0, maximum: 10 }
+                initialMs: { type: integer, minimum: 0, maximum: 60000 }
+                maxMs: { type: integer, minimum: 0, maximum: 300000 }
+                exponential: { type: boolean }
+            cache:
+              type: object
+              description: >-
+                Build-stage layer cache. mode registry/oci requires ref —
+                a registry image ref the builder pushes and pulls layer
+                cache through (Kaniko --cache-repo, Buildah --cache-from/to,
+                BuildKit cache import/export). Omitted or disabled means
+                cold builds. Refs are validated server-side (strict
+                registry-ref grammar).
+              properties:
+                mode: { type: string, enum: [registry, oci, disabled] }
+                ref: { type: string }
+                inline: { type: boolean, description: BuildKit-only mode=max cache export }
     Edge:
       type: object
       properties:
@@ -1343,12 +1436,18 @@ components:
         condition:
           type: string
           enum: [success, failure, always]
-          description: Only "success" (or empty) is evaluated today; others are rejected at validation.
+          description: >-
+            Evaluated per edge against the upstream stage's terminal status
+            (empty means success). Joins AND across incoming edges; a
+            skipped upstream propagates skip except through "always".
     PipelineRun:
       type: object
       properties:
         id: { type: string }
         pipelineId: { type: string }
+        pipelineVersion:
+          type: integer
+          description: Pipeline.Version at run creation (0 = unknown, pre-017 rows).
         status:
           type: string
           enum: [pending, running, success, failed, cancelled]

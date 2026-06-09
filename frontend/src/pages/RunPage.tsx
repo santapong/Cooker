@@ -772,7 +772,8 @@ function RightRail({
 }) {
   const t = useTheme();
   const pushToast = useToastStore((s) => s.push);
-  const { environments, fetchEnvironments } = useEnvironmentStore();
+  const environments = useEnvironmentStore((s) => s.environments);
+  const fetchEnvironments = useEnvironmentStore((s) => s.fetchEnvironments);
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {

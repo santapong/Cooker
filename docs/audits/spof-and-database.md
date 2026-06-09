@@ -116,6 +116,8 @@ All PKs are `TEXT` (random IDs generated in app code). All tables have `created_
 
 **Missing — every "list" query in the UI is unindexed:**
 
+> **CLOSED** by migration `016_run_list_indexes` (run-list pagination + index PR): composite `idx_pipeline_runs_pipeline_created (pipeline_id, created_at DESC)` (supersedes the single-column `idx_pipeline_runs_pipeline_id`), `idx_pipelines_updated_at`, `idx_apps_updated_at`, and functional `idx_users_email_lower (LOWER(email))`. Table kept for history:
+
 | Query | File:line | What's wrong |
 |---|---|---|
 | `pipeline_runs ORDER BY created_at DESC` | `store/postgres/run.go:29` | No index on `created_at`. Full-table scan + sort. With heartbeat updates churning the table at 1 row / 30s / running run, this gets expensive once history accumulates. |
@@ -180,6 +182,7 @@ The migration's own comment at `002_env_secrets.up.sql:1-4` confirms: "*base64-e
 - **Write amplification on stage transitions.** `RunStore.Update` (`store/postgres/run.go:85-113`) re-marshals all three JSONB columns (`stage_runs`, `env_statuses`, `variables`) on every call, regardless of which one changed. A 10-stage pipeline with stage transitions every few seconds re-writes the whole row each time. Mitigation: a partial-update method (only re-marshal what changed) or move to an append-only event log with a denormalised projection.
 - **Heartbeat hot row.** `UpdateHeartbeat` (`store/postgres/run.go:115-129`) fires every 30s per running run. The partial index `idx_pipeline_runs_running_heartbeat` is sized for this — it only contains running rows — so the index update cost stays small. But the row itself is the same row being touched repeatedly; under heavy concurrency, watch for HOT-update bloat and tune `autovacuum`.
 - **No `LIMIT` on any list query.** `RunStore.List`, `PipelineStore.List`, `AppStore.List` all return everything. Once `pipeline_runs` crosses ~10k rows, the dashboard starts pulling MB-sized JSON responses. Add pagination at the API layer.
+  **PARTIALLY CLOSED** (run-list pagination + index PR): `RunStore.List` — the only unbounded-growth table — now takes `limit`/`offset` (`GET /pipelines/:id/runs?limit=&offset=`, default 50, max 200) and strips per-stage `logs` from list rows in SQL, so up-to-1 MiB-per-stage log text never leaves Postgres on the list path. `pipelines`/`apps`/`hosts` lists stay unpaginated by choice: their cardinality is operator-created and small.
 - **List queries hold the cursor open during scan iteration.** Standard `database/sql` behaviour, not a bug, but worth noting if a slow consumer ever holds the connection.
 
 ### B.7 Backup and retention
@@ -198,16 +201,16 @@ Recommendation: add a `RUNBOOK.md` section covering backup cadence + retention p
 |---|---|---|---|---|
 | 1 | No down migrations for 002–006; migration runner doesn't embed `.down.sql` at all | **High** | `store/postgres/store.go:32`, `migrations/` | Add `*.down.sql`, change embed to `migrations/*.sql`, write down migrations |
 | 2 | No `schema_migrations` version table — partial-failure replay is silent | **High** | `store/postgres/store.go:113-137` | Adopt `golang-migrate` or add version tracking |
-| 3 | `pipeline_runs ORDER BY created_at DESC` unindexed | **High** | `store/postgres/run.go:29` | `CREATE INDEX idx_pipeline_runs_created_at_desc ON pipeline_runs (created_at DESC)` |
-| 4 | `pipelines ORDER BY updated_at DESC` unindexed | **High** | `store/postgres/pipeline.go:26` | Add equivalent index |
+| 3 | ~~`pipeline_runs ORDER BY created_at DESC` unindexed~~ **Closed** — `idx_pipeline_runs_pipeline_created` in `016_run_list_indexes.up.sql` | ~~High~~ | `store/postgres/run.go:25` | Done |
+| 4 | ~~`pipelines ORDER BY updated_at DESC` unindexed~~ **Closed** — `idx_pipelines_updated_at` in 016 | ~~High~~ | `store/postgres/pipeline.go:26` | Done |
 | 5 | WS-ticket Redis backend has no fallback; outage = no new WS upgrades | **Medium** | `wsticket_redis.go:39-41` + `server.go:122-128` | Add in-memory fallback or document the trade-off |
 | 6 | Per-replica in-memory rate buckets / WS tickets — multi-replica defeats them | **Medium** | `ratelimit.go:14-18`, `wsticket.go:56-58` | Use Redis backends in any deployment with `replicas > 1`; document explicitly |
 | 7 | `apps.environment_id` has no FK; orphaned apps after env deletion | **Medium** | `003_apps.up.sql` | `ALTER TABLE apps ADD CONSTRAINT … FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE SET NULL` |
 | 8 | `apps(github_repo, branch)` indexed but not `UNIQUE` | **Medium** | `003_apps.up.sql:23` | Add `UNIQUE` constraint or app-layer guard |
-| 9 | `users` query uses `LOWER(email)` but index is on raw column | **Medium** | `store/postgres/user.go:24` | Functional index `(LOWER(email))` or normalise on insert |
-| 10 | `apps ORDER BY updated_at DESC` unindexed | **Medium** | `store/postgres/app.go:28` | Add index |
+| 9 | ~~`users` query uses `LOWER(email)` but index is on raw column~~ **Closed** — `idx_users_email_lower` in 016 | ~~Medium~~ | `store/postgres/user.go:24` | Done |
+| 10 | ~~`apps ORDER BY updated_at DESC` unindexed~~ **Closed** — `idx_apps_updated_at` in 016 | ~~Medium~~ | `store/postgres/app.go:28` | Done |
 | 11 | `RunStore.Update` re-marshals all 3 JSONB blobs on every stage transition | **Medium** | `store/postgres/run.go:85-113` | Partial-update method or event-log approach |
-| 12 | List endpoints have no `LIMIT`/pagination | **Medium** | `run.go:25`, `pipeline.go:24`, `app.go:23`, `host.go`, `user.go` | Add cursor / offset pagination |
+| 12 | List endpoints have no `LIMIT`/pagination | **Medium** — runs half **closed** (`?limit/?offset` + SQL-side log strip; see B.6); small-cardinality lists deliberately left unpaginated | `run.go:25`, `pipeline.go:24`, `app.go:23`, `host.go`, `user.go` | Add cursor / offset pagination |
 | 13 | `COOKER_SECRET_KEY` rotation has no dual-key window | **Medium** | `crypto/codec.go:30-50`, `server.go:81-85` | Accept two keys at once during rotation |
 | 14 | No documented Postgres backup / restore / retention | **Medium** | `docs/RUNBOOK.md` | Add ops procedures |
 | 15 | Connection pool fixed at 25/5 — no env-var override | **Low** | `store/postgres/store.go:44-46` | Expose as `COOKER_DB_MAX_OPEN_CONNS` etc. |

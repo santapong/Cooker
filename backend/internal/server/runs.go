@@ -70,20 +70,29 @@ func NewRunCoordinator(st *store.Store) *RunCoordinator {
 	return &RunCoordinator{store: st}
 }
 
-// Spawn launches work in a tracked goroutine. The supplied ctx is
-// extended with a 30-minute deadline (matching the existing app-deploy
-// behaviour) and used for both work and heartbeat writes. work is
-// expected to mutate the run state through the store; the coordinator
-// only manages liveness, not run semantics.
+// Spawn launches work with the cluster-default deadline
+// (COOKER_RUN_DEADLINE, 30 minutes when unset). See SpawnWithDeadline.
 func (rc *RunCoordinator) Spawn(ctx context.Context, runID string, work func(context.Context) error) {
+	rc.SpawnWithDeadline(ctx, runID, runDeadline, work)
+}
+
+// SpawnWithDeadline launches work in a tracked goroutine with an
+// explicit upper bound (per-pipeline RunDeadline override). deadline
+// <= 0 falls back to the cluster default. The bounded ctx is used for
+// both work and heartbeat writes. work is expected to mutate the run
+// state through the store; the coordinator only manages liveness,
+// not run semantics.
+func (rc *RunCoordinator) SpawnWithDeadline(ctx context.Context, runID string, deadline time.Duration, work func(context.Context) error) {
+	if deadline <= 0 {
+		deadline = runDeadline
+	}
 	rc.wg.Add(1)
 	go func() {
 		defer rc.wg.Done()
-		// Apply the documented 30-minute upper bound. Without this
-		// a stuck builder / kubectl / git push could hold the
-		// goroutine forever; the sweep wouldn't catch it because
-		// heartbeats keep firing.
-		workCtx, cancelWork := context.WithTimeout(ctx, runDeadline)
+		// Apply the upper bound. Without this a stuck builder /
+		// kubectl / git push could hold the goroutine forever; the
+		// sweep wouldn't catch it because heartbeats keep firing.
+		workCtx, cancelWork := context.WithTimeout(ctx, deadline)
 		defer cancelWork()
 		ticker := time.NewTicker(heartbeatInterval)
 		defer ticker.Stop()

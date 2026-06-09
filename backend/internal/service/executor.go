@@ -83,6 +83,21 @@ func outputsEnabled() bool {
 	}
 }
 
+// edgeConditionsEnabled gates edge-condition evaluation (Primitive
+// #2): the per-edge success/failure/always gate, the skipped stage
+// status, and the continue-through-failure runner mode. Default on;
+// COOKER_EDGE_CONDITIONS_ENABLED=false restores the legacy behaviour
+// (all edges treated as success-edges, first failure aborts the run
+// at its level barrier). Rollback knob, same shape as outputsEnabled.
+func edgeConditionsEnabled() bool {
+	switch os.Getenv("COOKER_EDGE_CONDITIONS_ENABLED") {
+	case "false", "0":
+		return false
+	default:
+		return true
+	}
+}
+
 // Output caps (dag-adaptation-2026.md §7.3, DR-2). A single output value
 // is truncated to outputKeyMax bytes; the running per-stage total is
 // bounded at outputStageMax bytes, after which further keys are dropped
@@ -567,6 +582,14 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		ancestorSets[p.Stages[i].ID] = ancestorsOf(p.Stages[i].ID, outDeps)
 	}
 
+	// Edge conditions (Primitive #2): each stage's incoming edges with
+	// their conditions, evaluated at taskFunc entry against upstream
+	// terminal statuses.
+	incomingEdges := make(map[string][]model.Edge, len(p.Edges))
+	for _, edge := range p.Edges {
+		incomingEdges[edge.Target] = append(incomingEdges[edge.Target], edge)
+	}
+
 	// F2 cancellation lock-in: snapshot whether the caller pre-marked
 	// the run Cancelled (e.g. a CancelPipelineRun call that landed on
 	// the row before Spawn-ed work started). We stamp Running below
@@ -596,7 +619,15 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 	}
 	run.StartedAt = &now
 
-	runner := dagrunner.NewRunnerBounded(dag, func(ctx context.Context, nodeID string) error {
+	// Continue-through-failure is required for edge conditions: a
+	// "failure"-edge downstream must still execute after its upstream
+	// fails, so the runner can't abort at the level barrier. The flag
+	// restores the legacy abort-on-first-error runner.
+	newRunnerFn := dagrunner.NewRunnerBounded
+	if edgeConditionsEnabled() {
+		newRunnerFn = dagrunner.NewRunnerBoundedContinue
+	}
+	runner := newRunnerFn(dag, func(ctx context.Context, nodeID string) error {
 		stage, ok := stageMap[nodeID]
 		if !ok || stage == nil {
 			return fmt.Errorf("stage %q not found in pipeline", nodeID)
@@ -604,6 +635,36 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		stageRun, ok := stageRunMap[nodeID]
 		if !ok || stageRun == nil {
 			return fmt.Errorf("stage run %q not allocated", nodeID)
+		}
+
+		// Edge-condition gate (Primitive #2): evaluate every incoming
+		// edge against its upstream's terminal status BEFORE any work.
+		// Reading upstream StageRuns here is race-free for the same
+		// reason collectStageOutputs is: the level barrier guarantees
+		// upstreams finished before this taskFunc starts. A "don't run"
+		// verdict stamps the terminal Skipped status and returns the
+		// runner's sentinel so the rest of the level proceeds.
+		if edgeConditionsEnabled() {
+			statusOf := func(id string) model.RunStatus {
+				if sr, ok := stageRunMap[id]; ok && sr != nil {
+					return sr.Status
+				}
+				return model.RunStatusFailed
+			}
+			if !buildplan.StageShouldRun(nodeID, incomingEdges[nodeID], statusOf) {
+				skippedAt := time.Now()
+				if next, terr := runstate.TransitionStage(stageRun.Status, runstate.EventSkip); terr == nil {
+					stageRun.Status = next
+				} else {
+					slog.Warn("pipeline: unexpected stage state at skip",
+						"run", run.ID, "stage", stage.Name, "status", stageRun.Status, "err", terr)
+					stageRun.Status = model.RunStatusSkipped
+				}
+				stageRun.FinishedAt = &skippedAt
+				e.broadcastStatus(run.ID, stage.ID, string(stageRun.Status))
+				logger.Info("pipeline stage skipped by edge conditions", "stage", stage.Name)
+				return dagrunner.ErrSkipped
+			}
 		}
 
 		// Inter-stage outputs (Primitive #3, dag-adaptation-2026.md §7.3).
@@ -664,23 +725,8 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		// Wrap the type-specific dispatch with retry so transient
 		// adapter errors (registry 5xx, kube-API blip) don't fail
 		// the whole pipeline. Approval / custom stages don't make
-		// sense to retry — they're skipped via MaxAttempts=1 below.
-		retryPolicy := retry.Policy{
-			MaxAttempts: 1 + stage.Config.Retries,
-			Initial:     1 * time.Second,
-			Max:         15 * time.Second,
-			IsTransient: func(err error) bool {
-				// Don't retry if the parent context is gone — that's
-				// shutdown, cancellation, or the per-stage deadline
-				// firing. Also don't retry validation-shaped errors
-				// (those are caller bugs, not network blips).
-				return !retry.IsContextErr(err)
-			},
-		}
-		switch stage.Type {
-		case model.StageTypeApproval, model.StageTypeCustom, model.StageTypeTest:
-			retryPolicy.MaxAttempts = 1
-		}
+		// sense to retry — policyFromStage pins them to one attempt.
+		retryPolicy := policyFromStage(stage)
 
 		// Config interpolation failure (above) is deterministic: bypass
 		// retry.Do entirely and route ierrInterp through the same terminal
@@ -811,7 +857,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 				// no waiting for the next debounce tick. This is the
 				// guarantee that run-completion code paths (and the
 				// caller) do not observe lag on the last transition.
-				if update.Status == "failed" || update.Status == "success" {
+				if update.Status == "failed" || update.Status == "success" || update.Status == "skipped" {
 					flush()
 				} else if pending >= progressDrainBatchSize {
 					flush()
@@ -943,6 +989,7 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 		BuildArgs:  stage.Config.BuildArgs,
 		Platforms:  stage.Config.Platforms,
 		LogWriter:  writer,
+		Cache:      builderCacheSpec(stage.Config.Cache),
 	}
 	res, err := e.builder.Build(ctx, req)
 	if err != nil {
@@ -963,6 +1010,77 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 		applyStageOutputs(sr, deriveBuildOutputs(res), res.Outputs)
 	}
 	return nil
+}
+
+// policyFromStage builds the retry.Policy for one stage. The
+// structured StageConfig.Retry wins over the legacy Retries int; all
+// knobs are clamped (MaxAttempts [1,10], Initial [100ms,60s], Max
+// [Initial,5m]) so a typo'd policy can't spin a stage for hours.
+// Exponential=false pins every delay to Initial (Max=Initial does
+// that without touching internal/retry) — applied after the clamps so
+// an out-of-range InitialMS can't leave Max above Initial and
+// re-enable growth. Approval / custom / test stages never retry.
+func policyFromStage(stage *model.Stage) retry.Policy {
+	p := retry.Policy{
+		MaxAttempts: 1 + stage.Config.Retries,
+		Initial:     1 * time.Second,
+		Max:         15 * time.Second,
+		IsTransient: func(err error) bool {
+			// Don't retry if the parent context is gone — that's
+			// shutdown, cancellation, or the per-stage deadline
+			// firing. Also don't retry validation-shaped errors
+			// (those are caller bugs, not network blips).
+			return !retry.IsContextErr(err)
+		},
+	}
+	r := stage.Config.Retry
+	if r != nil {
+		if r.MaxAttempts > 0 {
+			p.MaxAttempts = r.MaxAttempts
+		}
+		if r.InitialMS > 0 {
+			p.Initial = time.Duration(r.InitialMS) * time.Millisecond
+		}
+		if r.MaxMS > 0 {
+			p.Max = time.Duration(r.MaxMS) * time.Millisecond
+		}
+	}
+	if p.MaxAttempts < 1 {
+		p.MaxAttempts = 1
+	}
+	if p.MaxAttempts > 10 {
+		p.MaxAttempts = 10
+	}
+	if p.Initial < 100*time.Millisecond {
+		p.Initial = 100 * time.Millisecond
+	}
+	if p.Initial > time.Minute {
+		p.Initial = time.Minute
+	}
+	if p.Max < p.Initial {
+		p.Max = p.Initial
+	}
+	if p.Max > 5*time.Minute {
+		p.Max = 5 * time.Minute
+	}
+	if r != nil && r.Exponential != nil && !*r.Exponential {
+		p.Max = p.Initial
+	}
+	switch stage.Type {
+	case model.StageTypeApproval, model.StageTypeCustom, model.StageTypeTest:
+		p.MaxAttempts = 1
+	}
+	return p
+}
+
+// builderCacheSpec maps the stage's cache config onto the builder
+// package's mirror type. The save-time validator already rejected
+// malformed refs; a nil spec maps to the zero value (cache off).
+func builderCacheSpec(c *model.CacheSpec) builder.CacheSpec {
+	if c == nil {
+		return builder.CacheSpec{}
+	}
+	return builder.CacheSpec{Mode: c.Mode, Ref: c.Ref, Inline: c.Inline}
 }
 
 // cappedBuffer is a write-capped bytes.Buffer. Writes after the cap
