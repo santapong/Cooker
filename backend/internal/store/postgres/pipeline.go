@@ -23,7 +23,7 @@ func NewPipelineStore(db *sql.DB) *PipelineStore {
 
 func (s *PipelineStore) List(ctx context.Context) ([]*model.Pipeline, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, description, stages, edges, variables, created_at, updated_at, version FROM pipelines ORDER BY updated_at DESC`)
+		`SELECT id, name, description, stages, edges, variables, created_at, updated_at, version, run_deadline FROM pipelines ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing pipelines: %w", err)
 	}
@@ -42,7 +42,7 @@ func (s *PipelineStore) List(ctx context.Context) ([]*model.Pipeline, error) {
 
 func (s *PipelineStore) Get(ctx context.Context, id string) (*model.Pipeline, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, description, stages, edges, variables, created_at, updated_at, version FROM pipelines WHERE id = $1`, id)
+		`SELECT id, name, description, stages, edges, variables, created_at, updated_at, version, run_deadline FROM pipelines WHERE id = $1`, id)
 	p, err := scanPipeline(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("pipeline %s: %w", id, store.ErrNotFound)
@@ -64,9 +64,9 @@ func (s *PipelineStore) Create(ctx context.Context, p *model.Pipeline) error {
 		return fmt.Errorf("marshal variables: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO pipelines (id, name, description, stages, edges, variables, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		p.ID, p.Name, p.Description, stagesJSON, edgesJSON, varsJSON, p.CreatedAt, p.UpdatedAt)
+		`INSERT INTO pipelines (id, name, description, stages, edges, variables, created_at, updated_at, run_deadline)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		p.ID, p.Name, p.Description, stagesJSON, edgesJSON, varsJSON, p.CreatedAt, p.UpdatedAt, p.RunDeadline)
 	if err != nil {
 		return fmt.Errorf("creating pipeline: %w", err)
 	}
@@ -91,9 +91,9 @@ func (s *PipelineStore) Update(ctx context.Context, p *model.Pipeline) error {
 	// doesn't exist (ErrNotFound) or another writer raced (ErrConflict);
 	// the SELECT below disambiguates.
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE pipelines SET name=$2, description=$3, stages=$4, edges=$5, variables=$6, updated_at=$7, version=version+1
-		 WHERE id=$1 AND version=$8`,
-		p.ID, p.Name, p.Description, stagesJSON, edgesJSON, varsJSON, p.UpdatedAt, p.Version)
+		`UPDATE pipelines SET name=$2, description=$3, stages=$4, edges=$5, variables=$6, updated_at=$7, run_deadline=$8, version=version+1
+		 WHERE id=$1 AND version=$9`,
+		p.ID, p.Name, p.Description, stagesJSON, edgesJSON, varsJSON, p.UpdatedAt, p.RunDeadline, p.Version)
 	if err != nil {
 		return fmt.Errorf("updating pipeline: %w", err)
 	}
@@ -128,7 +128,7 @@ type scannable interface {
 func scanPipeline(row scannable) (*model.Pipeline, error) {
 	p := &model.Pipeline{}
 	var stagesJSON, edgesJSON, varsJSON []byte
-	if err := row.Scan(&p.ID, &p.Name, &p.Description, &stagesJSON, &edgesJSON, &varsJSON, &p.CreatedAt, &p.UpdatedAt, &p.Version); err != nil {
+	if err := row.Scan(&p.ID, &p.Name, &p.Description, &stagesJSON, &edgesJSON, &varsJSON, &p.CreatedAt, &p.UpdatedAt, &p.Version, &p.RunDeadline); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(stagesJSON, &p.Stages); err != nil {

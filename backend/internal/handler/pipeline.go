@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -39,11 +40,16 @@ func validatePipelineInput(p *model.Pipeline) error {
 	if err := validate.Description("description", p.Description); err != nil {
 		return err
 	}
+	if err := validate.RunDeadline(p.RunDeadline); err != nil {
+		return err
+	}
 	for i, s := range p.Stages {
 		if err := validate.StageType(s.Type); err != nil {
 			return err
 		}
-		_ = i
+		if err := validate.RetryPolicy(s.Config.Retry); err != nil {
+			return fmt.Errorf("stage %d: %w", i, err)
+		}
 	}
 	return nil
 }
@@ -194,6 +200,9 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 		Status:     model.RunStatusPending,
 		StageRuns:  make([]model.StageRun, 0, len(p.Stages)),
 		Variables:  p.Variables,
+		// Definition stamp for run-diff: which pipeline version this
+		// run executed. 0 only on rows predating migration 017.
+		PipelineVersion: p.Version,
 	}
 
 	// Capture the actor that started the run so the deploy-stage executor
@@ -254,7 +263,9 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 	// Do NOT re-derive run.Status from runCopy.Status here — Execute
 	// guarantees a terminal value and Cancelled stays Cancelled.
 	if h.Runs != nil && h.Executor != nil {
-		h.Runs.Spawn(context.Background(), run.ID, func(ctx context.Context) error {
+		// Per-pipeline RunDeadline override; 0 falls back to the
+		// cluster default inside the coordinator.
+		h.Runs.SpawnWithDeadline(context.Background(), run.ID, service.PipelineRunDeadline(p), func(ctx context.Context) error {
 			runCopy := run
 			_, execErr := h.Executor.Execute(ctx, p, runCopy)
 			if err := h.Store.Runs.Update(ctx, runCopy); err != nil {

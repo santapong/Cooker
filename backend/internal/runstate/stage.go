@@ -1,13 +1,13 @@
 package runstate
 
 // stageBuilder declares the legal edges for a single stage run. The
-// alphabet is identical to a pipeline run — stages and runs share
-// the lifecycle shape — but a distinct builder lets us evolve them
-// independently (e.g. stages may grow a "skipped" terminal state
-// while runs do not).
+// alphabet is a superset of a pipeline run's: stages additionally
+// have the skipped terminal state (Pending → Skipped via EventSkip,
+// Primitive #2) which runs never enter.
 var stageBuilder = NewBuilder("stage").
 	Allow(Transition{From: StatePending, Event: EventStart, To: StateRunning}).
 	Allow(Transition{From: StatePending, Event: EventCancel, To: StateCancelled}).
+	Allow(Transition{From: StatePending, Event: EventSkip, To: StateSkipped}).
 	Allow(Transition{From: StateRunning, Event: EventSucceed, To: StateSucceeded}).
 	Allow(Transition{From: StateRunning, Event: EventFail, To: StateFailed}).
 	Allow(Transition{From: StateRunning, Event: EventCancel, To: StateCancelled})

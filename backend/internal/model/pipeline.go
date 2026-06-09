@@ -16,6 +16,11 @@ type Pipeline struct {
 	// every successful Update; clients echo it back on PUT/PATCH so
 	// concurrent edits are detected and rejected with 409.
 	Version int `json:"version" db:"version"`
+	// RunDeadline overrides the cluster-wide COOKER_RUN_DEADLINE for
+	// this pipeline's runs. Go duration string ("45m", "2h"); empty
+	// means "use the cluster default". Validated to [10s, 24h] at the
+	// API layer; clamped again at spawn time.
+	RunDeadline string `json:"runDeadline,omitempty" db:"run_deadline"`
 }
 
 // StageType identifies the kind of pipeline stage.
@@ -94,7 +99,13 @@ type StageConfig struct {
 	// Custom
 	Script  string `json:"script,omitempty"`
 	Timeout string `json:"timeout,omitempty"`
-	Retries int    `json:"retries,omitempty"`
+	// Retries is the legacy retry knob: N extra attempts with the
+	// executor's default backoff. Still honoured; Retry (below) wins
+	// when both are set.
+	Retries int `json:"retries,omitempty"`
+	// Retry is the structured retry policy (dag-adaptation Primitive
+	// #1). Nil falls back to Retries.
+	Retry *RetryPolicy `json:"retry,omitempty"`
 
 	// Env overrides the stage's environment variables. Values here win
 	// over anything inherited from the Pipeline.Variables or the
@@ -114,6 +125,21 @@ type StageConfig struct {
 	// should commit at GitOpsPath. Templating (${IMAGE}, etc.)
 	// happens at run time.
 	GitOpsContent string `json:"gitopsContent,omitempty"`
+}
+
+// RetryPolicy configures per-stage retry behaviour (dag-adaptation
+// Primitive #1). All fields optional; the executor clamps them to
+// sane bounds (MaxAttempts ≤ 10, delays within [100ms, 5m]).
+type RetryPolicy struct {
+	// MaxAttempts is the total number of attempts (1 = no retry).
+	MaxAttempts int `json:"maxAttempts,omitempty"`
+	// InitialMS is the delay before the first retry, in milliseconds.
+	InitialMS int `json:"initialMs,omitempty"`
+	// MaxMS caps the per-iteration delay, in milliseconds.
+	MaxMS int `json:"maxMs,omitempty"`
+	// Exponential selects exponential backoff (the default when nil).
+	// False pins every delay to InitialMS.
+	Exponential *bool `json:"exponential,omitempty"`
 }
 
 // Edge connects two stages in the pipeline graph.

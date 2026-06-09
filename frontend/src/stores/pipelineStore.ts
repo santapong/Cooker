@@ -20,6 +20,8 @@ interface PipelineStore {
   setSelectedNode: (id: string | null) => void;
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
+  setRunDeadline: (runDeadline: string) => void;
+  cycleEdgeCondition: (id: string) => void;
   validate: () => Promise<{ valid: boolean; errors: string[] }>;
 }
 
@@ -173,6 +175,29 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
   setSelectedNode: (id: string | null) => set({ selectedNodeId: id }),
   setNodes: (nodes: Node[]) => set({ nodes }),
   setEdges: (edges: Edge[]) => set({ edges }),
+
+  setRunDeadline: (runDeadline: string) => {
+    const { pipeline } = get();
+    if (!pipeline) return;
+    set({ pipeline: { ...pipeline, runDeadline: runDeadline || undefined } });
+  },
+
+  cycleEdgeCondition: (id: string) => {
+    const { pipeline } = get();
+    if (!pipeline) return;
+    // (none ≡ success) → failure → always → (none). The canvas refreshes
+    // its local edge state from the store after calling this.
+    const nextOf = (c?: PipelineEdge['condition']): PipelineEdge['condition'] =>
+      c === 'failure' ? 'always' : c === 'always' ? undefined : 'failure';
+    const updatedPipeline = {
+      ...pipeline,
+      edges: pipeline.edges.map((e) => (e.id === id ? { ...e, condition: nextOf(e.condition) } : e)),
+    };
+    set({
+      pipeline: updatedPipeline,
+      edges: edgesToFlowEdges(updatedPipeline.edges),
+    });
+  },
 
   validate: async () => {
     const { pipeline } = get();

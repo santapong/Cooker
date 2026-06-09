@@ -134,3 +134,36 @@ func TestRunCoordinator_DrainsOnWait(t *testing.T) {
 		t.Fatal("Wait returned before goroutine finished")
 	}
 }
+
+// SpawnWithDeadline must cancel the work context once the per-run
+// deadline elapses (the per-pipeline RunDeadline override path).
+func TestRunCoordinator_SpawnWithDeadline_CancelsWork(t *testing.T) {
+	st := memory.New()
+	ctx := context.Background()
+	run := &model.PipelineRun{ID: "r-deadline", PipelineID: "p", Status: model.RunStatusRunning}
+	if err := st.Runs.Create(ctx, run); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	rc := NewRunCoordinator(st)
+	got := make(chan error, 1)
+	rc.SpawnWithDeadline(ctx, run.ID, 50*time.Millisecond, func(workCtx context.Context) error {
+		select {
+		case <-workCtx.Done():
+			got <- workCtx.Err()
+		case <-time.After(5 * time.Second):
+			got <- nil
+		}
+		return nil
+	})
+	rc.Wait(context.Background())
+
+	select {
+	case err := <-got:
+		if err == nil {
+			t.Fatal("work ctx should have been cancelled by the 50ms deadline")
+		}
+	default:
+		t.Fatal("work never reported")
+	}
+}

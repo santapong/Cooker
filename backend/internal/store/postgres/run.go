@@ -26,7 +26,7 @@ func (s *RunStore) List(ctx context.Context, pipelineID string) ([]*model.Pipeli
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, pipeline_id, status, stage_runs, env_statuses, variables,
 		        created_at, started_at, finished_at, error, heartbeat_at,
-		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash
+		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash, pipeline_version
 		   FROM pipeline_runs WHERE pipeline_id = $1 ORDER BY created_at DESC`,
 		pipelineID)
 	if err != nil {
@@ -49,7 +49,7 @@ func (s *RunStore) Get(ctx context.Context, id string) (*model.PipelineRun, erro
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, pipeline_id, status, stage_runs, env_statuses, variables,
 		        created_at, started_at, finished_at, error, heartbeat_at,
-		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash
+		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash, pipeline_version
 		   FROM pipeline_runs WHERE id = $1`, id)
 	r, err := scanRun(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -89,13 +89,15 @@ func (s *RunStore) Create(ctx context.Context, r *model.PipelineRun) error {
 		`INSERT INTO pipeline_runs
 		  (id, pipeline_id, status, stage_runs, env_statuses, variables,
 		   created_at, started_at, finished_at, error,
-		   started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash)
-		 VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz, NOW()),$8,$9,$10,$11,$12,$13,$14)
+		   started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash,
+		   pipeline_version)
+		 VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz, NOW()),$8,$9,$10,$11,$12,$13,$14,$15)
 		 RETURNING created_at`,
 		r.ID, r.PipelineID, string(r.Status), stageJSON, envJSON, varsJSON,
 		createdAt,
 		nullTime(r.StartedAt), nullTime(r.FinishedAt), r.Error,
-		r.StartedByUserSub, r.StartedByEmail, groupsJSON, r.StartedByTokenHash).Scan(&r.CreatedAt)
+		r.StartedByUserSub, r.StartedByEmail, groupsJSON, r.StartedByTokenHash,
+		r.PipelineVersion).Scan(&r.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("creating run: %w", err)
 	}
@@ -186,7 +188,7 @@ func scanRun(row scannable) (*model.PipelineRun, error) {
 	var errStr sql.NullString
 	if err := row.Scan(&r.ID, &r.PipelineID, &status, &stageJSON, &envJSON, &varsJSON,
 		&r.CreatedAt, &started, &finished, &errStr, &heartbeat,
-		&r.StartedByUserSub, &r.StartedByEmail, &groupsJSON, &r.StartedByTokenHash); err != nil {
+		&r.StartedByUserSub, &r.StartedByEmail, &groupsJSON, &r.StartedByTokenHash, &r.PipelineVersion); err != nil {
 		return nil, err
 	}
 	r.Status = model.RunStatus(status)

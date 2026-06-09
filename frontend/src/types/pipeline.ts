@@ -1,5 +1,5 @@
 export type StageType = 'build' | 'test' | 'deploy' | 'push' | 'approval' | 'custom';
-export type RunStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
+export type RunStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'skipped';
 
 export interface Pipeline {
   id: string;
@@ -10,6 +10,9 @@ export interface Pipeline {
   variables: Record<string, string>;
   createdAt: string;
   updatedAt: string;
+  // Per-pipeline run deadline override (Go duration, e.g. "45m");
+  // empty/undefined uses the cluster default.
+  runDeadline?: string;
 }
 
 export interface Stage {
@@ -22,6 +25,13 @@ export interface Stage {
   // group is the deployment group-box this stage belongs to (compose
   // deployment DAGs). Empty/undefined means ungrouped.
   group?: string;
+}
+
+export interface RetryPolicy {
+  maxAttempts?: number;
+  initialMs?: number;
+  maxMs?: number;
+  exponential?: boolean;
 }
 
 export interface ResourceLimits {
@@ -53,6 +63,7 @@ export interface StageConfig {
   script?: string;
   timeout?: string;
   retries?: number;
+  retry?: RetryPolicy;
   // Compose deployment DAG provenance + per-service deploy runtime.
   deployRuntime?: 'kubernetes' | 'docker' | 'compose';
   composeServiceName?: string;

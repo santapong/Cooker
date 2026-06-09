@@ -94,6 +94,16 @@ export default function PipelineCanvas() {
     [store],
   );
 
+  const onEdgeClick = useCallback(
+    (event: React.MouseEvent, edge: { id: string }) => {
+      // Cycle the trajectory's condition: (success) → failure → always.
+      event.stopPropagation();
+      store.cycleEdgeCondition(edge.id);
+      setEdges(usePipelineStore.getState().edges);
+    },
+    [store, setEdges],
+  );
+
   const dark = t.mode === 'dark';
 
   return (
@@ -118,6 +128,7 @@ export default function PipelineCanvas() {
         onDragOver={onDragOver}
         onDrop={onDrop}
         onNodeClick={onNodeClick}
+        onEdgeClick={onEdgeClick}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={{ type: 'conditional' }}
