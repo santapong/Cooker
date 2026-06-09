@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/santapong/cooker/internal/observability"
 )
 
 // Event is one audit record. Only fields safe to persist appear here:
@@ -138,6 +140,7 @@ func (s *fileSink) Emit(e Event) {
 	select {
 	case s.ch <- e:
 	default:
+		observability.IncAuditDropped()
 		s.mu.Lock()
 		s.dropped++
 		dropped := s.dropped
@@ -228,6 +231,7 @@ func (s *storeSink) Emit(e Event) {
 	select {
 	case s.ch <- e:
 	default:
+		observability.IncAuditDropped()
 		s.mu.Lock()
 		s.dropped++
 		dropped := s.dropped

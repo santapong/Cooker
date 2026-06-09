@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -42,13 +44,16 @@ func CheckSecrets(ctx context.Context, mgr secrets.Manager, backend, envID strin
 		res.OK = true
 		return res
 	}
+	slog.Warn("secrets check: probe failed", "backend", backend, "error", err)
 	res.Error = classifySecretsErr(err)
 	return res
 }
 
 // classifySecretsErr maps probe failures to short operator-facing
-// strings. KeepSave surfaces typed HTTP errors; the other adapters
-// fall through to the network/timeout checks or the raw message.
+// strings. KeepSave surfaces typed HTTP errors; network failures
+// classify as unreachable. Everything else gets a generic message:
+// raw error strings can embed the backend URL or hostname (url.Error,
+// DNS errors), so the detail is logged server-side, never returned.
 func classifySecretsErr(err error) string {
 	var httpErr *keepsave.HTTPError
 	if errors.As(err, &httpErr) {
@@ -56,6 +61,7 @@ func classifySecretsErr(err error) string {
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return "authentication failed — check the backend credentials"
 		}
+		return fmt.Sprintf("backend returned HTTP %d", httpErr.Status)
 	}
 	var netErr net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
@@ -63,7 +69,7 @@ func classifySecretsErr(err error) string {
 	}
 	var opErr *net.OpError
 	if errors.As(err, &opErr) {
-		return "backend unreachable — " + opErr.Err.Error()
+		return "backend unreachable — connection failed"
 	}
-	return err.Error()
+	return "probe failed — see server logs"
 }

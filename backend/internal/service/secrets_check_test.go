@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -52,11 +53,11 @@ func TestCheckSecrets_Classification(t *testing.T) {
 	}{
 		{"keepsave 401", &keepsave.HTTPError{Status: 401, Message: "bad key"}, "authentication failed"},
 		{"keepsave 403", &keepsave.HTTPError{Status: 403, Message: "no access"}, "authentication failed"},
-		{"keepsave 500 is not auth", &keepsave.HTTPError{Status: 500, Message: "boom"}, "keepsave: 500"},
+		{"keepsave 500 is not auth", &keepsave.HTTPError{Status: 500, Message: "boom"}, "backend returned HTTP 500"},
 		{"wrapped auth error", errorWrap(&keepsave.HTTPError{Status: 401, Message: "x"}), "authentication failed"},
 		{"deadline", context.DeadlineExceeded, "unreachable"},
 		{"net op error", &net.OpError{Op: "dial", Err: errors.New("connection refused")}, "unreachable"},
-		{"other", errors.New("unexpected payload"), "unexpected payload"},
+		{"other", errors.New("unexpected payload"), "see server logs"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -68,6 +69,23 @@ func TestCheckSecrets_Classification(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", res.Error, tc.want)
 			}
 		})
+	}
+}
+
+// The classified error must never echo the backend address: url.Error
+// and DNS failures embed the full URL/hostname in their Error() text.
+func TestCheckSecrets_NeverLeaksBackendURL(t *testing.T) {
+	probeErr := &url.Error{
+		Op:  "Post",
+		URL: "https://keepsave.internal:8443/v1/list",
+		Err: errors.New("x509: certificate signed by unknown authority"),
+	}
+	res := CheckSecrets(context.Background(), &fakeSecretsManager{listErr: probeErr}, "keepsave", "env-1")
+	if res.OK {
+		t.Fatal("probe should fail")
+	}
+	if strings.Contains(res.Error, "keepsave.internal") || strings.Contains(res.Error, "8443") {
+		t.Fatalf("classified error leaks backend address: %q", res.Error)
 	}
 }
 
