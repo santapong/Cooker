@@ -28,6 +28,13 @@ func (s *RunStore) List(ctx context.Context, pipelineID string, limit, offset in
 	// Postgres on the list path. LIMIT NULL means "no limit", matching
 	// the limit <= 0 contract. The query is served by
 	// idx_pipeline_runs_pipeline_created (migration 016).
+	//
+	// stage_runs can hold the jsonb scalar 'null' rather than an array:
+	// app-deploy stub runs marshal a nil Go slice, which satisfies the
+	// column's NOT NULL DEFAULT '[]' as a JSON null value. The CASE
+	// guard maps non-arrays to '[]' because jsonb_array_elements raises
+	// "cannot extract elements from a scalar" and would 500 the whole
+	// list for one such row.
 	var limitArg interface{}
 	if limit > 0 {
 		limitArg = limit
@@ -39,7 +46,10 @@ func (s *RunStore) List(ctx context.Context, pipelineID string, limit, offset in
 		`SELECT id, pipeline_id, status,
 		        COALESCE(
 		          (SELECT jsonb_agg(elem - 'logs' ORDER BY idx)
-		             FROM jsonb_array_elements(stage_runs) WITH ORDINALITY AS t(elem, idx)),
+		             FROM jsonb_array_elements(
+		                    CASE WHEN jsonb_typeof(stage_runs) = 'array'
+		                         THEN stage_runs ELSE '[]'::jsonb END
+		                  ) WITH ORDINALITY AS t(elem, idx)),
 		          '[]'::jsonb) AS stage_runs,
 		        env_statuses, variables,
 		        created_at, started_at, finished_at, error, heartbeat_at,

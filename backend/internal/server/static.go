@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -67,12 +68,22 @@ func spaIndexHandler(indexPath string) gin.HandlerFunc {
 	}
 }
 
+// acceptsGzip reports whether the request allows a gzip response. A
+// q-value of zero is an explicit refusal (RFC 9110 §12.5.3) — some
+// proxies send "gzip;q=0" — so it must not count as acceptance.
 func acceptsGzip(r *http.Request) bool {
 	for _, enc := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
-		e := strings.TrimSpace(enc)
-		if e == "gzip" || strings.HasPrefix(e, "gzip;") {
-			return true
+		fields := strings.Split(strings.TrimSpace(enc), ";")
+		if strings.TrimSpace(fields[0]) != "gzip" {
+			continue
 		}
+		for _, p := range fields[1:] {
+			if v, ok := strings.CutPrefix(strings.TrimSpace(p), "q="); ok {
+				q, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+				return err == nil && q > 0
+			}
+		}
+		return true
 	}
 	return false
 }

@@ -108,6 +108,30 @@ func TestAssets_NoGzipWhenClientDoesNotAcceptIt(t *testing.T) {
 	}
 }
 
+// "gzip;q=0" is an explicit refusal, not an acceptance (RFC 9110).
+func TestAssets_GzipQZeroIsRefusal(t *testing.T) {
+	r, _ := staticFixture(t)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/assets/app-abc123.js", nil)
+	req.Header.Set("Accept-Encoding", "gzip;q=0, deflate")
+	r.ServeHTTP(w, req)
+	if got := w.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("Content-Encoding = %q, want unset for q=0", got)
+	}
+	if w.Body.String() != "console.log('cooker')" {
+		t.Fatalf("body = %q", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/assets/app-abc123.js", nil)
+	req.Header.Set("Accept-Encoding", "gzip;q=0.5")
+	r.ServeHTTP(w, req)
+	if got := w.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip for q=0.5", got)
+	}
+}
+
 func TestAssets_MissingFile404WithoutImmutableHeader(t *testing.T) {
 	r, _ := staticFixture(t)
 	w := httptest.NewRecorder()
