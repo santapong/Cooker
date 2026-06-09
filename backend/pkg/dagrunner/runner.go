@@ -70,29 +70,37 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("invalid DAG: %w", err)
 	}
 
+	// Per-Run state, hoisted out of the level loop (P26-05-04):
+	//
+	// errCh holds the first error of a level; later errors are dropped
+	// via the non-blocking send in fail() — Run only ever returned the
+	// first error it drained anyway. It is drained between levels, so
+	// one capacity-1 channel serves the whole Run.
+	//
+	// The OTel carrier captures the parent span once — ctx doesn't
+	// change between levels. The fan-out semaphore likewise carries no
+	// per-level state: each level joins via wg.Wait, so all slots are
+	// free when the next level starts.
+	errCh := make(chan error, 1)
+	fail := func(err error) {
+		select {
+		case errCh <- err:
+		default:
+		}
+	}
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+	var sem chan struct{}
+	if r.maxParallel > 0 {
+		sem = make(chan struct{}, r.maxParallel)
+	}
+
 	for _, level := range levels {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
 		var wg sync.WaitGroup
-		errCh := make(chan error, len(level))
-
-		// Capture the parent's OpenTelemetry span context as a TextMap
-		// carrier; each goroutine extracts it back into its own ctx so
-		// builder/pusher/deployer adapters running concurrently still
-		// link to the right trace.
-		carrier := propagation.MapCarrier{}
-		otel.GetTextMapPropagator().Inject(ctx, carrier)
-
-		// Semaphore for bounded fan-out. nil when maxParallel<=0
-		// preserves the legacy unbounded behaviour with a noop
-		// acquire/release.
-		var sem chan struct{}
-		if r.maxParallel > 0 {
-			sem = make(chan struct{}, r.maxParallel)
-		}
-
 		for _, nodeID := range level {
 			wg.Add(1)
 			go func(id string) {
@@ -103,7 +111,7 @@ func (r *Runner) Run(ctx context.Context) error {
 						defer func() { <-sem }()
 					case <-ctx.Done():
 						r.emitStatus(id, "failed", ctx.Err())
-						errCh <- ctx.Err()
+						fail(ctx.Err())
 						return
 					}
 				}
@@ -111,7 +119,7 @@ func (r *Runner) Run(ctx context.Context) error {
 					if rec := recover(); rec != nil {
 						err := fmt.Errorf("node %s panic: %v", id, rec)
 						r.emitStatus(id, "failed", err)
-						errCh <- err
+						fail(err)
 					}
 				}()
 
@@ -120,7 +128,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 				if taskErr := r.taskFunc(stageCtx, id); taskErr != nil {
 					r.emitStatus(id, "failed", taskErr)
-					errCh <- fmt.Errorf("node %s failed: %w", id, taskErr)
+					fail(fmt.Errorf("node %s failed: %w", id, taskErr))
 					return
 				}
 
@@ -129,12 +137,11 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 
 		wg.Wait()
-		close(errCh)
 
-		for e := range errCh {
-			if e != nil {
-				return e
-			}
+		select {
+		case e := <-errCh:
+			return e
+		default:
 		}
 	}
 

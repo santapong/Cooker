@@ -274,8 +274,7 @@ func (s *Server) registerRoutes() {
 		})
 	}
 
-	s.router.NoRoute(func(c *gin.Context) {
-		c.File("/usr/share/cooker/static/index.html")
-	})
-	s.router.Static("/assets", "/usr/share/cooker/static/assets")
+	s.router.NoRoute(spaIndexHandler("/usr/share/cooker/static/index.html"))
+	s.router.GET("/assets/*filepath", assetsHandler("/usr/share/cooker/static/assets"))
+	s.router.HEAD("/assets/*filepath", assetsHandler("/usr/share/cooker/static/assets"))
 }

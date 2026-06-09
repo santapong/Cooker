@@ -30,7 +30,12 @@ type PipelineStore interface {
 
 // RunStore manages pipeline run persistence.
 type RunStore interface {
-	List(ctx context.Context, pipelineID string) ([]*model.PipelineRun, error)
+	// List returns a pipeline's runs newest-first. limit caps the number
+	// of rows (<= 0 means unbounded); offset skips that many newest rows
+	// for pagination. Returned runs are summaries: per-stage Logs are
+	// omitted so a long history can't balloon the payload — fetch one
+	// run via Get (or the stage-logs endpoint) for full logs.
+	List(ctx context.Context, pipelineID string, limit, offset int) ([]*model.PipelineRun, error)
 	Get(ctx context.Context, id string) (*model.PipelineRun, error)
 	Create(ctx context.Context, run *model.PipelineRun) error
 	Update(ctx context.Context, run *model.PipelineRun) error

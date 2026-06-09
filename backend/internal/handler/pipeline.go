@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -266,8 +267,37 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 	c.JSON(http.StatusAccepted, run)
 }
 
+// Run-history pagination bounds. The default keeps the common "recent
+// activity" view to one page; the max stops a single request from
+// dragging the whole history (runs carry three JSONB blobs each).
+const (
+	listRunsDefaultLimit = 50
+	listRunsMaxLimit     = 200
+)
+
+// intQuery parses an integer query param, falling back to def when the
+// param is absent or malformed (cosmetic params don't 400, matching
+// the tailLines convention) and clamping the result to [min, max].
+func intQuery(c *gin.Context, name string, def, min, max int) int {
+	out := def
+	if v := c.Query(name); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			out = n
+		}
+	}
+	if out < min {
+		out = min
+	}
+	if out > max {
+		out = max
+	}
+	return out
+}
+
 func (h *Handler) ListPipelineRuns(c *gin.Context) {
-	runs, err := h.Store.Runs.List(c.Request.Context(), c.Param("id"))
+	limit := intQuery(c, "limit", listRunsDefaultLimit, 1, listRunsMaxLimit)
+	offset := intQuery(c, "offset", 0, 0, 1<<30)
+	runs, err := h.Store.Runs.List(c.Request.Context(), c.Param("id"), limit, offset)
 	if abortStoreErr(c, err, "runs not found") {
 		return
 	}

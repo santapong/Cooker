@@ -5,8 +5,11 @@ import { Icon } from '../../ui/Icon';
 
 export default function NodeConfigPanel() {
   const t = useTheme();
-  const { pipeline, selectedNodeId, updateStageConfig, removeStage, setSelectedNode } =
-    usePipelineStore();
+  const pipeline = usePipelineStore((s) => s.pipeline);
+  const selectedNodeId = usePipelineStore((s) => s.selectedNodeId);
+  const updateStageConfig = usePipelineStore((s) => s.updateStageConfig);
+  const removeStage = usePipelineStore((s) => s.removeStage);
+  const setSelectedNode = usePipelineStore((s) => s.setSelectedNode);
 
   if (!pipeline || !selectedNodeId) return null;
 

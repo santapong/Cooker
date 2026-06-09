@@ -47,16 +47,14 @@ function ClusterUnavailableBanner() {
 
 export default function KubernetesPage() {
   const t = useTheme();
-  const {
-    namespaces,
-    workloads,
-    selectedNamespace,
-    loading,
-    clusterUnavailable,
-    fetchNamespaces,
-    fetchWorkloads,
-    setNamespace,
-  } = useKubernetesStore();
+  const namespaces = useKubernetesStore((s) => s.namespaces);
+  const workloads = useKubernetesStore((s) => s.workloads);
+  const selectedNamespace = useKubernetesStore((s) => s.selectedNamespace);
+  const loading = useKubernetesStore((s) => s.loading);
+  const clusterUnavailable = useKubernetesStore((s) => s.clusterUnavailable);
+  const fetchNamespaces = useKubernetesStore((s) => s.fetchNamespaces);
+  const fetchWorkloads = useKubernetesStore((s) => s.fetchWorkloads);
+  const setNamespace = useKubernetesStore((s) => s.setNamespace);
 
   useEffect(() => {
     fetchNamespaces();
