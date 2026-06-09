@@ -362,6 +362,52 @@ func (h *Handler) GetStageLogs(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "stage not found"})
 }
 
+// GetRunDiff compares a run against a baseline run of the same
+// pipeline (roadmap M3). ?against=<runId> picks an explicit baseline;
+// the default "last-success" resolves to the most recent successful
+// run created before this one.
+func (h *Handler) GetRunDiff(c *gin.Context) {
+	pipelineID := c.Param("id")
+	base, ok := h.loadRunForPipeline(c, c.Param("runId"), pipelineID)
+	if !ok {
+		return
+	}
+	// Stage names are cosmetic on the diff; a missing pipeline row
+	// (e.g. deleted since the run) must not 404 the comparison.
+	p, _ := h.Store.Pipelines.Get(c.Request.Context(), pipelineID)
+
+	againstParam := c.Query("against")
+	var against *model.PipelineRun
+	switch {
+	case againstParam == "" || againstParam == "last-success":
+		// Unbounded on purpose: the newest green run may sit arbitrarily
+		// deep in history. The list path strips logs in the store, so
+		// the scan is cheap rows, not megabytes.
+		runs, err := h.Store.Runs.List(c.Request.Context(), pipelineID, 0, 0)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		for _, r := range runs {
+			if r.ID != base.ID && r.Status == model.RunStatusSuccess && r.CreatedAt.Before(base.CreatedAt) {
+				against = r
+				break
+			}
+		}
+		if against == nil {
+			c.JSON(http.StatusOK, service.RunDiff{Reason: "no successful prior run", Stages: []service.StageDiff{}})
+			return
+		}
+	default:
+		var okAgainst bool
+		against, okAgainst = h.loadRunForPipeline(c, againstParam, pipelineID)
+		if !okAgainst {
+			return
+		}
+	}
+	c.JSON(http.StatusOK, service.BuildRunDiff(base, against, p))
+}
+
 // GetPipelineAnalytics computes stage-duration and success-rate
 // statistics from recent run history (roadmap M4). ?runs=N bounds the
 // sample (default 30, max 200).

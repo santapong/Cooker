@@ -123,6 +123,28 @@ export interface EnvironmentStatus {
   approvedBy?: string;
 }
 
+// Run diff (roadmap M3): GET /pipelines/:id/runs/:runId/diff
+export interface RunDiffReport {
+  againstRunId?: string;
+  againstStatus?: string;
+  reason?: string;
+  definitionChanged?: boolean;
+  pipelineVersionDelta?: { from: number; to: number };
+  variables?: {
+    added?: Record<string, string>;
+    removed?: Record<string, string>;
+    changed?: Record<string, { from: string; to: string }>;
+  };
+  stages: Array<{
+    stageId: string;
+    name?: string;
+    status: { from: RunStatus | ''; to: RunStatus };
+    durationMs: { from: number; to: number; deltaMs: number };
+    digest: { from?: string; to?: string; changed: boolean };
+    outputsChangedKeys?: string[];
+  }>;
+}
+
 // Stage-duration analytics (roadmap M4): GET /pipelines/:id/analytics
 export interface PipelineAnalytics {
   pipelineId: string;

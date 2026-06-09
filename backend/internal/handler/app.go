@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -416,4 +417,189 @@ func (h *Handler) DetectAppBuild(c *gin.Context) {
 		"plan":            plan,
 		"suggestedRecipe": recipe,
 	})
+}
+
+// ListAppDeploys returns the app's deploy/rollback history,
+// newest-first (roadmap M3).
+func (h *Handler) ListAppDeploys(c *gin.Context) {
+	a, err := h.Store.Apps.Get(c.Request.Context(), c.Param("id"))
+	if abortStoreErr(c, err, "app not found") {
+		return
+	}
+	if h.Store.AppDeploys == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "deploy history not available"})
+		return
+	}
+	limit := 20
+	if v := c.Query("limit"); v != "" {
+		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	deploys, err := h.Store.AppDeploys.ListByApp(c.Request.Context(), a.ID, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if deploys == nil {
+		deploys = []*model.AppDeploy{}
+	}
+	c.JSON(http.StatusOK, gin.H{"deploys": deploys})
+}
+
+// resolveRollbackTarget picks the history row a rollback re-deploys.
+// Explicit deployId wins (must belong to the app, be successful, and
+// carry an image ref). Default: the SECOND most-recent successful
+// deploy-kind row with an image — i.e. "the version before the one
+// we're on".
+func (h *Handler) resolveRollbackTarget(c *gin.Context, appID, deployID string) (*model.AppDeploy, bool) {
+	if deployID != "" {
+		d, err := h.Store.AppDeploys.Get(c.Request.Context(), deployID)
+		if abortStoreErr(c, err, "deploy not found") {
+			return nil, false
+		}
+		if d.AppID != appID {
+			c.JSON(http.StatusNotFound, gin.H{"error": "deploy not found"})
+			return nil, false
+		}
+		if d.Status != model.RunStatusSuccess || d.ImageRef == "" {
+			c.JSON(http.StatusConflict, gin.H{"error": "deploy is not a successful single-image deploy; cannot roll back to it"})
+			return nil, false
+		}
+		return d, true
+	}
+	history, err := h.Store.AppDeploys.ListByApp(c.Request.Context(), appID, 50)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return nil, false
+	}
+	var candidates []*model.AppDeploy
+	for _, d := range history {
+		if d.Kind == model.AppDeployKindDeploy && d.Status == model.RunStatusSuccess && d.ImageRef != "" {
+			candidates = append(candidates, d)
+		}
+	}
+	if len(candidates) < 2 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no earlier successful deploy to roll back to"})
+		return nil, false
+	}
+	return candidates[1], true
+}
+
+// RollbackApp re-deploys a previously shipped image (roadmap M3).
+// Deploy-only: no clone/build/push. v1 supports kubernetes targets
+// and single-image (non-compose) history rows.
+func (h *Handler) RollbackApp(c *gin.Context) {
+	a, err := h.Store.Apps.Get(c.Request.Context(), c.Param("id"))
+	if abortStoreErr(c, err, "app not found") {
+		return
+	}
+	if h.AppDeployer == nil || h.Store.AppDeploys == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "rollback not available"})
+		return
+	}
+	if a.DeployTarget.Kind != model.DeployTargetKubernetes {
+		c.JSON(http.StatusConflict, gin.H{"error": "rollback supports kubernetes deploy targets only"})
+		return
+	}
+
+	var req struct {
+		DeployID string `json:"deployId"`
+	}
+	if c.Request.ContentLength > 0 {
+		if bindErr := c.ShouldBindJSON(&req); bindErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": bindErr.Error()})
+			return
+		}
+	}
+	target, ok := h.resolveRollbackTarget(c, a.ID, req.DeployID)
+	if !ok {
+		return
+	}
+
+	runID := uuid.New().String()
+	channel := "app-run:" + runID
+	// Stub run row before Spawn — same F-07 rationale as DeployApp.
+	if h.Runs != nil && h.Store != nil {
+		now := time.Now()
+		stub := &model.PipelineRun{
+			ID:         runID,
+			PipelineID: "app-" + a.ID + "-rollback-" + runID,
+			Status:     model.RunStatusRunning,
+			StartedAt:  &now,
+		}
+		if createErr := h.Store.Runs.Create(c.Request.Context(), stub); createErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "create run: " + createErr.Error()})
+			return
+		}
+	}
+
+	work := func(ctx context.Context) error {
+		h.runRollbackCtx(ctx, a, target.ImageRef, runID, channel)
+		return nil
+	}
+	if h.Runs != nil {
+		h.Runs.Spawn(context.Background(), runID, work)
+	} else {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer cancel()
+			_ = work(ctx)
+		}()
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"appId":   a.ID,
+		"runId":   runID,
+		"channel": channel,
+		"status":  "running",
+		"stream":  "/ws/app-run/" + runID,
+		"rolledBackTo": gin.H{
+			"deployId": target.ID,
+			"imageRef": target.ImageRef,
+		},
+	})
+}
+
+// runRollbackCtx is the rollback worker; mirrors runAppDeployCtx.
+func (h *Handler) runRollbackCtx(ctx context.Context, a *model.App, imageRef, runID, channel string) {
+	deployCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+
+	sink := &wsLogSink{channel: channel, broadcast: h.WSBroadcast}
+	sink.writef("[start] rollback app=%s image=%s run=%s\n", a.Name, imageRef, runID)
+
+	pipeline, run, err := h.AppDeployer.DeployImage(deployCtx, a, imageRef, runID, sink)
+	if err != nil {
+		sink.writef("[error] %v\n", err)
+	}
+	if pipeline != nil {
+		if createErr := h.Store.Pipelines.Create(deployCtx, pipeline); createErr != nil {
+			sink.writef("[warn] persist pipeline: %v\n", createErr)
+		}
+	}
+	if run != nil {
+		if updateErr := h.Store.Runs.Update(deployCtx, run); updateErr != nil {
+			sink.writef("[warn] persist run: %v\n", updateErr)
+		}
+		sink.writef("[final] status=%s\n", run.Status)
+	}
+	sink.writef("[end] run=%s\n", runID)
+}
+
+// GetAppDrift compares the app's last successfully shipped image to
+// the live cluster workload (roadmap M3, on-demand v1).
+func (h *Handler) GetAppDrift(c *gin.Context) {
+	a, err := h.Store.Apps.Get(c.Request.Context(), c.Param("id"))
+	if abortStoreErr(c, err, "app not found") {
+		return
+	}
+	var kc service.KubeWorkloadGetter
+	if h.Kube != nil {
+		kc = h.Kube
+	}
+	c.JSON(http.StatusOK, service.CheckDrift(c.Request.Context(), kc, h.Store.AppDeploys, a))
 }

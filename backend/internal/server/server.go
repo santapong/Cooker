@@ -232,6 +232,7 @@ func New(cfg *config.Config) (*Server, error) {
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 	appDeployer.CacheRef = cfg.BuildCacheRepo
+	appDeployer.Deploys = st.AppDeploys
 
 	runs := NewRunCoordinator(st)
 

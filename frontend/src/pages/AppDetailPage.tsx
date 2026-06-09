@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { appsApi } from '../api/apps';
-import type { AppModel, AppDeployResponse } from '../types/app';
+import type { AppModel, AppDeployResponse, AppDeployRecord, AppDriftReport } from '../types/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { hexA } from '../theme/tokens';
 import { Btn, Card, Field, Input, Label, PageHeader, Pill, SectionLabel, statusTone } from '../components/ui/atoms';
@@ -19,6 +19,8 @@ export default function AppDetailPage() {
 
   const [deploying, setDeploying] = useState(false);
   const [lastDeploy, setLastDeploy] = useState<AppDeployResponse | null>(null);
+  const [history, setHistory] = useState<AppDeployRecord[]>([]);
+  const [drift, setDrift] = useState<AppDriftReport | null>(null);
   const [logs, setLogs] = useState<string>('');
   // streamRunId drives useWebSocket — null means "no active stream".
   const [streamRunId, setStreamRunId] = useState<string | null>(null);
@@ -108,6 +110,39 @@ export default function AppDetailPage() {
     } catch (e) {
       setError((e as Error).message);
       setDeploying(false);
+    }
+  };
+
+  const refreshHistory = useCallback(() => {
+    if (!id) return;
+    appsApi
+      .listDeploys(id)
+      .then((res) => setHistory(res.deploys))
+      .catch(() => {
+        /* history is additive UI; stay quiet */
+      });
+    appsApi
+      .drift(id)
+      .then(setDrift)
+      .catch(() => setDrift(null));
+  }, [id]);
+
+  useEffect(() => {
+    refreshHistory();
+  }, [refreshHistory]);
+
+  const rollback = async (deployId: string, imageRef: string) => {
+    if (!id) return;
+    if (!confirm(`Roll back to ${imageRef}? This re-deploys that image.`)) return;
+    setLogs('');
+    setStreamRunId(null);
+    try {
+      const res = await appsApi.rollback(id, deployId);
+      pushToast({ kind: 'success', message: `Rolling back to ${res.rolledBackTo.imageRef}.` });
+      setStreamRunId(res.runId);
+      window.setTimeout(refreshHistory, 4000);
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
     }
   };
 
@@ -233,8 +268,52 @@ export default function AppDetailPage() {
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
               {app.hasWebhook && <Pill tone="cool">webhook</Pill>}
               {app.autoDeploy && <Pill tone="good">auto-deploy</Pill>}
+              {drift?.status === 'in_sync' && <Pill tone="good">in sync</Pill>}
+              {drift?.status === 'drift' && <Pill tone="warn">drift</Pill>}
             </div>
           </Card>
+
+          {/* Deploy history + one-click rollback (roadmap M3) */}
+          {history.length > 0 && (
+            <Card style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <SectionLabel>Deploy history</SectionLabel>
+              {history.map((d, i) => (
+                <div
+                  key={d.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    paddingBottom: 8,
+                    borderBottom: i < history.length - 1 ? `1px solid ${t.line}` : 'none',
+                  }}
+                >
+                  <Pill tone={statusTone(d.status)}>{d.status}</Pill>
+                  {d.kind === 'rollback' && <Pill tone="cool">rollback</Pill>}
+                  <span
+                    style={{
+                      fontFamily: t.mono,
+                      fontSize: 10.5,
+                      color: t.textSoft,
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={d.imageRef || d.runId}
+                  >
+                    {d.imageRef ? d.imageRef.split('/').pop() : `run ${d.runId.slice(0, 8)}`}
+                  </span>
+                  <span style={{ fontSize: 10, color: t.textMute, whiteSpace: 'nowrap' }}>
+                    {new Date(d.createdAt).toLocaleString()}
+                  </span>
+                  {i > 0 && d.status === 'success' && d.kind === 'deploy' && d.imageRef && (
+                    <Btn onClick={() => rollback(d.id, d.imageRef!)}>Roll back</Btn>
+                  )}
+                </div>
+              ))}
+            </Card>
+          )}
 
           {/* GitHub webhook card — Indie step 5 (W11-A1, PR #50) */}
           <Card style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
