@@ -49,6 +49,9 @@ type Handler struct {
 	Codec       *crypto.Codec
 	Secrets     secrets.Manager
 	AppDeployer *service.AppDeployer
+	// AppDetector backs POST /apps/detect-build (New-App wizard recipe
+	// suggestion). Set by server.New; nil returns 503.
+	AppDetector *service.AppDetector
 	// Hosts coordinates host-CRUD side-effects (writing SSH private
 	// keys through secrets.Manager). Set by server.New; nil-safe in
 	// dev when no secrets backend is configured (SSH host create/

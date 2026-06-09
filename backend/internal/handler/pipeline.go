@@ -50,6 +50,9 @@ func validatePipelineInput(p *model.Pipeline) error {
 		if err := validate.RetryPolicy(s.Config.Retry); err != nil {
 			return fmt.Errorf("stage %d: %w", i, err)
 		}
+		if err := validate.CacheSpec(s.Config.Cache); err != nil {
+			return fmt.Errorf("stage %d: %w", i, err)
+		}
 	}
 	return nil
 }

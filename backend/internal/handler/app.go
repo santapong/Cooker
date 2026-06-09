@@ -380,3 +380,40 @@ func (h *Handler) GitHubWebhook(c *gin.Context) {
 		"status": "deploy queued",
 	})
 }
+
+// DetectAppBuild shallow-clones a repo the user is about to import and
+// returns the detected build plan plus a suggested wizard recipe. The
+// App doesn't exist yet, so this takes the repo coordinates directly.
+func (h *Handler) DetectAppBuild(c *gin.Context) {
+	if h.AppDetector == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "build detection not available"})
+		return
+	}
+	var req struct {
+		GitHubRepo string `json:"githubRepo"`
+		Branch     string `json:"branch"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validate.GitHubRepo(req.GitHubRepo); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validate.GitRefName("branch", req.Branch); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	plan, recipe, err := h.AppDetector.DetectBuild(c.Request.Context(), req.GitHubRepo, req.Branch)
+	if err != nil {
+		// Clone failures (private repo, typo, network) are a property of
+		// the user's input, not a server fault: 422 with the reason.
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": fmt.Sprintf("clone failed: %v", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"plan":            plan,
+		"suggestedRecipe": recipe,
+	})
+}

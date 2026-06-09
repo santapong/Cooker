@@ -88,6 +88,7 @@ All 🔓 but **HMAC/token-verified** per provider; all ♻️ idempotent (`X-Git
 |---|---|---|---|
 | GET | `/api/v1/apps` | 🔑 | List apps |
 | POST | `/api/v1/apps` | ✏️ | Create app |
+| POST | `/api/v1/apps/detect-build` | ✏️ ⏱️ | Pre-import build detection: shallow-clone `{githubRepo, branch}` → `{plan, suggestedRecipe}` (New-App wizard) |
 | GET | `/api/v1/apps/:id` | 🔑 | Get app |
 | PUT | `/api/v1/apps/:id` | ✏️ | Update app |
 | DELETE | `/api/v1/apps/:id` | 🛡️ | Delete app |
@@ -242,7 +243,7 @@ First obtain a single-use 60s ticket, then connect with `?ticket=<value>` (see
 | Auth | 4 | OIDC + optional local |
 | Webhooks | 4 | HMAC-verified, idempotent |
 | Pipelines & runs | 15 | Core surface |
-| Apps | 7 | Build→push→deploy + webhook |
+| Apps | 8 | Build→push→deploy + webhook + detect-build |
 | Environments & secrets | 8 | Secret reveal/promote gated 🛡️ |
 | Docker | 20 | List/inspect are stubs |
 | Kubernetes | 8 | Stubs; real deploy via executor |

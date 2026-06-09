@@ -32,6 +32,24 @@ type Request struct {
 	// LogWriter receives the build's stdout/stderr stream as it runs.
 	// Nil discards the stream.
 	LogWriter io.Writer
+	// Cache configures layer-cache import/export. The zero value
+	// disables caching (the legacy behaviour). Builders that cannot
+	// honour it (docker socket) ignore it and say so on LogWriter.
+	Cache CacheSpec
+}
+
+// CacheSpec mirrors model.CacheSpec without importing the model
+// package (builder stays a leaf dependency). The executor maps the
+// stage's spec field-for-field.
+type CacheSpec struct {
+	Mode   string // "", "registry", "oci", "disabled"
+	Ref    string // cache image ref; required for registry/oci
+	Inline bool   // BuildKit: embed cache metadata in the image
+}
+
+// enabled reports whether the spec selects an active cache transport.
+func (c CacheSpec) enabled() bool {
+	return (c.Mode == "registry" || c.Mode == "oci") && c.Ref != ""
 }
 
 // Result reports the outcome of a successful build.

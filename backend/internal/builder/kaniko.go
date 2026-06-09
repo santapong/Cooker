@@ -174,6 +174,12 @@ func (k *Kaniko) buildJob(req Request) *batchv1.Job {
 	if len(req.Platforms) == 1 {
 		args = append(args, "--customPlatform="+req.Platforms[0])
 	}
+	if req.Cache.enabled() {
+		// Kaniko caches layers as separate images under the cache repo;
+		// subsequent builds pull matching layers instead of re-running
+		// the Dockerfile steps.
+		args = append(args, "--cache=true", "--cache-repo="+req.Cache.Ref)
+	}
 
 	jobName := fmt.Sprintf("cooker-build-%d", time.Now().UnixNano())
 	backoff := int32(0)

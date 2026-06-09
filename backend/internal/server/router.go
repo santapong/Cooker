@@ -186,6 +186,10 @@ func (s *Server) registerRoutes() {
 	{
 		apps.GET("", h.ListApps)
 		apps.POST("", writeRole, h.CreateApp)
+		// Pre-import build detection for the New-App wizard. Static
+		// segment beside /:id siblings; network-bound (shallow clone)
+		// → rate-limited like deploy.
+		apps.POST("/detect-build", writeRole, expensive, h.DetectAppBuild)
 		apps.GET("/:id", h.GetApp)
 		apps.PUT("/:id", writeRole, h.UpdateApp)
 		apps.DELETE("/:id", adminRole, mfa, h.DeleteApp)

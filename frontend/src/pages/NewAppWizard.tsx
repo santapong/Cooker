@@ -42,6 +42,7 @@ export default function NewAppWizard() {
     { id: 'prod', title: 'Production', sub: 'needs your approval first', cluster: 'k8s/prod', replicas: 4, auto: false, selected: true },
   ]);
   const [busy, setBusy] = useState(false);
+  const [detected, setDetected] = useState<'go' | 'node-static' | 'worker' | null>(null);
 
   const steps: Step[] = [
     { n: 1, label: 'Pick a source', done: stepIdx > 0 },
@@ -50,7 +51,26 @@ export default function NewAppWizard() {
     { n: 4, label: 'Review & cook', done: stepIdx > 3 },
   ].map((s, i) => ({ ...s, current: i === stepIdx }));
 
-  const next = () => setStepIdx((s) => Math.min(TOTAL_STEPS - 1, s + 1));
+  const next = () => {
+    // Leaving the source step: inspect the repo in the background and
+    // pre-select the matching recipe. Non-blocking — the user can keep
+    // going; failure just means they pick manually.
+    if (stepIdx === 0 && repo.trim() && !detected) {
+      appsApi
+        .detectBuild(repo.trim(), branch.trim() || 'main')
+        .then((res) => {
+          setRecipe(res.suggestedRecipe);
+          setDetected(res.suggestedRecipe);
+        })
+        .catch(() => {
+          pushToast({
+            kind: 'info',
+            message: 'Could not inspect the repo — pick a recipe manually.',
+          });
+        });
+    }
+    setStepIdx((s) => Math.min(TOTAL_STEPS - 1, s + 1));
+  };
   const back = () => setStepIdx((s) => Math.max(0, s - 1));
 
   const submit = async () => {
@@ -197,6 +217,9 @@ export default function NewAppWizard() {
                 >
                   <div
                     style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
                       fontFamily: t.serif,
                       fontSize: 18,
                       fontWeight: 500,
@@ -204,6 +227,7 @@ export default function NewAppWizard() {
                     }}
                   >
                     {r.title}
+                    {detected === r.id && <Pill tone="good">detected</Pill>}
                   </div>
                   <div style={{ fontSize: 13, color: t.textSoft, marginTop: 4 }}>{r.sub}</div>
                   <div

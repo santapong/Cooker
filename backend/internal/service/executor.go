@@ -989,6 +989,7 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 		BuildArgs:  stage.Config.BuildArgs,
 		Platforms:  stage.Config.Platforms,
 		LogWriter:  writer,
+		Cache:      builderCacheSpec(stage.Config.Cache),
 	}
 	res, err := e.builder.Build(ctx, req)
 	if err != nil {
@@ -1016,8 +1017,9 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 // knobs are clamped (MaxAttempts [1,10], Initial [100ms,60s], Max
 // [Initial,5m]) so a typo'd policy can't spin a stage for hours.
 // Exponential=false pins every delay to Initial (Max=Initial does
-// that without touching internal/retry). Approval / custom / test
-// stages never retry.
+// that without touching internal/retry) — applied after the clamps so
+// an out-of-range InitialMS can't leave Max above Initial and
+// re-enable growth. Approval / custom / test stages never retry.
 func policyFromStage(stage *model.Stage) retry.Policy {
 	p := retry.Policy{
 		MaxAttempts: 1 + stage.Config.Retries,
@@ -1031,7 +1033,8 @@ func policyFromStage(stage *model.Stage) retry.Policy {
 			return !retry.IsContextErr(err)
 		},
 	}
-	if r := stage.Config.Retry; r != nil {
+	r := stage.Config.Retry
+	if r != nil {
 		if r.MaxAttempts > 0 {
 			p.MaxAttempts = r.MaxAttempts
 		}
@@ -1040,9 +1043,6 @@ func policyFromStage(stage *model.Stage) retry.Policy {
 		}
 		if r.MaxMS > 0 {
 			p.Max = time.Duration(r.MaxMS) * time.Millisecond
-		}
-		if r.Exponential != nil && !*r.Exponential {
-			p.Max = p.Initial
 		}
 	}
 	if p.MaxAttempts < 1 {
@@ -1063,11 +1063,24 @@ func policyFromStage(stage *model.Stage) retry.Policy {
 	if p.Max > 5*time.Minute {
 		p.Max = 5 * time.Minute
 	}
+	if r != nil && r.Exponential != nil && !*r.Exponential {
+		p.Max = p.Initial
+	}
 	switch stage.Type {
 	case model.StageTypeApproval, model.StageTypeCustom, model.StageTypeTest:
 		p.MaxAttempts = 1
 	}
 	return p
+}
+
+// builderCacheSpec maps the stage's cache config onto the builder
+// package's mirror type. The save-time validator already rejected
+// malformed refs; a nil spec maps to the zero value (cache off).
+func builderCacheSpec(c *model.CacheSpec) builder.CacheSpec {
+	if c == nil {
+		return builder.CacheSpec{}
+	}
+	return builder.CacheSpec{Mode: c.Mode, Ref: c.Ref, Inline: c.Inline}
 }
 
 // cappedBuffer is a write-capped bytes.Buffer. Writes after the cap

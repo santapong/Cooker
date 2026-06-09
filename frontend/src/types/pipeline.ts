@@ -41,6 +41,12 @@ export interface ResourceLimits {
   nanoCpus?: number;
 }
 
+export interface CacheSpec {
+  mode?: 'registry' | 'oci' | 'disabled';
+  ref?: string;
+  inline?: boolean;
+}
+
 export interface StageConfig {
   // Build
   dockerfile?: string;
@@ -48,6 +54,7 @@ export interface StageConfig {
   buildArgs?: Record<string, string>;
   tags?: string[];
   platforms?: string[];
+  cache?: CacheSpec;
   // Test
   image?: string;
   command?: string[];
