@@ -104,3 +104,27 @@ export interface EnvironmentStatus {
   promotedAt?: string;
   approvedBy?: string;
 }
+
+// Stage-duration analytics (roadmap M4): GET /pipelines/:id/analytics
+export interface PipelineAnalytics {
+  pipelineId: string;
+  runCount: number;
+  successRate: number;
+  stages: Array<{
+    stageId: string;
+    name?: string;
+    type?: string;
+    samples: number;
+    p50Ms: number;
+    p95Ms: number;
+    avgMs: number;
+    successRate: number;
+  }>;
+  runs: Array<{
+    runId: string;
+    createdAt: string;
+    status: RunStatus;
+    durationMs: number;
+    stageDurations?: Record<string, number>;
+  }>;
+}

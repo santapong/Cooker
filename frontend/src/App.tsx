@@ -33,6 +33,7 @@ const RegistryPage = lazy(() => import('./pages/RegistryPage'))
 const SchedulesPage = lazy(() => import('./pages/SchedulesPage'))
 const NotificationTargetsPage = lazy(() => import('./pages/NotificationTargetsPage'))
 const TemplatesGalleryPage = lazy(() => import('./pages/TemplatesGalleryPage'))
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 
 /**
  * Full-viewport skeleton shown while a lazy route chunk is being fetched.
@@ -79,6 +80,7 @@ export default function App() {
                     <Route path="/admin/schedules" element={<MainLayout><SchedulesPage /></MainLayout>} />
                     <Route path="/admin/notifications" element={<MainLayout><NotificationTargetsPage /></MainLayout>} />
                     <Route path="/admin/templates" element={<MainLayout><TemplatesGalleryPage /></MainLayout>} />
+                    <Route path="/analytics" element={<MainLayout><AnalyticsPage /></MainLayout>} />
                   </Routes>
                 </Suspense>
               </ProtectedRoute>

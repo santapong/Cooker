@@ -44,6 +44,11 @@ type Handler struct {
 	Codec       *crypto.Codec
 	Secrets     secrets.Manager
 	AppDeployer *service.AppDeployer
+	// Triage backs the opt-in AI failure-triage endpoint (roadmap M4).
+	// Set by server.New when COOKER_AI_TRIAGE_ENABLED=true; nil keeps
+	// the route returning 503 and hides the frontend button via
+	// /capabilities.
+	Triage TriageRunner
 	// Hosts coordinates host-CRUD side-effects (writing SSH private
 	// keys through secrets.Manager). Set by server.New; nil-safe in
 	// dev when no secrets backend is configured (SSH host create/

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -316,4 +317,34 @@ func (h *Handler) GetStageLogs(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusNotFound, gin.H{"error": "stage not found"})
+}
+
+// GetPipelineAnalytics computes stage-duration and success-rate
+// statistics from recent run history (roadmap M4). ?runs=N bounds the
+// sample (default 30, max 200).
+func (h *Handler) GetPipelineAnalytics(c *gin.Context) {
+	pipelineID := c.Param("id")
+	p, err := h.Store.Pipelines.Get(c.Request.Context(), pipelineID)
+	if abortStoreErr(c, err, "pipeline not found") {
+		return
+	}
+	n := 30
+	if v := c.Query("runs"); v != "" {
+		if parsed, perr := strconv.Atoi(v); perr == nil && parsed > 0 {
+			n = parsed
+		}
+	}
+	if n > 200 {
+		n = 200
+	}
+	runs, err := h.Store.Runs.List(c.Request.Context(), pipelineID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// List returns newest-first; bound the sample window.
+	if len(runs) > n {
+		runs = runs[:n]
+	}
+	c.JSON(http.StatusOK, service.ComputeAnalytics(p, runs))
 }
