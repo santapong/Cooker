@@ -8,7 +8,11 @@ import { Btn, EmptyState, Pill } from '../components/ui/atoms';
 
 export default function ComposePage() {
   const t = useTheme();
-  const { fetchComposeGraph, selectedServiceName, loading, error, graph } = useComposeStore();
+  const fetchComposeGraph = useComposeStore((s) => s.fetchComposeGraph);
+  const selectedServiceName = useComposeStore((s) => s.selectedServiceName);
+  const loading = useComposeStore((s) => s.loading);
+  const error = useComposeStore((s) => s.error);
+  const graph = useComposeStore((s) => s.graph);
 
   useEffect(() => {
     fetchComposeGraph();

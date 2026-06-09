@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { memo, useCallback, useRef } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -42,13 +42,20 @@ const edgeTypes: EdgeTypes = {
   conditional: ConditionalEdge,
 };
 
-export default function PipelineCanvas() {
+function PipelineCanvas() {
   const t = useTheme();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const store = usePipelineStore();
+  // Subscribe to actions only (stable identities in Zustand) so store
+  // churn — a keystroke in NodeConfigPanel rebuilds pipeline+nodes —
+  // never re-renders the xyflow canvas (P26-05-25). The graph snapshot
+  // seeds local xyflow state once at mount; the editor page gates
+  // mounting on a loaded pipeline, and onDrop re-syncs explicitly.
+  const connectStages = usePipelineStore((s) => s.connectStages);
+  const addStage = usePipelineStore((s) => s.addStage);
+  const setSelectedNode = usePipelineStore((s) => s.setSelectedNode);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(store.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(store.edges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(usePipelineStore.getState().nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(usePipelineStore.getState().edges);
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -56,10 +63,10 @@ export default function PipelineCanvas() {
       // source node's run status — no per-edge style needed here.
       setEdges((eds) => addEdge({ ...params, type: 'conditional' }, eds));
       if (params.source && params.target) {
-        store.connectStages(params.source, params.target);
+        connectStages(params.source, params.target);
       }
     },
-    [setEdges, store],
+    [setEdges, connectStages],
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -81,17 +88,17 @@ export default function PipelineCanvas() {
         y: event.clientY - bounds.top - 30,
       };
 
-      store.addStage(type, position);
+      addStage(type, position);
       setNodes(usePipelineStore.getState().nodes);
     },
-    [store, setNodes],
+    [addStage, setNodes],
   );
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: { id: string }) => {
-      store.setSelectedNode(node.id);
+      setSelectedNode(node.id);
     },
-    [store],
+    [setSelectedNode],
   );
 
   const dark = t.mode === 'dark';
@@ -149,3 +156,8 @@ export default function PipelineCanvas() {
     </div>
   );
 }
+
+// memo: the parent editor page re-renders on every pipeline edit (it
+// shows live stage counts); without memo those parent renders would
+// cascade into ReactFlow regardless of the selector work above.
+export default memo(PipelineCanvas);

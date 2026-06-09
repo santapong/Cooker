@@ -47,6 +47,7 @@ Where this audit overlaps an open existing finding, the entry below references i
 - **Effort:** M.
 
 ### P26-05-04 — DAG runner allocates a fresh OTel `MapCarrier` and `errCh` per level
+- **Status:** CLOSED — see "Closed findings" section below.
 - **Area:** backend
 - **Current behavior:** `backend/pkg/dagrunner/runner.go:79, 85-86, 93` — every level inside `Run` allocates: `errCh := make(chan error, len(level))`, `carrier := propagation.MapCarrier{}` (a map), `otel.GetTextMapPropagator().Inject(ctx, carrier)` (populates the map), and (when bounded) `sem := make(chan struct{}, r.maxParallel)`. A pipeline with 5 levels means 5 errCh + 5 carriers + 5 semaphores.
 - **Why it's wasteful:** Carriers are typically <5 keys — fine — but the `Inject` call always runs even when no tracer is configured (`OTel.GetTextMapPropagator()` returns the no-op propagator by default, but it still iterates and writes header keys). The `errCh` only ever holds at most one drained value because the loop reads it after `wg.Wait()` and returns on the first error. The semaphore is created+discarded per level.
@@ -186,6 +187,7 @@ Where this audit overlaps an open existing finding, the entry below references i
 - **Effort:** S (caching) / M (handler-bound metrics).
 
 ### P26-05-21 — Kaniko `streamLogs` uses `bufio.Scanner` with default 64 KiB max line buffer
+- **Status:** CLOSED — see "Closed findings" section below.
 - **Area:** backend
 - **Current behavior:** `internal/builder/kaniko.go:343-349` — `scanner := bufio.NewScanner(stream)` with no `scanner.Buffer(...)` call, so the default `bufio.MaxScanTokenSize = 64 KiB` applies.
 - **Why it's wasteful:** A Kaniko build that emits a single >64 KiB log line (e.g. a JSON blob from `npm ci --verbose`) causes the scanner to silently drop the line with `bufio.ErrTooLong`. The defer-close on line 342 means the stream itself stays attached, but logs go dark.
@@ -228,6 +230,7 @@ Where this audit overlaps an open existing finding, the entry below references i
 - **Effort:** S.
 
 ### P26-05-25 — Multiple Zustand stores consumed without selectors → re-render storms
+- **Status:** CLOSED — see "Closed findings" section below.
 - **Area:** frontend
 - **Current behavior:** Found via grep:
   - `frontend/src/pages/RunPage.tsx:590` — `const { environments, fetchEnvironments } = useEnvironmentStore();`
@@ -306,6 +309,7 @@ Where this audit overlaps an open existing finding, the entry below references i
 - **Effort:** S.
 
 ### P26-05-33 — Frontend static files copied flat into `/usr/share/cooker/static`; not gzipped, no immutable headers
+- **Status:** CLOSED — see "Closed findings" section below.
 - **Area:** container / backend
 - **Current behavior:** `Dockerfile:71` copies `frontend-build/dist` into `/usr/share/cooker/static`. `internal/server/router.go:262` uses `s.router.Static("/assets", ...)`, which serves files with Gin's default headers — no `Cache-Control: public, max-age=31536000, immutable` and no `Content-Encoding: gzip` even when a `.gz` sibling exists.
 - **Why it's wasteful:** (a) Every page reload re-downloads the full bundle because nothing is cacheable past the default Gin headers. (b) Vite emits hashed filenames (already cache-busted), so they could be served with immutable; (c) gzip-compressing the bundle saves ~70% over the wire.
@@ -450,4 +454,8 @@ Findings moved here once the fix lands on `main`.
 - **P26-05-34** — Backend test loop serialised packages one at a time. Fixed in `claude/ci-critical-path-3min`: replaced `for pkg in $(go list ./...); do go test -race ...; done` with a single `go test -race -timeout 120s ./...` invocation so Go's native cross-package parallelism applies. Expected: backend job ~90s → ~20s.
 - **P26-05-38** — Docker job had `needs: [backend, frontend, helm]`, serialising it after the full test suite. Fixed in `claude/ci-critical-path-3min`: dropped `needs:` so all four jobs run in parallel. The docker job has no genuine data dependency on test output. Expected: critical-path CI ~8 min → ~3-5 min (docker build and tests run concurrently).
 - **P26-05-39** — Docker build had no buildx layer cache. Fixed in `claude/ci-critical-path-3min`: added `docker/setup-buildx-action@v3` + `docker/build-push-action@v6` with `cache-from: type=gha` and `cache-to: type=gha,mode=max`. Expected: docker job ~4 min → ~1 min on warm cache.
+- **P26-05-33** — Static assets were served by bare `router.Static` with no caching or compression headers. Fixed in the run-list pagination + static-cache PR: new `internal/server/static.go` `assetsHandler` sets `Cache-Control: public, max-age=31536000, immutable` on the content-hashed `/assets/*` files (404s deliberately carry no cache header), serves a precompressed `.gz` sibling with the original Content-Type + `Vary: Accept-Encoding` when the client accepts gzip, and contains traversal via `path.Clean`; the Dockerfile gzips `*.js/*.css/*.svg/*.json` at build time (`gzip -9 -k`). `NoRoute` index.html is now `Cache-Control: no-cache` so deploys propagate immediately. Expected: ~70% less JS/CSS over the wire; near-total cache hits on repeat visits.
+- **P26-05-25** — Zustand stores were consumed without selectors in 10 components, so every store write re-rendered every subscriber (canvas re-rendered per keystroke). Fixed in the same PR: per-field selectors everywhere (`useFooStore((s) => s.x)`); `PipelineCanvas`/`ComposeCanvas` additionally subscribe to *actions only* (stable identities), seed xyflow local state once at mount via `getState()`, and are wrapped in `React.memo` so parent-page renders don't cascade into ReactFlow. Expected: editor/canvas renders during typing and drag drop by 50-90%.
+- **P26-05-21** — Kaniko (and Buildah, same pattern) pod-log scanners used the default 64 KiB token cap; one oversized line silently ended the stream with `bufio.ErrTooLong`. Fixed in the same PR: `scanner.Buffer(make([]byte, 64<<10), 1<<20)` in both `streamLogs` implementations — lines up to 1 MiB.
+- **P26-05-04** — The DAG runner allocated `errCh` (sized `len(level)`), an OTel `MapCarrier` + `Inject` walk, and the fan-out semaphore *per level*. Fixed in the same PR: all three hoisted to per-Run scope in `runner.go`; errors now use a capacity-1 channel with a non-blocking `fail()` send (Run only ever surfaced the first error), drained between levels. Behaviour identical under `-race -count=10`.
 - **P26-05-29** — `useWebSocket` included `onMessage` in the `useCallback([url, onMessage])` dep array for `connect`. Every parent re-render that passed a fresh arrow function (the common pattern in `useStageLogs`) gave `connect` a new identity, which triggered the `useEffect([autoConnect, connect, disconnect])` — causing a spurious disconnect+reconnect. Fixed in `claude/w3-p26-05-29-onmessage-ref`: `onMessage` is now stashed in `onMessageRef` (a `useRef`) updated via a bare `useEffect()` after every render; `ws.onmessage` reads `onMessageRef.current` at call time; `onMessage` is dropped from `connect`'s deps. The WS lifecycle now only reconnects when `url` actually changes. Expected: eliminates reconnect churn under re-render pressure; stable WS lifecycle during pipeline log streaming.

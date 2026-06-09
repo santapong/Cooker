@@ -324,6 +324,10 @@ func (b *Buildah) streamLogs(ctx context.Context, jobName string, w io.Writer) {
 	}
 	defer stream.Close()
 	scanner := bufio.NewScanner(stream)
+	// Same 1 MiB line allowance as the Kaniko streamer: the default
+	// 64 KiB token cap silently truncates the stream on the first
+	// oversized line (P26-05-21).
+	scanner.Buffer(make([]byte, 64<<10), 1<<20)
 	for scanner.Scan() {
 		if _, err := fmt.Fprintln(w, scanner.Text()); err != nil {
 			return

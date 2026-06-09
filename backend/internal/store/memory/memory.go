@@ -92,19 +92,44 @@ type runs struct {
 	m  map[string]*model.PipelineRun
 }
 
-func (s *runs) List(_ context.Context, pipelineID string) ([]*model.PipelineRun, error) {
+func (s *runs) List(_ context.Context, pipelineID string, limit, offset int) ([]*model.PipelineRun, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]*model.PipelineRun, 0)
+	matched := make([]*model.PipelineRun, 0)
 	for _, r := range s.m {
 		if r.PipelineID == pipelineID {
-			out = append(out, r)
+			matched = append(matched, r)
 		}
 	}
 	// Sort newest-first to match the Postgres ORDER BY created_at DESC.
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].CreatedAt.After(out[j].CreatedAt)
+	sort.Slice(matched, func(i, j int) bool {
+		return matched[i].CreatedAt.After(matched[j].CreatedAt)
 	})
+	if offset > 0 {
+		if offset >= len(matched) {
+			return []*model.PipelineRun{}, nil
+		}
+		matched = matched[offset:]
+	}
+	if limit > 0 && len(matched) > limit {
+		matched = matched[:limit]
+	}
+	// Return copies with per-stage Logs stripped, matching the Postgres
+	// list projection. Stored rows must not be mutated — callers of Get
+	// still see full logs.
+	out := make([]*model.PipelineRun, len(matched))
+	for i, r := range matched {
+		cp := *r
+		if len(r.StageRuns) > 0 {
+			srs := make([]model.StageRun, len(r.StageRuns))
+			copy(srs, r.StageRuns)
+			for j := range srs {
+				srs[j].Logs = ""
+			}
+			cp.StageRuns = srs
+		}
+		out[i] = &cp
+	}
 	return out, nil
 }
 

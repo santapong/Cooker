@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -27,18 +27,22 @@ const edgeTypes: EdgeTypes = {
   serviceConnection: ServiceConnectionEdge,
 };
 
-export default function ComposeCanvas() {
+function ComposeCanvas() {
   const t = useTheme();
-  const store = useComposeStore();
-  const [nodes, , onNodesChange] = useNodesState(store.nodes);
-  const [edges, , onEdgesChange] = useEdgesState(store.edges);
+  // Action-only subscription: service-config edits rebuild the graph in
+  // the store, and a whole-store subscription would re-render xyflow on
+  // each one (P26-05-25). Local state is seeded once at mount — the
+  // page gates mounting on a loaded graph and remounts on refresh.
+  const setSelectedService = useComposeStore((s) => s.setSelectedService);
+  const [nodes, , onNodesChange] = useNodesState(useComposeStore.getState().nodes);
+  const [edges, , onEdgesChange] = useEdgesState(useComposeStore.getState().edges);
   const dark = t.mode === 'dark';
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: { id: string }) => {
-      store.setSelectedService(node.id);
+      setSelectedService(node.id);
     },
-    [store],
+    [setSelectedService],
   );
 
   return (
@@ -88,3 +92,7 @@ export default function ComposeCanvas() {
     </div>
   );
 }
+
+// memo: parent page re-renders on store changes (it shows the service
+// count); keep those renders from cascading into ReactFlow.
+export default memo(ComposeCanvas);

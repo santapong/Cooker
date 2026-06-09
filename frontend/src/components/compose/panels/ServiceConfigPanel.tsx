@@ -4,7 +4,10 @@ import { hexA } from '../../../theme/tokens';
 
 export default function ServiceConfigPanel() {
   const t = useTheme();
-  const { graph, selectedServiceName, setSelectedService, updateServiceConfig } = useComposeStore();
+  const graph = useComposeStore((s) => s.graph);
+  const selectedServiceName = useComposeStore((s) => s.selectedServiceName);
+  const setSelectedService = useComposeStore((s) => s.setSelectedService);
+  const updateServiceConfig = useComposeStore((s) => s.updateServiceConfig);
 
   if (!graph || !selectedServiceName) return null;
 
