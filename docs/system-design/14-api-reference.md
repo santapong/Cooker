@@ -198,6 +198,7 @@ All 🔓 but **HMAC/token-verified** per provider; all ♻️ idempotent (`X-Git
 | DELETE | `/api/v1/settings/registries/:id` | 🛠️ | Delete registry config |
 | GET | `/api/v1/settings/clusters` | 🔑 | List cluster configs |
 | POST | `/api/v1/settings/clusters` | 🛠️ | Add cluster config |
+| POST | `/api/v1/settings/secrets/test` | 🛡️ | Probe secrets-backend connectivity (reveals backend kind + reachability only, never values) |
 
 ## Admin catalogs
 
@@ -218,6 +219,7 @@ All under `/api/v1/admin`, all 🛡️ (admin + MFA).
 | POST | `/api/v1/admin/notification-targets` | Create notification target |
 | PUT | `/api/v1/admin/notification-targets/:id` | Update notification target |
 | DELETE | `/api/v1/admin/notification-targets/:id` | Delete notification target |
+| GET | `/api/v1/admin/audit` | Query the audit trail (`?from&to&user&method&path&limit&offset`; db sink) |
 
 ## Real-time (WebSocket)
 

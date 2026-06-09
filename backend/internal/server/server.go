@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,7 @@ import (
 	"github.com/santapong/cooker/internal/idempotency"
 	"github.com/santapong/cooker/internal/kube"
 	"github.com/santapong/cooker/internal/logstore"
+	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/observability"
 	"github.com/santapong/cooker/internal/pusher"
 	"github.com/santapong/cooker/internal/secrets"
@@ -57,9 +59,11 @@ type Server struct {
 	// when the jobqueue is off; nil when templates share the
 	// jobqueue's pool or when the templates feature is disabled.
 	// Closed in Server.Close after the WS hub.
-	templatesDB  *struct{ closer func() error }
-	healthCancel context.CancelFunc
-	healthDone   chan struct{}
+	templatesDB      *struct{ closer func() error }
+	healthCancel     context.CancelFunc
+	healthDone       chan struct{}
+	auditSweepCancel context.CancelFunc
+	auditSweepDone   chan struct{}
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -183,13 +187,17 @@ func New(cfg *config.Config) (*Server, error) {
 		})
 	}
 
-	auditSink, err := newAuditSink(cfg.Audit)
+	auditSink, err := newAuditSink(cfg.Audit, st)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("audit: %w", err)
 	}
 	if auditSink != nil {
 		cleanups = append(cleanups, func() { _ = auditSink.Close() })
+	}
+	if auditSink != nil && auditHasDB(cfg.Audit.Destination) && cfg.DatabaseURL == "" {
+		slog.Warn("audit: destination \"db\" is using the in-memory store; " +
+			"events are capped at ~10k and lost on restart — set DATABASE_URL for a durable trail")
 	}
 
 	bld, err := selectBuilder(cfg.BuilderBackend, cfg.Kubernetes)
@@ -241,6 +249,7 @@ func New(cfg *config.Config) (*Server, error) {
 	cleanups = append(cleanups, func() { idem.Close() })
 
 	h := handler.New(st, codec, secMgr)
+	h.SecretsBackend = cfg.SecretsBackend
 	h.AppDeployer = appDeployer
 	// AI triage (M4): Validate() already guaranteed the key when
 	// enabled; nil keeps the route 503 and the frontend button hidden.
@@ -359,26 +368,74 @@ func New(cfg *config.Config) (*Server, error) {
 		})
 	}
 
+	// Daily retention sweep for the db audit sink: deletes rows older
+	// than COOKER_AUDIT_DB_RETENTION (0 disables). Boot sweep first so
+	// a server that was stopped past its window trims immediately.
+	var auditSweepCancel context.CancelFunc
+	var auditSweepDone chan struct{}
+	if cfg.Audit.Enabled && auditHasDB(cfg.Audit.Destination) &&
+		cfg.Audit.DBRetention > 0 && st.AuditEvents != nil {
+		auditSweepCtx, cancel := context.WithCancel(context.Background())
+		auditSweepCancel = cancel
+		auditSweepDone = make(chan struct{})
+		retention := cfg.Audit.DBRetention
+		events := st.AuditEvents
+		go func() {
+			defer close(auditSweepDone)
+			sweep := func() {
+				c, cancelSweep := context.WithTimeout(auditSweepCtx, time.Minute)
+				n, err := events.DeleteOlderThan(c, time.Now().Add(-retention))
+				cancelSweep()
+				if err != nil {
+					slog.Warn("audit: retention sweep failed", "err", err)
+				} else if n > 0 {
+					slog.Info("audit: retention sweep deleted rows",
+						"deleted", n, "retention", retention.String())
+				}
+			}
+			sweep()
+			t := time.NewTicker(24 * time.Hour)
+			defer t.Stop()
+			for {
+				select {
+				case <-auditSweepCtx.Done():
+					return
+				case <-t.C:
+					sweep()
+				}
+			}
+		}()
+		cleanups = append(cleanups, func() {
+			auditSweepCancel()
+			select {
+			case <-auditSweepDone:
+			case <-time.After(2 * time.Second):
+			}
+		})
+	}
+
 	s := &Server{
-		router:        router,
-		config:        cfg,
-		wsHub:         wsHub,
-		oidcMW:        oidcMW,
-		handler:       h,
-		localAuth:     localAuthHandler,
-		store:         st,
-		wsTickets:     wsTickets,
-		audit:         auditSink,
-		traceShutdown: traceShutdown,
-		redisClient:   redisClient,
-		runs:          runs,
-		idempotency:   idem,
-		jobQueue:      jobDeps,
-		scheduler:     schedDeps,
-		governance:    govClient,
-		templatesDB:   templatesDBCloser,
-		healthCancel:  healthCancel,
-		healthDone:    healthDone,
+		router:           router,
+		config:           cfg,
+		wsHub:            wsHub,
+		oidcMW:           oidcMW,
+		handler:          h,
+		localAuth:        localAuthHandler,
+		store:            st,
+		wsTickets:        wsTickets,
+		audit:            auditSink,
+		traceShutdown:    traceShutdown,
+		redisClient:      redisClient,
+		runs:             runs,
+		idempotency:      idem,
+		jobQueue:         jobDeps,
+		scheduler:        schedDeps,
+		governance:       govClient,
+		templatesDB:      templatesDBCloser,
+		healthCancel:     healthCancel,
+		healthDone:       healthDone,
+		auditSweepCancel: auditSweepCancel,
+		auditSweepDone:   auditSweepDone,
 	}
 
 	router.Use(securityHeadersMiddleware())
@@ -482,6 +539,18 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 				slog.Warn("shutdown: app health checker drain timed out")
 			}
 		}
+		if s.auditSweepCancel != nil {
+			s.auditSweepCancel()
+		}
+		if s.auditSweepDone != nil {
+			t := time.NewTimer(5 * time.Second)
+			defer t.Stop()
+			select {
+			case <-s.auditSweepDone:
+			case <-t.C:
+				slog.Warn("shutdown: audit retention sweeper drain timed out")
+			}
+		}
 		return <-errCh
 	}
 }
@@ -516,18 +585,97 @@ func (s *Server) Close() error {
 	return s.store.Close()
 }
 
-func newAuditSink(cfg config.AuditConfig) (audit.Sink, error) {
+// auditDestinations splits the COOKER_AUDIT_DESTINATION comma list
+// into trimmed entries; empty input means the stdout default.
+func auditDestinations(dest string) []string {
+	var out []string
+	for _, p := range strings.Split(dest, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		out = []string{"stdout"}
+	}
+	return out
+}
+
+func auditHasDB(dest string) bool {
+	for _, d := range auditDestinations(dest) {
+		if d == "db" {
+			return true
+		}
+	}
+	return false
+}
+
+// newAuditSink builds the sink stack for COOKER_AUDIT_DESTINATION.
+// The value is a comma list (e.g. "db,stdout"); a single entry
+// returns that sink bare, several fan out via MultiSink. The store
+// backs the "db" sink — the audit middleware itself is untouched.
+func newAuditSink(cfg config.AuditConfig, st *store.Store) (audit.Sink, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
-	switch cfg.Destination {
-	case "", "stdout":
-		return audit.NewStdoutSink(nil), nil
-	case "file":
-		return audit.NewFileSink(cfg.FilePath)
-	default:
-		return nil, fmt.Errorf("unknown destination %q", cfg.Destination)
+	var sinks []audit.Sink
+	closeAll := func() {
+		for _, s := range sinks {
+			_ = s.Close()
+		}
 	}
+	seen := map[string]bool{}
+	for _, dest := range auditDestinations(cfg.Destination) {
+		if seen[dest] {
+			continue
+		}
+		seen[dest] = true
+		switch dest {
+		case "stdout":
+			sinks = append(sinks, audit.NewStdoutSink(nil))
+		case "file":
+			fs, err := audit.NewFileSink(cfg.FilePath)
+			if err != nil {
+				closeAll()
+				return nil, err
+			}
+			sinks = append(sinks, fs)
+		case "db":
+			if st == nil || st.AuditEvents == nil {
+				closeAll()
+				return nil, fmt.Errorf("destination \"db\" requires a store with audit support")
+			}
+			sinks = append(sinks, audit.NewStoreSink(auditStoreWriter{events: st.AuditEvents}))
+		default:
+			closeAll()
+			return nil, fmt.Errorf("unknown destination %q", dest)
+		}
+	}
+	if len(sinks) == 1 {
+		return sinks[0], nil
+	}
+	return audit.NewMultiSink(sinks...), nil
+}
+
+// auditStoreWriter adapts store.AuditEventStore to audit.EventWriter.
+// Runs on the storeSink's single writer goroutine, never a request
+// path, so a generous per-insert timeout is safe.
+type auditStoreWriter struct {
+	events store.AuditEventStore
+}
+
+func (w auditStoreWriter) WriteAuditEvent(e audit.Event) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return w.events.Insert(ctx, &model.AuditEvent{
+		Time:      e.Time,
+		UserSub:   e.UserSub,
+		UserEmail: e.UserMail,
+		Method:    e.Method,
+		Path:      e.Path,
+		Status:    e.Status,
+		LatencyMS: e.LatencyMS(),
+		ClientIP:  e.ClientIP,
+	})
 }
 
 func newStore(ctx context.Context, cfg *config.Config) (*store.Store, error) {

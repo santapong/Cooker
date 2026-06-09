@@ -181,3 +181,118 @@ func (s *fileSink) Close() error {
 	defer s.mu.Unlock()
 	return s.f.Close()
 }
+
+// EventWriter is the narrow persistence interface the db sink needs.
+// Satisfied by an adapter over store.AuditEventStore (the audit
+// package stays store-agnostic).
+type EventWriter interface {
+	WriteAuditEvent(e Event) error
+}
+
+// storeSinkBuffer mirrors fileSinkBuffer: deep enough to absorb a
+// burst or a brief Postgres stall; on overflow events drop with a
+// counter rather than ever blocking a request goroutine.
+const storeSinkBuffer = 1024
+
+// NewStoreSink returns an async Sink that persists events through w
+// (roadmap M5: the queryable audit trail). Same drop-on-full contract
+// as the file sink: a slow or down database loses audit events, it
+// never freezes the API.
+func NewStoreSink(w EventWriter) Sink {
+	s := &storeSink{
+		w:  w,
+		ch: make(chan Event, storeSinkBuffer),
+	}
+	s.done = make(chan struct{})
+	go s.run()
+	return s
+}
+
+type storeSink struct {
+	w    EventWriter
+	ch   chan Event
+	done chan struct{}
+
+	mu      sync.Mutex
+	closed  bool
+	dropped uint64
+}
+
+func (s *storeSink) Emit(e Event) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+	select {
+	case s.ch <- e:
+	default:
+		s.mu.Lock()
+		s.dropped++
+		dropped := s.dropped
+		s.mu.Unlock()
+		if dropped == 1 || dropped%100 == 0 {
+			slog.Warn("audit: db sink overflow; dropping events", "dropped_total", dropped)
+		}
+	}
+}
+
+func (s *storeSink) run() {
+	defer close(s.done)
+	for e := range s.ch {
+		if err := s.w.WriteAuditEvent(e); err != nil {
+			slog.Warn("audit: db sink write failed", "err", err)
+		}
+	}
+}
+
+// Close drains queued events then stops the writer goroutine.
+func (s *storeSink) Close() error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	s.mu.Unlock()
+	close(s.ch)
+	<-s.done
+	return nil
+}
+
+// NewMultiSink fans Emit out to every sink and Closes them all
+// (first error wins). Lets COOKER_AUDIT_DESTINATION carry a comma
+// list ("db,stdout") without touching the middleware or the Sink
+// interface.
+func NewMultiSink(sinks ...Sink) Sink {
+	return multiSink(sinks)
+}
+
+type multiSink []Sink
+
+func (m multiSink) Emit(e Event) {
+	for _, s := range m {
+		s.Emit(e)
+	}
+}
+
+func (m multiSink) Close() error {
+	var first error
+	for _, s := range m {
+		if err := s.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+// LatencyMS parses the event's latency string ("12.3ms", "1.2s")
+// into milliseconds for storage; unparseable values yield 0.
+func (e Event) LatencyMS() int64 {
+	d, err := time.ParseDuration(e.Latency)
+	if err != nil {
+		return 0
+	}
+	return int64(d / time.Millisecond)
+}

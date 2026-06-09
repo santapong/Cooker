@@ -26,6 +26,7 @@ const navItems: NavItem[] = [
   { path: '/admin/templates', label: 'Templates', icon: 'spark' },
   { path: '/admin/schedules', label: 'Schedules', icon: 'pause', proOnly: true },
   { path: '/admin/notifications', label: 'Notifications', icon: 'bell', proOnly: true },
+  { path: '/admin/audit', label: 'Audit log', icon: 'layers', proOnly: true },
   { path: '/settings', label: 'Settings', icon: 'cog', proOnly: true },
 ];
 

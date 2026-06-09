@@ -102,3 +102,49 @@ export const notificationTargetsApi = {
     put<NotificationTarget>(`/admin/notification-targets/${id}`, data),
   delete: (id: string) => del<void>(`/admin/notification-targets/${id}`),
 };
+
+// --- Audit trail ---
+
+export interface AuditEvent {
+  id: number;
+  time: string;
+  userSub?: string;
+  userEmail?: string;
+  method: string;
+  path: string;
+  status: number;
+  latencyMs: number;
+  clientIp?: string;
+}
+
+export interface AuditEventFilters {
+  /** RFC3339 lower bound, inclusive. */
+  from?: string;
+  /** RFC3339 upper bound, inclusive. */
+  to?: string;
+  /** Exact OIDC subject match. */
+  user?: string;
+  /** Exact HTTP method match (e.g. POST). */
+  method?: string;
+  /** Route-path prefix match (e.g. /api/v1/apps). */
+  path?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AuditEventPage {
+  events: AuditEvent[];
+  limit: number;
+  offset: number;
+}
+
+export const auditApi = {
+  list: (filters: AuditEventFilters = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(filters)) {
+      if (v !== undefined && v !== '') qs.set(k, String(v));
+    }
+    const suffix = qs.toString();
+    return get<AuditEventPage>(`/admin/audit${suffix ? `?${suffix}` : ''}`);
+  },
+};

@@ -1181,6 +1181,42 @@ paths:
       x-required-role: admin
       responses:
         "201": { description: Created }
+  /api/v1/settings/secrets/test:
+    post:
+      summary: Probe secrets-backend connectivity (admin + MFA)
+      description: >
+        Runs a lightweight authenticated read (List) against the configured
+        secrets backend and classifies the outcome. Reveals only the backend
+        kind, reachability, latency, and a classified error — never key names
+        or values. Probe failure is reported in the 200 body, not as an HTTP
+        error.
+      tags: [settings]
+      x-required-role: admin
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                environmentId:
+                  type: string
+                  description: Environment to probe; defaults to the first environment.
+      responses:
+        "200":
+          description: Probe result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [backend, ok, latencyMs]
+                properties:
+                  backend: { type: string, example: keepsave }
+                  ok: { type: boolean }
+                  latencyMs: { type: integer }
+                  error: { type: string, description: Present when ok=false. }
+        "409": { description: No environments exist and none was specified }
+        "503": { description: No secrets backend configured }
 
   # ---------------------------------------------------------------- admin
   /api/v1/admin/templates:
@@ -1273,6 +1309,69 @@ paths:
       x-required-role: admin
       responses:
         "204": { description: Deleted }
+  /api/v1/admin/audit:
+    get:
+      summary: Query the audit trail (admin + MFA)
+      description: >
+        Queryable audit events written by the db audit sink
+        (COOKER_AUDIT_DESTINATION includes "db"). Filters are conjunctive.
+        Newest first. Bodies are never captured, so none are returned.
+      tags: [admin]
+      x-required-role: admin
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+          description: RFC3339 lower bound (inclusive).
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+          description: RFC3339 upper bound (inclusive).
+        - name: user
+          in: query
+          schema: { type: string }
+          description: Exact OIDC subject match.
+        - name: method
+          in: query
+          schema: { type: string, example: POST }
+          description: Exact HTTP method match.
+        - name: path
+          in: query
+          schema: { type: string, example: /api/v1/apps }
+          description: Route-path prefix match (literal, LIKE-escaped).
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: One page of audit events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, limit, offset]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer, format: int64 }
+                        time: { type: string, format: date-time }
+                        userSub: { type: string }
+                        userEmail: { type: string }
+                        method: { type: string }
+                        path: { type: string }
+                        status: { type: integer }
+                        latencyMs: { type: integer, format: int64 }
+                        clientIp: { type: string }
+                  limit: { type: integer }
+                  offset: { type: integer }
+        "400": { description: Malformed filter (non-RFC3339 time, bad limit/offset) }
+        "503": { description: Audit store not configured }
 
   # ------------------------------------------------------------- webhooks
   /webhooks/github:

@@ -28,7 +28,7 @@ func TestLivenessHandler_AlwaysOK(t *testing.T) {
 
 func TestReadinessHandler_DBPingErrorReturns503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	st := store.New(nil, nil, nil, nil, nil, nil, nil, nil, func(ctx context.Context) error {
+	st := store.New(nil, nil, nil, nil, nil, nil, nil, nil, nil, func(ctx context.Context) error {
 		return errors.New("connection refused")
 	})
 	r := gin.New()

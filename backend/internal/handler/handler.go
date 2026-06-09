@@ -45,10 +45,14 @@ type JobEnqueuer interface {
 
 // Handler owns the dependencies shared by request handlers.
 type Handler struct {
-	Store       *store.Store
-	Codec       *crypto.Codec
-	Secrets     secrets.Manager
-	AppDeployer *service.AppDeployer
+	Store   *store.Store
+	Codec   *crypto.Codec
+	Secrets secrets.Manager
+	// SecretsBackend names the configured secrets adapter ("database",
+	// "keepsave", ...) for the connectivity-test response. Set by
+	// server.New from COOKER_SECRETS_BACKEND.
+	SecretsBackend string
+	AppDeployer    *service.AppDeployer
 	// Triage backs the opt-in AI failure-triage endpoint (roadmap M4).
 	// Set by server.New when COOKER_AI_TRIAGE_ENABLED=true; nil keeps
 	// the route returning 503 and hides the frontend button via
