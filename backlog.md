@@ -289,14 +289,10 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 - [ ] **In-product audit-log viewer.** Filter by user / route / date / app. Reads from existing `audit.Sink`. Surfaced by SaaS team (SOC 2 Lite) + Enterprise SRE (SOC 2 / ISO 27001). W11 §SaaS step 6 + §Enterprise step 6.
 - [ ] **Tenant scoping** — design-doc gate first. Either data-scoped (`owner_team_id` on every Pipeline / App / Environment) or namespace-scoped (a "Cooker namespace" wrapping a slice of resources visible to a subset of OIDC groups). Multi-week feature; needs an ADR before code. Surfaced by Enterprise SRE. W11 §Enterprise step 4.
 - [ ] **Per-Pipeline / per-App `runDeadline` override.** Cluster-level `COOKER_RUN_DEADLINE` is too coarse. Promote to a per-resource setting on `model.Pipeline` and `model.App`. Surfaced by AI/ML engineer; also helps large-monorepo Go shops. W11 §ML step 5.
-- [ ] **Build-cache plumbing.** Surface Kaniko `--cache=true --cache-repo=...` (and Buildah equivalents) as Pipeline / App config. Massive ROI for ML and any iterative-build workload. Surfaced by AI/ML engineer. W11 §ML step 4 + step 9.
 
 ### P2 — single-persona high-value
 
 - [ ] **First-run empty-state CTAs** on Apps / Pipelines / Environments. Narrate the "create deploy target → import app → see deploy" sequence. Surfaced by Indie hacker (acute) + SaaS team (less acute). W11 §Indie step 2.
-- [ ] **Build-recipe auto-detect** on `NewAppWizard`. Read `package.json` / `go.mod` / `pyproject.toml` / `Dockerfile` from the connected repo and pre-select Step 3. Surfaced by Indie hacker. W11 §Indie step 3.
-- [ ] **Webhook URL surfaced on `AppDetailPage`** next to the AutoDeploy toggle, with a copy button. Surfaced by Indie hacker. W11 §Indie step 5.
-- [ ] **Surface deployed `URL` on `AppDetailPage`** after a successful deploy (read from `DeployTarget.Status.URL`). Surfaced by Indie hacker. W11 §Indie step 6.
 - [ ] **Bulk import** "import all repos from this GitHub org as Apps". Surfaced by SaaS team. W11 §SaaS step 4.
 - [ ] **Per-environment secret diff view** (`Staging vs Prod`). Same UX shape as `git diff` for env-vars. Surfaced by SaaS team. W11 §SaaS step 7.
 - [ ] **Approver pre-warning** for step-up MFA. Show a badge before they click "approve" so the 403 → re-auth round-trip isn't a surprise. Surfaced by SaaS team. W11 §SaaS step 3.
@@ -326,6 +322,12 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 ## Closed (recent)
 
 Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), the `claude/w3-t1-t3-handler-f1` PR, the `claude/w4-t4-edge-condition-refuse` PR, the `claude/w4-f04-created-at` PR, the `claude/w4-t2-logwriter-push-deploy` PR, the `claude/w5-ci-cache-mode-min` PR, the `claude/w5-adr-0004-finalize` PR, the `claude/w5-f3-parse-compose-graph` PR, the `claude/w5-security-drift-bundle` PR, the `claude/w5-f2-executor-runresult` PR, and the `claude/fervent-sagan-q50XA` branch:
+
+### `claude/feat-build-cache` — build layer cache + recipe auto-detect (roadmap M1)
+
+- ✅ **Build-cache plumbing (W11 §ML step 4 + 9)** — `CacheSpec{mode,ref,inline}` on `StageConfig.Cache` + `builder.Request.Cache`; Kaniko appends `--cache=true --cache-repo=`, Buildah appends `--layers --cache-from/--cache-to` as discrete `$@` argv entries (a single env var would not word-split under the script's `IFS=$'\n'`), BuildKit sets registry `CacheImports/CacheExports` (`inline` → `mode=max` export; image-exporter `push` deliberately untouched), docker-sock logs "unsupported" and ignores. `validate.CacheSpec` enforces a strict registry-ref grammar (shell-safety gate, same class as T1). App-deploy synthesized build stages pick up `COOKER_BUILD_CACHE_REPO` (chart: `builder.cache.{enabled,ref}` with a `required` guard + CI render-matrix case). Editor: build-stage "Layer cache" section. Docs: `docs/build-cache.md`.
+- ✅ **Build-recipe auto-detect (W11 §Indie step 3)** — `POST /api/v1/apps/detect-build` (writeRole + rate-limited): shallow clone via `internal/source/github` + the existing `buildplan.Detect`; `NewAppWizard` fires it when leaving the repo step and pre-selects the matching recipe with a "detected" badge; clone failures degrade to an info toast and the default recipe.
+- ✅ **Webhook URL + deployed URL on `AppDetailPage` (W11 §Indie steps 5–6)** — verified already shipped at `AppDetailPage.tsx` (webhook row with copy button; deployed-URL chip fed by the app-health prober); backlog rows retired without code change.
 
 ### `claude/fervent-sagan-q50XA` — DAG Primitive #3 (inter-stage outputs) + log history/replay
 

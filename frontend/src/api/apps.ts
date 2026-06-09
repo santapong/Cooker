@@ -8,6 +8,11 @@ export const appsApi = {
   update: (id: string, data: AppModel) => put<AppModel>(`/apps/${id}`, data),
   delete: (id: string) => del(`/apps/${id}`),
   deploy: (id: string) => post<AppDeployResponse>(`/apps/${id}/deploy`),
+  detectBuild: (githubRepo: string, branch: string) =>
+    post<{
+      plan: { kind: string; path?: string };
+      suggestedRecipe: 'go' | 'node-static' | 'worker';
+    }>('/apps/detect-build', { githubRepo, branch }),
   setWebhookSecret: (id: string, secret: string) =>
     put<{ status: string }>(`/apps/${id}/webhook`, { secret }),
 };

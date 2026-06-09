@@ -165,9 +165,20 @@ func (b *Buildah) buildJob(req Request) *batchv1.Job {
 	// even if `value` contains spaces or quotes, buildah parses it
 	// correctly. The "=" form (vs "--build-arg" + "key=value" as
 	// two args) avoids any shell re-tokenisation.
-	args := make([]string, 0, len(req.BuildArgs))
+	args := make([]string, 0, len(req.BuildArgs)+3)
 	for k, v := range req.BuildArgs {
 		args = append(args, "--build-arg="+k+"="+v)
+	}
+	if req.Cache.enabled() {
+		// Discrete argv entries through the same $@ mechanism as
+		// --build-arg: the script sets IFS=$'\n', so a single
+		// space-joined env var would NOT word-split into flags.
+		// Buildah takes plain repo refs for --cache-from/--cache-to.
+		args = append(args,
+			"--layers",
+			"--cache-from="+req.Cache.Ref,
+			"--cache-to="+req.Cache.Ref,
+		)
 	}
 
 	jobName := fmt.Sprintf("cooker-buildah-%d", time.Now().UnixNano())

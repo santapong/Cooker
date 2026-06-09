@@ -54,6 +54,10 @@ type StageConfig struct {
 	BuildArgs  map[string]string `json:"buildArgs,omitempty"`
 	Tags       []string          `json:"tags,omitempty"`
 	Platforms  []string          `json:"platforms,omitempty"` // Multi-arch OCI Image Index
+	// Cache configures build layer-cache reuse. Nil means no cache —
+	// every build is cold (the pre-cache behaviour). See
+	// docs/build-cache.md for per-builder semantics.
+	Cache *CacheSpec `json:"cache,omitempty"`
 
 	// Test
 	Image   string   `json:"image,omitempty"`
@@ -114,6 +118,25 @@ type StageConfig struct {
 	// should commit at GitOpsPath. Templating (${IMAGE}, etc.)
 	// happens at run time.
 	GitOpsContent string `json:"gitopsContent,omitempty"`
+}
+
+// CacheSpec configures build layer caching for a build stage.
+// Implemented by the Kaniko (--cache-repo), Buildah (--cache-from/to)
+// and BuildKit (CacheImports/Exports) builders; the docker-sock
+// builder ignores it.
+type CacheSpec struct {
+	// Mode selects the cache transport: "registry" pushes the layer
+	// cache to an OCI registry ref, "oci" does the same with OCI media
+	// types forced (BuildKit), "disabled" is an explicit off. Empty
+	// means no cache.
+	Mode string `json:"mode,omitempty"`
+	// Ref is the fully-qualified cache image ref, e.g.
+	// "registry.example.com/org/app:buildcache". Required when Mode is
+	// "registry" or "oci".
+	Ref string `json:"ref,omitempty"`
+	// Inline additionally embeds cache metadata into the built image
+	// (BuildKit only; maps to mode=max on the cache export).
+	Inline bool `json:"inline,omitempty"`
 }
 
 // Edge connects two stages in the pipeline graph.

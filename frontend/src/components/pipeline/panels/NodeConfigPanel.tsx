@@ -1,7 +1,8 @@
 import { usePipelineStore } from '../../../stores/pipelineStore';
 import { useTheme } from '../../../theme/ThemeProvider';
-import { Btn, Field, KindBadge, Pill, SectionLabel, Input, Label } from '../../ui/atoms';
+import { Btn, Field, KindBadge, Pill, SectionLabel, Input, Label, Select } from '../../ui/atoms';
 import { Icon } from '../../ui/Icon';
+import type { CacheSpec } from '../../../types/pipeline';
 
 export default function NodeConfigPanel() {
   const t = useTheme();
@@ -14,6 +15,7 @@ export default function NodeConfigPanel() {
   if (!stage) return null;
 
   const config = stage.config as Record<string, string | undefined>;
+  const cache = stage.config.cache;
 
   return (
     <aside
@@ -93,6 +95,38 @@ export default function NodeConfigPanel() {
                 placeholder="."
               />
             </div>
+            <div style={{ marginTop: 4 }}>
+              <SectionLabel>Layer cache</SectionLabel>
+            </div>
+            <div>
+              <Label>Mode</Label>
+              <Select
+                value={cache?.mode || ''}
+                onChange={(e) =>
+                  updateStageConfig(stage.id, {
+                    cache: e.target.value
+                      ? { ...cache, mode: e.target.value as CacheSpec['mode'] }
+                      : undefined,
+                  })
+                }
+              >
+                <option value="">Off (cold builds)</option>
+                <option value="registry">Registry</option>
+                <option value="oci">Registry (OCI media types)</option>
+              </Select>
+            </div>
+            {(cache?.mode === 'registry' || cache?.mode === 'oci') && (
+              <div>
+                <Label>Cache image ref</Label>
+                <Input
+                  value={cache?.ref || ''}
+                  onChange={(e) =>
+                    updateStageConfig(stage.id, { cache: { ...cache, ref: e.target.value } })
+                  }
+                  placeholder="registry.example.com/org/app:buildcache"
+                />
+              </div>
+            )}
           </>
         )}
 
