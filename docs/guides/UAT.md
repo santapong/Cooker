@@ -357,6 +357,34 @@ no configuration is required.
   p50/p95/avg durations and success rates from the last 30 runs —
   no extra configuration.
 
+## Audit trail + secrets probe (M5)
+
+- **Queryable audit trail** — `COOKER_AUDIT_DESTINATION` now accepts a
+  comma list of sinks; add `db` to write each mutating-API event into
+  the `audit_events` table and browse/filter it at `/admin/audit`
+  (admin + MFA; `GET /api/v1/admin/audit`).
+
+  | Env var | Default | Meaning |
+  |---|---|---|
+  | `COOKER_AUDIT_ENABLED` | `true` in production, else `false` | Master switch for the audit middleware. |
+  | `COOKER_AUDIT_DESTINATION` | `stdout` | Comma list of `stdout`, `file`, `db` (e.g. `db,stdout`). |
+  | `COOKER_AUDIT_DB_RETENTION` | `2160h` (90 days) | Daily sweep deletes `audit_events` rows older than this. `0` disables the sweep. |
+
+  **Trade-offs**: the `db` sink is queryable, durable, and
+  retention-managed, but couples the audit trail to Postgres
+  availability — the writer is async drop-on-full (like the file
+  sink), so a Postgres outage *loses* events rather than blocking
+  requests. The `file` sink is append-only and SIEM-shippable with no
+  query path. Running `db,stdout` (or `db,file`) gives you the
+  queryable viewer plus a loss-resistant stream. With no
+  `DATABASE_URL` the db sink falls back to a non-durable in-memory
+  ring (~10k events) and warns at boot; production refuses to start.
+- **Secrets connectivity test** — Settings → Secrets tab (or
+  `POST /api/v1/settings/secrets/test`, admin + MFA) probes the
+  configured secrets backend with one authenticated `List` call and
+  reports reachability + latency. Key names/values are never returned.
+  In default UAT (database backend) expect `ok` with ~0 ms latency.
+
 ## What's scaffolded (don't file bugs about these)
 
 These are intentional placeholders documented as such. They'll

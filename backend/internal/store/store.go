@@ -87,6 +87,28 @@ type AppDeployStore interface {
 	Get(ctx context.Context, id string) (*model.AppDeploy, error)
 }
 
+// AuditQuery filters an audit-trail read (roadmap M5). Zero values
+// mean "no filter"; Limit <= 0 falls back to a server-side default.
+type AuditQuery struct {
+	From       *time.Time
+	To         *time.Time
+	UserSub    string
+	Method     string
+	PathPrefix string
+	Limit      int
+	Offset     int
+}
+
+// AuditEventStore persists the queryable audit trail. Insert is
+// called from the async db audit sink (never from request
+// goroutines); Query backs the admin viewer; DeleteOlderThan is the
+// retention sweep.
+type AuditEventStore interface {
+	Insert(ctx context.Context, e *model.AuditEvent) error
+	Query(ctx context.Context, q AuditQuery) ([]*model.AuditEvent, error)
+	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int, error)
+}
+
 // HostStore manages managed-host persistence (Phase 4).
 type HostStore interface {
 	List(ctx context.Context) ([]*model.Host, error)
@@ -114,6 +136,7 @@ type Store struct {
 	Environments EnvironmentStore
 	Apps         AppStore
 	AppDeploys   AppDeployStore
+	AuditEvents  AuditEventStore
 	Hosts        HostStore
 	Users        UserStore
 	close        func() error
@@ -123,13 +146,14 @@ type Store struct {
 // New builds a Store. closeFn may be nil when no cleanup is required
 // (e.g., in-memory stores). pingFn may be nil for backends without a
 // liveness probe; Ping then reports healthy unconditionally.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, ad AppDeployStore, h HostStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
+func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
 		Pipelines:    p,
 		Runs:         r,
 		Environments: e,
 		Apps:         a,
 		AppDeploys:   ad,
+		AuditEvents:  ae,
 		Hosts:        h,
 		Users:        u,
 		close:        closeFn,

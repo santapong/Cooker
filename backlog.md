@@ -31,7 +31,7 @@ The chart can't make these decisions for you:
 2. **Builder choice** — set `builder.kind=kaniko` in production. The `docker` builder still ships for single-node test clusters but gives the Cooker container root-equivalent access to the host Docker daemon. The chart conditionally drops the `docker.sock` mount when `builder.kind != "docker"`.
 3. **Multi-replica state** — rate limiter and WebSocket ticket store are per-process. Pin sticky sessions at ingress (works fine; documented in `docs/MULTI_REPLICA.md`) or implement Redis-backed versions (P3).
 4. **Postgres SSL** — `?sslmode=` now renders into `DATABASE_URL` from `postgresql.sslMode` (default `require`). Set `database.host` to a TLS-capable Postgres for the chart to wire it through.
-5. **Audit destination** — `COOKER_AUDIT_DESTINATION=stdout` (the default) routes via the cluster log stack. Set `COOKER_AUDIT_DESTINATION=file` + `COOKER_AUDIT_FILE_PATH` if you'd rather pair with a sidecar tail-shipper.
+5. **Audit destination** — `COOKER_AUDIT_DESTINATION=stdout` (the default) routes via the cluster log stack. Set `COOKER_AUDIT_DESTINATION=file` + `COOKER_AUDIT_FILE_PATH` if you'd rather pair with a sidecar tail-shipper. The value is a comma list — add `db` (e.g. `db,stdout`) for the queryable `/admin/audit` viewer backed by Postgres (async drop-on-full writer; daily `COOKER_AUDIT_DB_RETENTION` sweep, default 90 days; production requires `DATABASE_URL`).
 
 ### What "OCI compliance" means here
 
@@ -280,7 +280,6 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 
 ### P1 — high-leverage cross-persona
 
-- [ ] **In-product audit-log viewer.** Filter by user / route / date / app. Reads from existing `audit.Sink`. Surfaced by SaaS team (SOC 2 Lite) + Enterprise SRE (SOC 2 / ISO 27001). W11 §SaaS step 6 + §Enterprise step 6.
 - [ ] **Tenant scoping** — design-doc gate first. Either data-scoped (`owner_team_id` on every Pipeline / App / Environment) or namespace-scoped (a "Cooker namespace" wrapping a slice of resources visible to a subset of OIDC groups). Multi-week feature; needs an ADR before code. Surfaced by Enterprise SRE. W11 §Enterprise step 4.
 - [ ] **Per-App `runDeadline` override.** The per-Pipeline half shipped in roadmap M2 (`Pipeline.RunDeadline`, clamped [10s,24h], editor field). App deploys still use the cluster default — promote to `model.App` when a real app-deploy exceeds it. W11 §ML step 5.
 
@@ -292,7 +291,6 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 - [ ] **Approver pre-warning** for step-up MFA. Show a badge before they click "approve" so the 403 → re-auth round-trip isn't a surprise. Surfaced by SaaS team. W11 §SaaS step 3.
 - [ ] **Production-readiness checklist surfaced in-product** on first boot (read from `launch-readiness.md` or hardcoded). Surfaced by Enterprise SRE. W11 §Enterprise step 1.
 - [ ] **Per-team RBAC.** Extend `groupRoleMap` to allow scoped grants like `auth-admin: admin in tenant=auth-team`. Depends on the Tenant Scoping P1 above. Surfaced by Enterprise SRE. W11 §Enterprise step 4.
-- [ ] **"Test secrets backend connectivity" page** (`/settings/secrets/test`) — calls Vault / KeepSave / AWS / GCP and shows green/red. Surfaced by Enterprise SRE. W11 §Enterprise step 2.
 - [ ] **Surface "deployed to cluster X (namespace Y)"** prominently on AppDetailPage and Run page header. Surfaced by Enterprise SRE. W11 §Enterprise step 5.
 - [ ] **Append-only / write-once audit-log adapter.** Eg. AWS CloudWatch with no-delete IAM policy, or a write-once S3 backend. New `audit.Sink` impl. Surfaced by Enterprise SRE. W11 §Enterprise step 6.
 - [ ] **Kaniko / Buildah Job `nodeSelector` + `tolerations`** chart values, threaded through to the Job spec. Surfaced by AI/ML engineer. W11 §ML step 6.
@@ -316,6 +314,11 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 ## Closed (recent)
 
 Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), the `claude/w3-t1-t3-handler-f1` PR, the `claude/w4-t4-edge-condition-refuse` PR, the `claude/w4-f04-created-at` PR, the `claude/w4-t2-logwriter-push-deploy` PR, the `claude/w5-ci-cache-mode-min` PR, the `claude/w5-adr-0004-finalize` PR, the `claude/w5-f3-parse-compose-graph` PR, the `claude/w5-security-drift-bundle` PR, the `claude/w5-f2-executor-runresult` PR, and the `claude/fervent-sagan-q50XA` branch:
+
+### `claude/feat-enterprise` — queryable audit trail + secrets connectivity test (roadmap M5)
+
+- ✅ **Audit DB sink + admin viewer (W11 §SaaS step 6 + §Enterprise step 6)** — migration 019 `audit_events` (indexes `(time DESC)`, `(user_sub, time DESC)`); `store.AuditEventStore` in postgres + bounded-ring memory (~10k); `audit.NewStoreSink` (async, drop-on-full — same contract as the file sink; middleware and `Sink` untouched) + `NewMultiSink` so `COOKER_AUDIT_DESTINATION` takes comma lists (`db,stdout`); daily retention sweep via `COOKER_AUDIT_DB_RETENTION` (default 90 days, boot sweep + 24h ticker); `Config.Validate()` requires `DATABASE_URL` for `db` in production, memory-store fallback warns at boot. `GET /api/v1/admin/audit` (admin + MFA; from/to/user/method/path-prefix filters, limit ≤ 200) + `/admin/audit` viewer page (filter row, status-tone table, prev/next).
+- ✅ **Secrets connectivity test (W11 §Enterprise step 2)** — `service.CheckSecrets` probes the configured backend with one `List` call (10s cap) and classifies auth-failed (KeepSave 401/403) / unreachable (timeout, net) / other; `POST /api/v1/settings/secrets/test` (adminRole + explicit MFA on the otherwise-MFA-less settings group; 409 with no environments, 503 with no backend; probe failure is 200-body data). Settings → Secrets tab with env select + result card. Reveals backend kind + reachability only — never key names/values.
 
 ### `claude/feat-reliability` — deploy history/rollback + drift + run diff (roadmap M3)
 

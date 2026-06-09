@@ -70,13 +70,13 @@ Stand up Cooker for the team, import all 8 repos as apps, wire OIDC against Okta
 | 3 | Wire approval policy on Prod | Promotion + approval flow shipped ✅; `auth.RequireMFA` step-up on admin destructive routes ✅ | Approver doesn't get pre-warned that step-up MFA will be required when they click "approve". The 403 → re-auth flow happens but feels unexpected the first time. |
 | 4 | Import 8 GitHub repos as Apps | NewAppWizard works one-by-one ✅ | **No bulk import.** Platform team types each one. For 8 it's tolerable; for 25 it's painful. No "import all repos from this GitHub org" tool. |
 | 5 | Wire CI/CD policy: auto-Dev on push, manual Staging, manual Prod | App-level AutoDeploy ✅; per-environment promotion policy via Pipelines ✅ | The relationship between Apps and Pipelines is documented in `docs/design.md` but unintuitive on first use. Platform team typically thinks "this repo deploys to these environments" — Cooker thinks "this app uses this pipeline which has these env-statuses." Conceptual translation cost. |
-| 6 | Compliance: who approved what, when? | `internal/audit/` audit log middleware ✅; structured slog → stdout/file ✅ | **No in-product audit-log viewer.** Operators have to grep stdout / file. Most SOC 2 controls expect an interactive query view. |
+| 6 | Compliance: who approved what, when? | `internal/audit/` audit log middleware ✅; structured slog → stdout/file ✅ | **No in-product audit-log viewer.** Operators have to grep stdout / file. Most SOC 2 controls expect an interactive query view. *(Since shipped — roadmap M5: db sink + `/admin/audit` viewer.)* |
 | 7 | Compare Staging vs Prod secrets | Per-environment secret put/reveal/delete ✅; `KeepSave` promotion endpoint ✅ | **No diff view.** Operator sees "set of keys in Staging" + "set of keys in Prod" but no side-by-side that shows which keys differ in value or are missing on one side. |
 | 8 | Rotate a webhook secret across all 8 apps | Per-app rotation endpoint ✅ | **No bulk rotation.** Platform team rotates each app individually. |
 
 ### Gaps
 
-- **[P1]** In-product audit-log viewer. Filter by user / route / date / app. Reads from the existing audit sink. SOC-2-shaped feature; high marginal ROI vs. the existing slog-to-stdout setup.
+- **[P1]** In-product audit-log viewer. Filter by user / route / date / app. Reads from the existing audit sink. SOC-2-shaped feature; high marginal ROI vs. the existing slog-to-stdout setup. *(Since shipped — roadmap M5.)*
 - **[P2]** Bulk import: "import all repos from this GitHub org as Apps". Wizard that lists the org's repos and lets the operator multi-select.
 - **[P2]** Per-environment secret diff view (`Staging vs Prod`). Same UX shape as `git diff` for env-vars.
 - **[P2]** Approver pre-warning: when a user lands on a promotion that requires step-up MFA, show the badge before they click. Reduces 403 surprise.
@@ -101,7 +101,7 @@ Deploy Cooker into the SRE platform cluster. Configure NetworkPolicy + MFA + Vau
 | Step | What they do | What works | What doesn't |
 |---|---|---|---|
 | 1 | Helm install with `cookerEnv=production`, replicaCount=3, Redis backends, NetworkPolicy on, ingress TLS | Chart enforces these defaults ✅; `Validate()` refuses production boot with `BUILDER=docker` ✅; multi-replica + memory backends without sticky sessions also refused ✅ | First-time installer doesn't get a "production-readiness checklist" — `launch-readiness.md` exists but isn't surfaced. |
-| 2 | Wire HashiCorp Vault secrets backend | `internal/secrets/vault` shipped ✅; `COOKER_SECRETS_BACKEND=vault` ✅ | No in-product test page that says "your Vault config is reachable" — operators run a manual `kubectl exec` curl to verify. |
+| 2 | Wire HashiCorp Vault secrets backend | `internal/secrets/vault` shipped ✅; `COOKER_SECRETS_BACKEND=vault` ✅ | No in-product test page that says "your Vault config is reachable" — operators run a manual `kubectl exec` curl to verify. *(Since shipped — roadmap M5: Settings → Secrets test.)* |
 | 3 | Wire OIDC against Entra with MFA enforcement | `auth.RequireMFA` middleware ✅; configurable ACR values ✅ | Entra and ADFS flow with `acr_values` works fine. SAML-only IdPs (some legacy enterprise) aren't supported. Out of scope, but worth a doc note. |
 | 4 | Configure 4 teams with tenant boundaries | — | **Cooker is single-org.** All 4 teams' pipelines / apps / environments live in one shared list. The `groupRoleMap` is a flat CSV: cannot say "auth-admin: admin in `auth-team` namespace, viewer elsewhere." |
 | 5 | Multi-cluster deploy targets | Multi-cluster works at the deploy-target level ✅ | UI doesn't surface "which cluster did this deploy land on?" prominently. RunPage shows the run; clicking through to find the target cluster takes 2-3 clicks. |
@@ -114,7 +114,7 @@ Deploy Cooker into the SRE platform cluster. Configure NetworkPolicy + MFA + Vau
 - **[P1]** **Tenant scoping.** Either (a) data-scoped: every Pipeline / App / Environment has an `owner_team_id` and store-layer queries filter by it; (b) namespace-scoped: a "Cooker namespace" that wraps a slice of resources visible to a subset of OIDC groups. Substantial — multi-week feature; design doc first.
 - **[P2]** Production-readiness checklist surfaced in-product on first boot (read from `launch-readiness.md` or hardcoded).
 - **[P2]** Per-team RBAC. Extend `groupRoleMap` to allow scoped grants like `auth-admin: admin in tenant=auth-team`.
-- **[P2]** "Test secrets backend connectivity" page (`/settings/secrets/test`) that calls Vault / KeepSave / AWS / GCP and shows green / red.
+- **[P2]** "Test secrets backend connectivity" page (`/settings/secrets/test`) that calls Vault / KeepSave / AWS / GCP and shows green / red. *(Since shipped — roadmap M5.)*
 - **[P2]** Surface "deployed to cluster X (namespace Y)" prominently on AppDetailPage and on the Run page header.
 - **[P2]** Append-only audit-log adapter (eg. AWS CloudWatch with a "no-delete" policy, or a write-once S3 backend). Out of scope for the existing stdout adapter — a new `audit.Sink` impl.
 - **[P3]** SAML auth method (out of scope for the OIDC-only design today; would require a separate adapter and `auth.methods` extension).

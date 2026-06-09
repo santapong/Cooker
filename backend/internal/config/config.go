@@ -217,9 +217,15 @@ type DeployTargetsConfig struct {
 }
 
 type AuditConfig struct {
-	Enabled     bool
+	Enabled bool
+	// Destination accepts a comma list: stdout | file | db, e.g.
+	// "db,stdout" writes through to both (roadmap M5).
 	Destination string
 	FilePath    string
+	// DBRetention bounds the queryable audit trail when the db sink
+	// is active. 0 disables the sweep. COOKER_AUDIT_DB_RETENTION,
+	// default 90 days.
+	DBRetention time.Duration
 }
 
 // JobQueueConfig configures the Phase-1 durable async job queue.
@@ -337,6 +343,7 @@ func Load() *Config {
 			Enabled:     getEnvBool("COOKER_AUDIT_ENABLED", env.IsProduction()),
 			Destination: getEnv("COOKER_AUDIT_DESTINATION", "stdout"),
 			FilePath:    getEnv("COOKER_AUDIT_FILE_PATH", ""),
+			DBRetention: getEnvDuration("COOKER_AUDIT_DB_RETENTION", 90*24*time.Hour),
 		},
 		Observability: ObservabilityConfig{
 			MetricsEnabled: getEnvBool("COOKER_METRICS_ENABLED", false),
@@ -378,6 +385,9 @@ func (c *Config) Validate() error {
 	// every click. Fail at boot instead.
 	if c.Triage.Enabled && c.Triage.APIKey == "" {
 		return fmt.Errorf("config: COOKER_AI_TRIAGE_ENABLED=true requires ANTHROPIC_API_KEY")
+	}
+	if strings.Contains(c.Audit.Destination, "db") && c.Env.IsProduction() && c.DatabaseURL == "" {
+		return fmt.Errorf("config: COOKER_AUDIT_DESTINATION=db requires DATABASE_URL in production")
 	}
 	if !c.Env.IsProduction() {
 		return nil

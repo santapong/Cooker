@@ -223,13 +223,18 @@ private key body never lands on the `hosts` table. The flow is:
 
 ### Audit logging
 
-Cooker emits a structured audit event for every authenticated mutating call (POST, PUT, PATCH, DELETE under `/api/v1`). Defaults: **enabled in production**, off elsewhere. Events are JSON, one per request, written to either stdout (default) or a file.
+Cooker emits a structured audit event for every authenticated mutating call (POST, PUT, PATCH, DELETE under `/api/v1`). Defaults: **enabled in production**, off elsewhere. Events are JSON, one per request, written to stdout (default), a file, a Postgres table, or any comma-separated combination.
 
-- Tunable via `COOKER_AUDIT_ENABLED` (default `true` when `COOKER_ENV=production`, else `false`), `COOKER_AUDIT_DESTINATION` (`stdout` or `file`), and `COOKER_AUDIT_FILE_PATH`.
+- Tunable via `COOKER_AUDIT_ENABLED` (default `true` when `COOKER_ENV=production`, else `false`), `COOKER_AUDIT_DESTINATION` (comma list of `stdout`, `file`, `db` — e.g. `db,stdout`), and `COOKER_AUDIT_FILE_PATH`.
 - Each event records: timestamp, OIDC subject, OIDC email, HTTP method, route template (e.g. `/api/v1/environments/:id/secrets/:key` — never the concrete `:id`), status code, latency, client IP.
 - **Bodies are never captured.** The middleware does not read request or response bodies, so secret-bearing routes (`PUT /environments/:id/secrets/:key`, `PUT /apps/:id/webhook`) are safe by construction. Bearer tokens, OIDC raw JWTs, and secret values cannot appear in the trail.
 - The redacted-route allowlist lives in `internal/audit/audit.go` (`IsRedacted`). Future changes that introduce body capture must consult it.
 - Forward stdout to your SIEM via the cluster's logging stack (Loki, ELK, Datadog) or use the file sink with a sidecar tail-shipper.
+- **`db` destination (queryable trail)**: events are also written asynchronously to the `audit_events` table and served back through `GET /api/v1/admin/audit` (admin + MFA) and the `/admin/audit` UI. The writer is drop-on-full (same contract as the file sink): a slow or down Postgres can lose audit events but can never block or slow request handling — pair `db` with `stdout`/`file` when you need a loss-resistant copy. Rows are swept daily after `COOKER_AUDIT_DB_RETENTION` (default `2160h` = 90 days; `0` disables). In production, `db` requires `DATABASE_URL` (`Config.Validate()` refuses to boot otherwise); with the in-memory store it degrades to a non-durable ~10k-event ring and logs a boot warning.
+
+### Secrets-backend connectivity test
+
+`POST /api/v1/settings/secrets/test` (admin + MFA) probes the configured secrets backend with a single authenticated `List` call. The response reveals **only** the backend kind (`database`, `keepsave`, …), reachability, latency, and a classified error (`authentication failed` / `backend unreachable` / raw message). Key names and values are never returned — the probe discards the list contents. The probe is rate-limited only by the admin+MFA gate; it makes one outbound request per click to the same endpoint the executor already talks to (no new egress class).
 
 ### Rate limiting
 

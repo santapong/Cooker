@@ -105,6 +105,9 @@ func (s *Server) registerRoutes() {
 			adminNotificationTargets.PUT("/:id", h.UpdateNotificationTarget)
 			adminNotificationTargets.DELETE("/:id", h.DeleteNotificationTarget)
 		}
+		// Queryable audit trail (roadmap M5). Backed by the db audit
+		// sink; the memory store serves a bounded ring in dev.
+		admin.GET("/audit", h.ListAuditEvents)
 	}
 
 	docker := api.Group("/docker")
@@ -249,6 +252,10 @@ func (s *Server) registerRoutes() {
 		settings.DELETE("/registries/:id", adminRole, handler.DeleteRegistryConfig)
 		settings.GET("/clusters", handler.ListClusterConfigs)
 		settings.POST("/clusters", adminRole, handler.AddClusterConfig)
+		// Secrets-backend connectivity probe (roadmap M5 / F12). The
+		// settings group carries no MFA gate, so this admin action
+		// adds it explicitly, matching the /admin group's posture.
+		settings.POST("/secrets/test", adminRole, mfa, h.TestSecretsBackend)
 	}
 
 	api.POST("/ws-tickets", func(c *gin.Context) {
