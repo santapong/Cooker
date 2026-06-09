@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -79,8 +80,13 @@ func (h *Handler) TriageStage(c *gin.Context) {
 			c.JSON(http.StatusTooManyRequests, gin.H{"error": "AI provider rate limit; try again shortly"})
 		case errors.Is(err, triage.ErrAuth):
 			c.JSON(http.StatusBadGateway, gin.H{"error": "AI provider rejected the configured API key"})
+		case errors.Is(err, triage.ErrOverloaded):
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI provider overloaded; try again later"})
 		default:
-			c.JSON(http.StatusBadGateway, gin.H{"error": "triage failed: " + err.Error()})
+			// Upstream error text can carry provider diagnostics
+			// (request ids, hosts) — log it, never relay it.
+			slog.Error("triage: upstream call failed", "error", err)
+			c.JSON(http.StatusBadGateway, gin.H{"error": "triage failed; see server logs"})
 		}
 		return
 	}

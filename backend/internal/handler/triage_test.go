@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 
 	"net/http"
 	"net/http/httptest"
@@ -109,5 +110,32 @@ func TestTriageStage_RateLimited429(t *testing.T) {
 	triageRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/pipelines/p1/runs/r1/stages/build/triage", nil))
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("code = %d, want 429: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTriageStage_Overloaded503(t *testing.T) {
+	h := newTestHandler(t)
+	h.Triage = &fakeTriage{err: &triage.APIError{Status: 529, Type: "overloaded_error"}}
+	seedFailedRun(t, h)
+	w := httptest.NewRecorder()
+	triageRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/pipelines/p1/runs/r1/stages/build/triage", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want 503: %s", w.Code, w.Body.String())
+	}
+}
+
+// Unclassified upstream errors must not be relayed to the client —
+// their text can carry provider diagnostics (request ids, hosts).
+func TestTriageStage_UnknownErrorNotRelayed(t *testing.T) {
+	h := newTestHandler(t)
+	h.Triage = &fakeTriage{err: errors.New("dial tcp 10.9.8.7:443: connect: connection refused (request_id=req_secret123)")}
+	seedFailedRun(t, h)
+	w := httptest.NewRecorder()
+	triageRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/pipelines/p1/runs/r1/stages/build/triage", nil))
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("code = %d, want 502: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "req_secret123") || strings.Contains(w.Body.String(), "10.9.8.7") {
+		t.Fatalf("upstream error text relayed to client: %s", w.Body.String())
 	}
 }
