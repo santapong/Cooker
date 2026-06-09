@@ -22,6 +22,7 @@ const navItems: NavItem[] = [
   { path: '/kubernetes', label: 'Clusters', icon: 'servers', proOnly: true },
   { path: '/hosts', label: 'Hosts', icon: 'servers', proOnly: true },
   { path: '/environments', label: 'Environments', icon: 'flask' },
+  { path: '/analytics', label: 'Insights', icon: 'spark', proOnly: true },
   { path: '/admin/templates', label: 'Templates', icon: 'spark' },
   { path: '/admin/schedules', label: 'Schedules', icon: 'pause', proOnly: true },
   { path: '/admin/notifications', label: 'Notifications', icon: 'bell', proOnly: true },

@@ -1,5 +1,11 @@
 import { get, post, put, del } from './client';
-import type { Pipeline, PipelineRun, EnvironmentStatus, RunDiffReport } from '../types/pipeline';
+import type {
+  Pipeline,
+  PipelineRun,
+  EnvironmentStatus,
+  RunDiffReport,
+  PipelineAnalytics,
+} from '../types/pipeline';
 
 export const pipelineApi = {
   list: () => get<Pipeline[]>('/pipelines'),
@@ -23,6 +29,12 @@ export const pipelineApi = {
     get<RunDiffReport>(
       `/pipelines/${pipelineId}/runs/${runId}/diff${against ? `?against=${against}` : ''}`,
     ),
+  triageStage: (pipelineId: string, runId: string, stageId: string) =>
+    post<{ advisory: string; model: string }>(
+      `/pipelines/${pipelineId}/runs/${runId}/stages/${stageId}/triage`,
+    ),
+  analytics: (pipelineId: string, runs = 30) =>
+    get<PipelineAnalytics>(`/pipelines/${pipelineId}/analytics?runs=${runs}`),
   envStatus: (pipelineId: string, runId: string) =>
     get<EnvironmentStatus[]>(`/pipelines/${pipelineId}/runs/${runId}/env-status`),
 };

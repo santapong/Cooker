@@ -47,6 +47,7 @@
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/api/v1/auth/methods` | 🔓 | Which auth modes are enabled (OIDC / local) |
+| GET | `/api/v1/capabilities` | 🔑 | Optional-feature discovery (`{aiTriage}`) |
 | POST | `/api/v1/auth/local/signup` | 🔓 | Local-auth signup (only if local auth enabled) |
 | POST | `/api/v1/auth/local/signin` | 🔓 | Local-auth signin → JWT |
 | GET | `/api/v1/auth/local/me` | 🔑 | Current local-auth user (only if local auth enabled) |
@@ -78,6 +79,8 @@ All 🔓 but **HMAC/token-verified** per provider; all ♻️ idempotent (`X-Git
 | POST | `/api/v1/pipelines/:id/runs/:runId/cancel` | ✏️ | Cancel a running run |
 | GET | `/api/v1/pipelines/:id/runs/:runId/logs/:stageId` | 🔑 | Final logs for a stage (REST) |
 | GET | `/api/v1/pipelines/:id/runs/:runId/diff` | 🔑 | Diff a run vs last-success (or `?against=<runId>`) |
+| POST | `/api/v1/pipelines/:id/runs/:runId/stages/:stageId/triage` | ✏️ ⏱️ | AI failure triage (opt-in; advisory only; 503 when disabled) |
+| GET | `/api/v1/pipelines/:id/analytics` | 🔑 | Stage-duration + success-rate analytics (`?runs=`, default 30) |
 | POST | `/api/v1/pipelines/from-template/:id` | ✏️ | Create a pipeline from a catalog template |
 | POST | `/api/v1/pipelines/:id/runs/:runId/promote` | ✏️ | Promote a run to the next environment |
 | POST | `/api/v1/pipelines/:id/runs/:runId/approve` | 🔑 ‡ | Approve a manual promotion gate. **No route-level role gate**; the handler requires **admin or approver** via `CanApprovePromotion` |
@@ -246,7 +249,7 @@ First obtain a single-use 60s ticket, then connect with `?ticket=<value>` (see
 | Health/version/metrics | 5 | All public |
 | Auth | 4 | OIDC + optional local |
 | Webhooks | 4 | HMAC-verified, idempotent |
-| Pipelines & runs | 16 | Core surface + run diff |
+| Pipelines & runs | 18 | Core surface + run diff + triage + analytics |
 | Apps | 11 | Build→push→deploy + webhook + detect-build + history/rollback/drift |
 | Environments & secrets | 8 | Secret reveal/promote gated 🛡️ |
 | Docker | 20 | List/inspect are stubs |

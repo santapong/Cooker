@@ -49,6 +49,11 @@ type Handler struct {
 	Codec       *crypto.Codec
 	Secrets     secrets.Manager
 	AppDeployer *service.AppDeployer
+	// Triage backs the opt-in AI failure-triage endpoint (roadmap M4).
+	// Set by server.New when COOKER_AI_TRIAGE_ENABLED=true; nil keeps
+	// the route returning 503 and hides the frontend button via
+	// /capabilities.
+	Triage TriageRunner
 	// AppDetector backs POST /apps/detect-build (New-App wizard recipe
 	// suggestion). Set by server.New; nil returns 503.
 	AppDetector *service.AppDetector

@@ -143,7 +143,21 @@ The Helm chart conditionally drops the `docker.sock` volume + mount when `builde
 
 **Docker-host deploy runtime (compose deployment DAGs):** An App whose deploy target is `docker-host` runs its per-service deploy stages through the `docker-run` / `compose` deployers (`backend/internal/deployer/dockerrun.go`, `compose.go`), which shell out to the local `docker` CLI (`docker run` / `docker compose up`). These talk to the Docker daemon (`DOCKER_HOST`, default the host socket) and therefore carry the **same root-equivalent RCE-to-host exposure as the `docker` builder/pusher** — an RCE in Cooker becomes host control. They are intended for **single-node / dev hosts only**; for cluster deployments use a Kubernetes deploy target (the per-service manifests apply via client-go, no socket). The deployers fail closed with `ErrUnavailable` when the `docker` CLI is absent. Resource limits parsed from the compose file are applied as `docker run --memory/--cpus` (and as K8s `resources.limits` on the Kubernetes path).
 
-### Data Security
+### AI failure triage (opt-in data egress)
+
+`COOKER_AI_TRIAGE_ENABLED=true` adds `POST /pipelines/:id/runs/:runId/stages/:stageId/triage` (operator role, rate-limited). On each **explicit operator click** — never automatically — Cooker sends the failed stage's sanitized config summary, its error string, and the last 32 KiB of its captured logs to the Anthropic Messages API and returns the model's advisory text.
+
+Controls:
+
+- **Off by default.** Disabled deployments return 503 and the frontend hides the button (`GET /api/v1/capabilities`).
+- **Secrets stripped.** `Config.Env` values and `SecretRefs` values never enter the prompt (names only, for context). Pinned by `TestBuildRequest_StripsSecretsAndTailsLogs`.
+- **Key custody.** `ANTHROPIC_API_KEY` lives server-side only; boot fails fast if triage is enabled without it (`Config.Validate`). The key is never echoed to clients or logs.
+- **Advisory only.** The response is text for the operator; Cooker takes no automatic action on it.
+- **Transport.** TLS ≥ 1.2 enforced on the outbound client; 90s timeout; one retry on 429/5xx.
+
+Residual risk: stage logs can contain whatever the user's build prints. If your builds may log sensitive material, leave triage disabled or scrub at the build level — Cooker cannot distinguish a secret a build chose to print from ordinary output.
+
+## Data Security
 
 - **Database**: Pipeline definitions, run history, and environment configs stored in PostgreSQL
 - **Secrets**: Database passwords, OIDC client secrets, and registry credentials should be managed via Kubernetes Secrets or an external secret manager. Cooker ships **five** secret-backend adapters, selected via `COOKER_SECRETS_BACKEND` (chart: `secrets.backend`); `Config.Validate()` (`backend/internal/config/config.go:411-433`) enforces the per-backend required env vars before boot:

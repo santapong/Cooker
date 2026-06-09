@@ -343,6 +343,20 @@ no configuration is required.
   at the end. Set `COOKER_EDGE_CONDITIONS_ENABLED=false` to restore
   the legacy abort-on-first-failure behaviour.
 
+## AI failure triage + analytics (M4)
+
+- **AI triage** is off by default. `COOKER_AI_TRIAGE_ENABLED=true` +
+  `ANTHROPIC_API_KEY` (and optionally `COOKER_AI_TRIAGE_MODEL`,
+  default `claude-fable-5`) enable the "Why did this fail?" button on
+  failed stages. **Data egress:** the failed stage's sanitized config
+  summary, error and last 32 KiB of logs are sent to the Anthropic
+  API on each click — never automatically. Env values and secret
+  refs are stripped from the prompt; the API key never reaches the
+  browser. Responses are advisory text only.
+- **Insights page** (`/analytics`, pro mode) computes per-stage
+  p50/p95/avg durations and success rates from the last 30 runs —
+  no extra configuration.
+
 ## What's scaffolded (don't file bugs about these)
 
 These are intentional placeholders documented as such. They'll
