@@ -330,6 +330,28 @@ paths:
       responses:
         "200": { description: Cancellation requested }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/pipelines/{id}/runs/{runId}/diff:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Diff a run against a baseline (default last successful prior run)
+      tags: [runs]
+      parameters:
+        - name: against
+          in: query
+          schema: { type: string }
+          description: Baseline runId, or "last-success" (default).
+      responses:
+        "200":
+          description: >-
+            Per-stage status/duration/digest deltas + variables diff +
+            definition-version delta. When no baseline exists the body
+            carries {"reason": "no successful prior run"} instead.
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/pipelines/{id}/runs/{runId}/logs/{stageId}:
     parameters:
       - $ref: "#/components/parameters/PathId"
@@ -518,6 +540,76 @@ paths:
         "403": { description: Forbidden or denied by governance hook }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503": { description: Governance hook unavailable (fail-closed env) }
+  /api/v1/apps/{id}/deploys:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Per-app deploy/rollback history, newest first
+      tags: [apps]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        "200":
+          description: History rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deploys:
+                    type: array
+                    items: { $ref: "#/components/schemas/AppDeploy" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/apps/{id}/rollback:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    post:
+      summary: Re-deploy a previously shipped image (deploy-only, no rebuild)
+      description: >-
+        v1 supports kubernetes deploy targets and single-image history
+        rows. Default target is the second most-recent successful
+        deploy; pass deployId to pick an explicit row. Same rate-limit,
+        idempotency and governance gates as deploy.
+      tags: [apps]
+      x-required-role: operator
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deployId: { type: string }
+      responses:
+        "202":
+          description: Rollback accepted; stream via /ws/app-run/{runId}
+        "404":
+          description: App not found, or no earlier successful deploy
+        "409":
+          description: Unsupported target (non-kubernetes) or non-rollbackable row
+  /api/v1/apps/{id}/drift:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Compare the last shipped image to the live cluster workload
+      tags: [apps]
+      x-required-role: operator
+      responses:
+        "200":
+          description: Drift verdict
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [in_sync, drift, unknown, unsupported] }
+                  expectedImage: { type: string }
+                  liveImage: { type: string }
+                  message: { type: string }
+                  checkedAt: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/apps/{id}/webhook:
     parameters:
       - $ref: "#/components/parameters/PathId"
@@ -1362,6 +1454,18 @@ components:
                 mode: { type: string, enum: [registry, oci, disabled] }
                 ref: { type: string }
                 inline: { type: boolean, description: BuildKit-only mode=max cache export }
+    AppDeploy:
+      type: object
+      properties:
+        id: { type: string }
+        appId: { type: string }
+        runId: { type: string }
+        pipelineId: { type: string }
+        imageRef: { type: string, description: Empty for compose multi-image deploys }
+        digest: { type: string }
+        status: { type: string }
+        kind: { type: string, enum: [deploy, rollback] }
+        createdAt: { type: string }
     Edge:
       type: object
       properties:

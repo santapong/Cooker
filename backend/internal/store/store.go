@@ -76,6 +76,17 @@ type AppStore interface {
 	UpdateHealth(ctx context.Context, id string, status model.AppHealth, msg string, at time.Time, deployedURL string) error
 }
 
+// AppDeployStore manages per-app deploy history (roadmap M3). Rows
+// are append-only: AppDeployer records one per terminal deploy or
+// rollback; nothing updates them afterwards.
+type AppDeployStore interface {
+	Create(ctx context.Context, d *model.AppDeploy) error
+	// ListByApp returns the app's history newest-first, capped at
+	// limit (limit <= 0 means a sane server-side default).
+	ListByApp(ctx context.Context, appID string, limit int) ([]*model.AppDeploy, error)
+	Get(ctx context.Context, id string) (*model.AppDeploy, error)
+}
+
 // HostStore manages managed-host persistence (Phase 4).
 type HostStore interface {
 	List(ctx context.Context) ([]*model.Host, error)
@@ -102,6 +113,7 @@ type Store struct {
 	Runs         RunStore
 	Environments EnvironmentStore
 	Apps         AppStore
+	AppDeploys   AppDeployStore
 	Hosts        HostStore
 	Users        UserStore
 	close        func() error
@@ -111,12 +123,13 @@ type Store struct {
 // New builds a Store. closeFn may be nil when no cleanup is required
 // (e.g., in-memory stores). pingFn may be nil for backends without a
 // liveness probe; Ping then reports healthy unconditionally.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, h HostStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
+func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, ad AppDeployStore, h HostStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
 		Pipelines:    p,
 		Runs:         r,
 		Environments: e,
 		Apps:         a,
+		AppDeploys:   ad,
 		Hosts:        h,
 		Users:        u,
 		close:        closeFn,

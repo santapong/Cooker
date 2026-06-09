@@ -54,3 +54,23 @@ export interface AppDeployResponse {
   // this field. The backend surfaces it from DeployTarget.Status.URL.
   url?: string;
 }
+
+export interface AppDeployRecord {
+  id: string;
+  appId: string;
+  runId: string;
+  pipelineId?: string;
+  imageRef?: string;
+  digest?: string;
+  status: string;
+  kind: 'deploy' | 'rollback';
+  createdAt: string;
+}
+
+export interface AppDriftReport {
+  status: 'in_sync' | 'drift' | 'unknown' | 'unsupported';
+  expectedImage?: string;
+  liveImage?: string;
+  message?: string;
+  checkedAt: string;
+}

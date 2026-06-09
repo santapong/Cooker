@@ -125,3 +125,32 @@ func (a *App) Redact() *App {
 	cp.HasWebhook = len(a.WebhookSecret) > 0
 	return &cp
 }
+
+// AppDeployKind distinguishes ordinary deploys from rollbacks in the
+// per-app deploy history.
+type AppDeployKind string
+
+const (
+	AppDeployKindDeploy   AppDeployKind = "deploy"
+	AppDeployKindRollback AppDeployKind = "rollback"
+)
+
+// AppDeploy is one row of an app's deploy history (roadmap M3).
+// Written by AppDeployer when a deploy or rollback reaches a terminal
+// status; read by the history endpoint, rollback target resolution,
+// and drift detection.
+type AppDeploy struct {
+	ID         string `json:"id" db:"id"`
+	AppID      string `json:"appId" db:"app_id"`
+	RunID      string `json:"runId" db:"run_id"`
+	PipelineID string `json:"pipelineId,omitempty" db:"pipeline_id"`
+	// ImageRef is the fully-qualified image the deploy shipped. Empty
+	// for compose multi-image deploys (not rollback-eligible in v1).
+	ImageRef string `json:"imageRef,omitempty" db:"image_ref"`
+	// Digest is the content digest of the built image when the build
+	// stage reported one.
+	Digest    string        `json:"digest,omitempty" db:"digest"`
+	Status    RunStatus     `json:"status" db:"status"`
+	Kind      AppDeployKind `json:"kind" db:"kind"`
+	CreatedAt time.Time     `json:"createdAt" db:"created_at"`
+}

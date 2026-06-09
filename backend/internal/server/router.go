@@ -51,6 +51,9 @@ func (s *Server) registerRoutes() {
 		pipelines.GET("/:id/runs/:runId", h.GetPipelineRun)
 		pipelines.POST("/:id/runs/:runId/cancel", writeRole, h.CancelPipelineRun)
 		pipelines.GET("/:id/runs/:runId/logs/:stageId", h.GetStageLogs)
+		// Run diff (roadmap M3): compare a run against last-success (or
+		// an explicit ?against=<runId>).
+		pipelines.GET("/:id/runs/:runId/diff", h.GetRunDiff)
 		// Phase-2 / F4: create a pipeline from a catalog template. Same
 		// writeRole gate as POST /pipelines (creating-via-template is
 		// just a parameterised create).
@@ -194,6 +197,13 @@ func (s *Server) registerRoutes() {
 		apps.PUT("/:id", writeRole, h.UpdateApp)
 		apps.DELETE("/:id", adminRole, mfa, h.DeleteApp)
 		apps.POST("/:id/deploy", writeRole, expensive, idempotencyMiddleware(s.idempotency), govDeploy, h.DeployApp)
+		// Deploy history + one-click rollback + drift (roadmap M3). A
+		// rollback IS a deploy: same rate limit, idempotency and
+		// governance gates. Drift is writeRole because it reveals live
+		// cluster state (same rationale as the kubernetes read path).
+		apps.GET("/:id/deploys", h.ListAppDeploys)
+		apps.POST("/:id/rollback", writeRole, expensive, idempotencyMiddleware(s.idempotency), govDeploy, h.RollbackApp)
+		apps.GET("/:id/drift", writeRole, h.GetAppDrift)
 		apps.PUT("/:id/webhook",
 			adminRole, mfa,
 			auth.RequirePermission(auth.ResourceWebhook, auth.ActionUpdate),

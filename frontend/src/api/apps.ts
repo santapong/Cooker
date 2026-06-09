@@ -1,5 +1,5 @@
 import { get, post, put, del } from './client';
-import type { AppModel, AppDeployResponse } from '../types/app';
+import type { AppModel, AppDeployResponse, AppDeployRecord, AppDriftReport } from '../types/app';
 
 export const appsApi = {
   list: () => get<AppModel[]>('/apps'),
@@ -13,6 +13,14 @@ export const appsApi = {
       plan: { kind: string; path?: string };
       suggestedRecipe: 'go' | 'node-static' | 'worker';
     }>('/apps/detect-build', { githubRepo, branch }),
+  listDeploys: (id: string, limit = 20) =>
+    get<{ deploys: AppDeployRecord[] }>(`/apps/${id}/deploys?limit=${limit}`),
+  rollback: (id: string, deployId?: string) =>
+    post<AppDeployResponse & { rolledBackTo: { deployId: string; imageRef: string } }>(
+      `/apps/${id}/rollback`,
+      deployId ? { deployId } : {},
+    ),
+  drift: (id: string) => get<AppDriftReport>(`/apps/${id}/drift`),
   setWebhookSecret: (id: string, secret: string) =>
     put<{ status: string }>(`/apps/${id}/webhook`, { secret }),
 };

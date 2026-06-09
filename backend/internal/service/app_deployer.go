@@ -18,6 +18,7 @@ import (
 	"github.com/santapong/cooker/internal/buildplan"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/source/github"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // AppDeployer orchestrates a real "Deploy" button click. It clones
@@ -38,6 +39,10 @@ type AppDeployer struct {
 	// onto every synthesized build stage (CacheSpec{Mode:"registry"}).
 	// Wired from COOKER_BUILD_CACHE_REPO.
 	CacheRef string
+	// Deploys, when non-nil, receives one history row per terminal
+	// deploy/rollback (roadmap M3). Best-effort: a write failure is
+	// logged, never surfaced — history must not fail a deploy.
+	Deploys store.AppDeployStore
 }
 
 // cacheSpec returns the CacheSpec for synthesized build stages, or
@@ -52,6 +57,44 @@ func (d *AppDeployer) cacheSpec() *model.CacheSpec {
 // NewAppDeployer builds a deployer bound to exec and registry.
 func NewAppDeployer(exec *Executor, registry string) *AppDeployer {
 	return &AppDeployer{Executor: exec, Registry: registry}
+}
+
+// recordDeploy persists one history row, best-effort.
+func (d *AppDeployer) recordDeploy(ctx context.Context, rec *model.AppDeploy) {
+	if d.Deploys == nil || rec == nil {
+		return
+	}
+	if err := d.Deploys.Create(ctx, rec); err != nil {
+		slog.Warn("app-deploy: record history failed", "app", rec.AppID, "run", rec.RunID, "err", err)
+	}
+}
+
+// deployRecordFromRun derives the history row for a finished deploy.
+// Single-image path: image_ref is the synthesized tag; digest comes
+// from the build stage's artifacts when the builder reported one.
+// Compose path (multi-image): refs stay empty — not rollback-eligible.
+func deployRecordFromRun(app *model.App, p *model.Pipeline, run *model.PipelineRun, imageRef string, kind model.AppDeployKind) *model.AppDeploy {
+	rec := &model.AppDeploy{
+		ID:       uuid.New().String(),
+		AppID:    app.ID,
+		ImageRef: imageRef,
+		Kind:     kind,
+	}
+	if p != nil {
+		rec.PipelineID = p.ID
+	}
+	if run != nil {
+		rec.RunID = run.ID
+		rec.Status = run.Status
+		for i := range run.StageRuns {
+			for _, a := range run.StageRuns[i].Artifacts {
+				if a.Type == "oci-image" && a.Digest != "" {
+					rec.Digest = a.Digest
+				}
+			}
+		}
+	}
+	return rec
 }
 
 // Deploy runs Clone → Build → Push → Deploy for app. It returns the
@@ -145,10 +188,71 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 	// reflects it. We use run.Status (and the [done] log line below)
 	// rather than the RunResult so callers that inspect run see the
 	// same terminal value.
+	//
+	// History (M3): record the terminal outcome either way. Compose
+	// deploys record with an empty image_ref (multi-image — not
+	// rollback-eligible); the single-image path records the tag.
+	historyRef := tag
+	if plan.Kind == model.BuildPlanCompose {
+		historyRef = ""
+	}
 	if _, err := d.Executor.Execute(ctx, p, run); err != nil {
+		d.recordDeploy(ctx, deployRecordFromRun(app, p, run, historyRef, model.AppDeployKindDeploy))
 		return p, run, fmt.Errorf("execute: %w", err)
 	}
+	d.recordDeploy(ctx, deployRecordFromRun(app, p, run, historyRef, model.AppDeployKindDeploy))
 	fmt.Fprintf(logW, "[done] run=%s status=%s\n", run.ID, run.Status)
+	return p, run, nil
+}
+
+// DeployImage re-deploys a previously shipped image (rollback, M3):
+// a deploy-only single-stage pipeline — no clone, no build, no push.
+// v1 scope: Kubernetes deploy targets only; the caller validates the
+// source history row. The synthesized run uses runID so it aligns
+// with the caller's stub row and the app-run:<runID> WS channel.
+func (d *AppDeployer) DeployImage(ctx context.Context, app *model.App, imageRef, runID string, logW io.Writer) (*model.Pipeline, *model.PipelineRun, error) {
+	if app.DeployTarget.Kind != model.DeployTargetKubernetes {
+		return nil, nil, fmt.Errorf("rollback: deploy target %q not supported (kubernetes only)", app.DeployTarget.Kind)
+	}
+	if imageRef == "" {
+		return nil, nil, fmt.Errorf("rollback: empty image ref")
+	}
+	logW = fanOut(logW, d.LogSink)
+	fmt.Fprintf(logW, "[rollback] re-deploying %s\n", imageRef)
+
+	now := time.Now()
+	p := &model.Pipeline{
+		ID:   "app-" + app.ID + "-rollback-" + runID,
+		Name: "Rollback " + app.Name,
+		Stages: []model.Stage{{
+			ID: "deploy", Name: "Deploy", Type: model.StageTypeDeploy,
+			Config: model.StageConfig{
+				Namespace:    app.DeployTarget.Namespace,
+				ManifestPath: defaultKubernetesManifest(app, imageRef),
+			},
+		}},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	run := &model.PipelineRun{
+		ID:         runID,
+		PipelineID: p.ID,
+		Status:     model.RunStatusPending,
+		StageRuns:  []model.StageRun{{StageID: "deploy", Status: model.RunStatusPending}},
+	}
+	if run.ID == "" {
+		run.ID = uuid.New().String()
+	}
+
+	rec := func() *model.AppDeploy {
+		return deployRecordFromRun(app, p, run, imageRef, model.AppDeployKindRollback)
+	}
+	if _, err := d.Executor.Execute(ctx, p, run); err != nil {
+		d.recordDeploy(ctx, rec())
+		return p, run, fmt.Errorf("execute: %w", err)
+	}
+	d.recordDeploy(ctx, rec())
+	fmt.Fprintf(logW, "[done] rollback run=%s status=%s\n", run.ID, run.Status)
 	return p, run, nil
 }
 
