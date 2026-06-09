@@ -38,13 +38,15 @@ func ValidatePipelineDAG(p *model.Pipeline) []string {
 		if !stageIDs[e.Target] {
 			errs = append(errs, "edge references unknown target: "+e.Target)
 		}
-		// T4 (dag-adaptation-2026.md §6 T4) — forward-compat refusal.
-		// Only "" and "success" are evaluated today; anything else would
-		// silently run as "success" and surprise the pipeline author.
-		// Primitive #2 (W6) replaces this refusal with real evaluation.
-		if e.Condition != "" && e.Condition != "success" {
+		// Primitive #2 (replaces the T4 forward-compat refusal): the
+		// executor now evaluates success/failure/always per edge; only
+		// genuinely unknown values are rejected, because they would
+		// fail closed at run time and confuse the pipeline author.
+		switch e.Condition {
+		case "", "success", "failure", "always":
+		default:
 			errs = append(errs, fmt.Sprintf(
-				"service: edge %s->%s: condition %q not yet supported (only \"success\" or empty)",
+				"service: edge %s->%s: condition %q is not one of success, failure, always",
 				e.Source, e.Target, e.Condition,
 			))
 		}

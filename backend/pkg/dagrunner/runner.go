@@ -2,6 +2,7 @@ package dagrunner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -11,6 +12,12 @@ import (
 
 // TaskFunc is the function executed for each node. It receives the node ID and returns an error.
 type TaskFunc func(ctx context.Context, nodeID string) error
+
+// ErrSkipped is the sentinel a TaskFunc returns to report "this node
+// was deliberately not run" (edge-condition evaluation, Primitive #2).
+// The runner records the node as skipped — not failed — and it does
+// not abort the run.
+var ErrSkipped = errors.New("dagrunner: node skipped")
 
 // StatusUpdate is emitted when a node's status changes.
 type StatusUpdate struct {
@@ -27,6 +34,12 @@ type Runner struct {
 	mu          sync.Mutex
 	statuses    map[string]string
 	maxParallel int // 0 means unbounded (legacy behaviour)
+	// continueOnError keeps walking the remaining levels after a node
+	// fails (recording the first error to return at the end) instead
+	// of aborting at the level barrier. Required for edge conditions:
+	// a "failure"-edge downstream must still get its chance to run.
+	// Per-level ctx cancellation still aborts.
+	continueOnError bool
 }
 
 // NewRunner creates a new DAG runner with unbounded fan-out per
@@ -56,6 +69,17 @@ func NewRunnerBounded(dag *DAG, taskFunc TaskFunc, maxParallel int) *Runner {
 	}
 }
 
+// NewRunnerBoundedContinue is NewRunnerBounded with continue-through-
+// failure semantics: a failed node no longer aborts at its level
+// barrier; remaining levels still execute (so failure-edge downstreams
+// get evaluated) and Run returns the first error at the end. Context
+// cancellation still aborts between levels.
+func NewRunnerBoundedContinue(dag *DAG, taskFunc TaskFunc, maxParallel int) *Runner {
+	r := NewRunnerBounded(dag, taskFunc, maxParallel)
+	r.continueOnError = true
+	return r
+}
+
 // Updates returns a channel that receives status updates during execution.
 func (r *Runner) Updates() <-chan StatusUpdate {
 	return r.updates
@@ -70,12 +94,17 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("invalid DAG: %w", err)
 	}
 
+	// First node failure, returned at the end in continue mode (the
+	// abort-on-first-error mode returns it from inside the loop).
+	var firstErr error
+
 	// Per-Run state, hoisted out of the level loop (P26-05-04):
 	//
 	// errCh holds the first error of a level; later errors are dropped
 	// via the non-blocking send in fail() — Run only ever returned the
-	// first error it drained anyway. It is drained between levels, so
-	// one capacity-1 channel serves the whole Run.
+	// first error it drained anyway. It is drained between levels (the
+	// continue-mode drain records it into firstErr instead of
+	// returning), so one capacity-1 channel serves the whole Run.
 	//
 	// The OTel carrier captures the parent span once — ctx doesn't
 	// change between levels. The fan-out semaphore likewise carries no
@@ -97,6 +126,9 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	for _, level := range levels {
 		if err := ctx.Err(); err != nil {
+			if firstErr != nil {
+				return firstErr
+			}
 			return err
 		}
 
@@ -127,6 +159,12 @@ func (r *Runner) Run(ctx context.Context) error {
 				r.emitStatus(id, "running", nil)
 
 				if taskErr := r.taskFunc(stageCtx, id); taskErr != nil {
+					if errors.Is(taskErr, ErrSkipped) {
+						// Deliberate no-run, not a failure: record and
+						// keep the level (and run) going.
+						r.emitStatus(id, "skipped", nil)
+						return
+					}
 					r.emitStatus(id, "failed", taskErr)
 					fail(fmt.Errorf("node %s failed: %w", id, taskErr))
 					return
@@ -138,14 +176,24 @@ func (r *Runner) Run(ctx context.Context) error {
 
 		wg.Wait()
 
+		// Every fail() send happens-before wg.Wait returns, so the
+		// channel is fully settled here and provably empty entering the
+		// next level. Abort mode returns the level's first error at the
+		// barrier (legacy semantics); continue mode records it and keeps
+		// walking so failure-edge downstreams still execute.
 		select {
 		case e := <-errCh:
-			return e
+			if !r.continueOnError {
+				return e
+			}
+			if firstErr == nil {
+				firstErr = e
+			}
 		default:
 		}
 	}
 
-	return nil
+	return firstErr
 }
 
 func (r *Runner) emitStatus(nodeID, status string, err error) {

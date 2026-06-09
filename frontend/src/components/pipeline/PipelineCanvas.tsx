@@ -53,6 +53,7 @@ function PipelineCanvas() {
   const connectStages = usePipelineStore((s) => s.connectStages);
   const addStage = usePipelineStore((s) => s.addStage);
   const setSelectedNode = usePipelineStore((s) => s.setSelectedNode);
+  const cycleEdgeCondition = usePipelineStore((s) => s.cycleEdgeCondition);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(usePipelineStore.getState().nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(usePipelineStore.getState().edges);
@@ -101,6 +102,16 @@ function PipelineCanvas() {
     [setSelectedNode],
   );
 
+  const onEdgeClick = useCallback(
+    (event: React.MouseEvent, edge: { id: string }) => {
+      // Cycle the trajectory's condition: (success) → failure → always.
+      event.stopPropagation();
+      cycleEdgeCondition(edge.id);
+      setEdges(usePipelineStore.getState().edges);
+    },
+    [cycleEdgeCondition, setEdges],
+  );
+
   const dark = t.mode === 'dark';
 
   return (
@@ -125,6 +136,7 @@ function PipelineCanvas() {
         onDragOver={onDragOver}
         onDrop={onDrop}
         onNodeClick={onNodeClick}
+        onEdgeClick={onEdgeClick}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={{ type: 'conditional' }}

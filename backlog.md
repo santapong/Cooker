@@ -47,15 +47,9 @@ What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-
 
 Items deferred from the W2–W5 cycle. Sequenced for the next session.
 
-#### W6.1 — Primitive #1: per-stage retry policies (~3 days)
+#### W6.1 — Primitive #1: per-stage retry policies
 
-- [ ] Per-stage `RetryPolicy` on `model.Stage` (`MaxAttempts`, `BackoffStrategy: fixed|exponential`, `BackoffSeconds`, `RetryOn: error|timeout|always`).
-- [ ] Executor honours the policy with bounded retry helper from `internal/retry/`.
-- [ ] Frontend stage-node UI exposes the policy (Pro-mode toggle).
-- [ ] Schema migration `011_stage_retry.up.sql` adds the field to JSONB stages (no DDL — CHECK constraint as in P#3 sketch).
-- [ ] Tests: retry-on-error, retry-on-timeout, max-attempts-reached, exponential-backoff timing.
-- [ ] **Prerequisite already on main:** T5 batched persistProgress (PR #75 squash) — without T5, retry attempts triple the JSONB write rate per stage.
-- [ ] **Audit closure:** `docs/dag-adaptation-2026.md` §3.1 Primitive #1, `docs/audits/2026-05-p1-context-pack.md`.
+✅ **Shipped** on `claude/feat-pipeline-power` (roadmap M2) — see "Closed (recent)". Field shape landed as `StageConfig.Retry {maxAttempts, initialMs, maxMs, exponential}` (JSONB — no migration needed; legacy `retries` int still honoured); `RetryOn` classification stayed with the executor's existing transient-vs-ctx classifier.
 
 #### W6.2 — useStageLogs reconnect backfill (~1 hour, HIGH severity)
 
@@ -288,7 +282,7 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 
 - [ ] **In-product audit-log viewer.** Filter by user / route / date / app. Reads from existing `audit.Sink`. Surfaced by SaaS team (SOC 2 Lite) + Enterprise SRE (SOC 2 / ISO 27001). W11 §SaaS step 6 + §Enterprise step 6.
 - [ ] **Tenant scoping** — design-doc gate first. Either data-scoped (`owner_team_id` on every Pipeline / App / Environment) or namespace-scoped (a "Cooker namespace" wrapping a slice of resources visible to a subset of OIDC groups). Multi-week feature; needs an ADR before code. Surfaced by Enterprise SRE. W11 §Enterprise step 4.
-- [ ] **Per-Pipeline / per-App `runDeadline` override.** Cluster-level `COOKER_RUN_DEADLINE` is too coarse. Promote to a per-resource setting on `model.Pipeline` and `model.App`. Surfaced by AI/ML engineer; also helps large-monorepo Go shops. W11 §ML step 5.
+- [ ] **Per-App `runDeadline` override.** The per-Pipeline half shipped in roadmap M2 (`Pipeline.RunDeadline`, clamped [10s,24h], editor field). App deploys still use the cluster default — promote to `model.App` when a real app-deploy exceeds it. W11 §ML step 5.
 
 ### P2 — single-persona high-value
 
@@ -322,6 +316,12 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 ## Closed (recent)
 
 Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), the `claude/w3-t1-t3-handler-f1` PR, the `claude/w4-t4-edge-condition-refuse` PR, the `claude/w4-f04-created-at` PR, the `claude/w4-t2-logwriter-push-deploy` PR, the `claude/w5-ci-cache-mode-min` PR, the `claude/w5-adr-0004-finalize` PR, the `claude/w5-f3-parse-compose-graph` PR, the `claude/w5-security-drift-bundle` PR, the `claude/w5-f2-executor-runresult` PR, and the `claude/fervent-sagan-q50XA` branch:
+
+### `claude/feat-pipeline-power` — retry policies + run deadline + edge conditions (roadmap M2)
+
+- ✅ **Primitive #1 — structured retry policies (W6.1)** — `StageConfig.Retry {maxAttempts, initialMs, maxMs, exponential}` (JSONB, no migration; legacy `retries` int still honoured, structured policy wins). Executor `policyFromStage` clamps to [1,10] attempts / [100ms,60s] initial / [initial,5m] max; `exponential=false` pins constant delay; approval/custom/test never retry. `validate.RetryPolicy` rejects out-of-range payloads at save. Editor: "Retry" section on build/push/deploy panels.
+- ✅ **Per-Pipeline `runDeadline` override (W11 §ML step 5, pipeline half)** — migration 017 adds `pipelines.run_deadline` + `pipeline_runs.pipeline_version` (the version stamp feeds M3's run-diff). `validate.RunDeadline` ([10s,24h]); `service.PipelineRunDeadline` clamps; `RunCoordinator.SpawnWithDeadline` (additive — `Spawn` unchanged) applies it on the inline path and `jobqueue_runner` wraps Execute's ctx on the durable path. Editor toolbar "Run deadline" field.
+- ✅ **Primitive #2 — edge conditions + skipped status** — `EdgeAllows`/`StageShouldRun` (AND-join; skip propagates through success/failure edges; only `always` passes a skipped upstream) in `internal/buildplan/edges.go`; `dagrunner.ErrSkipped` + `NewRunnerBoundedContinue` (continue-through-failure, first error returned at the end, ctx-cancel still aborts); executor gates each taskFunc and stamps terminal `RunStatusSkipped` (runstate gains Pending→Skipped). Validation now accepts success/failure/always and rejects unknowns (replaces T4's refusal). Editor: click an edge to cycle the condition; RunPage renders `skipped` neutral. Rollback knob `COOKER_EDGE_CONDITIONS_ENABLED=false` restores legacy abort-on-first-failure. **Behaviour change:** parallel branches now complete after an unrelated failure.
 
 ### `claude/feat-build-cache` — build layer cache + recipe auto-detect (roadmap M1)
 

@@ -19,6 +19,9 @@ const (
 	StateSucceeded State = "success" // matches model.RunStatusSuccess
 	StateFailed    State = "failed"
 	StateCancelled State = "cancelled"
+	// StateSkipped is stage-only: incoming edge conditions resolved to
+	// "don't run" (Primitive #2). Runs never enter it.
+	StateSkipped State = "skipped"
 )
 
 // Events that can drive run / stage transitions.
@@ -27,6 +30,9 @@ const (
 	EventSucceed Event = "succeed"
 	EventFail    Event = "fail"
 	EventCancel  Event = "cancel"
+	// EventSkip moves a pending stage straight to skipped (stage FSM
+	// only — the run FSM has no edge for it).
+	EventSkip Event = "skip"
 )
 
 // runBuilder declares the legal edges for a pipeline run. Reused
@@ -49,7 +55,7 @@ func NewRunFSM(initial State) FSM { return runBuilder.Build(initial) }
 // ErrInvalidTransition.
 func IsTerminal(s State) bool {
 	switch s {
-	case StateSucceeded, StateFailed, StateCancelled:
+	case StateSucceeded, StateFailed, StateCancelled, StateSkipped:
 		return true
 	}
 	return false

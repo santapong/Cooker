@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/santapong/cooker/internal/model"
 )
@@ -59,6 +60,44 @@ func Name(field, s string) error {
 func Description(field, s string) error {
 	if len(s) > MaxDescriptionLen {
 		return fmt.Errorf("%s exceeds %d characters", field, MaxDescriptionLen)
+	}
+	return nil
+}
+
+// RunDeadline validates a pipeline's per-run deadline override.
+// Empty is fine (cluster default applies). Otherwise it must be a Go
+// duration within [10s, 24h].
+func RunDeadline(s string) error {
+	if s == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return fmt.Errorf("runDeadline %q is not a Go duration (e.g. \"45m\", \"2h\")", s)
+	}
+	if d < 10*time.Second || d > 24*time.Hour {
+		return fmt.Errorf("runDeadline %q is outside [10s, 24h]", s)
+	}
+	return nil
+}
+
+// RetryPolicy validates a stage's structured retry policy. Nil is
+// fine (legacy Retries int applies).
+func RetryPolicy(r *model.RetryPolicy) error {
+	if r == nil {
+		return nil
+	}
+	if r.MaxAttempts < 0 || r.MaxAttempts > 10 {
+		return fmt.Errorf("retry.maxAttempts %d is outside [0, 10]", r.MaxAttempts)
+	}
+	if r.InitialMS < 0 || r.InitialMS > 60_000 {
+		return fmt.Errorf("retry.initialMs %d is outside [0, 60000]", r.InitialMS)
+	}
+	if r.MaxMS < 0 || r.MaxMS > 300_000 {
+		return fmt.Errorf("retry.maxMs %d is outside [0, 300000]", r.MaxMS)
+	}
+	if r.MaxMS > 0 && r.InitialMS > 0 && r.MaxMS < r.InitialMS {
+		return fmt.Errorf("retry.maxMs %d is below retry.initialMs %d", r.MaxMS, r.InitialMS)
 	}
 	return nil
 }

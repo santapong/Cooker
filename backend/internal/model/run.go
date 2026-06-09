@@ -11,6 +11,10 @@ const (
 	RunStatusSuccess   RunStatus = "success"
 	RunStatusFailed    RunStatus = "failed"
 	RunStatusCancelled RunStatus = "cancelled"
+	// RunStatusSkipped marks a stage whose incoming edge conditions
+	// resolved to "don't run" (dag-adaptation Primitive #2). Terminal,
+	// stage-level only — a PipelineRun itself is never skipped.
+	RunStatusSkipped RunStatus = "skipped"
 )
 
 // RunResult is the terminal outcome the Executor reports back to its
@@ -60,6 +64,10 @@ type PipelineRun struct {
 	StartedByEmail     string   `json:"startedByEmail,omitempty" db:"started_by_email"`
 	StartedByGroups    []string `json:"startedByGroups,omitempty"`
 	StartedByTokenHash string   `json:"startedByTokenHash,omitempty" db:"started_by_token_hash"`
+	// PipelineVersion is Pipeline.Version at run-creation time. 0 means
+	// "unknown" (rows predating migration 017). Run-diff uses it to
+	// report definition drift between two runs.
+	PipelineVersion int `json:"pipelineVersion,omitempty" db:"pipeline_version"`
 }
 
 // StageRun tracks the execution of a single stage within a pipeline run.

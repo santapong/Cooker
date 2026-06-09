@@ -74,9 +74,18 @@ func (r *JobQueueRunner) Handle(ctx context.Context, job *jobqueue.Job) error {
 
 	// Execute. Per F2 (handler-layering audit), Execute owns terminal
 	// status transitions; we persist the run as Execute returned it.
+	// A per-pipeline RunDeadline bounds the execution the same way the
+	// inline coordinator path does; without one the job inherits the
+	// worker's ctx as before.
 	execErr := error(nil)
 	if r.executor != nil {
-		_, execErr = r.executor.Execute(ctx, p, run)
+		execCtx := ctx
+		if d := PipelineRunDeadline(p); d > 0 {
+			var cancel context.CancelFunc
+			execCtx, cancel = context.WithTimeout(ctx, d)
+			defer cancel()
+		}
+		_, execErr = r.executor.Execute(execCtx, p, run)
 	}
 	if updateErr := r.store.Runs.Update(ctx, run); updateErr != nil {
 		// Persist failure is logged but doesn't override the executor

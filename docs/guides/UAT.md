@@ -324,6 +324,25 @@ constraint as the in-memory WS hub and rate limiter. Durable / multi-replica
 and are not implemented yet. The default UAT compose is single-replica, so
 no configuration is required.
 
+## Pipeline power knobs (M2)
+
+- **Per-pipeline run deadline** — the editor's "Run deadline" field (or
+  `Pipeline.runDeadline` via API; Go duration, clamped [10s, 24h])
+  overrides `COOKER_RUN_DEADLINE` for that pipeline's runs. Applies to
+  both the inline spawn path and jobqueue workers.
+- **Per-stage retry policy** — build/push/deploy stage panels expose
+  `retry {maxAttempts, initialMs, maxMs, exponential}`; the legacy
+  integer `retries` is still honoured when no structured policy is set.
+- **Edge conditions** — click an edge in the editor to cycle
+  success → failure → always. "failure" trajectories run when their
+  upstream fails (e.g. notify-on-failure); "always" runs on any
+  terminal upstream; stages whose conditions resolve to "don't run"
+  finish as `skipped`. **Behaviour change:** with conditions enabled
+  (default), one failed stage no longer aborts unrelated parallel
+  branches mid-run — they complete and the run is still marked failed
+  at the end. Set `COOKER_EDGE_CONDITIONS_ENABLED=false` to restore
+  the legacy abort-on-first-failure behaviour.
+
 ## What's scaffolded (don't file bugs about these)
 
 These are intentional placeholders documented as such. They'll
