@@ -70,6 +70,18 @@ type Config struct {
 	// (Phase-4). URL empty -> disabled (no-op middleware). See
 	// internal/governance/client.go.
 	Governance GovernanceConfig
+	// Triage configures the opt-in AI failure-triage endpoint
+	// (roadmap M4). Enabled=false keeps the route returning 503 and
+	// no key is ever required. The API key stays server-side.
+	Triage TriageConfig
+}
+
+// TriageConfig wires the Anthropic Messages API client behind
+// POST /pipelines/:id/runs/:runId/stages/:stageId/triage.
+type TriageConfig struct {
+	Enabled bool   // COOKER_AI_TRIAGE_ENABLED (default false)
+	Model   string // COOKER_AI_TRIAGE_MODEL (default claude-fable-5)
+	APIKey  string // ANTHROPIC_API_KEY (required when Enabled)
 }
 
 // GovernanceConfig configures the call-out to the Grovernance Platform's
@@ -352,10 +364,21 @@ func Load() *Config {
 			DelegateToken:     getEnv("COOKER_GOVERNANCE_DELEGATE_TOKEN", ""),
 			BreakGlassEnabled: getEnvBool("COOKER_GOVERNANCE_BREAK_GLASS_ENABLED", false),
 		},
+		Triage: TriageConfig{
+			Enabled: getEnvBool("COOKER_AI_TRIAGE_ENABLED", false),
+			Model:   getEnv("COOKER_AI_TRIAGE_MODEL", ""),
+			APIKey:  getEnv("ANTHROPIC_API_KEY", ""),
+		},
 	}
 }
 
 func (c *Config) Validate() error {
+	// AI triage is env-independent: enabling it without a key is a
+	// misconfiguration in dev and prod alike — the route would 502 on
+	// every click. Fail at boot instead.
+	if c.Triage.Enabled && c.Triage.APIKey == "" {
+		return fmt.Errorf("config: COOKER_AI_TRIAGE_ENABLED=true requires ANTHROPIC_API_KEY")
+	}
 	if !c.Env.IsProduction() {
 		return nil
 	}

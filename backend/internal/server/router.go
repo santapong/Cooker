@@ -20,6 +20,10 @@ func (s *Server) registerRoutes() {
 	api := s.router.Group("/api/v1", s.oidcMW.Handler())
 	api.Use(auditMiddleware(s.audit))
 
+	// Optional-feature discovery for the frontend (authenticated so
+	// config posture isn't leaked publicly).
+	api.GET("/capabilities", func(c *gin.Context) { s.handler.GetCapabilities(c) })
+
 	h := s.handler
 	writeRole := auth.RequireRole(auth.RoleOperator, auth.RoleAdmin)
 	adminRole := auth.RequireRole(auth.RoleAdmin)
@@ -51,6 +55,11 @@ func (s *Server) registerRoutes() {
 		pipelines.GET("/:id/runs/:runId", h.GetPipelineRun)
 		pipelines.POST("/:id/runs/:runId/cancel", writeRole, h.CancelPipelineRun)
 		pipelines.GET("/:id/runs/:runId/logs/:stageId", h.GetStageLogs)
+		// AI failure triage (roadmap M4): paid upstream call → same
+		// rate limit as the other expensive routes.
+		pipelines.POST("/:id/runs/:runId/stages/:stageId/triage", writeRole, expensive, h.TriageStage)
+		// Stage-duration analytics from run history (roadmap M4).
+		pipelines.GET("/:id/analytics", h.GetPipelineAnalytics)
 		// Phase-2 / F4: create a pipeline from a catalog template. Same
 		// writeRole gate as POST /pipelines (creating-via-template is
 		// just a parameterised create).

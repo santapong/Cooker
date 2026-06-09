@@ -330,6 +330,71 @@ paths:
       responses:
         "200": { description: Cancellation requested }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/pipelines/{id}/analytics:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Stage-duration + success-rate analytics from run history
+      tags: [pipelines]
+      parameters:
+        - name: runs
+          in: query
+          schema: { type: integer, default: 30, maximum: 200 }
+      responses:
+        "200":
+          description: Per-stage p50/p95/avg durations, success rates, per-run series
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/pipelines/{id}/runs/{runId}/stages/{stageId}/triage:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: stageId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: AI failure triage for a failed stage (opt-in, advisory only)
+      description: >-
+        Sends the failed stage's sanitized config summary, error and log
+        tail (last 32 KiB) to the configured Anthropic model and returns
+        an advisory explanation. Requires COOKER_AI_TRIAGE_ENABLED=true +
+        ANTHROPIC_API_KEY server-side; the key never reaches clients.
+        Secrets (env values, secretRefs values) are stripped from the
+        prompt. Rate-limited (paid upstream call).
+      tags: [runs]
+      x-required-role: operator
+      responses:
+        "200":
+          description: Advisory
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  advisory: { type: string }
+                  model: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Stage is not failed
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: AI triage not enabled on this deployment
+  /api/v1/capabilities:
+    get:
+      summary: Optional-feature discovery for the frontend
+      tags: [settings]
+      responses:
+        "200":
+          description: Feature flags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  aiTriage: { type: boolean }
   /api/v1/pipelines/{id}/runs/{runId}/logs/{stageId}:
     parameters:
       - $ref: "#/components/parameters/PathId"

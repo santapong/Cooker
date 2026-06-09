@@ -21,6 +21,7 @@ import { Icon } from '../components/ui/Icon';
 import { Starfield } from '../components/ui/Starfield';
 import { useToastStore } from '../stores/toastStore';
 import { useStageLogs } from '../hooks/useStageLogs';
+import { capabilitiesApi } from '../api/capabilities';
 
 export default function RunPage() {
   const t = useTheme();
@@ -30,6 +31,7 @@ export default function RunPage() {
 
   const [run, setRun] = useState<PipelineRun | null>(null);
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
+  const [aiTriage, setAiTriage] = useState(false);
   const [envStatuses, setEnvStatuses] = useState<EnvironmentStatus[]>([]);
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,6 +51,13 @@ export default function RunPage() {
   const stageLogs = useMemo(() => stageLogStream.lines.join('\n'), [stageLogStream.lines]);
   const logsLoading = !!selectedStageId && !stageLogStream.backfillLoaded;
   const streamTruncated = stageLogStream.streamTruncated;
+
+  useEffect(() => {
+    capabilitiesApi
+      .get()
+      .then((c) => setAiTriage(c.aiTriage))
+      .catch(() => setAiTriage(false));
+  }, []);
 
   // Fetch run + pipeline + env status. Refresh env status every 5s
   // to pick up promotions/approvals while you're watching.
@@ -152,6 +161,9 @@ export default function RunPage() {
         loading={logsLoading}
         run={run}
         streamTruncated={streamTruncated}
+        pipelineId={id ?? ''}
+        runId={runId ?? ''}
+        aiTriage={aiTriage}
       />
       {mode === 'pro' && (
         <RightRail
@@ -353,6 +365,9 @@ function LogsPanel({
   loading,
   run,
   streamTruncated,
+  pipelineId,
+  runId,
+  aiTriage,
 }: {
   stage: Stage | null;
   stageRun: StageRun | null;
@@ -360,9 +375,33 @@ function LogsPanel({
   loading: boolean;
   run: PipelineRun | null;
   streamTruncated: boolean;
+  pipelineId: string;
+  runId: string;
+  aiTriage: boolean;
 }) {
   const t = useTheme();
+  const pushToast = useToastStore((s) => s.push);
   const [filter, setFilter] = useState<'all' | 'info' | 'warn' | 'error'>('all');
+  const [triaging, setTriaging] = useState(false);
+  const [advisory, setAdvisory] = useState<{ text: string; model: string } | null>(null);
+
+  // A new stage selection invalidates the previous advisory.
+  useEffect(() => {
+    setAdvisory(null);
+  }, [stage?.id, runId]);
+
+  const triage = async () => {
+    if (!pipelineId || !runId || !stage) return;
+    setTriaging(true);
+    try {
+      const res = await pipelineApi.triageStage(pipelineId, runId, stage.id);
+      setAdvisory({ text: res.advisory, model: res.model });
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setTriaging(false);
+    }
+  };
 
   const lines = useMemo(() => {
     const all = logs ? logs.split('\n').map((l) => parseLogLine(l)) : [];
@@ -453,8 +492,45 @@ function LogsPanel({
           />
           {run?.status === 'running' ? 'tail · live' : 'tail · idle'}
         </div>
+        {aiTriage && stageRun?.status === 'failed' && (
+          <Btn onClick={triage} disabled={triaging}>
+            {triaging ? 'Asking…' : 'Why did this fail?'}
+          </Btn>
+        )}
         <KBD>/</KBD>
       </div>
+
+      {advisory && (
+        <div
+          style={{
+            margin: '10px 18px 0',
+            padding: '12px 14px',
+            border: `1px solid ${t.line}`,
+            borderRadius: 10,
+            background: t.surface,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <SectionLabel>AI triage</SectionLabel>
+            <Pill tone="cool">{advisory.model}</Pill>
+            <Pill tone="warn">advisory only</Pill>
+            <span style={{ flex: 1 }} />
+            <Btn onClick={() => setAdvisory(null)}>dismiss</Btn>
+          </div>
+          <div
+            style={{
+              whiteSpace: 'pre-wrap',
+              fontSize: 12.5,
+              lineHeight: 1.6,
+              color: t.textSoft,
+              maxHeight: 260,
+              overflow: 'auto',
+            }}
+          >
+            {advisory.text}
+          </div>
+        </div>
+      )}
 
       {streamTruncated && (
         <div

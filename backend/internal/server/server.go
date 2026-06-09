@@ -33,6 +33,7 @@ import (
 	"github.com/santapong/cooker/internal/store"
 	"github.com/santapong/cooker/internal/store/memory"
 	"github.com/santapong/cooker/internal/store/postgres"
+	"github.com/santapong/cooker/internal/triage"
 )
 
 type Server struct {
@@ -240,6 +241,12 @@ func New(cfg *config.Config) (*Server, error) {
 
 	h := handler.New(st, codec, secMgr)
 	h.AppDeployer = appDeployer
+	// AI triage (M4): Validate() already guaranteed the key when
+	// enabled; nil keeps the route 503 and the frontend button hidden.
+	if cfg.Triage.Enabled {
+		h.Triage = triage.New(cfg.Triage.APIKey, cfg.Triage.Model)
+		slog.Info("ai triage enabled", "model", h.Triage.(*triage.Client).Model)
+	}
 	h.AppDetector = service.NewAppDetector()
 	h.WSBroadcast = wsHub.Broadcast
 	h.Executor = exec
