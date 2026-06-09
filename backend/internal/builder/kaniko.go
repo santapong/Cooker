@@ -347,6 +347,11 @@ func (k *Kaniko) streamLogs(ctx context.Context, jobName string, w io.Writer) {
 	}
 	defer stream.Close()
 	scanner := bufio.NewScanner(stream)
+	// Default MaxScanTokenSize is 64 KiB; one verbose tool line beyond
+	// that (npm ci --verbose JSON, webpack stats) would silently end the
+	// stream with bufio.ErrTooLong and the rest of the build's logs go
+	// dark (P26-05-21). Allow lines up to 1 MiB.
+	scanner.Buffer(make([]byte, 64<<10), 1<<20)
 	for scanner.Scan() {
 		line := stripANSI(scanner.Bytes())
 		if _, err := w.Write(append(line, '\n')); err != nil {

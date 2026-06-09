@@ -282,10 +282,24 @@ paths:
       - $ref: "#/components/parameters/PathId"
     get:
       summary: List runs for a pipeline
+      description: >-
+        Returns run summaries newest-first. Per-stage `logs` are omitted
+        from list responses — fetch a single run (or the stage-logs
+        endpoint) for full logs. Malformed `limit`/`offset` values fall
+        back to their defaults rather than erroring.
       tags: [runs]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+          description: Page size, clamped to [1, 200].
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0, minimum: 0 }
+          description: Number of newest runs to skip.
       responses:
         "200":
-          description: Array of runs
+          description: Array of run summaries (per-stage logs omitted)
           content:
             application/json:
               schema:

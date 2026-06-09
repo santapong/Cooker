@@ -31,7 +31,7 @@ func TestRunStore_ListOrderedByCreatedAt(t *testing.T) {
 		}
 	}
 
-	got, err := st.Runs.List(ctx, pipelineID)
+	got, err := st.Runs.List(ctx, pipelineID, 0, 0)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

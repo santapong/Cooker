@@ -19,7 +19,10 @@ import { useToastStore } from '../stores/toastStore';
 
 export default function EnvironmentsPage() {
   const t = useTheme();
-  const { environments, loading, fetchEnvironments, createEnvironment } = useEnvironmentStore();
+  const environments = useEnvironmentStore((s) => s.environments);
+  const loading = useEnvironmentStore((s) => s.loading);
+  const fetchEnvironments = useEnvironmentStore((s) => s.fetchEnvironments);
+  const createEnvironment = useEnvironmentStore((s) => s.createEnvironment);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Environment | null>(null);
 

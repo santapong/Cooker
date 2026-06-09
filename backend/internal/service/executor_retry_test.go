@@ -49,6 +49,20 @@ func TestPolicyFromStage(t *testing.T) {
 		}
 	})
 
+	t.Run("exponential false pins after clamps", func(t *testing.T) {
+		// InitialMS above the 60s clamp: the pin must apply to the
+		// clamped Initial, not the raw value, or growth re-enables.
+		p := policyFromStage(build(model.StageConfig{
+			Retry: &model.RetryPolicy{MaxAttempts: 3, InitialMS: 120_000, Exponential: boolPtr(false)},
+		}))
+		if p.Initial != time.Minute {
+			t.Errorf("Initial = %s, want clamp to 1m", p.Initial)
+		}
+		if p.Max != p.Initial {
+			t.Errorf("constant backoff must pin Max to clamped Initial; got initial=%s max=%s", p.Initial, p.Max)
+		}
+	})
+
 	t.Run("clamps", func(t *testing.T) {
 		p := policyFromStage(build(model.StageConfig{
 			Retry: &model.RetryPolicy{MaxAttempts: 99, InitialMS: 1, MaxMS: 99_000_000},

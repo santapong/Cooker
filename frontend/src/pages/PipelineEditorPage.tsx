@@ -16,7 +16,13 @@ export default function PipelineEditorPage() {
   const mode = useUIStore((s) => s.mode);
   const pushToast = useToastStore((s) => s.push);
   const { id } = useParams<{ id: string }>();
-  const { pipeline, loadPipeline, savePipeline, selectedNodeId } = usePipelineStore();
+  // Per-field selectors: this page legitimately re-renders on pipeline
+  // edits (live stage/edge counts in the header) but must not also
+  // re-render on nodes/edges churn it never reads (P26-05-25).
+  const pipeline = usePipelineStore((s) => s.pipeline);
+  const loadPipeline = usePipelineStore((s) => s.loadPipeline);
+  const savePipeline = usePipelineStore((s) => s.savePipeline);
+  const selectedNodeId = usePipelineStore((s) => s.selectedNodeId);
 
   useEffect(() => {
     if (id) loadPipeline(id);
