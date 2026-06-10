@@ -4,6 +4,8 @@ Tracks work that's been planned, scoped, or hinted at by the codebase but isn't 
 
 Items are grouped by area and roughly prioritized within each group.
 
+> Strategic framing — the feature roadmap for OSS adoption, monetization strategy, and UAT→production hosting recommendation — lives in [`docs/product-plan.md`](docs/product-plan.md).
+
 ---
 
 ## Production readiness summary
