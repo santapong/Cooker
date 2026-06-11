@@ -1,7 +1,8 @@
 # 08 · Deployment
 
 > **Purpose:** the topology spectrum and the artifacts that ship Cooker. **See also:**
-> [`../UAT.md`](../guides/UAT.md), [`../ROLLOUT.md`](../guides/ROLLOUT.md), [`../RUNBOOK.md`](../guides/RUNBOOK.md), and
+> [`../UAT.md`](../guides/UAT.md), [`../ROLLOUT.md`](../guides/ROLLOUT.md), [`../RUNBOOK.md`](../guides/RUNBOOK.md),
+> [`../guides/DEPLOY-AWS-VERCEL.md`](../guides/DEPLOY-AWS-VERCEL.md) (the hosted AWS EKS Auto Mode + Vercel track), and
 > [`../../backlog.md`](../../backlog.md) for the honest production-readiness verdict.
 
 ## Topology spectrum

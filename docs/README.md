@@ -29,6 +29,7 @@ Operator-facing how-tos. Read the one that matches what you're doing.
 | Doc | Read when |
 |---|---|
 | [guides/UAT.md](guides/UAT.md) | Touching anything that affects `make uat-up` |
+| [guides/DEPLOY-AWS-VERCEL.md](guides/DEPLOY-AWS-VERCEL.md) | Hosting Cooker on AWS (EKS Auto Mode) + UAT SPA on Vercel — IaC, tiered cost, runbook |
 | [guides/MULTI_REPLICA.md](guides/MULTI_REPLICA.md) | Running Cooker HA (Redis-backed, multi-replica) |
 | [guides/ROLLOUT.md](guides/ROLLOUT.md) | Doing a UAT → production cutover |
 | [guides/RUNBOOK.md](guides/RUNBOOK.md) | On call — incident response & alert rules |

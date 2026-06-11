@@ -8,6 +8,10 @@ Apps "Deploy" button and filing bugs.
 > works" and "What's scaffolded" sections before you start so you
 > know what to hit and what to skip.
 
+> **Hosted UAT on Vercel + AWS:** to run UAT off your laptop — SPA on
+> Vercel with per-PR previews, backend on AWS Lightsail — see
+> [`DEPLOY-AWS-VERCEL.md`](DEPLOY-AWS-VERCEL.md).
+
 ## Prerequisites
 
 - **Docker 24+** with the daemon running. On Linux, your user

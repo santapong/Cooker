@@ -150,6 +150,8 @@ This is a *local* acceptance environment. For a hosted UAT that rehearses produc
   - **Builder = kaniko** against the bundled k3s, to rehearse the production posture early (`Config.Validate` refuses the docker builder in production anyway).
 - **Purpose:** walk the [`launch-readiness.md`](audits/launch-readiness.md) Pre-UAT checklist §1–§5 here, including the OIDC round-trip and WS log smoke tests, before touching production.
 
+…**or the AWS/Vercel track** — a hosted UAT that puts the SPA on Vercel (with per-PR previews) and the backend on a small AWS Lightsail instance behind Caddy (~$1.45/day). See [`docs/guides/DEPLOY-AWS-VERCEL.md`](guides/DEPLOY-AWS-VERCEL.md) §2.
+
 ### 6.3 Production — recommended target (and two alternatives)
 
 Backlog's deployment-shape matrix row 1 is the documented "✅ Production-ready. Ship it." shape: **single-replica + TLS ingress + Kaniko + Postgres SSL + edge rate limit**. For a solo portfolio project that is the right starting point — no Redis required, lowest cost, fully validated at boot.
@@ -159,6 +161,8 @@ Backlog's deployment-shape matrix row 1 is the documented "✅ Production-ready.
 | **Recommended: k3s on one VPS** (4 vCPU / 8 GB, e.g. Hetzner CPX31/CX32) + cert-manager (Let's Encrypt) + Helm chart, single replica | Matrix row 1 | **$15–45** — VPS $8–30; Postgres either co-hosted with nightly `pg_dump` off-box (cheap, fine at this scale) or managed (Neon/Supabase/DO, $0–15) | Best cost/ops balance; everything the chart needs (ingress, NetworkPolicy, PVC for Kaniko context) works on k3s. |
 | DigitalOcean Managed Kubernetes (DOKS) | Row 1 or row 3 (HA) | **$50–75** — node(s) $24+, LB $12, managed PG $15 | Less ops burden, real cloud LB; pick this if you'd rather not own a node. |
 | EKS / GKE | Row 3 | **$150+** — EKS control plane alone ≈ $73 | **Not recommended** at portfolio scope — pure overhead. |
+
+> **AWS managed track (EKS Auto Mode).** If you do want a fully-managed AWS deployment (managed Postgres + cache, in-cluster Spot build capacity, ALB, Pod Identity), there is now a complete tiered design: **Starter ~$9.6/day us-east-1** (~$292/mo), scaling to Team/Scale — full IaC + cost tables + runbook in [`docs/guides/DEPLOY-AWS-VERCEL.md`](guides/DEPLOY-AWS-VERCEL.md). This is **heavier and pricier on purpose**; the VPS row above remains the **budget default** for a portfolio project. The "Not recommended at portfolio scope" verdict stands for *cost-minimizing* deployments — the managed track is for when you've outgrown a single VPS.
 
 Scale-up path: when one replica isn't enough, move to matrix row 3 (multi-replica + Redis-backed hub/tickets/rate-limit — the chart's *default* values shape) per [`docs/guides/MULTI_REPLICA.md`](guides/MULTI_REPLICA.md). Don't start there.
 

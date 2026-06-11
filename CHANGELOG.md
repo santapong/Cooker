@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — AWS/Vercel hosting design (IaC + overlays + guide)
+
+- New hosting track: UAT = Cooker SPA on **Vercel** (split-origin via
+  `VITE_API_BASE_URL`, per-PR previews with local auth, Deployment
+  Protection off) + an AWS **Lightsail** backend behind Caddy;
+  production = **EKS Auto Mode** across Starter/Team/Scale tiers.
+- `deploy/vercel/`: `vercel.json` (SPA rewrites + 1y asset cache) and a
+  setup README (project settings, env matrix, preview-auth recipe,
+  Lightsail+Caddy sketch).
+- `deploy/aws/terraform/`: a clean Terraform skeleton (no eksctl,
+  single state, S3 native locking) — VPC, EKS Auto Mode, RDS, ElastiCache
+  Serverless Valkey (Team+), ECR + pull-through cache, Pod Identity,
+  Secrets Manager, CloudWatch + Budgets, per-tier tfvars. Spot NodePool
+  and a dockerconfig-refresh CronJob ship as example k8s manifests.
+- `deploy/aws/values/values-aws-{starter,team,scale}.yaml`: Helm overlays
+  (`COOKER_SECRETS_BACKEND=aws`, OIDC scopes without `groups` for Cognito,
+  `networkPolicy.enabled=false`, Pod-Identity `serviceAccount.annotations`
+  `{}`, ALB ingress with mandatory `idle_timeout.timeout_seconds=300`).
+- `.github/workflows/ci.yml` helm job now templates the chart against each
+  AWS overlay (+ kubeconform) so the overlays can't rot.
+- `docs/guides/DEPLOY-AWS-VERCEL.md`: the full advisory — topology, tiered
+  cost tables (rough estimates, sourced, retrieved 2026-06-11), traps
+  ledger, provisioning runbook, DR, and an OPEN-questions list (incl. the
+  Cognito `aud` spike and the chart `extraVolumes` gap). Region
+  recommendation: ap-southeast-1 (Bangkok not launch-ready). Cross-linked
+  from the docs index, product-plan §6, system-design 08, UAT, ROLLOUT,
+  and MULTI_REPLICA. Costs are estimates — re-verify at apply time.
+
 ### Added — SSH remote deploy target (Thread 1, Dokploy/Coolify model)
 
 - New `deploytarget/ssh` adapter: SSH into a registered host
