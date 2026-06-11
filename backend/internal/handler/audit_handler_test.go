@@ -28,7 +28,7 @@ func auditTestRouter(h *Handler) *gin.Engine {
 }
 
 func TestListAuditEvents_StoreNotConfigured(t *testing.T) {
-	h := &Handler{Store: store.New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)}
+	h := &Handler{Store: store.New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)}
 	w := httptest.NewRecorder()
 	auditTestRouter(h).ServeHTTP(w, newRequest(http.MethodGet, "/admin/audit", nil))
 	if w.Code != http.StatusServiceUnavailable {

@@ -71,7 +71,15 @@ type Handler struct {
 	// keys through secrets.Manager). Set by server.New; nil-safe in
 	// dev when no secrets backend is configured (SSH host create/
 	// update with a key body returns 503).
-	Hosts       *service.HostService
+	Hosts *service.HostService
+	// Registries / Clusters coordinate Settings-config CRUD
+	// side-effects (writing the registry password / cluster kubeconfig
+	// through secrets.Manager so the row carries only a reference;
+	// HS26-05-04). Set by server.New; nil-safe in dev when no secrets
+	// backend is configured — a Create that carries a credential then
+	// returns 503, a credential-free Create persists via the plain store.
+	Registries  *service.RegistryConfigService
+	Clusters    *service.ClusterConfigService
 	WSBroadcast func(channel string, data []byte)
 	Executor    *service.Executor
 	Runs        RunSpawner

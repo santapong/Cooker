@@ -281,6 +281,13 @@ func New(cfg *config.Config) (*Server, error) {
 	// with a key body returns 503 — non-SSH hosts continue to work.
 	h.Hosts = service.NewHostService(st, secMgr)
 
+	// Settings registry/cluster-config services (HS26-05-04). Same
+	// nil-safe posture as HostService: a Create carrying a credential
+	// (registry password / cluster kubeconfig) returns 503 when secMgr
+	// is nil; credential-free configs persist regardless.
+	h.Registries = service.NewRegistryConfigService(st, secMgr)
+	h.Clusters = service.NewClusterConfigService(st, secMgr)
+
 	// SSH remote deploy target (Thread 1 of the 2026-05 plan). Wired
 	// here so it can pull the App's Host via the store and resolve
 	// the private key via the host service. Registration is

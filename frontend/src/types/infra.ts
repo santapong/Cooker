@@ -49,10 +49,18 @@ export interface RegistryConfig {
   name: string;
   url: string;
   username?: string;
+  /** True when a password/token is stored on the backend; the password itself is never returned. */
+  hasPassword?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ClusterConfig {
   id: string;
   name: string;
   context?: string;
+  /** True when a kubeconfig is stored on the backend; the kubeconfig itself is never returned. */
+  hasCredentials?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }

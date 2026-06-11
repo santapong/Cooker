@@ -121,6 +121,8 @@ func NewStore(ctx context.Context, databaseURL string) (*store.Store, error) {
 		NewAppDeployStore(db),
 		NewAuditEventStore(db),
 		NewHostStore(db),
+		NewRegistryConfigStore(db),
+		NewClusterConfigStore(db),
 		NewUserStore(db),
 		db.Close,
 		db.PingContext,

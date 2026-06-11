@@ -50,7 +50,7 @@ func TestNewAuditSink_Destinations(t *testing.T) {
 	})
 
 	t.Run("db without audit store", func(t *testing.T) {
-		bare := store.New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		bare := store.New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		if _, err := newAuditSink(config.AuditConfig{Enabled: true, Destination: "db"}, bare); err == nil {
 			t.Fatal("expected error when the store lacks audit support")
 		}

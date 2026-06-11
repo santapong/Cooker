@@ -247,11 +247,12 @@ func (s *Server) registerRoutes() {
 
 	settings := api.Group("/settings")
 	{
-		settings.GET("/registries", handler.ListRegistryConfigs)
-		settings.POST("/registries", adminRole, handler.AddRegistryConfig)
-		settings.DELETE("/registries/:id", adminRole, handler.DeleteRegistryConfig)
-		settings.GET("/clusters", handler.ListClusterConfigs)
-		settings.POST("/clusters", adminRole, handler.AddClusterConfig)
+		settings.GET("/registries", h.ListRegistryConfigs)
+		settings.POST("/registries", adminRole, h.AddRegistryConfig)
+		settings.DELETE("/registries/:id", adminRole, h.DeleteRegistryConfig)
+		settings.GET("/clusters", h.ListClusterConfigs)
+		settings.POST("/clusters", adminRole, h.AddClusterConfig)
+		settings.DELETE("/clusters/:id", adminRole, h.DeleteClusterConfig)
 		// Secrets-backend connectivity probe (roadmap M5 / F12). The
 		// settings group carries no MFA gate, so this admin action
 		// adds it explicitly, matching the /admin group's posture.

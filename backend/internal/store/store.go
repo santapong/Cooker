@@ -142,6 +142,30 @@ type HostStore interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// RegistryConfigStore persists Settings-page image-registry
+// connections (audit finding HS26-05-04). Mirrors the HostStore shape;
+// there is no Update — the Settings UI replaces a registry by
+// delete+add rather than editing in place. Secret material (the auth
+// password/token) is held in secrets.Manager by the service layer; only
+// the reference lands on the row.
+type RegistryConfigStore interface {
+	List(ctx context.Context) ([]*model.RegistryConfig, error)
+	Get(ctx context.Context, id string) (*model.RegistryConfig, error)
+	Create(ctx context.Context, r *model.RegistryConfig) error
+	Delete(ctx context.Context, id string) error
+}
+
+// ClusterConfigStore persists Settings-page Kubernetes cluster
+// connections (audit finding HS26-05-04). Same shape and rationale as
+// RegistryConfigStore; the kubeconfig body is the secret held in
+// secrets.Manager.
+type ClusterConfigStore interface {
+	List(ctx context.Context) ([]*model.ClusterConfig, error)
+	Get(ctx context.Context, id string) (*model.ClusterConfig, error)
+	Create(ctx context.Context, cfg *model.ClusterConfig) error
+	Delete(ctx context.Context, id string) error
+}
+
 // UserStore manages local-auth account persistence. Only used when
 // COOKER_LOCAL_AUTH_ENABLED=true; the OIDC path produces no rows here.
 type UserStore interface {
@@ -163,6 +187,8 @@ type Store struct {
 	AppDeploys   AppDeployStore
 	AuditEvents  AuditEventStore
 	Hosts        HostStore
+	Registries   RegistryConfigStore
+	Clusters     ClusterConfigStore
 	Users        UserStore
 	close        func() error
 	ping         func(context.Context) error
@@ -171,7 +197,7 @@ type Store struct {
 // New builds a Store. closeFn may be nil when no cleanup is required
 // (e.g., in-memory stores). pingFn may be nil for backends without a
 // liveness probe; Ping then reports healthy unconditionally.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
+func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
 		Pipelines:    p,
 		Runs:         r,
@@ -181,6 +207,8 @@ func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, a A
 		AppDeploys:   ad,
 		AuditEvents:  ae,
 		Hosts:        h,
+		Registries:   rc,
+		Clusters:     cc,
 		Users:        u,
 		close:        closeFn,
 		ping:         pingFn,
