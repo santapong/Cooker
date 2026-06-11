@@ -123,7 +123,7 @@ The cutover procedure itself (UAT → production order of operations) is [`docs/
 
 | Item | Effort | Why |
 |---|---|---|
-| Pipeline-as-code: YAML import/export | 3–5 d | The #1 expectation for any CI/CD tool; the DAG already serializes to JSON — add a YAML round-trip + `POST /pipelines/import`. |
+| Pipeline-as-code: YAML import/export | 3–5 d | ✅ Shipped 2026-06-11 — `apiVersion: cooker.dev/v1` envelope, byte-identical round-trip, imports run the editor's DAG validation, secret values provably absent; guide at `docs/user-guide/guides/pipelines-as-code.md`. |
 | Git-push → pipeline triggers | 2 d | Extend the existing webhook receivers (GitHub/GitLab/Bitbucket/Gitea) from Apps to Pipelines. |
 | CLI (`cooker` binary over API + tokens) | 3–5 d | Unlocks scripting and CI-of-CI; depends on Tier 1 tokens. |
 | First-run empty-state CTAs (W11 P2) | 1 d | Softens the onboarding cliff on Apps/Pipelines/Environments. |
