@@ -1,7 +1,8 @@
-.PHONY: all build clean dev test lint uat-up uat-up-socketproxy uat-up-with-keycloak uat-down uat-logs uat-shell uat-reset test-e2e release release-snapshot
+.PHONY: all build build-cli clean dev test lint uat-up uat-up-socketproxy uat-up-with-keycloak uat-down uat-logs uat-shell uat-reset test-e2e release release-snapshot
 
 # Variables
 BINARY_NAME=cooker
+CLI_BINARY_NAME=cookerctl
 BACKEND_DIR=backend
 FRONTEND_DIR=frontend
 DEPLOY_DIR=deploy
@@ -26,6 +27,16 @@ build-backend:
 	cd $(BACKEND_DIR) && CGO_ENABLED=0 GOOS=linux go build \
 		-ldflags "$(GO_LDFLAGS)" \
 		-o ../bin/$(BINARY_NAME) ./cmd/cooker/
+
+# Builds the cookerctl CLI — a second binary in the same Go module that
+# talks to a Cooker server over the REST API with a ck_ token. Mirrors
+# build-backend; clientVersion is injected so `cookerctl version` reports
+# the real release. CGO disabled + static for the same portability the
+# server binary gets.
+build-cli:
+	cd $(BACKEND_DIR) && CGO_ENABLED=0 go build \
+		-ldflags "-s -w -X main.clientVersion=$(VERSION)" \
+		-o ../bin/$(CLI_BINARY_NAME) ./cmd/cookerctl/
 
 test-backend:
 	cd $(BACKEND_DIR) && go test ./... -v -race
