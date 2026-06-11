@@ -200,6 +200,37 @@ type UserStore interface {
 	Count(ctx context.Context) (int, error)
 }
 
+// APITokenStore persists personal-access / service-account tokens
+// (product-plan Tier 1). A token is a long-lived bearer credential
+// (`ck_<base64url>`) scripts and external CI use in place of the browser
+// OIDC flow. Only the SHA-256 hash of the plaintext is stored; the
+// plaintext is shown exactly once at creation and revocation is a row
+// delete. GetByHash is on the auth hot path (every ck_-prefixed request)
+// and is served by a unique index on the hash column (migration 023).
+type APITokenStore interface {
+	// Create inserts a new token. The caller is responsible for having
+	// hashed the plaintext and set DisplayPrefix before calling.
+	Create(ctx context.Context, t *model.APIToken) error
+	// ListByCreator returns the tokens minted by one user (keyed on
+	// CreatedBySub), newest-first. Backs "list my tokens".
+	ListByCreator(ctx context.Context, createdBySub string) ([]*model.APIToken, error)
+	// ListAll returns every token, newest-first. Admin-only at the
+	// service layer.
+	ListAll(ctx context.Context) ([]*model.APIToken, error)
+	// GetByHash looks a token up by its hex SHA-256 hash. ErrNotFound if
+	// no token has that hash. This is the auth-middleware lookup.
+	GetByHash(ctx context.Context, hash string) (*model.APIToken, error)
+	// Get returns a token by id. ErrNotFound if absent. Used by the
+	// delete path to resolve ownership before deleting.
+	Get(ctx context.Context, id string) (*model.APIToken, error)
+	// Delete removes a token by id (revocation). ErrNotFound if absent.
+	Delete(ctx context.Context, id string) error
+	// TouchLastUsed stamps last_used_at = ts for the token. Called from
+	// the auth hot path, throttled to at most once per minute per token
+	// by the middleware so this stays a rare write.
+	TouchLastUsed(ctx context.Context, id string, ts time.Time) error
+}
+
 // Store aggregates all data-access interfaces and a cleanup hook.
 // Construct with New and pass to the server and handler layers.
 type Store struct {
@@ -215,6 +246,7 @@ type Store struct {
 	Registries     RegistryConfigStore
 	Clusters       ClusterConfigStore
 	Users          UserStore
+	APITokens      APITokenStore
 	close          func() error
 	ping           func(context.Context) error
 }
@@ -222,7 +254,7 @@ type Store struct {
 // New builds a Store. closeFn may be nil when no cleanup is required
 // (e.g., in-memory stores). pingFn may be nil for backends without a
 // liveness probe; Ping then reports healthy unconditionally.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa StageApprovalStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
+func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa StageApprovalStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, at APITokenStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
 		Pipelines:      p,
 		Runs:           r,
@@ -236,6 +268,7 @@ func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa 
 		Registries:     rc,
 		Clusters:       cc,
 		Users:          u,
+		APITokens:      at,
 		close:          closeFn,
 		ping:           pingFn,
 	}

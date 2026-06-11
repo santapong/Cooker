@@ -18,6 +18,7 @@ import (
 
 	"github.com/santapong/cooker/internal/auth/local"
 	"github.com/santapong/cooker/internal/config"
+	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/observability"
 )
 
@@ -52,6 +53,10 @@ type Claims struct {
 type Middleware struct {
 	cfg         config.OIDCConfig
 	localIssuer *local.Issuer
+	// apiTokens authenticates `ck_`-prefixed bearer credentials. nil
+	// disables the token path entirely (the prefix is then treated like
+	// any other non-local token). Set via EnableAPITokens.
+	apiTokens *APITokenAuthenticator
 
 	// verifier holds the OIDC ID-token verifier once provider discovery
 	// succeeds. Loaded lock-free on every authenticated request; written
@@ -142,14 +147,64 @@ func (m *Middleware) EnableLocalAuth(issuer *local.Issuer) {
 	m.localIssuer = issuer
 }
 
+// EnableAPITokens attaches the API-token authenticator so the middleware
+// accepts `ck_`-prefixed bearer credentials (product-plan Tier 1). Pass
+// nil to disable. Wired unconditionally by server.New: the token path is
+// always available because the api_tokens table backs it regardless of
+// which interactive auth method is configured.
+func (m *Middleware) EnableAPITokens(a *APITokenAuthenticator) {
+	m.apiTokens = a
+}
+
 // Handler returns a Gin middleware that validates bearer tokens.
 func (m *Middleware) Handler() gin.HandlerFunc {
+	// Dev mode (no OIDC, no local auth) injects a dev admin — but still
+	// honour a presented API token if the token path is wired, so the
+	// token feature can be exercised in UAT/dev. A request with no
+	// Authorization header (or a non-`ck_` one) falls through to the dev
+	// admin, preserving the auth-off developer experience.
 	if !m.cfg.Enabled && m.localIssuer == nil {
-		return devHandler()
+		dev := devHandler()
+		if m.apiTokens == nil {
+			return dev
+		}
+		return func(c *gin.Context) {
+			if cred := rawBearer(c); cred != "" && model.LooksLikeAPIToken(cred) {
+				if claims, ok := m.apiTokens.Authenticate(c.Request.Context(), cred); ok {
+					c.Set("user", claims)
+					c.Next()
+					return
+				}
+				slog.Warn("auth: rejected api token in dev mode")
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"error": "authentication failed",
+				})
+				return
+			}
+			dev(c)
+		}
 	}
 	return func(c *gin.Context) {
 		token, ok := bearerToken(c)
 		if !ok {
+			return
+		}
+		// API-token fast path: a `ck_` prefix routes to the token store
+		// (SHA-256 + hash-index lookup) before any JWT verify. This branch
+		// only engages on the prefix, so it cannot affect OIDC or local
+		// tokens. An invalid/expired/revoked token fails closed with a
+		// generic 401, exactly like a bad JWT (S26-05-01 posture).
+		if m.apiTokens != nil && model.LooksLikeAPIToken(token) {
+			claims, valid := m.apiTokens.Authenticate(c.Request.Context(), token)
+			if !valid {
+				slog.Warn("auth: api token verify failed")
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"error": "authentication failed",
+				})
+				return
+			}
+			c.Set("user", claims)
+			c.Next()
 			return
 		}
 		// Local-auth fast path: probe the token's iss before paying
@@ -266,6 +321,22 @@ func devHandler() gin.HandlerFunc {
 		c.Set("user", devUser)
 		c.Next()
 	}
+}
+
+// rawBearer returns the bearer credential from the Authorization header
+// without aborting on a missing/malformed header (it returns ""). Used by
+// the dev-mode dispatcher to peek for a `ck_` token before deciding
+// whether to inject the dev admin.
+func rawBearer(c *gin.Context) string {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		return ""
+	}
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
 }
 
 // bearerToken pulls the bearer token out of the Authorization header.

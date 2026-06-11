@@ -254,6 +254,22 @@ func (s *Server) registerRoutes() {
 		api.GET("/auth/local/me", s.localAuth.Me)
 	}
 
+	// Personal-access / service-account tokens (product-plan Tier 1).
+	// RBAC is enforced inside the service, not at the route, because the
+	// rules are relational, not role-flat: create caps the new token's
+	// role at the caller's own role; list/delete are scoped to ownership
+	// (admins see/manage all). No route-level MFA gate — own-token
+	// management must work without step-up; an admin deleting ANOTHER
+	// user's token is MFA-gated inline in the handler (matching the
+	// destructive-admin-route convention). A request authenticated by a
+	// token is refused create/delete in the service (no self-replication).
+	tokens := api.Group("/tokens")
+	{
+		tokens.POST("", h.CreateAPIToken)
+		tokens.GET("", h.ListAPITokens)
+		tokens.DELETE("/:id", h.DeleteAPIToken)
+	}
+
 	settings := api.Group("/settings")
 	{
 		settings.GET("/registries", h.ListRegistryConfigs)

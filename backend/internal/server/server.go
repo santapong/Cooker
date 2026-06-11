@@ -274,6 +274,18 @@ func New(cfg *config.Config) (*Server, error) {
 	// share the same service instance the executor uses to open + poll the
 	// gate, so a decision recorded over HTTP unblocks the running stage.
 	h.StageApprovals = stageApprovals
+	// API tokens (product-plan Tier 1): the create/list/delete handlers
+	// route the role-cap / ownership / no-self-replication rules through
+	// this service. The same store backs the auth middleware's `ck_`
+	// token path, wired below. MFAACRValues lets the delete handler
+	// step-up-gate an admin deleting another user's token.
+	h.APITokens = service.NewAPITokenService(st.APITokens)
+	h.MFAACRValues = cfg.OIDC.MFAACRValues
+	// Enable the `ck_` bearer-token auth path. Wired unconditionally: the
+	// api_tokens table backs it regardless of which interactive auth
+	// method (OIDC / local / dev) is configured, so scripts and CI can
+	// authenticate even when no IdP is present.
+	oidcMW.EnableAPITokens(auth.NewAPITokenAuthenticator(st.APITokens))
 	// AI triage (M4): Validate() already guaranteed the key when
 	// enabled; nil keeps the route 503 and the frontend button hidden.
 	if cfg.Triage.Enabled {
