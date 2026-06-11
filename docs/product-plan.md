@@ -117,7 +117,7 @@ The cutover procedure itself (UAT → production order of operations) is [`docs/
 | Working promotion/approval (= §3 #1) | 1–2 d | It's the differentiating headline feature; today it's theatre. |
 | Working webhook deploy (= §3 #2) | ½ d | "Push and it deploys" is the demo. |
 | README screenshots + a 90-second GIF (W6.3) | ½ d | Half the star decision happens on the README. |
-| **API tokens / service accounts** | 1–2 d | Migration + auth middleware accepting a token alongside the Bearer JWT. Gateway to CLI, scripting, external CI. |
+| **API tokens / service accounts** | 1–2 d | ✅ Shipped 2026-06-11 — `ck_` bearer tokens, hash-only storage, role-capped minting, Settings UI; see SECURITY.md "Path 3". Gateway to CLI, scripting, external CI. |
 
 ### Tier 2 — makes people adopt it for real work
 
