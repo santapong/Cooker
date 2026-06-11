@@ -349,6 +349,68 @@ paths:
               schema: { $ref: "#/components/schemas/Pipeline" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/pipelines/import:
+    post:
+      summary: Import a pipeline from a YAML document (pipeline-as-code)
+      description: |
+        Creates a NEW pipeline from a `cooker.dev/v1` `Pipeline` YAML
+        envelope (the same document `GET /pipelines/{id}/export` produces).
+        The body is the raw YAML (Content-Type `application/yaml`), not a
+        JSON wrapper. A fresh ID and timestamps are always minted, so
+        importing the same document twice yields two pipelines (there is
+        no name-collision handling — create has none).
+
+        The parsed pipeline runs the identical validation path as a JSON
+        create: an unknown `apiVersion`/`kind`, malformed YAML, an empty
+        body, an invalid stage type, or a graph that fails DAG validation
+        all return 400. A DAG failure returns the same
+        `{ "valid": false, "errors": [...] }` envelope as `POST /validate`.
+      tags: [pipelines]
+      x-required-role: operator
+      requestBody:
+        required: true
+        content:
+          application/yaml:
+            schema:
+              type: string
+              description: A cooker.dev/v1 Pipeline YAML document.
+      responses:
+        "201":
+          description: Created pipeline
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pipeline" }
+        "400":
+          description: Malformed/unknown envelope or failing validation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { description: Pipeline document exceeds the 1 MiB import cap }
+  /api/v1/pipelines/{id}/export:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    get:
+      summary: Export a pipeline as a YAML document (pipeline-as-code)
+      description: |
+        Returns the pipeline as a `cooker.dev/v1` `Pipeline` YAML
+        envelope (`apiVersion`/`kind`/`metadata`/`spec`). Server-assigned
+        fields (id, timestamps, version) are stripped so the document is
+        portable and version-controllable; re-importing regenerates them.
+        Secret VALUES never appear — only `secretRefs` (names). The
+        response carries a `Content-Disposition` filename suggestion
+        (`<name>.cooker.yaml`). Read-level access, same as GET pipeline.
+      tags: [pipelines]
+      responses:
+        "200":
+          description: Pipeline-as-code YAML document
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   # ----------------------------------------------------------------- runs
   /api/v1/pipelines/{id}/run:

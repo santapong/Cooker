@@ -132,6 +132,7 @@ kubectl get deploy/hello-world -n default
 - **A Test stage** between Build and Push so unit tests gate the push.
 - **A second Deploy stage** in a `staging` swimlane with `Approval` between them.
 - **A Notify** stage — but [notifications are partial today](notifications.md); use a Custom stage that `curl`s your Slack webhook as the workaround.
+- **Export it to YAML** and commit it to git — see [Pipelines as code](pipelines-as-code.md).
 
 ## Common first-pipeline mistakes
 
@@ -148,4 +149,5 @@ kubectl get deploy/hello-world -n default
 - **[Stages](../concepts/stages.md)** — every type with its full config schema.
 - **[Promotions](promotions.md)** — adding Staging -> Prod with approval gates.
 - **[GitHub webhooks](github-webhooks.md)** — auto-run on push to `main`.
+- **[Pipelines as code](pipelines-as-code.md)** — export/import pipelines as YAML.
 - **[Pipelines concept](../concepts/pipelines.md)** — DAG semantics if something behaves unexpectedly.

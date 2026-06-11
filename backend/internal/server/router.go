@@ -43,7 +43,14 @@ func (s *Server) registerRoutes() {
 	{
 		pipelines.GET("", h.ListPipelines)
 		pipelines.POST("", writeRole, h.CreatePipeline)
+		// Pipeline-as-code (product-plan Tier 2). Import is a create, so
+		// it carries the same writeRole gate as POST /pipelines; it is a
+		// static sibling of /:id (like /from-template) so Gin routes the
+		// literal "import" segment ahead of the :id param. Export is
+		// read-level — same (no) gate as GET /:id.
+		pipelines.POST("/import", writeRole, h.ImportPipeline)
 		pipelines.GET("/:id", h.GetPipeline)
+		pipelines.GET("/:id/export", h.ExportPipeline)
 		pipelines.PUT("/:id", writeRole, h.UpdatePipeline)
 		pipelines.DELETE("/:id", adminRole, mfa, h.DeletePipeline)
 		pipelines.POST("/:id/validate", h.ValidatePipeline)

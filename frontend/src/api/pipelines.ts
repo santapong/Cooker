@@ -1,4 +1,4 @@
-import { get, post, put, del } from './client';
+import { get, post, put, del, getText, postText } from './client';
 import type {
   Pipeline,
   PipelineRun,
@@ -15,6 +15,11 @@ export const pipelineApi = {
   update: (id: string, data: Pipeline) => put<Pipeline>(`/pipelines/${id}`, data),
   delete: (id: string) => del(`/pipelines/${id}`),
   validate: (id: string) => post<{ valid: boolean; errors: string[] }>(`/pipelines/${id}/validate`),
+  // Pipeline-as-code (product-plan Tier 2). exportYaml returns the raw
+  // YAML document for download; importYaml POSTs a YAML document and
+  // returns the freshly-created pipeline (new id + timestamps).
+  exportYaml: (id: string) => getText(`/pipelines/${id}/export`, 'application/yaml'),
+  importYaml: (yaml: string) => postText<Pipeline>('/pipelines/import', yaml),
   run: (id: string) => post<PipelineRun>(`/pipelines/${id}/run`),
   listRuns: (id: string) => get<PipelineRun[]>(`/pipelines/${id}/runs`),
   getRun: (pipelineId: string, runId: string) => get<PipelineRun>(`/pipelines/${pipelineId}/runs/${runId}`),
