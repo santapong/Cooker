@@ -28,7 +28,7 @@ const (
 // Secret key names within the per-config scope. One key per config,
 // suffixed with the config ID (mirrors hostSSHKeyKey usage).
 const (
-	registryPasswordKey = "registry_password"
+	registryPasswordKey  = "registry_password"
 	clusterKubeconfigKey = "cluster_kubeconfig"
 )
 
