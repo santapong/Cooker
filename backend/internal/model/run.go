@@ -99,6 +99,12 @@ type EnvironmentStatus struct {
 	Status        EnvStatus  `json:"status"`
 	PromotedAt    *time.Time `json:"promotedAt,omitempty"`
 	ApprovedBy    string     `json:"approvedBy,omitempty"`
+	// ApprovalsHave / ApprovalsNeed expose manual-gate progress for the
+	// run page's promotion lane ("2 of 3 approvals"). Populated by
+	// GetEnvStatus from the persisted promotion rows; zero for the
+	// executor's legacy inline auto-promote path.
+	ApprovalsHave int `json:"approvalsHave,omitempty"`
+	ApprovalsNeed int `json:"approvalsNeed,omitempty"`
 }
 
 // EnvStatus represents the deployment state for an environment.

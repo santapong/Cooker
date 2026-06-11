@@ -251,6 +251,10 @@ func New(cfg *config.Config) (*Server, error) {
 	h := handler.New(st, codec, secMgr)
 	h.SecretsBackend = cfg.SecretsBackend
 	h.AppDeployer = appDeployer
+	// Persistent promotion/approval flow (HS26-05-01 / -08 / -14):
+	// promote/approve/env-status route through this service, which
+	// persists promotions + approvals and enforces RequiredApprovers.
+	h.Promotions = service.NewPromotionService(st.Promotions, st.Environments)
 	// AI triage (M4): Validate() already guaranteed the key when
 	// enabled; nil keeps the route 503 and the frontend button hidden.
 	if cfg.Triage.Enabled {

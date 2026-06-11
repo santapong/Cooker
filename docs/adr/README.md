@@ -23,3 +23,5 @@ Status: proposed | accepted | superseded by ADR-NNNN | deprecated
 | [0001](0001-strategy-pattern-interfaces.md) | Strategy-pattern interfaces for builder / pusher / deployer / secrets / deploytarget | accepted |
 | [0002](0002-secrets-manager.md) | Pluggable `secrets.Manager` with KeepSave as system of record | accepted |
 | [0003](0003-jsonb-graph-storage.md) | JSONB columns for pipeline graphs and environment secrets | accepted |
+| [0004](0004-multi-tenancy.md) | Multi-tenancy model | accepted |
+| [0005](0005-promotion-approval-persistence.md) | Persisted promotions and approvals as relational rows | accepted |

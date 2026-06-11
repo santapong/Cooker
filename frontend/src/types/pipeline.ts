@@ -118,9 +118,13 @@ export interface Artifact {
 
 export interface EnvironmentStatus {
   environmentId: string;
-  status: 'pending' | 'deploying' | 'deployed' | 'failed' | 'awaiting_approval';
+  status: 'pending' | 'deploying' | 'deployed' | 'failed' | 'awaiting_approval' | 'approved';
   promotedAt?: string;
   approvedBy?: string;
+  /** manual-gate progress: distinct approvals collected so far */
+  approvalsHave?: number;
+  /** manual-gate progress: distinct approvals required to advance */
+  approvalsNeed?: number;
 }
 
 // Run diff (roadmap M3): GET /pipelines/:id/runs/:runId/diff

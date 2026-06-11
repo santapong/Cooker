@@ -58,6 +58,30 @@ type EnvironmentStore interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// PromotionStore persists run→environment promotions and their
+// approvals (audit findings HS26-05-01 / -08 / -14). A promotion is
+// keyed uniquely by (run, environment); approvals are append-only with
+// a one-per-approver uniqueness guarantee so the count drives manual
+// gate completion. See docs/adr/0005-promotion-approval-persistence.md.
+type PromotionStore interface {
+	// CreatePromotion inserts a new promotion. Returns ErrConflict if a
+	// promotion for the same (run, environment) already exists.
+	CreatePromotion(ctx context.Context, p *model.RunPromotion) error
+	// GetPromotion returns the promotion for (runID, environmentID) with
+	// its Approvals populated. ErrNotFound if none exists.
+	GetPromotion(ctx context.Context, runID, environmentID string) (*model.RunPromotion, error)
+	// ListPromotions returns all promotions for a run, each with its
+	// Approvals populated, ordered by creation time.
+	ListPromotions(ctx context.Context, runID string) ([]*model.RunPromotion, error)
+	// UpdatePromotionStatus advances a promotion's status (and stamps
+	// promoted_at when non-nil). ErrNotFound if the row is gone.
+	UpdatePromotionStatus(ctx context.Context, id string, status model.PromotionStatus, promotedAt *time.Time) error
+	// AddApproval records an approval. It is idempotent per approver:
+	// re-approval by the same ApproverSub is a no-op (added=false) rather
+	// than an error. Returns the resulting distinct-approval count.
+	AddApproval(ctx context.Context, a *model.PromotionApproval) (added bool, count int, err error)
+}
+
 // AppStore manages App persistence (Phase 3).
 type AppStore interface {
 	List(ctx context.Context) ([]*model.App, error)
@@ -134,6 +158,7 @@ type Store struct {
 	Pipelines    PipelineStore
 	Runs         RunStore
 	Environments EnvironmentStore
+	Promotions   PromotionStore
 	Apps         AppStore
 	AppDeploys   AppDeployStore
 	AuditEvents  AuditEventStore
@@ -146,11 +171,12 @@ type Store struct {
 // New builds a Store. closeFn may be nil when no cleanup is required
 // (e.g., in-memory stores). pingFn may be nil for backends without a
 // liveness probe; Ping then reports healthy unconditionally.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
+func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
 		Pipelines:    p,
 		Runs:         r,
 		Environments: e,
+		Promotions:   pr,
 		Apps:         a,
 		AppDeploys:   ad,
 		AuditEvents:  ae,

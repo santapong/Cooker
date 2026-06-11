@@ -52,7 +52,13 @@ type Handler struct {
 	// "keepsave", ...) for the connectivity-test response. Set by
 	// server.New from COOKER_SECRETS_BACKEND.
 	SecretsBackend string
-	AppDeployer    *service.AppDeployer
+	// Promotions persists run→environment promotions and approvals and
+	// enforces PromotionPolicy.RequiredApprovers (HS26-05-01 / -08 / -14).
+	// Set by server.New from the store; the promote/approve/env-status
+	// handlers route through it. nil-safe: handlers fall back to 503 when
+	// the store wasn't wired (defensive — server.New always sets it).
+	Promotions  *service.PromotionService
+	AppDeployer *service.AppDeployer
 	// Triage backs the opt-in AI failure-triage endpoint (roadmap M4).
 	// Set by server.New when COOKER_AI_TRIAGE_ENABLED=true; nil keeps
 	// the route returning 503 and hides the frontend button via

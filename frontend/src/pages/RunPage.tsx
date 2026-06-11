@@ -919,11 +919,12 @@ function RightRail({
                   ? 'bad'
                   : status.status === 'awaiting_approval'
                     ? 'warn'
-                    : status.status === 'deploying'
+                    : status.status === 'deploying' || status.status === 'approved'
                       ? 'ember'
                       : 'neutral'
               : 'neutral';
             const needsApproval = status?.status === 'awaiting_approval';
+            const settled = status?.status === 'deployed' || status?.status === 'approved';
             return (
               <div
                 key={env.id}
@@ -941,7 +942,13 @@ function RightRail({
                   <span style={{ fontFamily: t.mono, fontSize: 12, fontWeight: 600, color: t.text, flex: 1 }}>
                     {env.name}
                   </span>
-                  <Pill tone={tone}>{status?.status ?? 'pending'}</Pill>
+                  {needsApproval && status?.approvalsNeed ? (
+                    <Pill tone="warn">
+                      {status.approvalsHave ?? 0}/{status.approvalsNeed} approved
+                    </Pill>
+                  ) : (
+                    <Pill tone={tone}>{status?.status ?? 'pending'}</Pill>
+                  )}
                 </div>
                 {status?.promotedAt && (
                   <div style={{ fontFamily: t.mono, fontSize: 10.5, color: t.textMute }}>
@@ -960,7 +967,7 @@ function RightRail({
                       {busy === `approve:${env.id}` ? 'Approving…' : 'Approve'}
                     </Btn>
                   )}
-                  {!needsApproval && status?.status !== 'deployed' && (
+                  {!needsApproval && !settled && (
                     <Btn
                       kind="ink"
                       icon="arrow"
