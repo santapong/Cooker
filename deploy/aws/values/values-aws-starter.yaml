@@ -1,0 +1,169 @@
+# =============================================================================
+# Cooker Helm overlay — AWS STARTER tier
+# ~$9.61/day us-east-1 (~$292/mo) / ~$11.00/day ap-southeast-1 (rough estimate,
+# retrieved 2026-06-11; sources + full BOM in
+# docs/guides/DEPLOY-AWS-VERCEL.md).
+#
+# Shape: 1 replica, in-memory WS hub / ticket / rate-limit backends, NO Redis,
+# single-AZ RDS, Kaniko builder on an EFS context PVC, ALB ingress.
+#
+# Apply: helm upgrade --install cooker deploy/helm/cooker \
+#          -f deploy/aws/values/values-aws-starter.yaml \
+#          --set database.host=<rds-endpoint> \
+#          --set 'ingress.annotations.alb\.ingress\.kubernetes\.io/certificate-arn=<acm-arn>' \
+#          --set oidc.issuerUrl=<cognito-issuer> ...
+# skeleton — review before apply; prices/assumptions in the guide above.
+# =============================================================================
+
+replicaCount: 1
+
+cookerEnv: production
+
+# Single replica ⇒ in-memory backends are legal (Config.Validate allows
+# memory at replicaCount=1). No Redis at this tier.
+wsHub:
+  backend: memory
+wsTicket:
+  backend: memory
+rateLimit:
+  backend: memory
+
+redis:
+  enabled: false
+
+# --- Builder: Kaniko, in-cluster Job, no host docker.sock --------------------
+builder:
+  kind: kaniko
+  kaniko:
+    # Pin to a digest in production for reproducible builds. Example shape:
+    #   gcr.io/kaniko-project/executor@sha256:<digest>
+    # (left as a tag here; replace with a pinned digest before apply).
+    image: gcr.io/kaniko-project/executor:latest
+    # Kaniko Job's SA. Pod Identity (modules/cluster) maps cooker-kaniko -> ECR
+    # push, and Kaniko's built-in amazon-ecr-credential-helper picks the creds
+    # up with ZERO in-pod config.
+    serviceAccount: cooker-kaniko
+    # EFS-backed RWX PVC shared between the Cooker pod and Kaniko Jobs. Create
+    # the PVC against the EFS CSI storage class (modules/data provisions the
+    # EFS). Build contexts live here; a nightly GC CronJob trims them (nothing
+    # in the repo GCs contexts — see the guide §7).
+    contextPVC: cooker-context
+
+# --- Database: RDS Postgres, sslmode=require ---------------------------------
+# sslmode=require works with the default RDS cert (lib/pq require = TLS without
+# verification; no CA bundle needed). database.host is left empty so it MUST be
+# supplied at install (--set database.host=<rds-endpoint>); the chart fails
+# closed if host is set without passwordSecretRef.
+database:
+  host: ""                       # REQUIRED at install: the RDS endpoint
+  port: 5432
+  name: cooker
+  username: cooker
+  passwordSecretRef:
+    name: cooker-db              # K8s Secret synced from Secrets Manager db-password
+    key: password
+
+postgresql:
+  sslMode: require               # verify-full + mounted CA bundle = hardening (guide §7)
+
+# --- OIDC: Cognito (GATED on the aud-claim spike, OPEN-7) --------------------
+oidc:
+  enabled: true
+  issuerUrl: ""                  # REQUIRED at install: Cognito user-pool issuer URL
+  clientId: ""                   # REQUIRED at install
+  redirectUrl: ""                # REQUIRED at install: https://<domain>/auth/callback (exact)
+  # IMPORTANT: scopes WITHOUT "groups". Cognito has NO "groups" scope — the
+  # default chart value ["openid","profile","email","groups"] would make the
+  # IdP reject the authorize request. Cognito injects the groups CLAIM via a
+  # pre-token-generation V2_0 Lambda instead (claim name hardcoded "groups" at
+  # backend/internal/auth/oidc.go:286). See the guide's Cognito section.
+  scopes: ["openid", "profile", "email"]
+  allowedOrigins: []             # REQUIRED at install: the exact HTTPS app origin(s)
+  clientSecretRef:
+    name: cooker-oidc            # K8s Secret synced from Secrets Manager oidc-client-secret
+    key: client-secret
+  # Example group->role mapping (Cognito group names on the left). Adjust to
+  # your pool's groups.
+  groupRoleMap: "cooker-admins:admin,cooker-operators:operator,cooker-approvers:approver,cooker-viewers:viewer"
+
+# --- Ingress: ALB via EKS Auto Mode's controller -----------------------------
+ingress:
+  enabled: true
+  className: alb
+  hosts:
+    - host: cooker.example.com   # REPLACE with var.domain
+      paths:
+        - path: /
+          pathType: Prefix
+  # ALB terminates TLS with an ACM cert (no in-cluster cert Secret), so
+  # ingress.tls stays empty. The chart's prod+OIDC fail-guard requires
+  # ingress.tls UNLESS TLS is handled at the ALB — confirm the guard's
+  # condition against templates/ingress.yaml; if it still demands ingress.tls,
+  # pass a dummy tls host entry or adjust the chart. (Tracked in the guide's
+  # OPEN list.)
+  tls: []
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    # ACM cert ARN — REQUIRED at install (left empty so --set supplies it):
+    alb.ingress.kubernetes.io/certificate-arn: ""
+    # MANDATORY: Cooker's WS ping is ~54s; the ALB default idle timeout is 60s,
+    # which can clip long-lived live-log WebSockets. Raise to 300s.
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=300
+
+# --- NetworkPolicy: OFF on EKS Auto Mode -------------------------------------
+# The chart's NetworkPolicy uses ingressNamespaceLabel to admit the ingress
+# controller by namespace. On EKS Auto Mode the ALB lives OUTSIDE the cluster
+# (its ENIs aren't pods), so a namespace selector can't match ALB traffic ->
+# health checks + data-plane would be blocked. Disable here and apply a
+# CIDR-based NetworkPolicy alternative manifest instead (documented in the
+# guide §3, ALB rationale).
+networkPolicy:
+  enabled: false
+
+# --- ServiceAccount: Pod Identity (NOT IRSA) ---------------------------------
+serviceAccount:
+  create: true
+  name: cooker
+  # STAYS EMPTY. Pod Identity associates the role to the (namespace, SA-name)
+  # pair server-side (modules/cluster) — no eks.amazonaws.com/role-arn
+  # annotation, unlike IRSA.
+  annotations: {}
+
+# --- Extra env: AWS secrets backend + crane DOCKER_CONFIG --------------------
+extraEnv:
+  # Secrets backend selector. VERIFIED value is "aws" (backend/internal/config/
+  # config.go:447 `case "aws"`, server.go:850, and the values.yaml example).
+  # NOT "awsm".
+  - name: COOKER_SECRETS_BACKEND
+    value: aws
+  # The crane in-process pusher reads $DOCKER_CONFIG/config.json per push
+  # (authn.DefaultKeychain). Point it at the mounted dockerconfig dir.
+  - name: DOCKER_CONFIG
+    value: /etc/cooker-docker
+  # AWS Secrets Manager region/prefix the "aws" backend needs (confirm exact
+  # env-var names against backend/internal/config AWSSecrets fields before
+  # apply; placeholders shown):
+  # - name: COOKER_SECRETS_AWS_REGION
+  #   value: ap-southeast-1
+  # - name: COOKER_SECRETS_AWS_PREFIX
+  #   value: cooker-starter/
+
+# CHART GAP (OPEN): the chart exposes extraEnvFrom but NOT extraVolumes/
+# extraVolumeMounts. The dockerconfig Secret refreshed by the CronJob
+# (modules/registry/dockerconfig-refresh.example.yaml) must be mounted at
+# /etc/cooker-docker — which the chart CANNOT do today. Workarounds:
+#   (a) add extraVolumes/extraVolumeMounts to the chart (preferred follow-up); or
+#   (b) layer a kustomize/pod-spec patch over the Helm output to mount it; or
+#   (c) crane also honors REGISTRY_AUTH_FILE pointing at a single file IF the
+#       go-containerregistry version in use supports it — but DOCKER_CONFIG
+#       (a directory) is the verified path here, so a mount is still needed.
+# Setting DOCKER_CONFIG via extraEnv (above) is the env-only half; the VOLUME
+# is the gap. Tracked in the guide's OPEN list.
+extraEnvFrom: []
+
+# HPA/PDB off at 1 replica.
+hpa:
+  enabled: false
+pdb:
+  enabled: false

@@ -1,0 +1,107 @@
+# =============================================================================
+# Cooker Helm overlay — AWS SCALE tier
+# ~$54.09/day us-east-1 (~$1,645/mo) / ~$64.71/day ap-southeast-1 (rough
+# estimate, retrieved 2026-06-11; sources + full BOM in
+# docs/guides/DEPLOY-AWS-VERCEL.md).
+#
+# Shape: 3+ replicas + HPA (3..6), larger Multi-AZ RDS (db.r7g.large),
+# Redis via ElastiCache Serverless Valkey, bigger Spot pool, WAF (attached at
+# the ALB via annotation — see below).
+# skeleton — review before apply; prices/assumptions in the guide above.
+# =============================================================================
+
+replicaCount: 3
+
+cookerEnv: production
+
+wsHub:
+  backend: redis
+wsTicket:
+  backend: redis
+rateLimit:
+  backend: redis
+
+redis:
+  enabled: false
+  url: "rediss://REPLACE-valkey-endpoint:6379"
+
+builder:
+  kind: kaniko
+  kaniko:
+    image: gcr.io/kaniko-project/executor:latest   # pin to a digest before apply
+    serviceAccount: cooker-kaniko
+    contextPVC: cooker-context
+
+database:
+  host: ""                       # REQUIRED at install: the db.r7g.large Multi-AZ endpoint
+  port: 5432
+  name: cooker
+  username: cooker
+  passwordSecretRef:
+    name: cooker-db
+    key: password
+
+postgresql:
+  sslMode: require
+
+oidc:
+  enabled: true
+  issuerUrl: ""                  # REQUIRED at install
+  clientId: ""                   # REQUIRED at install
+  redirectUrl: ""                # REQUIRED at install: https://<domain>/auth/callback (exact)
+  scopes: ["openid", "profile", "email"]   # WITHOUT groups (Cognito) — see starter/guide
+  allowedOrigins: []             # REQUIRED at install
+  clientSecretRef:
+    name: cooker-oidc
+    key: client-secret
+  groupRoleMap: "cooker-admins:admin,cooker-operators:operator,cooker-approvers:approver,cooker-viewers:viewer"
+
+ingress:
+  enabled: true
+  className: alb
+  hosts:
+    - host: cooker.example.com   # REPLACE with var.domain
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/certificate-arn: ""   # REQUIRED at install
+    # MANDATORY 300s idle timeout (WS ping ~54s vs ALB default 60s).
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=300
+    # WAF at Scale: associate an AWS WAFv2 web ACL with the ALB. Supply the ACL
+    # ARN at install (left commented so the overlay templates without it):
+    # alb.ingress.kubernetes.io/wafv2-acl-arn: ""
+
+networkPolicy:
+  enabled: false                 # ALB ENIs aren't pods; use CIDR alt (guide §3)
+
+serviceAccount:
+  create: true
+  name: cooker
+  annotations: {}                # Pod Identity, NOT IRSA
+
+extraEnv:
+  - name: COOKER_SECRETS_BACKEND
+    value: aws                   # VERIFIED selector value (config.go:447)
+  - name: DOCKER_CONFIG
+    value: /etc/cooker-docker
+extraEnvFrom: []
+# Same CHART GAP (OPEN) as starter/team: no extraVolumes/extraVolumeMounts to
+# mount the dockerconfig Secret. See starter overlay note + the guide.
+
+pdb:
+  enabled: true
+  minAvailable: 2                # keep a quorum during node drains
+
+# --- Autoscaling -------------------------------------------------------------
+# NOTE: the spec called this "autoscaling.enabled"; the Cooker chart's actual
+# key is `hpa` (deploy/helm/cooker/values.yaml). Using the real chart key so
+# the overlay templates correctly.
+hpa:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70

@@ -1,0 +1,104 @@
+# skeleton — review before apply; prices/assumptions in docs/guides/DEPLOY-AWS-VERCEL.md
+#
+# EXAMPLE dockerconfig-refresh CronJob. NOT applied by Terraform — apply
+# out-of-band into the cooker namespace.
+#
+# WHY this exists: Cooker's crane pusher pushes IN-PROCESS using
+# authn.DefaultKeychain, which re-reads ~/.docker/config.json (or
+# $DOCKER_CONFIG/config.json) on EVERY push (verified:
+# backend/internal/pusher/crane.go:29-33 falls back to
+# authn.DefaultKeychain). ECR auth tokens live ~12h, so a CronJob refreshes a
+# dockerconfigjson Secret every 6h; the Cooker pod mounts it at
+# DOCKER_CONFIG=/etc/cooker-docker (set via the Helm overlay's extraEnv).
+#
+# REPO FOLLOW-UP (OPEN): wiring the ecr-login keychain
+# (github.com/awslabs/amazon-ecr-credential-helper as a go-containerregistry
+# keychain) directly into the crane pusher would DELETE this CronJob entirely
+# — the pusher would mint ECR tokens itself via Pod Identity. Until then, this
+# refresh sidecar-as-CronJob is the bridge.
+#
+# CHART GAP (OPEN): the Cooker Helm chart exposes extraEnv + extraEnvFrom but
+# NOT extraVolumes/extraVolumeMounts (confirmed against
+# deploy/helm/cooker/values.yaml + templates). So mounting the refreshed
+# Secret at /etc/cooker-docker requires either (a) a chart change adding
+# extraVolumes/extraVolumeMounts, or (b) a pod-spec patch/kustomize overlay
+# layered on top of the Helm output. Document this; do not assume the chart
+# can mount the Secret today. The DOCKER_CONFIG env var itself IS settable via
+# extraEnv — only the volume mount is the gap.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cooker-ecr-refresher
+  namespace: cooker
+# This SA gets its own Pod Identity association (ECR GetAuthorizationToken)
+# in a real apply; omitted from the TF skeleton to keep modules/cluster focused
+# on the two app SAs.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cooker-ecr-refresher
+  namespace: cooker
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cooker-ecr-refresher
+  namespace: cooker
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cooker-ecr-refresher
+subjects:
+  - kind: ServiceAccount
+    name: cooker-ecr-refresher
+    namespace: cooker
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cooker-dockerconfig-refresh
+  namespace: cooker
+spec:
+  # Every 6h; ECR tokens live ~12h so this keeps a fresh token with margin.
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: cooker-ecr-refresher
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+          containers:
+            - name: refresh
+              # An image with aws-cli + kubectl. Pin to a digest in production.
+              image: amazon/aws-cli:latest
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  REGION="${AWS_REGION:?}"
+                  ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
+                  REGISTRY="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com"
+                  TOKEN="$(aws ecr get-login-password --region "${REGION}")"
+                  AUTH="$(printf 'AWS:%s' "${TOKEN}" | base64 -w0)"
+                  cat > /tmp/config.json <<EOF
+                  {"auths":{"${REGISTRY}":{"auth":"${AUTH}"}}}
+                  EOF
+                  kubectl create secret generic cooker-dockerconfig \
+                    --namespace cooker \
+                    --type kubernetes.io/dockerconfigjson \
+                    --from-file=.dockerconfigjson=/tmp/config.json \
+                    --dry-run=client -o yaml | kubectl apply -f -
+              env:
+                - name: AWS_REGION
+                  value: REPLACE-with-var.region

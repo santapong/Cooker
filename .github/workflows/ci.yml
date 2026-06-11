@@ -317,11 +317,56 @@ jobs:
             cat /tmp/keepsave-stderr >&2
             exit 1
           }
+      - name: helm template (AWS overlays — starter/team/scale)
+        run: |
+          # Template the chart with each AWS deploy overlay so the overlays
+          # in deploy/aws/values/ can't silently rot against chart changes.
+          # The overlays deliberately leave per-cluster values empty
+          # (database.host, the ACM certificate-arn, oidc.issuerUrl, etc.);
+          # CI supplies the minimal --set placeholders here so the chart
+          # renders. NOTE: cookerEnv=production + oidc.enabled + ingress.enabled
+          # trips the chart's ingress.tls fail-guard
+          # (templates/ingress.yaml). On AWS, TLS is terminated at the ALB via
+          # an ACM cert, so the overlays carry no ingress.tls — meaning a dummy
+          # tls entry must be supplied here to template. This is the documented
+          # chart gap (see deploy/aws/values/*.yaml + DEPLOY-AWS-VERCEL.md OPEN
+          # list): the prod+OIDC TLS guard doesn't account for ALB-terminated
+          # TLS.
+          for tier in starter team scale; do
+            helm template cooker deploy/helm/cooker \
+              -f "deploy/aws/values/values-aws-${tier}.yaml" \
+              --set database.host=cooker-pg.example.rds.amazonaws.com \
+              --set 'oidc.issuerUrl=https://cognito-idp.ap-southeast-1.amazonaws.com/pool' \
+              --set oidc.clientId=ci-client \
+              --set 'oidc.redirectUrl=https://cooker.example.com/auth/callback' \
+              --set 'oidc.allowedOrigins={https://cooker.example.com}' \
+              --set secretKey.existingSecret=cooker-secret-key \
+              --set 'ingress.annotations.alb\.ingress\.kubernetes\.io/certificate-arn=arn:aws:acm:ap-southeast-1:000000000000:certificate/ci' \
+              --set 'ingress.tls[0].secretName=cooker-alb-placeholder' \
+              --set 'ingress.tls[0].hosts[0]=cooker.example.com' \
+              > "/tmp/aws-${tier}.yaml"
+            # The AWS secrets backend selector must render as "aws".
+            grep -q 'COOKER_SECRETS_BACKEND' "/tmp/aws-${tier}.yaml" || {
+              echo "ERROR: COOKER_SECRETS_BACKEND not rendered for ${tier}" >&2; exit 1; }
+            grep -Eq 'value: *"?aws"?' "/tmp/aws-${tier}.yaml" || {
+              echo "ERROR: COOKER_SECRETS_BACKEND value 'aws' not rendered for ${tier}" >&2
+              grep -n -A1 COOKER_SECRETS_BACKEND "/tmp/aws-${tier}.yaml" >&2 || true
+              exit 1; }
+            # The mandatory ALB WS idle-timeout must be present on the Ingress.
+            grep -q 'idle_timeout.timeout_seconds=300' "/tmp/aws-${tier}.yaml" || {
+              echo "ERROR: ALB idle_timeout=300 annotation not rendered for ${tier}" >&2; exit 1; }
+            # OIDC 'groups' scope must NOT leak (Cognito has no groups scope).
+            if grep -qiE 'COOKER_OIDC_SCOPES.*groups' "/tmp/aws-${tier}.yaml"; then
+              echo "ERROR: 'groups' scope leaked into ${tier} render (Cognito has no groups scope)" >&2
+              grep -n -i 'COOKER_OIDC_SCOPES' "/tmp/aws-${tier}.yaml" >&2 || true
+              exit 1
+            fi
+          done
       - name: kubeconform
         run: |
           curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz -o /tmp/kc.tar.gz
           tar -xzf /tmp/kc.tar.gz -C /tmp
-          /tmp/kubeconform -strict -summary -ignore-missing-schemas /tmp/default.yaml /tmp/prod.yaml /tmp/kaniko.yaml /tmp/buildah.yaml /tmp/keepsave.yaml
+          /tmp/kubeconform -strict -summary -ignore-missing-schemas /tmp/default.yaml /tmp/prod.yaml /tmp/kaniko.yaml /tmp/buildah.yaml /tmp/keepsave.yaml /tmp/aws-starter.yaml /tmp/aws-team.yaml /tmp/aws-scale.yaml
 
   docker:
     # P26-05-38: drop needs:[backend,frontend,helm] so the docker build runs

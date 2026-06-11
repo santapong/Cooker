@@ -1,0 +1,115 @@
+# =============================================================================
+# Cooker Helm overlay — AWS TEAM tier
+# ~$32.11/day us-east-1 (~$977/mo) / ~$38.53/day ap-southeast-1 (rough
+# estimate, retrieved 2026-06-11; sources + full BOM in
+# docs/guides/DEPLOY-AWS-VERCEL.md).
+#
+# Shape: 2 replicas, Redis-backed WS hub / ticket / rate-limit via ElastiCache
+# Serverless Valkey (rediss://, TLS-only), Multi-AZ RDS, Kaniko on EFS context
+# PVC, Spot build pool, PodDisruptionBudget on.
+# skeleton — review before apply; prices/assumptions in the guide above.
+# =============================================================================
+
+replicaCount: 2
+
+cookerEnv: production
+
+# Multi-replica ⇒ Redis-backed shared state is REQUIRED (Config.Validate
+# refuses production boot with memory backends at replicaCount>1 unless
+# stickySessions=true; Redis is the correct answer).
+wsHub:
+  backend: redis
+wsTicket:
+  backend: redis
+rateLimit:
+  backend: redis
+
+# ElastiCache Serverless Valkey. rediss:// = TLS-only; go-redis ParseURL
+# handles the rediss scheme (verified). Supply the real endpoint at install:
+#   --set redis.url=rediss://<valkey-endpoint>:6379
+redis:
+  enabled: false                 # external managed cache; chart deploys no sidecar
+  url: "rediss://REPLACE-valkey-endpoint:6379"
+
+# --- Builder: Kaniko (Spot pool applied out of band) -------------------------
+builder:
+  kind: kaniko
+  kaniko:
+    image: gcr.io/kaniko-project/executor:latest   # pin to a digest before apply
+    serviceAccount: cooker-kaniko
+    contextPVC: cooker-context
+    # Spot targeting (nodeSelector/tolerations) is a REPO FOLLOW-UP (OPEN): the
+    # builder doesn't stamp them onto Kaniko Jobs yet, so the Spot NodePool
+    # (modules/cluster/spot-nodepool.example.yaml) is left untainted and
+    # "Spot-preferring". Builds land there opportunistically until the follow-up.
+
+# --- Database: Multi-AZ RDS Postgres -----------------------------------------
+database:
+  host: ""                       # REQUIRED at install: the Multi-AZ RDS endpoint
+  port: 5432
+  name: cooker
+  username: cooker
+  passwordSecretRef:
+    name: cooker-db
+    key: password
+
+postgresql:
+  sslMode: require
+
+# --- OIDC: Cognito (GATED on the aud-claim spike, OPEN-7) --------------------
+oidc:
+  enabled: true
+  issuerUrl: ""                  # REQUIRED at install
+  clientId: ""                   # REQUIRED at install
+  redirectUrl: ""                # REQUIRED at install: https://<domain>/auth/callback (exact)
+  # scopes WITHOUT "groups" — Cognito has no groups scope; the pre-token Lambda
+  # injects the groups claim. See starter overlay + guide.
+  scopes: ["openid", "profile", "email"]
+  allowedOrigins: []             # REQUIRED at install: exact HTTPS app origin(s)
+  clientSecretRef:
+    name: cooker-oidc
+    key: client-secret
+  groupRoleMap: "cooker-admins:admin,cooker-operators:operator,cooker-approvers:approver,cooker-viewers:viewer"
+
+# --- Ingress: ALB (same posture as starter) ----------------------------------
+ingress:
+  enabled: true
+  className: alb
+  hosts:
+    - host: cooker.example.com   # REPLACE with var.domain
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/certificate-arn: ""   # REQUIRED at install
+    # MANDATORY 300s idle timeout (WS ping ~54s vs ALB default 60s).
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=300
+
+networkPolicy:
+  enabled: false                 # ALB ENIs aren't pods; use CIDR alt (guide §3)
+
+serviceAccount:
+  create: true
+  name: cooker
+  annotations: {}                # Pod Identity, NOT IRSA
+
+extraEnv:
+  - name: COOKER_SECRETS_BACKEND
+    value: aws                   # VERIFIED selector value (config.go:447)
+  - name: DOCKER_CONFIG
+    value: /etc/cooker-docker
+extraEnvFrom: []
+# Same CHART GAP (OPEN) as starter: no extraVolumes/extraVolumeMounts to mount
+# the dockerconfig Secret at /etc/cooker-docker. See starter overlay note +
+# the guide's OPEN list.
+
+# --- HA: PodDisruptionBudget on; HPA off at fixed 2 replicas -----------------
+pdb:
+  enabled: true
+  minAvailable: 1                # node drain can't evict both replicas at once
+
+hpa:
+  enabled: false                 # fixed 2 replicas; Scale tier turns on autoscaling

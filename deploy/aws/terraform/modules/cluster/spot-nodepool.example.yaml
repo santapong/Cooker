@@ -1,0 +1,53 @@
+# skeleton — review before apply; prices/assumptions in docs/guides/DEPLOY-AWS-VERCEL.md
+#
+# EXAMPLE Spot NodePool for Team+ build capacity. NOT applied by Terraform —
+# apply it out-of-band (kubectl apply -f) once the cluster exists, or fold it
+# into your GitOps. EKS Auto Mode consumes NodePool/NodeClass CRDs to drive
+# Karpenter-based provisioning.
+#
+# WHY a separate Spot pool: Kaniko build Jobs are bursty and tolerant of being
+# retried (the jobqueue retries failed runs). Spot is ~70% cheaper. BUT:
+#   - Kaniko is NOT checkpointable: a Spot interruption = a failed run.
+#   - EKS Auto Mode's per-instance management fee stays ON-DEMAND-rate even on
+#     Spot (~30% effective overhead on the Spot price).
+#
+# KNOWN REPO FOLLOW-UP (OPEN): clean Spot targeting needs the Cooker builder to
+# stamp nodeSelector + tolerations onto the Kaniko Job pods so they land on
+# (and only on) this pool. Until that lands, this NodePool is left UNTAINTED
+# and merely "Spot-preferring" via requirements — general workloads could also
+# schedule here. Do not add a taint until the builder sets a matching
+# toleration, or builds won't schedule.
+
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: cooker-spot-build
+spec:
+  template:
+    metadata:
+      labels:
+        cooker.dev/pool: spot-build
+    spec:
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"] # Spot preferred; OD fallback for capacity
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["arm64"] # Graviton; the Cooker image is multi-arch
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["m7g.xlarge", "m7g.2xlarge"]
+      # NOTE: no taints here on purpose (see header). Add a taint such as
+      #   taints:
+      #     - key: cooker.dev/build-only
+      #       effect: NoSchedule
+      # ONLY after the builder sets the matching toleration on Kaniko Jobs.
+      expireAfter: 168h # 7d; Auto Mode also enforces a 21d hard max
+  disruption:
+    # capacity-optimized-ish behaviour: consolidate when underused, and let
+    # Karpenter replace interrupted Spot nodes.
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 1m
+  limits:
+    cpu: "64" # cap the pool so a runaway build queue can't scale unbounded
