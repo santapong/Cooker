@@ -30,6 +30,7 @@ func New() *store.Store {
 		&registryConfigs{m: map[string]*model.RegistryConfig{}},
 		&clusterConfigs{m: map[string]*model.ClusterConfig{}},
 		&users{byID: map[string]*model.User{}, byEmail: map[string]string{}},
+		&apiTokens{m: map[string]*model.APIToken{}},
 		nil,
 		nil,
 	)

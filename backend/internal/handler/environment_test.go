@@ -41,6 +41,9 @@ func newTestHandler(t *testing.T) *Handler {
 	// Wire the stage-approval service so stage approve/reject/list handlers
 	// exercise the same path as production (HS26-05-03).
 	h.StageApprovals = service.NewStageApprovalService(st.StageApprovals)
+	// Wire the API-token service so the token handlers exercise the same
+	// role-cap / ownership path as production (product-plan Tier 1).
+	h.APITokens = service.NewAPITokenService(st.APITokens)
 	return h
 }
 

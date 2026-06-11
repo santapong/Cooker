@@ -56,6 +56,8 @@ tags:
     description: Pipeline template catalog
   - name: settings
     description: Registry and cluster configuration
+  - name: tokens
+    description: API tokens (personal access / service-account bearer tokens)
   - name: admin
     description: Admin-only catalog CRUD (admin + MFA)
   - name: webhooks
@@ -161,6 +163,95 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/UserInfo" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # --------------------------------------------------------------- tokens
+  /api/v1/tokens:
+    get:
+      summary: List API tokens
+      description: >
+        Returns the caller's own tokens. An admin may pass `?all=true` to
+        list every token. The SHA-256 hash and the plaintext are never
+        returned — only metadata (name, display prefix, role, timestamps).
+      tags: [tokens]
+      parameters:
+        - name: all
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: Admin-only. List every token instead of just the caller's.
+      responses:
+        "200":
+          description: Tokens visible to the caller
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    type: array
+                    items: { $ref: "#/components/schemas/APIToken" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Non-admin requested all=true }
+    post:
+      summary: Create an API token
+      description: >
+        Mints a long-lived bearer token (`ck_…`). The plaintext is returned
+        exactly once in this response and is unrecoverable afterward — only
+        its SHA-256 hash is stored. The role is capped at the caller's own
+        role. A request authenticated **by** a token may not create tokens
+        (no self-replication).
+      tags: [tokens]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, role]
+              properties:
+                name:
+                  type: string
+                  description: Operator-supplied label, e.g. "ci-deploy".
+                role:
+                  type: string
+                  enum: [admin, operator, approver, viewer]
+                  description: Role the token authenticates as; must be ≤ the caller's own role.
+                expiresAt:
+                  type: string
+                  format: date-time
+                  description: Optional RFC3339 expiry. Omitted = never expires (short expiries recommended for CI).
+      responses:
+        "201":
+          description: Created. `token` is the plaintext, shown only here.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: The plaintext credential (`ck_…`). Shown exactly once.
+                  apiToken: { $ref: "#/components/schemas/APIToken" }
+        "400": { description: Unknown role, missing name, or expiry in the past }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Requested role exceeds caller's role, or caller is token-authenticated }
+  /api/v1/tokens/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PathId"
+    delete:
+      summary: Revoke an API token
+      description: >
+        Deletes the token row — revocation is immediate (the next
+        authenticated use fails). A non-admin may delete only their own
+        tokens; targeting another user's token returns 404 so ids cannot be
+        probed. An admin deleting another user's token is MFA-gated when MFA
+        is configured. A token-authenticated request may not delete tokens.
+      tags: [tokens]
+      responses:
+        "200": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Token-authenticated caller, or admin without required MFA }
+        "404": { description: Token not found (or not owned by a non-admin caller) }
 
   # ------------------------------------------------------------ pipelines
   /api/v1/pipelines:
@@ -1563,6 +1654,35 @@ components:
         roles:
           type: array
           items: { type: string }
+    APIToken:
+      type: object
+      description: >
+        Metadata for a personal-access / service-account token. The plaintext
+        and the SHA-256 hash are NEVER present in any response — the plaintext
+        is returned once at creation under a separate `token` field, and the
+        hash is server-only.
+      properties:
+        id: { type: string }
+        name:
+          type: string
+          description: Operator-supplied label.
+        displayPrefix:
+          type: string
+          description: First 12 chars of the plaintext (e.g. "ck_AbCd1234"); identifies a token without revealing it.
+        role:
+          type: string
+          enum: [admin, operator, approver, viewer]
+        createdBySub: { type: string }
+        createdByEmail: { type: string }
+        createdAt: { type: string, format: date-time }
+        expiresAt:
+          type: string
+          format: date-time
+          description: Null/omitted = never expires.
+        lastUsedAt:
+          type: string
+          format: date-time
+          description: Most recent authenticated use (throttled to ≤ 1 write/min/token). Null = never used.
     Pipeline:
       type: object
       properties:

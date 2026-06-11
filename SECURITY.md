@@ -60,6 +60,22 @@ The same auth middleware accepts both kinds of bearer token: it inspects the JWT
 
 This path is intentionally minimal — it's the homelab / single-user / OIDC-isn't-available-yet escape hatch, not a full IAM. For team or production use, OIDC is the recommended path.
 
+#### Path 3: API tokens (personal access tokens / service accounts)
+
+Scripts and external CI authenticate with a long-lived bearer token instead of a browser OIDC flow. This path is always available — the `api_tokens` table backs it regardless of which interactive auth method is configured.
+
+- **Format.** A token is `ck_` + base64url(32 random bytes from `crypto/rand`) — 256 bits of entropy. The `ck_` prefix lets the bearer middleware route token auth vs JWT auth cheaply, before paying for any verify.
+- **Hash-only storage.** Only the SHA-256 hash of the plaintext is persisted (hex), behind a unique index. The plaintext is shown **exactly once**, at creation (`POST /api/v1/tokens` → `{"token":"ck_…"}`), and is unrecoverable afterward. A short `displayPrefix` (first 12 chars, e.g. `ck_AbCd1234`) is kept so a token is identifiable in listings without revealing the secret; it is not sufficient to authenticate. The hash is never serialised to any client (`json:"-"`).
+- **Verification.** On a `ck_`-prefixed bearer credential the middleware SHA-256-hashes it, looks it up by the hash index, and `crypto/subtle.ConstantTimeCompare`s the stored hash. An absent, revoked, or expired token is rejected with a generic `401 {"error":"authentication failed"}` — identical to a bad JWT, with no oracle (S26-05-01 posture). The token branch engages **only** on the `ck_` prefix and never alters the OIDC or local-JWT paths.
+- **Identity.** A token-authenticated request carries `sub = token:<id>`, `name = <token name>`, and the token's single stored role. The role is snapshotted at creation.
+- **Role cap.** Any authenticated user may mint a token, but only with a role **≤ their own** — a viewer cannot mint an admin token. An admin may mint any role; the orthogonal `approver` role may be minted only by an admin or an approver (an operator of the same numeric rank cannot escalate into promotion-approval rights via a token).
+- **Ownership.** A user may list and delete the tokens they created; admins may list (`GET /api/v1/tokens?all=true`) and delete any token. A non-admin deleting another user's token gets `404` (not `403`) so token ids cannot be probed.
+- **No self-replication.** A request **authenticated by a token** may **not** create or delete tokens. A leaked token therefore cannot mint fresh tokens or revoke others — it is bounded to its own role's API surface until revoked or expired.
+- **Revocation = immediate delete.** `DELETE /api/v1/tokens/:id` removes the row; the next authenticated use fails. There is no soft-revoke / grace window.
+- **Expiry.** `expiresAt` is optional. A token with no expiry never expires; expired tokens are rejected exactly like revoked ones. **Operators are strongly advised to set short expiries for CI tokens.**
+- **MFA bypass — stated honestly.** API tokens carry no `acr`/`amr` claims, so they **never satisfy the step-up MFA gate** (`COOKER_OIDC_MFA_ACR_VALUES`) — the same limitation as local-auth JWTs. A token cannot drive an MFA-gated destructive route, and an admin deleting *another* user's token via the API is itself MFA-gated when MFA is configured (own-token deletion is not). **A leaked token is bearer access at its role until it is revoked or expires** — there is no per-request second factor. Treat tokens as secrets: scope them to the least role that works, set a short expiry for CI, store them in your CI's secret store (never in source), and revoke on suspected exposure.
+- **`last_used_at`.** Each authenticated use stamps `last_used_at`, throttled to at most one write per minute per token to avoid hot-path write amplification. Use it to spot dormant tokens to prune.
+
 ### Authorization (RBAC)
 
 Role-based access control with four tiers (`backend/internal/auth/rbac.go:12-17`):

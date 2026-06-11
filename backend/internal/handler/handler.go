@@ -64,7 +64,16 @@ type Handler struct {
 	// Set by server.New from the store (HS26-05-03). nil-safe: handlers
 	// fall back to 503 when the store wasn't wired.
 	StageApprovals *service.StageApprovalService
-	AppDeployer    *service.AppDeployer
+	// APITokens backs the personal-access / service-account token
+	// endpoints (product-plan Tier 1). The create/list/delete handlers
+	// route ownership + role-cap + no-self-replication decisions through
+	// it. Set by server.New from the store; nil-safe (handlers return 503).
+	APITokens *service.APITokenService
+	// MFAACRValues mirrors COOKER_OIDC_MFA_ACR_VALUES. The token-delete
+	// handler uses it to step-up-gate an admin deleting ANOTHER user's
+	// token (own-token deletes are exempt). Empty disables the gate.
+	MFAACRValues []string
+	AppDeployer  *service.AppDeployer
 	// Triage backs the opt-in AI failure-triage endpoint (roadmap M4).
 	// Set by server.New when COOKER_AI_TRIAGE_ENABLED=true; nil keeps
 	// the route returning 503 and hides the frontend button via
