@@ -173,7 +173,10 @@ stickySessions: false
 
 # Redis connection. Required when any of {wsHub, wsTicket, rateLimit}
 # is set to "redis". Override when using an external Redis.
+# enabled: set false to skip deploying a Redis sidecar and manage your
+# own Redis instance externally (update url to point at it).
 redis:
+  enabled: true
   url: "redis://cooker-redis:6379"
 
 # Kubernetes access
@@ -263,17 +266,52 @@ postgresql:
   # Possible values: disable | allow | prefer | require | verify-ca | verify-full
   sslMode: require
 
-# Cache
-redis:
-  enabled: true
-
 # RBAC
 serviceAccount:
   create: true
   name: cooker
+  # Annotations to add to the ServiceAccount. Useful for IRSA on EKS
+  # (Workload Identity on GKE, Workload Identity on AKS, etc.).
+  # Example:
+  #   annotations:
+  #     eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/cooker
+  annotations: {}
 rbac:
   create: true
   clusterWide: true
+
+# Additional environment variables injected into the Cooker container
+# AFTER the chart-managed env vars. Kubernetes uses the FIRST occurrence
+# of a duplicated env name in the list, so chart-managed vars (COOKER_ENV,
+# COOKER_SECRET_KEY, REDIS_URL, etc.) cannot be overridden via extraEnv —
+# use the dedicated chart values for those. Use extraEnv for vars the chart
+# does not model as first-class values, e.g.:
+#
+#   extraEnv:
+#     # Literal value
+#     - name: COOKER_SECRETS_BACKEND
+#       value: aws
+#     # Value from a Kubernetes Secret
+#     - name: AWS_ROLE_ARN
+#       valueFrom:
+#         secretKeyRef:
+#           name: cooker-aws-creds
+#           key: role-arn
+extraEnv: []
+
+# Additional envFrom sources (ConfigMap or Secret) injected into the
+# Cooker container. Applied AFTER chart-managed env vars; the same
+# first-occurrence rule applies — chart-managed vars win over any key
+# that collides from an envFrom source. Example:
+#
+#   extraEnvFrom:
+#     # All keys from a Secret mounted as env vars
+#     - secretRef:
+#         name: cooker-aws-env
+#     # All keys from a ConfigMap mounted as env vars
+#     - configMapRef:
+#         name: cooker-feature-flags
+extraEnvFrom: []
 
 resources:
   requests:

@@ -14,7 +14,7 @@ spec:
       labels:
         {{- include "cooker.selectorLabels" . | nindent 8 }}
     spec:
-      {{- if .Values.serviceAccount.create }}
+      {{- if or .Values.serviceAccount.create .Values.serviceAccount.name }}
       serviceAccountName: {{ .Values.serviceAccount.name | default (include "cooker.fullname" .) }}
       {{- end }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 60 }}
@@ -165,6 +165,13 @@ spec:
                   {{- end }}
             {{- end }}
             {{- end }}
+            {{- if .Values.extraEnv }}
+            {{- toYaml .Values.extraEnv | nindent 12 }}
+            {{- end }}
+          {{- if .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml .Values.extraEnvFrom | nindent 12 }}
+          {{- end }}
           volumeMounts:
             {{- if and .Values.docker.enabled (eq .Values.builder.kind "docker") }}
             - name: docker-socket
