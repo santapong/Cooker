@@ -77,15 +77,8 @@ func (h *Handler) GitLabWebhook(c *gin.Context) {
 		return
 	}
 
-	// TODO (matches GitHubWebhook): enqueue a real deploy. Once the
-	// integration in commit 8 lights up COOKER_JOBQUEUE_ENABLED for
-	// the app-deploy path, this fans into the same Enqueuer.
-	c.JSON(http.StatusAccepted, gin.H{
-		"appId":  app.ID,
-		"commit": ev.After,
-		"branch": branch,
-		"status": "deploy queued",
-	})
+	// Converge on the manual-deploy path (see handler.triggerWebhookDeploy).
+	h.triggerWebhookDeploy(c, app, "gitlab", branch, ev.After)
 }
 
 // readWebhookBody reads up to maxWebhookBody+1 bytes from c. Returns

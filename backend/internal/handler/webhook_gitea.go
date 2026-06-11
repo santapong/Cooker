@@ -69,10 +69,6 @@ func (h *Handler) GiteaWebhook(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{
-		"appId":  app.ID,
-		"commit": ev.After,
-		"branch": branch,
-		"status": "deploy queued",
-	})
+	// Converge on the manual-deploy path (see handler.triggerWebhookDeploy).
+	h.triggerWebhookDeploy(c, app, "gitea", branch, ev.After)
 }

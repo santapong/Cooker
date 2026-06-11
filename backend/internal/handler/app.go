@@ -373,13 +373,85 @@ func (h *Handler) GitHubWebhook(c *gin.Context) {
 		return
 	}
 
-	// TODO: enqueue a real deploy (synthesise a Clone→Build→Push→Deploy run).
-	c.JSON(http.StatusAccepted, gin.H{
-		"appId":  app.ID,
-		"commit": ev.After,
-		"branch": branch,
-		"status": "deploy queued",
-	})
+	h.triggerWebhookDeploy(c, app, "github", branch, ev.After)
+}
+
+// triggerWebhookDeploy starts a real deploy for a signature-verified
+// push to a matching branch of an auto-deploy app. It converges onto
+// the exact path the manual "Deploy" button uses (DeployApp): a stub
+// run row is created before Spawn (F-07: so the coordinator's first
+// heartbeat lands and the orphan sweep can reap a crashed run), then
+// the deploy executes in a coordinator-owned goroutine via
+// runAppDeployCtx → AppDeployer.Deploy. Because the AppDeployer is
+// configured with the AppDeploys store, the terminal run is recorded
+// in app_deploys (migration 018) exactly like a manual deploy.
+//
+// The deploy is attributed to the webhook via the run's StartedByEmail
+// ("webhook:<source>", e.g. "webhook:github"); StartedByUserSub is left
+// empty, which the deploy-stage governance hook reads as "no human
+// actor to gate" — matching the manual DeployApp stub, which also omits
+// it. Orchestration lives here in the handler's service-adjacent helper
+// rather than being duplicated in each provider's webhook; the response
+// is the same 202 the webhooks have always returned, so the
+// idempotency middleware (keyed on X-GitHub-Delivery etc.) keeps
+// replaying it on redelivery and no double-deploy occurs.
+//
+// source is the provider slug ("github", "gitlab", "gitea",
+// "bitbucket"). commit may be empty (Bitbucket Server push payloads
+// don't always carry a top-level SHA); it's echoed in the response for
+// operator triage only and never drives the deploy.
+func (h *Handler) triggerWebhookDeploy(c *gin.Context, app *model.App, source, branch, commit string) {
+	if h.AppDeployer == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "app deployer not configured"})
+		return
+	}
+
+	runID := uuid.New().String()
+	channel := "app-run:" + runID
+
+	// Stub run row before Spawn — identical F-07 rationale as DeployApp
+	// and RollbackApp. Attribute the run to the webhook so deploy history
+	// and any audit view can tell auto-deploys from manual clicks.
+	if h.Runs != nil && h.Store != nil {
+		now := time.Now()
+		stub := &model.PipelineRun{
+			ID:             runID,
+			PipelineID:     app.ID,
+			Status:         model.RunStatusRunning,
+			StartedAt:      &now,
+			StartedByEmail: "webhook:" + source,
+		}
+		if createErr := h.Store.Runs.Create(c.Request.Context(), stub); createErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "create run: " + createErr.Error()})
+			return
+		}
+	}
+
+	if h.Runs != nil {
+		h.Runs.Spawn(context.Background(), runID, func(ctx context.Context) error {
+			h.runAppDeployCtx(ctx, app, runID, channel)
+			return nil
+		})
+	} else {
+		go h.runAppDeploy(app, runID, channel)
+	}
+
+	resp := gin.H{
+		"appId":   app.ID,
+		"runId":   runID,
+		"branch":  branch,
+		"channel": channel,
+		"status":  "running",
+		"stream":  "/ws/app-run/" + runID,
+		// Same deterministic compose-deploy ID DeployApp returns, so the
+		// deployment view can load the grouped DAG (harmless for non-compose).
+		"pipelineId":     service.ComposePipelineID(runID, app.ID, 0),
+		"deploymentView": "/apps/" + app.ID + "/deployments/" + service.ComposePipelineID(runID, app.ID, 0) + "/" + runID,
+	}
+	if commit != "" {
+		resp["commit"] = commit
+	}
+	c.JSON(http.StatusAccepted, resp)
 }
 
 // DetectAppBuild shallow-clones a repo the user is about to import and
