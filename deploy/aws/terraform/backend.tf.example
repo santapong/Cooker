@@ -1,0 +1,30 @@
+# skeleton — review before apply; prices/assumptions in docs/guides/DEPLOY-AWS-VERCEL.md
+#
+# Terraform remote state backend (S3 with NATIVE locking).
+#
+# HOW TO USE:
+#   1. Create the S3 bucket first (one-time bootstrap), e.g.:
+#        aws s3api create-bucket --bucket <your-tf-state-bucket> \
+#          --region ap-southeast-1 \
+#          --create-bucket-configuration LocationConstraint=ap-southeast-1
+#      Enable versioning on it so state history is recoverable.
+#   2. Copy this file to backend.tf (drop the .example) and fill in bucket/key/region.
+#   3. terraform init.
+#
+# WHY no DynamoDB table: Terraform >= 1.10 supports S3-native state locking
+# via `use_lockfile = true` — TF writes a `<key>.tflock` object alongside the
+# state and uses S3 conditional writes to serialize. This removes the legacy
+# DynamoDB lock-table requirement entirely.
+#
+# This file is committed as `.example` (NOT active) so the skeleton is safe
+# to `terraform validate` against a local backend; rename to activate.
+
+# terraform {
+#   backend "s3" {
+#     bucket       = "REPLACE-cooker-tf-state"     # the bucket you created
+#     key          = "cooker/prod/terraform.tfstate"
+#     region       = "ap-southeast-1"              # bucket region
+#     encrypt      = true                          # SSE on the state object
+#     use_lockfile = true                          # TF >= 1.10 native locking (no DynamoDB)
+#   }
+# }

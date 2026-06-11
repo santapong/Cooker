@@ -46,6 +46,10 @@ helm upgrade --install cooker deploy/helm/cooker \
   -f your-uat-values.yaml
 ```
 
+> For a hosted UAT cluster on AWS (EKS Auto Mode) with the SPA on Vercel, see
+> [`DEPLOY-AWS-VERCEL.md`](DEPLOY-AWS-VERCEL.md) — it ships per-tier Helm
+> overlays under `deploy/aws/values/` you can pass to `-f` here.
+
 Run these 7 smoke checks in order. Each maps to a specific resilience guarantee shipped in PR #21.
 
 ### 1. Boot survives a missing IdP

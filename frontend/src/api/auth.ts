@@ -4,7 +4,9 @@
 // the shared client triggers an OIDC redirect on 401, which breaks
 // the local-auth path.
 
-const API_BASE = '/api/v1';
+import { API_ORIGIN } from './origin';
+
+const API_BASE = `${API_ORIGIN}/api/v1`;
 
 export interface AuthMethods {
   oidc: { enabled: boolean };

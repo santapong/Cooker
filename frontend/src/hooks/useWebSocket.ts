@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { getAccessToken } from '../auth/OIDCProvider';
+import { API_ORIGIN, wsBase } from '../api/origin';
 
 interface UseWebSocketOptions {
   url: string;
@@ -31,11 +32,13 @@ interface UseWebSocketOptions {
 // fetchWSTicket exchanges the user's bearer token for a single-use
 // 60-second ticket. Browsers can't attach Authorization on a WS
 // upgrade, so this is the auth handoff for /ws/* connections.
+// Uses API_ORIGIN so that split-origin deployments (SPA on Vercel,
+// API elsewhere) POST to the correct host.
 async function fetchWSTicket(): Promise<string | null> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getAccessToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch('/api/v1/ws-tickets', { method: 'POST', headers });
+  const res = await fetch(`${API_ORIGIN}/api/v1/ws-tickets`, { method: 'POST', headers });
   if (!res.ok) return null;
   const body = (await res.json()) as { ticket?: string };
   return body.ticket ?? null;
@@ -151,7 +154,6 @@ export function useWebSocket({
       scheduleReconnect();
       return;
     }
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Build extra params from the caller's getter (read at connect
     // time so reconnects always see the latest values, e.g. lastSeq).
     const extraParams = getExtraParamsRef.current?.() ?? {};
@@ -160,7 +162,9 @@ export function useWebSocket({
       .join('&');
     const base = extraParamStr ? `${url}?${extraParamStr}` : url;
     const sep = base.includes('?') ? '&' : '?';
-    const wsUrl = `${protocol}//${window.location.host}${base}${sep}ticket=${encodeURIComponent(ticket)}`;
+    // wsBase() returns the correct wss:// or ws:// authority — either
+    // from VITE_API_BASE_URL (split-origin) or window.location (same-origin).
+    const wsUrl = `${wsBase()}${base}${sep}ticket=${encodeURIComponent(ticket)}`;
 
     const ws = new WebSocket(wsUrl);
 

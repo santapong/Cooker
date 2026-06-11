@@ -72,6 +72,11 @@ Key settings:
 | Ingress | Stickiness annotation |
 |---|---|
 | AWS ALB | `alb.ingress.kubernetes.io/target-group-attributes: stickiness.enabled=true,stickiness.lb_cookie.duration_seconds=3600` |
+
+> **AWS ALB + WebSockets:** on EKS the ALB idle timeout must exceed Cooker's
+> ~54s WS ping — set `idle_timeout.timeout_seconds=300` (it's **mandatory**, not
+> just for stickiness). The hosted AWS track wires this in every overlay; see
+> [`DEPLOY-AWS-VERCEL.md`](DEPLOY-AWS-VERCEL.md) §3.4.
 | Traefik | `traefik.ingress.kubernetes.io/service.sticky.cookie: "true"` |
 | HAProxy | `haproxy.org/cookie-persistence: SERVERID insert indirect nocache` |
 | Envoy / Istio | `DestinationRule { trafficPolicy.loadBalancer.consistentHash.httpCookie }` |
