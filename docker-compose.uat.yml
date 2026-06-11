@@ -137,6 +137,7 @@ services:
         VITE_OIDC_REDIRECT_URI: ${VITE_OIDC_REDIRECT_URI:-}
         VITE_OIDC_POST_LOGOUT_REDIRECT_URI: ${VITE_OIDC_POST_LOGOUT_REDIRECT_URI:-}
         VITE_OIDC_SCOPE: ${VITE_OIDC_SCOPE:-}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
     image: cooker:uat
     environment:
       COOKER_ENV: uat

@@ -1,6 +1,7 @@
 import { getAccessToken, triggerSignIn } from '../auth/OIDCProvider';
+import { API_ORIGIN } from './origin';
 
-const API_BASE = '/api/v1';
+const API_BASE = `${API_ORIGIN}/api/v1`;
 
 /**
  * ApiError is thrown for any non-2xx response that isn't handled inline
