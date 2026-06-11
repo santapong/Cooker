@@ -18,6 +18,14 @@ interface UseWebSocketOptions {
   // Use a ref-backed getter to avoid stale closures (the connect
   // callback reads it at call time, not at hook-mount time).
   getExtraParams?: () => Record<string, string>;
+  // onReconnect fires each time a socket opens that is NOT the first
+  // connection for this hook instance — i.e. after a drop+reconnect. The
+  // `count` is the 1-based reconnect ordinal (first reconnect → 1). It is
+  // the hook-level signal useStageLogs uses to re-issue its REST backfill
+  // and recover lines lost during the gap window
+  // (docs/audits/2026-05-usestagelogs-reconnect.md Q2). The initial open
+  // does NOT call this (the mount-time backfill already covers it).
+  onReconnect?: (count: number) => void;
 }
 
 // fetchWSTicket exchanges the user's bearer token for a single-use
@@ -43,9 +51,14 @@ export function useWebSocket({
   autoConnect = true,
   reconnect,
   getExtraParams,
+  onReconnect,
 }: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
+  // reconnectCount is the number of times a socket has re-opened after a
+  // drop (the initial open does not increment it). Exposed so callers can
+  // watch it via useEffect as an alternative to the onReconnect callback.
+  const [reconnectCount, setReconnectCount] = useState(0);
 
   const reconnectEnabled = reconnect?.enabled ?? true;
   const initialDelay = reconnect?.initialDelayMs ?? DEFAULT_INITIAL_DELAY;
@@ -70,6 +83,23 @@ export function useWebSocket({
   useEffect(() => {
     getExtraParamsRef.current = getExtraParams;
   });
+
+  // Keep onReconnect in a ref for the same reason — the onopen handler
+  // reads onReconnectRef.current at fire time so a fresh arrow on every
+  // render doesn't churn connect's identity.
+  const onReconnectRef = useRef(onReconnect);
+  useEffect(() => {
+    onReconnectRef.current = onReconnect;
+  });
+
+  // hasOpenedRef distinguishes the first successful open (no reconnect
+  // signal — the mount-time backfill covers it) from every later one
+  // (a drop+reconnect, which fires onReconnect / bumps reconnectCount).
+  const hasOpenedRef = useRef(false);
+  // reconnectCountRef mirrors the reconnectCount state so the onopen
+  // handler can compute the next ordinal without reading state (which it
+  // would close over stale).
+  const reconnectCountRef = useRef(0);
 
   // Mutable refs so the connect callback's identity doesn't churn on
   // every attempt (which would re-trigger the autoConnect effect).
@@ -137,6 +167,18 @@ export function useWebSocket({
     ws.onopen = () => {
       attemptRef.current = 0;
       setConnected(true);
+      // Fire the reconnect signal on every open AFTER the first. The
+      // first open is the initial subscription, already covered by the
+      // mount-time REST backfill; later opens follow a drop and need a
+      // gap-recovery backfill.
+      if (hasOpenedRef.current) {
+        const next = reconnectCountRef.current + 1;
+        reconnectCountRef.current = next;
+        setReconnectCount(next);
+        onReconnectRef.current?.(next);
+      } else {
+        hasOpenedRef.current = true;
+      }
     };
     ws.onclose = () => {
       setConnected(false);
@@ -197,11 +239,20 @@ export function useWebSocket({
   }, []);
 
   useEffect(() => {
+    // `connect` identity changes iff `url` changes (its only dep), so a
+    // new URL (e.g. useStageLogs switching stages) starts a fresh
+    // subscription: clear the "has opened" / reconnect bookkeeping so the
+    // first open on the new URL is treated as an initial connect, not a
+    // reconnect. Within a single URL the refs persist across the backoff
+    // reconnect loop, which is what lets us distinguish opens 2..N.
+    hasOpenedRef.current = false;
+    reconnectCountRef.current = 0;
+    setReconnectCount(0);
     if (autoConnect) {
       void connect();
     }
     return () => disconnect();
   }, [autoConnect, connect, disconnect]);
 
-  return { connected, connect, disconnect, send };
+  return { connected, connect, disconnect, send, reconnectCount };
 }
