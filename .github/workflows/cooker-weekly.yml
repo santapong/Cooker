@@ -23,7 +23,7 @@ jobs:
       pull-requests: write  # open the draft PR
       issues: read          # enumerate recent activity
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # Need full history so the skill can find the previous
           # T-weekly-* tag and diff against it.
@@ -31,11 +31,11 @@ jobs:
           # Required so the action's commits trigger downstream CI.
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.25'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: npm
@@ -54,7 +54,13 @@ jobs:
       # has the full routine. The action just kicks it off.
       - name: Run cooker-weekly skill
         if: ${{ vars.COOKER_WEEKLY_ENABLED == 'true' }}
-        uses: anthropics/claude-code-action@v1
+        # Pinned to the commit the moving v1 tag resolved to (S26-05-15).
+        # Highest blast radius in the repo: this job holds contents:write +
+        # pull-requests:write and carries ANTHROPIC_API_KEY, so a compromise
+        # of the upstream v1 tag could open a CI-passing backdoor PR. The
+        # SHA is the peeled commit of the annotated v1 tag; Renovate tracks
+        # the v1 line via the trailing comment.
+        uses: anthropics/claude-code-action@eee73e2ae5399c561de4ff038aa7b36a7aa991a7 # v1
         with:
           api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # The slash-form invokes the skill explicitly. The skill

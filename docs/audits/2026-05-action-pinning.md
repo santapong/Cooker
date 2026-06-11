@@ -3,6 +3,22 @@
 > Read-only research deliverable. No workflow edits in this PR. Implementation
 > happens in a follow-up owned by `cooker-infra-ci`.
 
+> **Implemented (`claude/jolly-knuth-j396dx`).** All 17 `uses:` refs in the three
+> non-release workflows (`ci.yml`, `cooker-weekly.yml`, `oci-conformance.yml`)
+> are now pinned to 40-char commit SHAs with a trailing `# vN.M.P` comment.
+> SHAs were **re-resolved live** via `git ls-remote` at implementation time —
+> the candidate column below was captured without live access and several
+> entries were stale (e.g. `actions/checkout` resolved to v4.3.1
+> `34e1148…`, not the documented v4.1.7 `b4ffde6…`), so the candidates were
+> NOT used. `anthropics/claude-code-action@v1` (the highest-blast-radius ref —
+> `contents:write` + `pull-requests:write`) was pinned first to the **peeled
+> commit** of its annotated `v1` tag (`eee73e2…`, not the tag object
+> `2ab86a3…`); `azure/setup-helm` and `golangci/golangci-lint-action` are also
+> annotated and were pinned to their peeled commits. `SECURITY.md`'s
+> `S26-05-15` row removal and `renovate.json` follow-up remain with
+> `cooker-security` per the done-criteria below; this doc stays the historical
+> migration record.
+
 ### Finding cross-reference
 
 - **`S26-05-15`** (MEDIUM) — `docs/audits/2026-05-security-review.md:172-176` already
