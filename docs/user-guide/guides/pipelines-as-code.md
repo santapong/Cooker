@@ -170,6 +170,8 @@ spec:
 
 ## See also
 
+- [CLI (`cookerctl`)](cli.md) — export, import, and run pipelines from the
+  command line with an API token; the scripting/CI entry point.
 - [Your first pipeline](first-pipeline.md) — build one in the editor first.
 - [Secrets](secrets.md) — how `secretRefs` resolve at run time.
 - [Promotions](promotions.md) — environment promotion and approval gates.
