@@ -45,6 +45,16 @@ The chart can't make these decisions for you:
 
 What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-line rationale for why they didn't ship in PR #17 and what unblocks them.
 
+### Owner-requested (2026-06-11)
+
+#### OR-1 — Pre-release / canary deploy mode (M, needs mini-ADR)
+
+Deploy a candidate version of an App *alongside* the current one — separate preview URL or percentage traffic split — validate it live, then promote-or-rollback with one click. Today's closest tools: environment promotion + approval gates, per-App deploy history + rollback, and Approval stages; what's missing is the side-by-side serving window. ADR must pick the traffic mechanism (K8s Service weight split vs header-routed preview Service vs Argo-Rollouts-style) and the target scope (Kubernetes targets first; docker-host/Cloud Run later or never). Pairs with the existing P3 "PR-preview environments" item — same plumbing, different trigger.
+
+#### OR-2 — Cloud-resource management around deployments (vision: cloud management platform; XL, ADR-gated)
+
+When Cooker deploys to a target (EC2 host, ECS, EKS), surface and manage the cloud resources *related to that deployment* — instance state, load balancer/target health, attached storage, linked database, per-App cost via cost-allocation tags — so day-2 operations happen in Cooker instead of the AWS console. **Scope guard (from the 2026-06-11 assessment):** a general AWS-console replacement is a product pivot with a large credential blast radius and entrenched competitors; the defensible slice is *resources Cooker itself created or deploys onto*, read-only first. Suggested phasing: (1) read-only inventory + cost panel per App (builds on Pod Identity + the `awsm` adapter + DEPLOY-AWS-VERCEL groundwork), (2) safe lifecycle ops (restart/scale) behind the existing MFA step-up, (3) only then evaluate broader management. Each phase gets its own ADR.
+
 ### W6 carry-forward (queued)
 
 Items deferred from the W2–W5 cycle. Sequenced for the next session.
