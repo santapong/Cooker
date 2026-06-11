@@ -98,6 +98,7 @@
 - **Symptom:** Enterprise SRE clicks the "Workloads" sidebar entry, sees "No workloads found in the selected namespace", concludes Cooker has no live cluster view. (And they're right.)
 - **Backlog:** Not tracked. **Add as P1** — but worth noting that the deployer-layer `clientgo` package is in place, so the gap is reading not writing. ~1 day to plumb a read-only listing through.
 - Note: `wshub.HandleKubeWatch` is registered at `router.go:249-251` and `useKubeWatch` consumes it, but no page in the app calls `useKubeWatch`. The whole watch path is reachable but unconsumed.
+- **Status: PARTIALLY RESOLVED.** The read path (`ListNamespaces`/`ListWorkloads`/`GetWorkload`/`GetPodLogs`) was wired to a real read-only client-go client on `claude/fervent-sagan-q50XA` (see backlog "Closed") and is no longer stubbed. The **write** part (`ScaleWorkload`/`RestartWorkload`/`ApplyManifest`/`DeleteResource`) is now **MITIGATED (closed-by-501)** on `claude/jolly-knuth-j396dx`: these return `501 {error,operation,hint}` via `notImplementedKubeWrite` instead of the fake 2xx (`scaled`/`rolling restart initiated`/`manifest applied`/`resource deleted`). The 501 is deliberately distinct from the read path's 503 `kubeUnavailable` — the read client may be configured and reachable; the write path simply isn't wired. The `kubernetesStore.{scale,restart}` actions have no UI consumer (`HS26-05-13`), so no success toast had to be re-toned; the api client already throws `ApiError` on the 501. Building the real mutating path stays future work.
 
 ### `HS26-05-09` — Webhook URL is not exposed on `AppDetailPage` — **User-facing bug (LOW)**
 
@@ -152,6 +153,7 @@
 - **Frontend:** `DockerPage` fetches via `dockerStore` and renders empty tables. The "build" `buildId` returned is the literal string `"build-placeholder"`; if any UI ever tried to open `/ws/docker/build/build-placeholder` it would never get any messages.
 - **Symptom:** Same as `HS26-05-05` — page renders empty, looks broken. Indie hacker + SaaS persona §step 1–2.
 - **Backlog:** Implicit in P9.1 closures (which only addressed builder/pusher/deployer for the pipeline path, **not** the standalone `/docker/*` REST surface).
+- **Status: MITIGATED (closed-by-501)** — `claude/jolly-knuth-j396dx`: the standalone docker write stubs (`BuildDockerImage`, `DeleteDockerImage`, `CreateContainer`, `StopContainer`, `DeleteContainer`) now return `501 {error,operation,hint}` via `notImplementedDockerHost` instead of fake 2xx (`build-placeholder`/`container-placeholder`/`stopped`/`removed`), so the api client throws and the UI shows an honest error rather than a green toast for an action that never ran. Real Docker host transport remains future work (P9.4). Reads were already honest (empty-200 list, 501 inspect).
 
 ### `HS26-05-16` — `RunHistoryPanel` is unimported — **Cosmetic**
 
