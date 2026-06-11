@@ -12,6 +12,8 @@ Cooker is a graph-based CI/CD + self-hosted-PaaS hybrid: a single Go binary that
 
 Recommended sequence:
 
+> **Update (2026-06-11):** the §3 fix-first list is **done** — all six code fixes landed on PR #108 (promotion/approval persistence w/ migration 020 + ADR-0005; webhook→deploy for all four providers; Settings persistence w/ migration 021; Test/Custom/Approval stage runtimes w/ `stagerunner` package + migration 022; W6.2 reconnect backfill; honest-501 sweep), plus S26-05-15 Action pinning. Remaining from §3: the four operator steps (Renovate toggle, screenshots, branch cleanup) — and note `COOKER_STAGE_RUNNER` must be set to `kube` in production (default `noop` logs intent without executing; see SECURITY.md).
+
 1. Close the fix-first list (§3) — roughly **one focused week** of work.
 2. Stand up a hosted UAT on a small VPS with OIDC on and Kaniko (§6.2) — **~$6–12/mo**.
 3. Go production as **single-replica k3s-on-VPS** per the backlog's "Ship it" shape (§6.3) — **~$15–45/mo**.
@@ -39,7 +41,7 @@ Feature surface already shipped: visual DAG editor; Docker/Kaniko/Buildah builde
 
 ### 2.2 What's functionally broken (verified live, 2026-06-10)
 
-These are the gaps a real user hits in the first hour. IDs from [`2026-05-half-shipped.md`](audits/2026-05-half-shipped.md); each re-verified against current code before listing here.
+These are the gaps a real user hits in the first hour. IDs from [`2026-05-half-shipped.md`](audits/2026-05-half-shipped.md); each re-verified against current code before listing here. *(Update 2026-06-11: every row below is now fixed on PR #108 — table kept as the historical record this plan was written against.)*
 
 | ID | What a user sees | Reality in code |
 |---|---|---|
@@ -67,7 +69,7 @@ These are the gaps a real user hits in the first hour. IDs from [`2026-05-half-s
 
 ## 3. Fix-first: the production-grade gate
 
-Security hardening is done; this list is **functional completeness**, ordered by leverage. Items 1–2 are the true gate — everything after is polish.
+Security hardening is done; this list is **functional completeness**, ordered by leverage. Items 1–2 are the true gate — everything after is polish. *(Update 2026-06-11: all six code fixes below are ✅ done — landed on PR #108. The operator steps remain open.)*
 
 ### Code fixes (sequence)
 
