@@ -82,6 +82,30 @@ type PromotionStore interface {
 	AddApproval(ctx context.Context, a *model.PromotionApproval) (added bool, count int, err error)
 }
 
+// StageApprovalStore persists per-stage approval gates and their votes
+// (audit finding HS26-05-03). A gate is keyed uniquely by (run, stage);
+// votes are append-only with a one-per-approver uniqueness guarantee so
+// the count drives the gate's approval threshold. Mirrors PromotionStore.
+// See docs/adr/0005-promotion-approval-persistence.md.
+type StageApprovalStore interface {
+	// CreateGate inserts a new approval gate. Returns ErrConflict if a gate
+	// for the same (run, stage) already exists.
+	CreateGate(ctx context.Context, g *model.StageApproval) error
+	// GetGate returns the gate for (runID, stageID) with its Votes
+	// populated. ErrNotFound if none exists.
+	GetGate(ctx context.Context, runID, stageID string) (*model.StageApproval, error)
+	// ListGates returns all gates for a run, each with its Votes populated,
+	// ordered by creation time.
+	ListGates(ctx context.Context, runID string) ([]*model.StageApproval, error)
+	// UpdateGateStatus advances a gate's status (and stamps resolved_at +
+	// resolved_by when non-nil). ErrNotFound if the row is gone.
+	UpdateGateStatus(ctx context.Context, id string, status model.StageApprovalStatus, resolvedBy string, resolvedAt *time.Time) error
+	// AddVote records an approval. It is idempotent per approver:
+	// re-approval by the same ApproverSub is a no-op (added=false). Returns
+	// the resulting distinct-approval count.
+	AddVote(ctx context.Context, v *model.StageApprovalVote) (added bool, count int, err error)
+}
+
 // AppStore manages App persistence (Phase 3).
 type AppStore interface {
 	List(ctx context.Context) ([]*model.App, error)
@@ -179,39 +203,41 @@ type UserStore interface {
 // Store aggregates all data-access interfaces and a cleanup hook.
 // Construct with New and pass to the server and handler layers.
 type Store struct {
-	Pipelines    PipelineStore
-	Runs         RunStore
-	Environments EnvironmentStore
-	Promotions   PromotionStore
-	Apps         AppStore
-	AppDeploys   AppDeployStore
-	AuditEvents  AuditEventStore
-	Hosts        HostStore
-	Registries   RegistryConfigStore
-	Clusters     ClusterConfigStore
-	Users        UserStore
-	close        func() error
-	ping         func(context.Context) error
+	Pipelines      PipelineStore
+	Runs           RunStore
+	Environments   EnvironmentStore
+	Promotions     PromotionStore
+	StageApprovals StageApprovalStore
+	Apps           AppStore
+	AppDeploys     AppDeployStore
+	AuditEvents    AuditEventStore
+	Hosts          HostStore
+	Registries     RegistryConfigStore
+	Clusters       ClusterConfigStore
+	Users          UserStore
+	close          func() error
+	ping           func(context.Context) error
 }
 
 // New builds a Store. closeFn may be nil when no cleanup is required
 // (e.g., in-memory stores). pingFn may be nil for backends without a
 // liveness probe; Ping then reports healthy unconditionally.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
+func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa StageApprovalStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
-		Pipelines:    p,
-		Runs:         r,
-		Environments: e,
-		Promotions:   pr,
-		Apps:         a,
-		AppDeploys:   ad,
-		AuditEvents:  ae,
-		Hosts:        h,
-		Registries:   rc,
-		Clusters:     cc,
-		Users:        u,
-		close:        closeFn,
-		ping:         pingFn,
+		Pipelines:      p,
+		Runs:           r,
+		Environments:   e,
+		Promotions:     pr,
+		StageApprovals: sa,
+		Apps:           a,
+		AppDeploys:     ad,
+		AuditEvents:    ae,
+		Hosts:          h,
+		Registries:     rc,
+		Clusters:       cc,
+		Users:          u,
+		close:          closeFn,
+		ping:           pingFn,
 	}
 }
 

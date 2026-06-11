@@ -57,8 +57,14 @@ type Handler struct {
 	// Set by server.New from the store; the promote/approve/env-status
 	// handlers route through it. nil-safe: handlers fall back to 503 when
 	// the store wasn't wired (defensive — server.New always sets it).
-	Promotions  *service.PromotionService
-	AppDeployer *service.AppDeployer
+	Promotions *service.PromotionService
+	// StageApprovals persists and resolves approval-gate stages
+	// (StageTypeApproval). The stage approve/reject handlers route through
+	// it; the executor uses the same service to open and poll the gate.
+	// Set by server.New from the store (HS26-05-03). nil-safe: handlers
+	// fall back to 503 when the store wasn't wired.
+	StageApprovals *service.StageApprovalService
+	AppDeployer    *service.AppDeployer
 	// Triage backs the opt-in AI failure-triage endpoint (roadmap M4).
 	// Set by server.New when COOKER_AI_TRIAGE_ENABLED=true; nil keeps
 	// the route returning 503 and hides the frontend button via

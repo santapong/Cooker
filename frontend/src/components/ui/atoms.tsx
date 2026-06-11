@@ -622,6 +622,7 @@ export function statusTone(status?: string): Tone {
       return 'ember';
     case 'pending':
     case 'queued':
+    case 'awaiting':
     case 'awaiting_approval':
     case 'warn':
     case 'cancelled':

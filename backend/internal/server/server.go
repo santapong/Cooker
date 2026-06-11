@@ -32,6 +32,7 @@ import (
 	"github.com/santapong/cooker/internal/secrets/keepsave"
 	"github.com/santapong/cooker/internal/secrets/vault"
 	"github.com/santapong/cooker/internal/service"
+	"github.com/santapong/cooker/internal/stagerunner"
 	"github.com/santapong/cooker/internal/store"
 	"github.com/santapong/cooker/internal/store/memory"
 	"github.com/santapong/cooker/internal/store/postgres"
@@ -224,6 +225,16 @@ func New(cfg *config.Config) (*Server, error) {
 		return p.Name, nil
 	})
 
+	stageRunner, err := selectStageRunner(cfg.StageRunner, cfg.Kubernetes)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("stage runner: %w", err)
+	}
+	// Approval-gate persistence for StageTypeApproval stages (HS26-05-03).
+	// The executor opens + polls the gate; the stage approve/reject handlers
+	// resolve it. Both share this one service over the same store.
+	stageApprovals := service.NewStageApprovalService(st.StageApprovals)
+
 	exec := service.NewExecutor(
 		service.WithBuilder(bld),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
@@ -233,6 +244,10 @@ func New(cfg *config.Config) (*Server, error) {
 		// docker CLI; harmless when unused.
 		service.WithDockerDeployer(deployer.NewDockerRun()),
 		service.WithComposeDeployer(deployer.NewCompose()),
+		// Test/Custom stages run user code in an isolated container
+		// (kube Job / docker run / noop), selected by COOKER_STAGE_RUNNER.
+		service.WithStageRunner(stageRunner),
+		service.WithStageApprovals(stageApprovals),
 		service.WithLogBroadcaster(wsHub.Broadcast),
 		service.WithLogStore(logStore),
 		service.WithStatusBroadcaster(wsHub.Broadcast),
@@ -255,6 +270,10 @@ func New(cfg *config.Config) (*Server, error) {
 	// promote/approve/env-status route through this service, which
 	// persists promotions + approvals and enforces RequiredApprovers.
 	h.Promotions = service.NewPromotionService(st.Promotions, st.Environments)
+	// Stage approval gates (HS26-05-03): the stage approve/reject handlers
+	// share the same service instance the executor uses to open + poll the
+	// gate, so a decision recorded over HTTP unblocks the running stage.
+	h.StageApprovals = stageApprovals
 	// AI triage (M4): Validate() already guaranteed the key when
 	// enabled; nil keeps the route 503 and the frontend button hidden.
 	if cfg.Triage.Enabled {
@@ -746,6 +765,28 @@ func selectBuilder(kind string, k8s config.KubernetesConfig) (builder.Builder, e
 		})
 	default:
 		return builder.Noop{}, nil
+	}
+}
+
+// selectStageRunner builds the container runtime for Test/Custom stages
+// from COOKER_STAGE_RUNNER. It mirrors selectBuilder: "kube" submits a
+// one-shot Job to the configured cluster (reusing the same K8s config as
+// the Kaniko/Buildah builders), "docker" shells `docker run`, and the
+// default ("noop" / unset) does not start a container — so a dev/test
+// install exercises Test/Custom stages without a runtime. An unknown value
+// falls through to noop rather than failing boot, matching selectBuilder.
+func selectStageRunner(kind string, k8s config.KubernetesConfig) (stagerunner.Runner, error) {
+	switch kind {
+	case "docker":
+		return stagerunner.NewDockerRun(), nil
+	case "kube":
+		return stagerunner.NewKube(stagerunner.KubeConfig{
+			Kubeconfig:     k8s.Kubeconfig,
+			Namespace:      k8s.Namespace,
+			ServiceAccount: k8s.KanikoServiceAccount,
+		})
+	default:
+		return stagerunner.Noop{}, nil
 	}
 }
 

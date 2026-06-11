@@ -38,6 +38,9 @@ func newTestHandler(t *testing.T) *Handler {
 	// Wire the persistent promotion service so promote/approve/env-status
 	// handlers exercise the same path as production (server.New).
 	h.Promotions = service.NewPromotionService(st.Promotions, st.Environments)
+	// Wire the stage-approval service so stage approve/reject/list handlers
+	// exercise the same path as production (HS26-05-03).
+	h.StageApprovals = service.NewStageApprovalService(st.StageApprovals)
 	return h
 }
 

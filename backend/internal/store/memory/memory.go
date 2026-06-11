@@ -22,6 +22,7 @@ func New() *store.Store {
 		&runs{m: map[string]*model.PipelineRun{}},
 		&environments{m: map[string]*model.Environment{}},
 		&promotions{m: map[string]*model.RunPromotion{}, approvals: map[string][]model.PromotionApproval{}},
+		&stageApprovals{m: map[string]*model.StageApproval{}, votes: map[string][]model.StageApprovalVote{}},
 		&apps{m: map[string]*model.App{}},
 		&appDeploys{m: map[string]*model.AppDeploy{}},
 		&auditEvents{},

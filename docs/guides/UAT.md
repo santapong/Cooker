@@ -394,6 +394,10 @@ expected UAT behaviour:
 - BuildKit gRPC client (use `COOKER_BUILDER=docker` instead)
 - go-containerregistry pusher (use `COOKER_PUSHER=docker`)
 - client-go deployer (use `COOKER_DEPLOYER=kubectl`)
+- Test/Custom stage runner defaults to `noop` (logs the intended
+  command, reports success, runs nothing). Set `COOKER_STAGE_RUNNER=docker`
+  (or `kube`) to actually run Test/Custom stages in a container; a
+  Test/Custom stage with no `image` fails loudly either way.
 - Cloud Run, ECS, Fly, Render deploy targets
 - go-git writer for the GitOpsCommit node
 - Real Docker network/volume handlers
@@ -575,6 +579,8 @@ export COOKER_REGISTRY="localhost:5000/cooker"
 export COOKER_BUILDER="docker"
 export COOKER_PUSHER="docker"
 export COOKER_DEPLOYER="kubectl"
+export COOKER_STAGE_RUNNER="docker"             # Test/Custom stages; "noop" to skip
+
 export KUBECONFIG="$HOME/.kube/config"
 export COOKER_SECRET_KEY="$(head -c 32 /dev/urandom | base64)"
 export COOKER_OIDC_ENABLED=false

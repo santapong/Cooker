@@ -186,6 +186,15 @@ func (s *Server) registerRoutes() {
 	api.POST("/pipelines/:id/runs/:runId/approve", h.ApprovePromotion)
 	api.GET("/pipelines/:id/runs/:runId/env-status", h.GetEnvStatus)
 
+	// Stage-level approval gates (StageTypeApproval, HS26-05-03). RBAC is
+	// an inline admin-or-approver check in the approve/reject handlers,
+	// matching the promotion /approve route above (no route-level role
+	// middleware). The list endpoint is read-only for any authenticated
+	// user (the run page polls it to surface awaiting gates).
+	api.GET("/pipelines/:id/runs/:runId/stage-approvals", h.ListStageApprovals)
+	api.POST("/pipelines/:id/runs/:runId/stages/:stageId/approve", h.ApproveStage)
+	api.POST("/pipelines/:id/runs/:runId/stages/:stageId/reject", h.RejectStage)
+
 	// Governance admission hook (Phase-4). The middleware is a no-op when
 	// COOKER_GOVERNANCE_URL is empty, so this is safe to wire unconditionally.
 	// Pipeline-defined deploy stages are caught by the executor pre-stage hook

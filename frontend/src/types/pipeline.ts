@@ -127,6 +127,19 @@ export interface EnvironmentStatus {
   approvalsNeed?: number;
 }
 
+// Approval-gate stage (StageTypeApproval). A persisted pause-gate keyed by
+// (run, stage); the executor blocks on it until approved or rejected.
+export interface StageApproval {
+  id: string;
+  runId: string;
+  stageId: string;
+  status: 'awaiting' | 'approved' | 'rejected';
+  requiredApprovers: number;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  votes?: { approverEmail: string; note?: string; createdAt: string }[];
+}
+
 // Run diff (roadmap M3): GET /pipelines/:id/runs/:runId/diff
 export interface RunDiffReport {
   againstRunId?: string;
