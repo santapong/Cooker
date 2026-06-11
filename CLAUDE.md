@@ -43,6 +43,7 @@ deploy/
 | [`docs/system-design/`](docs/system-design/README.md) | You want the consolidated 17-chapter system design (overview → C4) |
 | [`SECURITY.md`](SECURITY.md) | You're touching auth, CORS, secrets, or the Dockerfile |
 | [`backlog.md`](backlog.md) | You're picking the next thing to build, or want to know why something isn't done yet |
+| [`docs/product-plan.md`](docs/product-plan.md) | You want the adoption roadmap, monetization strategy, or the UAT→production hosting recommendation |
 
 ## Current state (as of the `claude/uat-ready-*` series merging)
 

@@ -5,6 +5,7 @@ import type {
   EnvironmentStatus,
   RunDiffReport,
   PipelineAnalytics,
+  StageApproval,
 } from '../types/pipeline';
 
 export const pipelineApi = {
@@ -37,6 +38,22 @@ export const pipelineApi = {
     get<PipelineAnalytics>(`/pipelines/${pipelineId}/analytics?runs=${runs}`),
   envStatus: (pipelineId: string, runId: string) =>
     get<EnvironmentStatus[]>(`/pipelines/${pipelineId}/runs/${runId}/env-status`),
+  // Approval-gate stages (StageTypeApproval). The run page polls
+  // stageApprovals to find paused stages, then approves/rejects them.
+  stageApprovals: (pipelineId: string, runId: string) =>
+    get<{ runId: string; gates: StageApproval[] }>(
+      `/pipelines/${pipelineId}/runs/${runId}/stage-approvals`,
+    ),
+  approveStage: (pipelineId: string, runId: string, stageId: string, note?: string) =>
+    post<{ status: string }>(
+      `/pipelines/${pipelineId}/runs/${runId}/stages/${stageId}/approve`,
+      { note: note ?? '' },
+    ),
+  rejectStage: (pipelineId: string, runId: string, stageId: string, note?: string) =>
+    post<{ status: string }>(
+      `/pipelines/${pipelineId}/runs/${runId}/stages/${stageId}/reject`,
+      { note: note ?? '' },
+    ),
 };
 
 export interface ServiceRuntimeStatus {

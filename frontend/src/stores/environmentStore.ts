@@ -11,8 +11,12 @@ interface EnvironmentStore {
   createEnvironment: (env: Partial<Environment>) => Promise<void>;
   updateEnvironment: (id: string, env: Environment) => Promise<void>;
   deleteEnvironment: (id: string) => Promise<void>;
-  promote: (pipelineId: string, runId: string) => Promise<void>;
-  approve: (pipelineId: string, runId: string, approvedBy: string) => Promise<void>;
+  // promote/approve target a specific environment. The approver identity
+  // is taken from the bearer token server-side, never the body — so
+  // approve carries an optional free-text note, not an approver name
+  // (HS26-05-14: the old {approvedBy} body shape the handler ignored).
+  promote: (pipelineId: string, runId: string, environmentId: string) => Promise<void>;
+  approve: (pipelineId: string, runId: string, environmentId: string, note?: string) => Promise<void>;
 }
 
 export const useEnvironmentStore = create<EnvironmentStore>((set, get) => ({
@@ -47,11 +51,11 @@ export const useEnvironmentStore = create<EnvironmentStore>((set, get) => ({
     }));
   },
 
-  promote: async (pipelineId, runId) => {
-    await post(`/pipelines/${pipelineId}/runs/${runId}/promote`);
+  promote: async (pipelineId, runId, environmentId) => {
+    await post(`/pipelines/${pipelineId}/runs/${runId}/promote`, { environmentId });
   },
 
-  approve: async (pipelineId, runId, approvedBy) => {
-    await post(`/pipelines/${pipelineId}/runs/${runId}/approve`, { approvedBy });
+  approve: async (pipelineId, runId, environmentId, note) => {
+    await post(`/pipelines/${pipelineId}/runs/${runId}/approve`, { environmentId, note });
   },
 }));

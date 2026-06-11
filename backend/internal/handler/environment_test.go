@@ -14,6 +14,7 @@ import (
 	"github.com/santapong/cooker/internal/crypto"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/secrets/database"
+	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/store/memory"
 )
 
@@ -33,7 +34,14 @@ func newTestHandler(t *testing.T) *Handler {
 		t.Fatal(err)
 	}
 	st := memory.New()
-	return New(st, codec, database.New(st.Environments, codec))
+	h := New(st, codec, database.New(st.Environments, codec))
+	// Wire the persistent promotion service so promote/approve/env-status
+	// handlers exercise the same path as production (server.New).
+	h.Promotions = service.NewPromotionService(st.Promotions, st.Environments)
+	// Wire the stage-approval service so stage approve/reject/list handlers
+	// exercise the same path as production (HS26-05-03).
+	h.StageApprovals = service.NewStageApprovalService(st.StageApprovals)
+	return h
 }
 
 func newRequest(method, target string, body any) *http.Request {
@@ -69,15 +77,26 @@ func TestApprovePromotion_ViewerForbidden(t *testing.T) {
 
 func TestApprovePromotion_ApproverAllowed_UsesClaimsEmail(t *testing.T) {
 	h := newTestHandler(t)
-	approver := &auth.Claims{Email: "approver@example.com", Roles: []string{string(auth.RoleApprover)}}
+	approver := &auth.Claims{Subject: "sub-approver", Email: "approver@example.com", Roles: []string{string(auth.RoleApprover)}}
+	ctx := context.Background()
 
 	// The IDOR-hardened ApprovePromotion handler verifies that the
 	// runId belongs to the :id pipeline before responding. Pre-seed
 	// matching pipeline + run rows so the assertion passes.
-	if err := h.Store.Pipelines.Create(context.Background(), &model.Pipeline{ID: "p1", Name: "p"}); err != nil {
+	if err := h.Store.Pipelines.Create(ctx, &model.Pipeline{ID: "p1", Name: "p"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Store.Runs.Create(context.Background(), &model.PipelineRun{ID: "r1", PipelineID: "p1"}); err != nil {
+	if err := h.Store.Runs.Create(ctx, &model.PipelineRun{ID: "r1", PipelineID: "p1"}); err != nil {
+		t.Fatal(err)
+	}
+	// A manual env with one required approver, plus the promotion the
+	// approval targets.
+	if err := h.Store.Environments.Create(ctx, &model.Environment{
+		ID: "staging", Name: "Staging", Promotion: model.PromotionPolicy{Strategy: "manual", RequiredApprovers: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Promotions.Promote(ctx, "r1", "p1", "staging", "op@example.com"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -85,7 +104,10 @@ func TestApprovePromotion_ApproverAllowed_UsesClaimsEmail(t *testing.T) {
 	r.POST("/pipelines/:id/runs/:runId/approve", withUser(h.ApprovePromotion, approver))
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, newRequest(http.MethodPost, "/pipelines/p1/runs/r1/approve", map[string]string{"approvedBy": "evil@example.com", "note": "shipping"}))
+	// approvedBy in the body is hostile and must be ignored — identity
+	// comes from claims.
+	r.ServeHTTP(w, newRequest(http.MethodPost, "/pipelines/p1/runs/r1/approve",
+		map[string]string{"environmentId": "staging", "approvedBy": "evil@example.com", "note": "shipping"}))
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -95,6 +117,9 @@ func TestApprovePromotion_ApproverAllowed_UsesClaimsEmail(t *testing.T) {
 	}
 	if body["approvedBy"] != "approver@example.com" {
 		t.Errorf("expected approvedBy from claims, got %v", body["approvedBy"])
+	}
+	if body["status"] != string(model.PromotionApproved) {
+		t.Errorf("one approval (threshold 1) should approve the gate, got status %v", body["status"])
 	}
 }
 

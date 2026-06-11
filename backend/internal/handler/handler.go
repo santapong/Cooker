@@ -52,6 +52,18 @@ type Handler struct {
 	// "keepsave", ...) for the connectivity-test response. Set by
 	// server.New from COOKER_SECRETS_BACKEND.
 	SecretsBackend string
+	// Promotions persists run→environment promotions and approvals and
+	// enforces PromotionPolicy.RequiredApprovers (HS26-05-01 / -08 / -14).
+	// Set by server.New from the store; the promote/approve/env-status
+	// handlers route through it. nil-safe: handlers fall back to 503 when
+	// the store wasn't wired (defensive — server.New always sets it).
+	Promotions *service.PromotionService
+	// StageApprovals persists and resolves approval-gate stages
+	// (StageTypeApproval). The stage approve/reject handlers route through
+	// it; the executor uses the same service to open and poll the gate.
+	// Set by server.New from the store (HS26-05-03). nil-safe: handlers
+	// fall back to 503 when the store wasn't wired.
+	StageApprovals *service.StageApprovalService
 	AppDeployer    *service.AppDeployer
 	// Triage backs the opt-in AI failure-triage endpoint (roadmap M4).
 	// Set by server.New when COOKER_AI_TRIAGE_ENABLED=true; nil keeps
@@ -65,7 +77,15 @@ type Handler struct {
 	// keys through secrets.Manager). Set by server.New; nil-safe in
 	// dev when no secrets backend is configured (SSH host create/
 	// update with a key body returns 503).
-	Hosts       *service.HostService
+	Hosts *service.HostService
+	// Registries / Clusters coordinate Settings-config CRUD
+	// side-effects (writing the registry password / cluster kubeconfig
+	// through secrets.Manager so the row carries only a reference;
+	// HS26-05-04). Set by server.New; nil-safe in dev when no secrets
+	// backend is configured — a Create that carries a credential then
+	// returns 503, a credential-free Create persists via the plain store.
+	Registries  *service.RegistryConfigService
+	Clusters    *service.ClusterConfigService
 	WSBroadcast func(channel string, data []byte)
 	Executor    *service.Executor
 	Runs        RunSpawner

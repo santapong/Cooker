@@ -1,11 +1,19 @@
 package handler
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
+	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/oci"
+	"github.com/santapong/cooker/internal/service"
+	"github.com/santapong/cooker/internal/store"
+	"github.com/santapong/cooker/internal/validate"
 )
 
 func ListRepositories(c *gin.Context) {
@@ -91,12 +99,43 @@ func GetReferrers(c *gin.Context) {
 	})
 }
 
-// Settings handlers for registry configuration
-func ListRegistryConfigs(c *gin.Context) {
-	c.JSON(http.StatusOK, []interface{}{})
+// Settings handlers for registry + cluster configuration (audit
+// finding HS26-05-04). These persist through store.RegistryConfigStore
+// / store.ClusterConfigStore; sensitive credentials (registry password,
+// cluster kubeconfig) are written to secrets.Manager by the service
+// layer and never echoed back — List/Get return the Redact()ed view
+// with a "has credentials" flag only, mirroring the Host handlers.
+
+// handleConfigServiceError maps RegistryConfig/ClusterConfig service
+// errors to HTTP status codes. ErrConfigSecretsUnavailable → 503;
+// store.ErrNotFound → 404; anything else → 500 with a fixed body (the
+// wrapped detail may carry internal paths/URLs, so it is logged
+// server-side instead of leaked). Mirrors handleHostServiceError.
+func handleConfigServiceError(c *gin.Context, err error, notFoundMsg string) {
+	switch {
+	case errors.Is(err, service.ErrConfigSecretsUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+	case errors.Is(err, store.ErrNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": notFoundMsg})
+	default:
+		slog.Error("settings config service error", "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+	}
 }
 
-func AddRegistryConfig(c *gin.Context) {
+func (h *Handler) ListRegistryConfigs(c *gin.Context) {
+	configs, err := h.Store.Registries.List(c.Request.Context())
+	if abortStoreErr(c, err, "registries not found") {
+		return
+	}
+	out := make([]*model.RegistryConfigResponse, 0, len(configs))
+	for _, r := range configs {
+		out = append(out, r.Redact())
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *Handler) AddRegistryConfig(c *gin.Context) {
 	var req struct {
 		Name     string `json:"name" binding:"required"`
 		URL      string `json:"url" binding:"required"`
@@ -107,18 +146,56 @@ func AddRegistryConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"message": "registry added", "name": req.Name})
+	if err := validate.Name("name", req.Name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.Registries == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "registry config service not configured"})
+		return
+	}
+	now := time.Now()
+	cfg := &model.RegistryConfig{
+		ID:        uuid.New().String(),
+		Name:      req.Name,
+		URL:       req.URL,
+		Username:  req.Username,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := h.Registries.CreateRegistry(c.Request.Context(), cfg, []byte(req.Password)); err != nil {
+		handleConfigServiceError(c, err, "registry not found")
+		return
+	}
+	c.JSON(http.StatusCreated, cfg.Redact())
 }
 
-func DeleteRegistryConfig(c *gin.Context) {
+func (h *Handler) DeleteRegistryConfig(c *gin.Context) {
+	if h.Registries == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "registry config service not configured"})
+		return
+	}
+	if err := h.Registries.DeleteRegistry(c.Request.Context(), c.Param("id")); err != nil {
+		if abortStoreErr(c, err, "registry not found") {
+			return
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "registry removed", "id": c.Param("id")})
 }
 
-func ListClusterConfigs(c *gin.Context) {
-	c.JSON(http.StatusOK, []interface{}{})
+func (h *Handler) ListClusterConfigs(c *gin.Context) {
+	configs, err := h.Store.Clusters.List(c.Request.Context())
+	if abortStoreErr(c, err, "clusters not found") {
+		return
+	}
+	out := make([]*model.ClusterConfigResponse, 0, len(configs))
+	for _, cfg := range configs {
+		out = append(out, cfg.Redact())
+	}
+	c.JSON(http.StatusOK, out)
 }
 
-func AddClusterConfig(c *gin.Context) {
+func (h *Handler) AddClusterConfig(c *gin.Context) {
 	var req struct {
 		Name       string `json:"name" binding:"required"`
 		KubeConfig string `json:"kubeconfig"`
@@ -128,5 +205,38 @@ func AddClusterConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"message": "cluster added", "name": req.Name})
+	if err := validate.Name("name", req.Name); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.Clusters == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cluster config service not configured"})
+		return
+	}
+	now := time.Now()
+	cfg := &model.ClusterConfig{
+		ID:        uuid.New().String(),
+		Name:      req.Name,
+		Context:   req.Context,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := h.Clusters.CreateCluster(c.Request.Context(), cfg, []byte(req.KubeConfig)); err != nil {
+		handleConfigServiceError(c, err, "cluster not found")
+		return
+	}
+	c.JSON(http.StatusCreated, cfg.Redact())
+}
+
+func (h *Handler) DeleteClusterConfig(c *gin.Context) {
+	if h.Clusters == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cluster config service not configured"})
+		return
+	}
+	if err := h.Clusters.DeleteCluster(c.Request.Context(), c.Param("id")); err != nil {
+		if abortStoreErr(c, err, "cluster not found") {
+			return
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "cluster removed", "id": c.Param("id")})
 }

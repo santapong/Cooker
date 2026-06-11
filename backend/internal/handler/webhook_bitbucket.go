@@ -71,9 +71,10 @@ func (h *Handler) BitbucketWebhook(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusAccepted, gin.H{
-		"appId":  app.ID,
-		"branch": branch,
-		"status": "deploy queued",
-	})
+	// Converge on the manual-deploy path (see handler.triggerWebhookDeploy).
+	// Bitbucket Server push payloads carry the commit SHA per-change
+	// (Changes[].ToHash), not at the top level, so we omit it here — the
+	// commit field is operator-triage metadata only and never drives the
+	// deploy.
+	h.triggerWebhookDeploy(c, app, "bitbucket", branch, "")
 }

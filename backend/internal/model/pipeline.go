@@ -103,6 +103,13 @@ type StageConfig struct {
 	// Custom
 	Script  string `json:"script,omitempty"`
 	Timeout string `json:"timeout,omitempty"`
+
+	// Approval (StageTypeApproval). RequiredApprovers is the distinct-
+	// approver threshold the gate must collect before the run resumes;
+	// 0 means 1 (a single approval). Snapshotted onto the StageApproval
+	// row at gate-creation time so editing the pipeline later doesn't move
+	// an in-flight gate.
+	RequiredApprovers int `json:"requiredApprovers,omitempty"`
 	// Retries is the legacy retry knob: N extra attempts with the
 	// executor's default backoff. Still honoured; Retry (below) wins
 	// when both are set.

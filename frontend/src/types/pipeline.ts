@@ -118,9 +118,26 @@ export interface Artifact {
 
 export interface EnvironmentStatus {
   environmentId: string;
-  status: 'pending' | 'deploying' | 'deployed' | 'failed' | 'awaiting_approval';
+  status: 'pending' | 'deploying' | 'deployed' | 'failed' | 'awaiting_approval' | 'approved';
   promotedAt?: string;
   approvedBy?: string;
+  /** manual-gate progress: distinct approvals collected so far */
+  approvalsHave?: number;
+  /** manual-gate progress: distinct approvals required to advance */
+  approvalsNeed?: number;
+}
+
+// Approval-gate stage (StageTypeApproval). A persisted pause-gate keyed by
+// (run, stage); the executor blocks on it until approved or rejected.
+export interface StageApproval {
+  id: string;
+  runId: string;
+  stageId: string;
+  status: 'awaiting' | 'approved' | 'rejected';
+  requiredApprovers: number;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  votes?: { approverEmail: string; note?: string; createdAt: string }[];
 }
 
 // Run diff (roadmap M3): GET /pipelines/:id/runs/:runId/diff

@@ -78,7 +78,7 @@ All other fields in GitHub's push payload are ignored.
               └── true
                     │
                     ▼
-              Spawn deploy run ──► 202 {"status":"deploy queued","runId":"..."}
+              Spawn deploy run ──► 202 {"status":"running","runId":"...","stream":"/ws/app-run/..."}
 ```
 
 Source: `backend/internal/handler/app.go:260-340` and `backend/internal/source/github/webhook.go`.
@@ -113,7 +113,7 @@ curl -X POST https://cooker.example.com/webhooks/github \
      -d "$BODY"
 ```
 
-Expected: `202 Accepted` with `{"status":"deploy queued"}`.
+Expected: `202 Accepted` with `{"status":"running","runId":"...","stream":"/ws/app-run/<runId>"}`. The deploy runs the same Clone→Build→Push→Deploy path as the manual "Deploy" button (the run is attributed to `webhook:github`) and lands in the app's deploy history.
 
 ## What Cooker does NOT do today
 

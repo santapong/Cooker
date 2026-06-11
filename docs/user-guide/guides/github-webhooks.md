@@ -80,7 +80,7 @@ curl -X POST https://cooker.example.com/webhooks/github \
      -d "$BODY"
 ```
 
-Expected response: `202 Accepted` with `{"status":"deploy queued"}`.
+Expected response: `202 Accepted` with `{"status":"running","runId":"..."}`. Cooker spawns a real deploy run (the same Clone→Build→Push→Deploy path as the manual "Deploy" button); subscribe to `/ws/app-run/<runId>` to stream its logs, or watch it in the app's deploy history.
 
 A wrong signature gets `401 Unauthorized`.
 

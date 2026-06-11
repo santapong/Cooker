@@ -4,6 +4,8 @@ Tracks work that's been planned, scoped, or hinted at by the codebase but isn't 
 
 Items are grouped by area and roughly prioritized within each group.
 
+> Strategic framing — the feature roadmap for OSS adoption, monetization strategy, and UAT→production hosting recommendation — lives in [`docs/product-plan.md`](docs/product-plan.md).
+
 ---
 
 ## Production readiness summary
@@ -53,10 +55,7 @@ Items deferred from the W2–W5 cycle. Sequenced for the next session.
 
 #### W6.2 — useStageLogs reconnect backfill (~1 hour, HIGH severity)
 
-- [ ] Expose `onReconnect`/`reconnectCount` from `useWebSocket` (`frontend/src/hooks/useWebSocket.ts`).
-- [ ] `useStageLogs` re-issues `getStageLogs` REST call on each reconnect and merges with the live WS stream.
-- [ ] Test: simulate WS drop + reconnect mid-run; assert no log lines lost.
-- [ ] **Found by:** `docs/audits/2026-05-usestagelogs-reconnect.md` (PR #80) — log lines during 0-30 s reconnect window are permanently dropped today.
+✅ **Shipped** on `claude/jolly-knuth-j396dx` (PR #108). `useWebSocket` exposes `onReconnect`/`reconnectCount`; `useStageLogs` re-issues `getStageLogs` on each reconnect and merges via the new seq-deduped `stageLogBuffer` module; vitest covers the drop-mid-run scenario from `docs/audits/2026-05-usestagelogs-reconnect.md` (no lines lost, none duplicated).
 
 #### W6.3 — README screenshots (operator step)
 

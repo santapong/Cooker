@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -140,6 +141,49 @@ func TestGetWorkload_UnknownKind400(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/workloads/default/cronjob/web", nil))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for unknown kind, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestKubeWriteEndpoints_NotImplemented asserts the mutating Kubernetes
+// endpoints return an honest 501 with the expected operation tag instead
+// of the old fake 2xx (HS26-05-05 stub part). A valid body is sent where
+// one is required so the handler reaches the 501 rather than a bind 400.
+func TestKubeWriteEndpoints_NotImplemented(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		route  string
+		path   string
+		body   string
+		op     string
+		handle gin.HandlerFunc
+	}{
+		{"scale", http.MethodPost, "/workloads/:ns/:kind/:name/scale", "/workloads/default/deployment/web/scale", `{"replicas":3}`, "workload.scale", ScaleWorkload},
+		{"restart", http.MethodPost, "/workloads/:ns/:kind/:name/restart", "/workloads/default/deployment/web/restart", "", "workload.restart", RestartWorkload},
+		{"apply", http.MethodPost, "/manifests", "/manifests", `{"manifest":"apiVersion: v1\nkind: ConfigMap"}`, "manifest.apply", ApplyManifest},
+		{"delete resource", http.MethodDelete, "/resources/:ns/:kind/:name", "/resources/default/deployment/web", "", "resource.delete", DeleteResource},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := gin.New()
+			r.Handle(tc.method, tc.route, tc.handle)
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			if w.Code != http.StatusNotImplemented {
+				t.Fatalf("expected 501, got %d: %s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), `"operation":"`+tc.op+`"`) {
+				t.Errorf("expected operation %q, got %s", tc.op, w.Body.String())
+			}
+			for _, leak := range []string{"rolling restart initiated", "manifest applied", `"message":"scaled"`, `"message":"resource deleted"`} {
+				if strings.Contains(w.Body.String(), leak) {
+					t.Errorf("response still leaks fake-success token %q: %s", leak, w.Body.String())
+				}
+			}
+		})
 	}
 }
 

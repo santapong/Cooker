@@ -186,6 +186,15 @@ func (s *Server) registerRoutes() {
 	api.POST("/pipelines/:id/runs/:runId/approve", h.ApprovePromotion)
 	api.GET("/pipelines/:id/runs/:runId/env-status", h.GetEnvStatus)
 
+	// Stage-level approval gates (StageTypeApproval, HS26-05-03). RBAC is
+	// an inline admin-or-approver check in the approve/reject handlers,
+	// matching the promotion /approve route above (no route-level role
+	// middleware). The list endpoint is read-only for any authenticated
+	// user (the run page polls it to surface awaiting gates).
+	api.GET("/pipelines/:id/runs/:runId/stage-approvals", h.ListStageApprovals)
+	api.POST("/pipelines/:id/runs/:runId/stages/:stageId/approve", h.ApproveStage)
+	api.POST("/pipelines/:id/runs/:runId/stages/:stageId/reject", h.RejectStage)
+
 	// Governance admission hook (Phase-4). The middleware is a no-op when
 	// COOKER_GOVERNANCE_URL is empty, so this is safe to wire unconditionally.
 	// Pipeline-defined deploy stages are caught by the executor pre-stage hook
@@ -247,11 +256,12 @@ func (s *Server) registerRoutes() {
 
 	settings := api.Group("/settings")
 	{
-		settings.GET("/registries", handler.ListRegistryConfigs)
-		settings.POST("/registries", adminRole, handler.AddRegistryConfig)
-		settings.DELETE("/registries/:id", adminRole, handler.DeleteRegistryConfig)
-		settings.GET("/clusters", handler.ListClusterConfigs)
-		settings.POST("/clusters", adminRole, handler.AddClusterConfig)
+		settings.GET("/registries", h.ListRegistryConfigs)
+		settings.POST("/registries", adminRole, h.AddRegistryConfig)
+		settings.DELETE("/registries/:id", adminRole, h.DeleteRegistryConfig)
+		settings.GET("/clusters", h.ListClusterConfigs)
+		settings.POST("/clusters", adminRole, h.AddClusterConfig)
+		settings.DELETE("/clusters/:id", adminRole, h.DeleteClusterConfig)
 		// Secrets-backend connectivity probe (roadmap M5 / F12). The
 		// settings group carries no MFA gate, so this admin action
 		// adds it explicitly, matching the /admin group's posture.

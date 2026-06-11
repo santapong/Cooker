@@ -11,6 +11,7 @@ import (
 	"github.com/santapong/cooker/internal/auth"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/secrets"
+	"github.com/santapong/cooker/internal/service"
 )
 
 // ListEnvironments returns all environments with secrets redacted so
@@ -256,20 +257,53 @@ func (h *Handler) DeleteSecret(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "status": "deleted"})
 }
 
+// PromoteRun records a promotion of a pipeline run to a target
+// environment. The route is operator+ (writeRole); the target env's
+// PromotionPolicy decides whether the promotion auto-completes or waits
+// for approval. Persists through the Promoter service — this handler
+// only parses, authorizes-by-route, and shapes the response.
 func (h *Handler) PromoteRun(c *gin.Context) {
+	if !h.requirePromotions(c) {
+		return
+	}
 	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
 	if !ok {
 		return
 	}
+	var req struct {
+		EnvironmentID string `json:"environmentId" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "environmentId is required"})
+		return
+	}
+
+	var requestedBy string
+	if claims := auth.GetUser(c); claims != nil {
+		requestedBy = claims.Email
+	}
+
+	promo, err := h.Promotions.Promote(c.Request.Context(), run.ID, run.PipelineID, req.EnvironmentID, requestedBy)
+	if err != nil {
+		if abortStoreErr(c, err, "environment not found") {
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"message": "promotion initiated",
-		"runId":   run.ID,
+		"runId":         run.ID,
+		"environmentId": promo.EnvironmentID,
+		"status":        promo.Status,
+		"promotion":     promo,
 	})
 }
 
-// ApprovePromotion records an approval for a promotion. Requires the
-// caller to hold RoleAdmin or RoleApprover; the approver identity is
-// taken from the OIDC claims, not the request body.
+// ApprovePromotion records an approval for a run's promotion to a target
+// environment. Requires the caller to hold RoleAdmin or RoleApprover;
+// the approver identity is taken from the OIDC claims, not the request
+// body (IDOR-safe). The promotion advances once the distinct-approver
+// count reaches the env policy's RequiredApprovers.
 func (h *Handler) ApprovePromotion(c *gin.Context) {
 	claims := auth.GetUser(c)
 	if !auth.CanApprovePromotion(claims) {
@@ -278,33 +312,76 @@ func (h *Handler) ApprovePromotion(c *gin.Context) {
 		})
 		return
 	}
+	if !h.requirePromotions(c) {
+		return
+	}
 
 	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
 	if !ok {
 		return
 	}
 	var req struct {
-		Note string `json:"note"`
+		EnvironmentID string `json:"environmentId" binding:"required"`
+		Note          string `json:"note"`
 	}
-	_ = c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "environmentId is required"})
+		return
+	}
+
+	promo, err := h.Promotions.Approve(c.Request.Context(), run.ID, req.EnvironmentID, claims.Subject, claims.Email, req.Note)
+	if err != nil && !errors.Is(err, service.ErrAlreadyApproved) {
+		if abortStoreErr(c, err, "promotion not found") {
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":    "promotion approved",
-		"runId":      run.ID,
-		"approvedBy": claims.Email,
-		"note":       req.Note,
+		"runId":         run.ID,
+		"environmentId": promo.EnvironmentID,
+		"status":        promo.Status,
+		"approvedBy":    claims.Email,
+		"note":          req.Note,
+		"approvalsHave": promo.ApprovalCount(),
+		"approvalsNeed": promo.RequiredApprovers,
+		"promotion":     promo,
 	})
 }
 
+// GetEnvStatus returns the real per-environment promotion status for a
+// run, derived from the persisted promotion rows (HS26-05-08).
 func (h *Handler) GetEnvStatus(c *gin.Context) {
+	if !h.requirePromotions(c) {
+		return
+	}
 	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
 	if !ok {
 		return
 	}
+	statuses, err := h.Promotions.Statuses(c.Request.Context(), run.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"runId":    run.ID,
-		"statuses": []model.EnvironmentStatus{},
+		"statuses": statuses,
 	})
+}
+
+// requirePromotions aborts with 503 when the promotion service was not
+// wired (defensive — server.New always sets it; a nil here means a
+// store-less test Handler). Keeps the handler from panicking on nil.
+func (h *Handler) requirePromotions(c *gin.Context) bool {
+	if h.Promotions != nil {
+		return true
+	}
+	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+		"error": "promotion service unavailable",
+	})
+	return false
 }
 
 // requireSecrets aborts with 503 when no secrets backend is

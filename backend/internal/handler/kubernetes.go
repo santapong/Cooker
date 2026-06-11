@@ -114,35 +114,50 @@ func (h *Handler) GetPodLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"logs": logs})
 }
 
-// --- Write path: still stubs. ---
+// --- Write path: not implemented (honest 501). ---
 //
-// ScaleWorkload, RestartWorkload, ApplyManifest, and DeleteResource
-// remain placeholder stubs. The mutating Kubernetes path is deliberately
-// out of scope for the read-only list/inspect work and is tracked
-// separately; these return a synthetic success shape and do NOT touch
-// h.Kube (which is read-only).
+// ScaleWorkload, RestartWorkload, ApplyManifest, and DeleteResource are
+// not built. The mutating Kubernetes path is deliberately out of scope
+// for the read-only list/inspect work (h.Kube is a read-only client) and
+// is tracked separately.
+//
+// Until they are implemented these return 501 with the consistent
+// {error,operation,hint} envelope rather than the fake 2xx
+// ("scaled" / "rolling restart initiated" / "manifest applied" /
+// "resource deleted") they used to. The fake success made the UI report
+// a mutation that never reached any cluster
+// (docs/audits/2026-05-half-shipped.md HS26-05-05). 501 makes the api
+// client throw so the UI surfaces an honest error.
+//
+// Note: this is distinct from the read-path 503 (kubeUnavailable). The
+// read client may be perfectly configured and reachable; the write path
+// simply isn't wired yet, so "not implemented" is the accurate status,
+// not "cluster unavailable".
+
+// notImplementedKubeWrite writes the 501 used for every unbuilt mutating
+// Kubernetes endpoint. Shape mirrors notImplementedDockerHost so the UI
+// can branch on `operation`.
+func notImplementedKubeWrite(c *gin.Context, op string) {
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"error":     "kubernetes write operations are not implemented",
+		"operation": op,
+		"hint":      "the mutating kubernetes path is not wired yet; use kubectl or a GitOps pipeline for cluster mutations",
+	})
+}
 
 func ScaleWorkload(c *gin.Context) {
+	// Keep validating the body so a malformed request still 400s ahead of
+	// the not-implemented signal (matches the docker write handlers).
 	var req model.ScaleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":  "scaled",
-		"kind":     c.Param("kind"),
-		"name":     c.Param("name"),
-		"replicas": req.Replicas,
-	})
+	notImplementedKubeWrite(c, "workload.scale")
 }
 
 func RestartWorkload(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"message": "rolling restart initiated",
-		"kind":    c.Param("kind"),
-		"name":    c.Param("name"),
-	})
+	notImplementedKubeWrite(c, "workload.restart")
 }
 
 func ApplyManifest(c *gin.Context) {
@@ -151,18 +166,9 @@ func ApplyManifest(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":   "manifest applied via server-side apply",
-		"namespace": req.Namespace,
-	})
+	notImplementedKubeWrite(c, "manifest.apply")
 }
 
 func DeleteResource(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"message":   "resource deleted",
-		"namespace": c.Param("ns"),
-		"kind":      c.Param("kind"),
-		"name":      c.Param("name"),
-	})
+	notImplementedKubeWrite(c, "resource.delete")
 }

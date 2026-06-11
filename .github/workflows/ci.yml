@@ -29,8 +29,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.25"
           # cache: true (the default) covers the module download cache
@@ -43,7 +43,7 @@ jobs:
       # OTel, etc.). Key on go.sum so the cache busts when dependencies
       # change; the restore-keys fallback lets partial cache hits still
       # benefit on dep-only changes.
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}
@@ -65,7 +65,7 @@ jobs:
         working-directory: backend
         run: go vet ./...
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
         # Keep going to the test step even on lint failure so a single
         # CI cycle surfaces both signals at once. The job still fails
         # overall — golangci-lint-action records it as a failed step.
@@ -87,8 +87,8 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: npm
@@ -109,8 +109,8 @@ jobs:
   helm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
         with:
           version: v3.14.0
       - name: helm lint
@@ -336,13 +336,13 @@ jobs:
     # independent failure signals in parallel.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       # P26-05-39: set up buildx with the GHA layer-cache backend so
       # subsequent runs reuse cached layers for the Go build, npm ci, and
       # kubectl fetch stages.
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Build Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: deploy/docker/Dockerfile

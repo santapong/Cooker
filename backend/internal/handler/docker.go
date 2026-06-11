@@ -56,12 +56,21 @@ func resolveComposePath(name string) (string, error) {
 	return candidate, nil
 }
 
-// Docker image/container read endpoints are intentionally honest: no
-// live docker host transport is wired (no docker.sock — see CLAUDE.md /
+// Docker image/container endpoints are intentionally honest: no live
+// docker host transport is wired (no docker.sock — see CLAUDE.md /
 // Kaniko P1.1, which closes the docker.sock-to-host RCE gap). Until a
-// host transport lands (backlog P9.4), list endpoints return an empty
-// slice with 200 (so UI pages render their empty state) and inspect
-// endpoints return 501 with the consistent shape from network.go.
+// host transport lands (backlog P9.4):
+//   - list endpoints return an empty slice with 200 (so UI pages render
+//     their empty state),
+//   - inspect AND write endpoints (build/remove image, create/stop/remove
+//     container) return 501 with the consistent {error,operation,hint}
+//     shape from network.go.
+//
+// The write endpoints previously returned fake 2xx ("build-placeholder" /
+// "container-placeholder" / "stopped" / "removed") which surfaced a green
+// success toast in the UI for an action that never happened
+// (docs/audits/2026-05-half-shipped.md HS26-05-15). Returning 501 makes
+// the api client throw, so the UI shows an honest error instead.
 
 func ListDockerImages(c *gin.Context) {
 	// No docker host transport wired (no docker.sock); reads are empty
@@ -86,15 +95,15 @@ func BuildDockerImage(c *gin.Context) {
 		return
 	}
 
-	// Placeholder: will stream build output via WebSocket
-	c.JSON(http.StatusAccepted, gin.H{
-		"buildId": "build-placeholder",
-		"message": "Build initiated. Connect to WS /ws/docker/build/<buildId> for logs.",
-	})
+	// No docker host transport wired (no docker.sock); the standalone
+	// /docker/* build path is not implemented (P9.4). Previously this
+	// returned a fake 202 with a "build-placeholder" id, so the UI showed
+	// a success it could never act on. Be honest: 501.
+	notImplementedDockerHost(c, "image.build")
 }
 
 func DeleteDockerImage(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "image deleted", "id": c.Param("id")})
+	notImplementedDockerHost(c, "image.remove")
 }
 
 func ListContainers(c *gin.Context) {
@@ -117,18 +126,18 @@ func CreateContainer(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"id":      "container-placeholder",
-		"message": "Container created via Docker Engine SDK",
-	})
+	// No docker host transport wired (no docker.sock); container create is
+	// not implemented (P9.4). Previously returned a fake 201 with a
+	// "container-placeholder" id. Be honest: 501.
+	notImplementedDockerHost(c, "container.create")
 }
 
 func StopContainer(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "stopped", "id": c.Param("id")})
+	notImplementedDockerHost(c, "container.stop")
 }
 
 func DeleteContainer(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "removed", "id": c.Param("id")})
+	notImplementedDockerHost(c, "container.remove")
 }
 
 func GetContainerLogs(c *gin.Context) {

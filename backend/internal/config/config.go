@@ -39,8 +39,12 @@ type Config struct {
 	// ref (CacheSpec{Mode:"registry"}) onto the build stages of
 	// app-deploy synthesized pipelines. Hand-built pipelines configure
 	// cache per stage instead.
-	BuildCacheRepo    string
-	BuilderBackend    string
+	BuildCacheRepo string
+	BuilderBackend string
+	// StageRunner selects the container runtime for Test/Custom stages:
+	// "kube" (one-shot Job), "docker" (`docker run`), or "noop" (default —
+	// no container; dev/test only). Loaded from COOKER_STAGE_RUNNER.
+	StageRunner       string
 	PusherBackend     string
 	DeployerBackend   string
 	SecretsBackend    string
@@ -260,6 +264,7 @@ func Load() *Config {
 		Registry:        getEnv("COOKER_REGISTRY", "localhost:5000/cooker"),
 		BuildCacheRepo:  getEnv("COOKER_BUILD_CACHE_REPO", ""),
 		BuilderBackend:  getEnv("COOKER_BUILDER", "noop"),
+		StageRunner:     getEnv("COOKER_STAGE_RUNNER", "noop"),
 		PusherBackend:   getEnv("COOKER_PUSHER", "noop"),
 		DeployerBackend: getEnv("COOKER_DEPLOYER", "noop"),
 		SecretsBackend:  getEnv("COOKER_SECRETS_BACKEND", "database"),

@@ -22,6 +22,7 @@ import (
 	"github.com/santapong/cooker/internal/pusher"
 	"github.com/santapong/cooker/internal/retry"
 	"github.com/santapong/cooker/internal/runstate"
+	"github.com/santapong/cooker/internal/stagerunner"
 	"github.com/santapong/cooker/pkg/dagrunner"
 )
 
@@ -35,6 +36,13 @@ const stageLogCap = 1 << 20 // 1 MiB
 // own. Picked to be longer than realistic Kaniko builds (~30 min)
 // without being so long that a stuck stage pins resources for a day.
 const defaultStageTimeout = 30 * time.Minute
+
+// defaultApprovalPoll is how often a blocked approval stage re-checks its
+// persisted gate for an approve/reject decision. The gate is also bounded
+// by the stage timeout and the run deadline (both delivered via ctx), so a
+// gate that is never actioned fails the stage rather than hanging forever.
+// 3s keeps the UI feeling responsive without hammering the store.
+const defaultApprovalPoll = 3 * time.Second
 
 // defaultMaxParallel caps how many stages within a single DAG level
 // execute concurrently. Picked to leave headroom for K8s API + one
@@ -357,11 +365,23 @@ type Executor struct {
 	dockerDeployer  deployer.Deployer
 	composeDeployer deployer.Deployer
 	gitops          gitops.Writer
+	// stageRunner runs Test/Custom stages in an isolated container
+	// (Kubernetes Job / docker run / noop). Defaults to Noop so Execute is
+	// safe to call in tests and dev without a container runtime.
+	stageRunner stagerunner.Runner
+	// stageApprovals persists and resolves approval-gate stages
+	// (StageTypeApproval). Nil disables the gate: an approval stage then
+	// fails loudly (the pre-HS26-05-03 fail-loud stub behaviour) rather
+	// than auto-passing, so a pipeline can't silently skip a human gate.
+	stageApprovals  *StageApprovalService
 	runUpdater      RunUpdater
 	logBroadcast    LogBroadcaster
 	logStore        logstore.Store
 	statusBroadcast StatusBroadcaster
 	govHook         DeployGovernanceHook
+	// approvalPoll governs how often a blocked approval stage re-checks its
+	// gate. Zero uses defaultApprovalPoll. Tests set it small.
+	approvalPoll time.Duration
 }
 
 // StatusBroadcaster publishes a per-stage status transition to a
@@ -454,6 +474,24 @@ func WithGitOps(g gitops.Writer) Option {
 	}
 }
 
+// WithStageRunner injects the container runtime used by Test/Custom
+// stages. Passing nil is a no-op (the default Noop runner is kept).
+func WithStageRunner(r stagerunner.Runner) Option {
+	return func(e *Executor) {
+		if r != nil {
+			e.stageRunner = r
+		}
+	}
+}
+
+// WithStageApprovals injects the approval-gate service used by approval
+// stages. Nil leaves approval stages failing loudly (no silent auto-pass).
+func WithStageApprovals(s *StageApprovalService) Option {
+	return func(e *Executor) {
+		e.stageApprovals = s
+	}
+}
+
 // WithRunUpdater installs a callback the executor invokes after
 // every stage transition so a Postgres-backed handler can persist
 // progress as it happens. Pass nil (or skip the option) to disable.
@@ -498,10 +536,11 @@ func WithDeployGovernanceHook(h DeployGovernanceHook) Option {
 // Noop backends so Execute is safe to call in tests and dry runs.
 func NewExecutor(opts ...Option) *Executor {
 	e := &Executor{
-		builder:  builder.Noop{},
-		pusher:   pusher.Noop{},
-		deployer: deployer.Noop{},
-		gitops:   gitops.Noop{},
+		builder:     builder.Noop{},
+		pusher:      pusher.Noop{},
+		deployer:    deployer.Noop{},
+		gitops:      gitops.Noop{},
+		stageRunner: stagerunner.Noop{},
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -742,7 +781,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 				case model.StageTypeBuild:
 					return e.executeBuild(ctx, run.ID, execStage, stageRun)
 				case model.StageTypeTest:
-					return e.executeTest(ctx, execStage)
+					return e.executeTest(ctx, run.ID, execStage, stageRun)
 				case model.StageTypePush:
 					return e.executePush(ctx, run.ID, execStage, stageRun)
 				case model.StageTypeDeploy:
@@ -758,9 +797,9 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 					}
 					return e.executeDeploy(ctx, run.ID, execStage, stageRun)
 				case model.StageTypeApproval:
-					return e.executeApproval(ctx, execStage)
+					return e.executeApproval(ctx, run.ID, execStage, stageRun)
 				case model.StageTypeCustom:
-					return e.executeCustom(ctx, execStage)
+					return e.executeCustom(ctx, run.ID, execStage, stageRun)
 				case model.StageTypeGitOpsCommit:
 					return e.executeGitOpsCommit(ctx, execStage, stageRun)
 				default:
@@ -1116,12 +1155,54 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 
 func (c *cappedBuffer) String() string { return c.buf.String() }
 
-func (e *Executor) executeTest(_ context.Context, stage *model.Stage) error {
-	// Stage type "test" is not yet implemented. Return an explicit error so
-	// pipelines that include a test stage fail loudly rather than silently
-	// passing. Closes dag-adaptation-2026.md §6 T1 / dag-performance.md
-	// §3 Critical finding #1.
-	return fmt.Errorf("stage type %q not implemented", stage.Type)
+// executeTest runs a Test stage: a user-specified image + command in an
+// isolated container, pass/fail by exit code. Thin wrapper over the shared
+// container runner. Closes HS26-05-03 (test runner) — formerly a fail-loud
+// stub. The UI collects only the test image today (NodeConfigPanel
+// `config.image`); Command is honoured if a hand-built pipeline sets it.
+func (e *Executor) executeTest(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
+	if stage.Config.Image == "" {
+		return fmt.Errorf("test stage %q: image is required", stage.Name)
+	}
+	return e.runStageContainer(ctx, runID, stage, sr, stagerunner.Request{
+		Image:   stage.Config.Image,
+		Command: stage.Config.Command,
+		Env:     stage.Config.Env,
+	})
+}
+
+// runStageContainer is the shared Test/Custom execution path: it wires the
+// stage-log tee (same pattern as executeBuild), invokes the configured
+// stage runner, persists logs, and maps the container exit code onto the
+// stage outcome. A non-zero exit fails the stage; a runtime error
+// (ErrUnavailable, lost API) also fails it but with the wrapped cause.
+func (e *Executor) runStageContainer(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun, req stagerunner.Request) error {
+	logs := newCappedBuffer(stageLogCap)
+	var writer io.Writer = logs
+	lw := e.newStageLineWriter(runID, stage)
+	if lw != nil {
+		writer = io.MultiWriter(logs, lw)
+	}
+	defer func() {
+		if lw != nil {
+			lw.flush()
+		}
+		sr.Logs = logs.String()
+	}()
+	req.LogWriter = writer
+
+	runner := e.stageRunner
+	if runner == nil {
+		runner = stagerunner.Noop{}
+	}
+	res, err := runner.Run(ctx, req)
+	if err != nil {
+		return fmt.Errorf("%s: %w", stage.Type, err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("%s stage %q: command exited %d", stage.Type, stage.Name, res.ExitCode)
+	}
+	return nil
 }
 
 func (e *Executor) executePush(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
@@ -1298,18 +1379,100 @@ func hasRegistryHost(ref string) bool {
 	return false
 }
 
-func (e *Executor) executeApproval(_ context.Context, stage *model.Stage) error {
-	// Stage type "approval" is not yet implemented. Return an explicit error
-	// so pipelines that include an approval gate fail loudly rather than
-	// silently auto-approving. Closes dag-adaptation-2026.md §6 T1.
-	return fmt.Errorf("stage type %q not implemented", stage.Type)
+// executeApproval is a persisted human-in-the-loop pause gate. It opens
+// (or re-attaches to) a StageApproval row, broadcasts the stage as
+// "awaiting" so the run page surfaces an Approve/Reject affordance, then
+// blocks — polling the gate — until it is approved (stage succeeds),
+// rejected (stage fails), or ctx is cancelled (run deadline / cancel /
+// stage timeout fires and the stage fails). Closes HS26-05-03 (approval
+// gate) — formerly a fail-loud stub. With no StageApprovalService wired the
+// gate cannot be persisted, so the stage fails loudly rather than
+// silently auto-passing a human gate.
+func (e *Executor) executeApproval(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
+	if e.stageApprovals == nil {
+		return fmt.Errorf("approval stage %q: approval gate not configured", stage.Name)
+	}
+
+	gate, err := e.stageApprovals.Await(ctx, runID, stage.ID, stage.Config.RequiredApprovers)
+	if err != nil {
+		return fmt.Errorf("approval stage %q: open gate: %w", stage.Name, err)
+	}
+
+	// Persist a breadcrumb in the stage log so the run page (which tails
+	// stage logs) explains why the stage is paused, and broadcast the
+	// non-FSM "awaiting" status so the step rail tints + offers the
+	// Approve/Reject buttons. The stage row itself stays "running" — the
+	// stage FSM has no awaiting state, and the gate row is the source of
+	// truth for the decision.
+	if lw := e.newStageLineWriter(runID, stage); lw != nil {
+		fmt.Fprintf(lw, "awaiting approval: %d distinct approver(s) required\n", gate.RequiredApprovers)
+		lw.flush()
+	}
+	sr.Logs = fmt.Sprintf("awaiting approval: %d distinct approver(s) required\n", gate.RequiredApprovers)
+
+	// If a previous attempt (pre-restart) already settled the gate, resolve
+	// immediately without re-broadcasting awaiting.
+	switch gate.Status {
+	case model.StageApprovalApproved:
+		return nil
+	case model.StageApprovalRejected:
+		return fmt.Errorf("approval stage %q: rejected by %s", stage.Name, gate.ResolvedBy)
+	}
+
+	e.broadcastStatus(runID, stage.ID, "awaiting")
+
+	poll := e.approvalPoll
+	if poll <= 0 {
+		poll = defaultApprovalPoll
+	}
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			// Run deadline, operator cancel, or the per-stage timeout. Fail
+			// the stage with the context cause; finalize() maps a canceled
+			// run to Cancelled, a deadline to Failed.
+			return fmt.Errorf("approval stage %q: %w", stage.Name, ctx.Err())
+		case <-ticker.C:
+			g, gerr := e.stageApprovals.Get(ctx, runID, stage.ID)
+			if gerr != nil {
+				// A transient store read error shouldn't fail the gate;
+				// log and keep polling. A vanished gate (NotFound) is
+				// unexpected mid-run but also non-fatal — keep waiting for
+				// ctx to bound the loop.
+				slog.Warn("approval stage: gate read failed", "run", runID, "stage", stage.Name, "err", gerr)
+				continue
+			}
+			switch g.Status {
+			case model.StageApprovalApproved:
+				return nil
+			case model.StageApprovalRejected:
+				return fmt.Errorf("approval stage %q: rejected by %s", stage.Name, g.ResolvedBy)
+			}
+		}
+	}
 }
 
-func (e *Executor) executeCustom(_ context.Context, stage *model.Stage) error {
-	// Stage type "custom" is not yet implemented. Return an explicit error
-	// so pipelines that include a custom stage fail loudly rather than
-	// silently succeeding. Closes dag-adaptation-2026.md §6 T1.
-	return fmt.Errorf("stage type %q not implemented", stage.Type)
+// executeCustom runs a Custom stage: a user-supplied shell script in an
+// isolated container, pass/fail by exit code. The script is NEVER exec'd
+// on the Cooker process — it runs in the container the stage runner
+// provides (Kubernetes Job / docker run). Closes HS26-05-03 (custom script
+// runner) — formerly a fail-loud stub. The UI collects the script
+// (NodeConfigPanel `config.script`) and an image is required to run it in.
+func (e *Executor) executeCustom(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
+	if stage.Config.Script == "" && len(stage.Config.Command) == 0 {
+		return fmt.Errorf("custom stage %q: script or command is required", stage.Name)
+	}
+	if stage.Config.Image == "" {
+		return fmt.Errorf("custom stage %q: image is required to run the script in a container", stage.Name)
+	}
+	return e.runStageContainer(ctx, runID, stage, sr, stagerunner.Request{
+		Image:   stage.Config.Image,
+		Command: stage.Config.Command,
+		Script:  stage.Config.Script,
+		Env:     stage.Config.Env,
+	})
 }
 
 func (e *Executor) executeGitOpsCommit(ctx context.Context, stage *model.Stage, sr *model.StageRun) error {

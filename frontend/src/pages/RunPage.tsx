@@ -2,7 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { pipelineApi } from '../api/pipelines';
 import { useEnvironmentStore } from '../stores/environmentStore';
-import type { PipelineRun, Pipeline, Stage, StageRun, EnvironmentStatus, RunDiffReport } from '../types/pipeline';
+import type {
+  PipelineRun,
+  Pipeline,
+  Stage,
+  StageRun,
+  EnvironmentStatus,
+  RunDiffReport,
+  StageApproval,
+} from '../types/pipeline';
 import { useTheme } from '../theme/ThemeProvider';
 import { useUIStore } from '../stores/uiStore';
 import { hexA, CONSOLE } from '../theme/tokens';
@@ -33,6 +41,10 @@ export default function RunPage() {
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
   const [aiTriage, setAiTriage] = useState(false);
   const [envStatuses, setEnvStatuses] = useState<EnvironmentStatus[]>([]);
+  // Approval-gate state for StageTypeApproval stages. Polled alongside the
+  // run so an awaiting gate surfaces an Approve/Reject affordance and a
+  // resolved gate clears it. Keyed by stageId for O(1) rail lookup.
+  const [stageGates, setStageGates] = useState<Record<string, StageApproval>>({});
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
@@ -98,6 +110,47 @@ export default function RunPage() {
     };
   }, [id, runId]);
 
+  const refreshRun = useCallback(() => {
+    if (!id || !runId) return;
+    pipelineApi
+      .getRun(id, runId)
+      .then(setRun)
+      .catch(() => {
+        /* keep the last good run on a transient error */
+      });
+  }, [id, runId]);
+
+  // Poll the approval gates + the run while the run is live. The executor
+  // blocks an approval stage server-side and broadcasts the decision via
+  // the persisted gate; polling lets the run page reflect an awaiting gate
+  // (to offer Approve/Reject) and pick up the stage flipping to
+  // succeeded/failed once a decision lands. Stops once the run is terminal.
+  useEffect(() => {
+    if (!id || !runId) return;
+    if (run && run.status !== 'running' && run.status !== 'pending') return;
+    let cancelled = false;
+    const tick = () => {
+      pipelineApi
+        .stageApprovals(id, runId)
+        .then((res) => {
+          if (cancelled) return;
+          const byStage: Record<string, StageApproval> = {};
+          for (const g of res.gates ?? []) byStage[g.stageId] = g;
+          setStageGates(byStage);
+        })
+        .catch(() => {
+          /* gates are best-effort */
+        });
+      refreshRun();
+    };
+    tick();
+    const t = window.setInterval(tick, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [id, runId, run, refreshRun]);
+
   // Logs are now driven by the useStageLogs hook above (WebSocket
   // stream + REST backfill). The previous 3s-polling loop is gone.
 
@@ -148,11 +201,15 @@ export default function RunPage() {
       <StepRail
         run={run}
         stages={stages}
+        stageGates={stageGates}
         selectedStageId={selectedStageId}
         onSelect={setSelectedStageId}
         canCancel={isLive}
         cancelling={cancelling}
         onCancel={cancel}
+        pipelineId={id ?? ''}
+        runId={runId ?? ''}
+        onGateResolved={refreshRun}
       />
       <LogsPanel
         stage={stages.find((s) => s.id === selectedStageId) ?? null}
@@ -184,19 +241,27 @@ export default function RunPage() {
 function StepRail({
   run,
   stages,
+  stageGates,
   selectedStageId,
   onSelect,
   canCancel,
   cancelling,
   onCancel,
+  pipelineId,
+  runId,
+  onGateResolved,
 }: {
   run: PipelineRun | null;
   stages: Stage[];
+  stageGates: Record<string, StageApproval>;
   selectedStageId: string | null;
   onSelect: (id: string) => void;
   canCancel: boolean;
   cancelling: boolean;
   onCancel: () => void;
+  pipelineId: string;
+  runId: string;
+  onGateResolved: () => void;
 }) {
   const t = useTheme();
   const stageRunMap = new Map(run?.stageRuns?.map((s) => [s.stageId, s]) ?? []);
@@ -255,51 +320,65 @@ function StepRail({
         />
         {stages.map((s) => {
           const sr = stageRunMap.get(s.id);
-          const tone = statusTone(sr?.status);
-          const isCurrent = tone === 'ember';
+          const gate = stageGates[s.id];
+          const awaiting = gate?.status === 'awaiting';
+          // An awaiting gate overrides the persisted "running" stage status
+          // so the rail tints warn and reads "awaiting" while paused.
+          const tone = awaiting ? 'warn' : statusTone(sr?.status);
+          const isCurrent = tone === 'ember' || awaiting;
           const isSelected = selectedStageId === s.id;
           return (
-            <div
-              key={s.id}
-              onClick={() => onSelect(s.id)}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '44px 1fr auto',
-                alignItems: 'center',
-                gap: 8,
-                padding: '10px 18px 10px 14px',
-                background: isSelected
-                  ? hexA(t.accent, 0.06)
-                  : isCurrent
-                    ? hexA(t.ember, 0.06)
-                    : 'transparent',
-                borderLeft: `3px solid ${isSelected ? t.accent : isCurrent ? t.ember : 'transparent'}`,
-                cursor: 'pointer',
-              }}
-            >
-              <StepDot tone={tone} />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 600, color: t.text }}>{s.name}</div>
-                <div
-                  style={{
-                    fontFamily: t.mono,
-                    fontSize: 10.5,
-                    color: t.textMute,
-                    marginTop: 2,
-                  }}
-                >
-                  {s.type}
-                </div>
-              </div>
-              <span
+            <div key={s.id}>
+              <div
+                onClick={() => onSelect(s.id)}
                 style={{
-                  fontFamily: t.mono,
-                  fontSize: 11,
-                  color: isCurrent ? t.ember : t.textMute,
+                  display: 'grid',
+                  gridTemplateColumns: '44px 1fr auto',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '10px 18px 10px 14px',
+                  background: isSelected
+                    ? hexA(t.accent, 0.06)
+                    : isCurrent
+                      ? hexA(t.ember, 0.06)
+                      : 'transparent',
+                  borderLeft: `3px solid ${isSelected ? t.accent : isCurrent ? t.ember : 'transparent'}`,
+                  cursor: 'pointer',
                 }}
               >
-                {duration(sr?.startedAt, sr?.finishedAt) ?? '—'}
-              </span>
+                <StepDot tone={tone} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: t.text }}>{s.name}</div>
+                  <div
+                    style={{
+                      fontFamily: t.mono,
+                      fontSize: 10.5,
+                      color: t.textMute,
+                      marginTop: 2,
+                    }}
+                  >
+                    {s.type}
+                  </div>
+                </div>
+                <span
+                  style={{
+                    fontFamily: t.mono,
+                    fontSize: 11,
+                    color: isCurrent ? t.ember : t.textMute,
+                  }}
+                >
+                  {awaiting ? 'awaiting' : (duration(sr?.startedAt, sr?.finishedAt) ?? '—')}
+                </span>
+              </div>
+              {awaiting && (
+                <StageGatePanel
+                  gate={gate}
+                  pipelineId={pipelineId}
+                  runId={runId}
+                  stageId={s.id}
+                  onResolved={onGateResolved}
+                />
+              )}
             </div>
           );
         })}
@@ -329,6 +408,91 @@ function StepRail({
         </Btn>
       </div>
     </aside>
+  );
+}
+
+// StageGatePanel renders the Approve/Reject affordance for a paused
+// approval-gate stage (StageTypeApproval). It posts to the stage
+// approve/reject endpoints and, on success, asks the parent to refresh the
+// run so the stage flips to succeeded/failed. RBAC is enforced server-side
+// (admin-or-approver); a forbidden click surfaces as an error toast.
+function StageGatePanel({
+  gate,
+  pipelineId,
+  runId,
+  stageId,
+  onResolved,
+}: {
+  gate: StageApproval;
+  pipelineId: string;
+  runId: string;
+  stageId: string;
+  onResolved: () => void;
+}) {
+  const t = useTheme();
+  const pushToast = useToastStore((s) => s.push);
+  const [busy, setBusy] = useState<'approve' | 'reject' | null>(null);
+
+  const act = async (kind: 'approve' | 'reject') => {
+    setBusy(kind);
+    try {
+      if (kind === 'approve') await pipelineApi.approveStage(pipelineId, runId, stageId);
+      else await pipelineApi.rejectStage(pipelineId, runId, stageId);
+      pushToast({
+        kind: 'success',
+        message: kind === 'approve' ? 'Approval recorded.' : 'Stage rejected.',
+      });
+      onResolved();
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const have = gate.votes?.length ?? 0;
+  const need = gate.requiredApprovers || 1;
+
+  return (
+    <div
+      style={{
+        margin: '0 18px 8px 44px',
+        padding: '8px 10px',
+        background: hexA(t.warn, 0.08),
+        border: `1px solid ${hexA(t.warn, 0.35)}`,
+        borderRadius: 8,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Pill tone="warn">awaiting approval</Pill>
+        <span style={{ fontFamily: t.mono, fontSize: 10.5, color: t.textMute }}>
+          {have}/{need} approved
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <Btn
+          kind="primary"
+          icon="check"
+          onClick={() => act('approve')}
+          disabled={busy !== null}
+          style={{ flex: 1, justifyContent: 'center' }}
+        >
+          {busy === 'approve' ? 'Approving…' : 'Approve'}
+        </Btn>
+        <Btn
+          kind="danger"
+          icon="close"
+          onClick={() => act('reject')}
+          disabled={busy !== null}
+          style={{ flex: 1, justifyContent: 'center' }}
+        >
+          {busy === 'reject' ? 'Rejecting…' : 'Reject'}
+        </Btn>
+      </div>
+    </div>
   );
 }
 
@@ -919,11 +1083,12 @@ function RightRail({
                   ? 'bad'
                   : status.status === 'awaiting_approval'
                     ? 'warn'
-                    : status.status === 'deploying'
+                    : status.status === 'deploying' || status.status === 'approved'
                       ? 'ember'
                       : 'neutral'
               : 'neutral';
             const needsApproval = status?.status === 'awaiting_approval';
+            const settled = status?.status === 'deployed' || status?.status === 'approved';
             return (
               <div
                 key={env.id}
@@ -941,7 +1106,13 @@ function RightRail({
                   <span style={{ fontFamily: t.mono, fontSize: 12, fontWeight: 600, color: t.text, flex: 1 }}>
                     {env.name}
                   </span>
-                  <Pill tone={tone}>{status?.status ?? 'pending'}</Pill>
+                  {needsApproval && status?.approvalsNeed ? (
+                    <Pill tone="warn">
+                      {status.approvalsHave ?? 0}/{status.approvalsNeed} approved
+                    </Pill>
+                  ) : (
+                    <Pill tone={tone}>{status?.status ?? 'pending'}</Pill>
+                  )}
                 </div>
                 {status?.promotedAt && (
                   <div style={{ fontFamily: t.mono, fontSize: 10.5, color: t.textMute }}>
@@ -960,7 +1131,7 @@ function RightRail({
                       {busy === `approve:${env.id}` ? 'Approving…' : 'Approve'}
                     </Btn>
                   )}
-                  {!needsApproval && status?.status !== 'deployed' && (
+                  {!needsApproval && !settled && (
                     <Btn
                       kind="ink"
                       icon="arrow"

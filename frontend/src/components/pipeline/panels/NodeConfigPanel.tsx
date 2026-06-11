@@ -194,14 +194,28 @@ export default function NodeConfigPanel() {
         )}
 
         {stage.type === 'custom' && (
-          <div>
-            <Label>Script</Label>
-            <Input
-              value={config.script || ''}
-              onChange={(e) => updateStageConfig(stage.id, { script: e.target.value })}
-              placeholder="echo hello"
-            />
-          </div>
+          <>
+            <div>
+              <Label>Container image</Label>
+              <Input
+                value={config.image || ''}
+                onChange={(e) => updateStageConfig(stage.id, { image: e.target.value })}
+                placeholder="alpine:3.20"
+              />
+            </div>
+            <div>
+              <Label>Script</Label>
+              <Input
+                value={config.script || ''}
+                onChange={(e) => updateStageConfig(stage.id, { script: e.target.value })}
+                placeholder="echo hello"
+              />
+            </div>
+            <div style={{ fontSize: 10.5, color: t.textMute, lineHeight: 1.5 }}>
+              The script runs in an isolated container (sh -c). It never executes on
+              the Cooker server.
+            </div>
+          </>
         )}
 
         {(stage.type === 'build' || stage.type === 'push' || stage.type === 'deploy') && (

@@ -176,8 +176,9 @@ func TestExecutor_ExecuteSimplePipeline(t *testing.T) {
 
 // TestExecutor_ImplementedStageTypes verifies the three fully-implemented
 // stage types (build, push, deploy) succeed end-to-end. test/approval/custom
-// are stubs that now return errors — verified separately in
-// TestExecutor_StubStagesFail.
+// have their own runtimes now (HS26-05-03) — exercised in
+// stageruntime_test.go; their misconfiguration failures are verified in
+// TestExecutor_MisconfiguredRuntimeStagesFail.
 func TestExecutor_ImplementedStageTypes(t *testing.T) {
 	p := &model.Pipeline{
 		ID: "pipe-implemented",
@@ -215,37 +216,41 @@ func TestExecutor_ImplementedStageTypes(t *testing.T) {
 	}
 }
 
-// TestExecutor_StubStagesFail verifies that the unimplemented stage types
-// (test, approval, custom) return an explicit error rather than silently
-// returning nil. Closes dag-adaptation-2026.md §6 T1.
-func TestExecutor_StubStagesFail(t *testing.T) {
-	stubTypes := []model.StageType{
-		model.StageTypeTest,
-		model.StageTypeApproval,
-		model.StageTypeCustom,
+// TestExecutor_MisconfiguredRuntimeStagesFail verifies that the runtime
+// stage types fail loudly when misconfigured / unwired rather than silently
+// passing: a Test/Custom stage with no image is a config error, and an
+// approval stage with no StageApprovalService wired cannot persist a gate
+// and so must not auto-pass a human gate. Closes HS26-05-03 (the no-op
+// regression these used to be) while keeping the fail-loud guarantee.
+func TestExecutor_MisconfiguredRuntimeStagesFail(t *testing.T) {
+	misTypes := []model.StageType{
+		model.StageTypeTest,     // no image
+		model.StageTypeApproval, // no approval service wired
+		model.StageTypeCustom,   // no script/image
 	}
 
-	for _, st := range stubTypes {
+	for _, st := range misTypes {
 		st := st
 		t.Run(string(st), func(t *testing.T) {
 			p := &model.Pipeline{
-				ID: "pipe-stub-" + string(st),
+				ID: "pipe-mis-" + string(st),
 				Stages: []model.Stage{
 					{ID: "s1", Name: string(st), Type: st, Config: model.StageConfig{}},
 				},
 				Edges: []model.Edge{},
 			}
 			run := &model.PipelineRun{
-				ID:         "run-stub-" + string(st),
+				ID:         "run-mis-" + string(st),
 				PipelineID: p.ID,
 				Status:     model.RunStatusPending,
 				StageRuns:  []model.StageRun{{StageID: "s1", Status: model.RunStatusPending}},
 			}
 
+			// Default executor: Noop stage runner, no approval service.
 			exec := NewExecutor()
 			_, err := exec.Execute(context.Background(), p, run)
 			if err == nil {
-				t.Fatalf("stage type %q should return an error (not implemented), got nil", st)
+				t.Fatalf("stage type %q with no config should fail, got nil", st)
 			}
 			if run.Status != model.RunStatusFailed {
 				t.Errorf("expected run status failed, got %s", run.Status)

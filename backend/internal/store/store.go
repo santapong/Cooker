@@ -58,6 +58,54 @@ type EnvironmentStore interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// PromotionStore persists run→environment promotions and their
+// approvals (audit findings HS26-05-01 / -08 / -14). A promotion is
+// keyed uniquely by (run, environment); approvals are append-only with
+// a one-per-approver uniqueness guarantee so the count drives manual
+// gate completion. See docs/adr/0005-promotion-approval-persistence.md.
+type PromotionStore interface {
+	// CreatePromotion inserts a new promotion. Returns ErrConflict if a
+	// promotion for the same (run, environment) already exists.
+	CreatePromotion(ctx context.Context, p *model.RunPromotion) error
+	// GetPromotion returns the promotion for (runID, environmentID) with
+	// its Approvals populated. ErrNotFound if none exists.
+	GetPromotion(ctx context.Context, runID, environmentID string) (*model.RunPromotion, error)
+	// ListPromotions returns all promotions for a run, each with its
+	// Approvals populated, ordered by creation time.
+	ListPromotions(ctx context.Context, runID string) ([]*model.RunPromotion, error)
+	// UpdatePromotionStatus advances a promotion's status (and stamps
+	// promoted_at when non-nil). ErrNotFound if the row is gone.
+	UpdatePromotionStatus(ctx context.Context, id string, status model.PromotionStatus, promotedAt *time.Time) error
+	// AddApproval records an approval. It is idempotent per approver:
+	// re-approval by the same ApproverSub is a no-op (added=false) rather
+	// than an error. Returns the resulting distinct-approval count.
+	AddApproval(ctx context.Context, a *model.PromotionApproval) (added bool, count int, err error)
+}
+
+// StageApprovalStore persists per-stage approval gates and their votes
+// (audit finding HS26-05-03). A gate is keyed uniquely by (run, stage);
+// votes are append-only with a one-per-approver uniqueness guarantee so
+// the count drives the gate's approval threshold. Mirrors PromotionStore.
+// See docs/adr/0005-promotion-approval-persistence.md.
+type StageApprovalStore interface {
+	// CreateGate inserts a new approval gate. Returns ErrConflict if a gate
+	// for the same (run, stage) already exists.
+	CreateGate(ctx context.Context, g *model.StageApproval) error
+	// GetGate returns the gate for (runID, stageID) with its Votes
+	// populated. ErrNotFound if none exists.
+	GetGate(ctx context.Context, runID, stageID string) (*model.StageApproval, error)
+	// ListGates returns all gates for a run, each with its Votes populated,
+	// ordered by creation time.
+	ListGates(ctx context.Context, runID string) ([]*model.StageApproval, error)
+	// UpdateGateStatus advances a gate's status (and stamps resolved_at +
+	// resolved_by when non-nil). ErrNotFound if the row is gone.
+	UpdateGateStatus(ctx context.Context, id string, status model.StageApprovalStatus, resolvedBy string, resolvedAt *time.Time) error
+	// AddVote records an approval. It is idempotent per approver:
+	// re-approval by the same ApproverSub is a no-op (added=false). Returns
+	// the resulting distinct-approval count.
+	AddVote(ctx context.Context, v *model.StageApprovalVote) (added bool, count int, err error)
+}
+
 // AppStore manages App persistence (Phase 3).
 type AppStore interface {
 	List(ctx context.Context) ([]*model.App, error)
@@ -118,6 +166,30 @@ type HostStore interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// RegistryConfigStore persists Settings-page image-registry
+// connections (audit finding HS26-05-04). Mirrors the HostStore shape;
+// there is no Update — the Settings UI replaces a registry by
+// delete+add rather than editing in place. Secret material (the auth
+// password/token) is held in secrets.Manager by the service layer; only
+// the reference lands on the row.
+type RegistryConfigStore interface {
+	List(ctx context.Context) ([]*model.RegistryConfig, error)
+	Get(ctx context.Context, id string) (*model.RegistryConfig, error)
+	Create(ctx context.Context, r *model.RegistryConfig) error
+	Delete(ctx context.Context, id string) error
+}
+
+// ClusterConfigStore persists Settings-page Kubernetes cluster
+// connections (audit finding HS26-05-04). Same shape and rationale as
+// RegistryConfigStore; the kubeconfig body is the secret held in
+// secrets.Manager.
+type ClusterConfigStore interface {
+	List(ctx context.Context) ([]*model.ClusterConfig, error)
+	Get(ctx context.Context, id string) (*model.ClusterConfig, error)
+	Create(ctx context.Context, cfg *model.ClusterConfig) error
+	Delete(ctx context.Context, id string) error
+}
+
 // UserStore manages local-auth account persistence. Only used when
 // COOKER_LOCAL_AUTH_ENABLED=true; the OIDC path produces no rows here.
 type UserStore interface {
@@ -131,33 +203,41 @@ type UserStore interface {
 // Store aggregates all data-access interfaces and a cleanup hook.
 // Construct with New and pass to the server and handler layers.
 type Store struct {
-	Pipelines    PipelineStore
-	Runs         RunStore
-	Environments EnvironmentStore
-	Apps         AppStore
-	AppDeploys   AppDeployStore
-	AuditEvents  AuditEventStore
-	Hosts        HostStore
-	Users        UserStore
-	close        func() error
-	ping         func(context.Context) error
+	Pipelines      PipelineStore
+	Runs           RunStore
+	Environments   EnvironmentStore
+	Promotions     PromotionStore
+	StageApprovals StageApprovalStore
+	Apps           AppStore
+	AppDeploys     AppDeployStore
+	AuditEvents    AuditEventStore
+	Hosts          HostStore
+	Registries     RegistryConfigStore
+	Clusters       ClusterConfigStore
+	Users          UserStore
+	close          func() error
+	ping           func(context.Context) error
 }
 
 // New builds a Store. closeFn may be nil when no cleanup is required
 // (e.g., in-memory stores). pingFn may be nil for backends without a
 // liveness probe; Ping then reports healthy unconditionally.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
+func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa StageApprovalStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
-		Pipelines:    p,
-		Runs:         r,
-		Environments: e,
-		Apps:         a,
-		AppDeploys:   ad,
-		AuditEvents:  ae,
-		Hosts:        h,
-		Users:        u,
-		close:        closeFn,
-		ping:         pingFn,
+		Pipelines:      p,
+		Runs:           r,
+		Environments:   e,
+		Promotions:     pr,
+		StageApprovals: sa,
+		Apps:           a,
+		AppDeploys:     ad,
+		AuditEvents:    ae,
+		Hosts:          h,
+		Registries:     rc,
+		Clusters:       cc,
+		Users:          u,
+		close:          closeFn,
+		ping:           pingFn,
 	}
 }
 
