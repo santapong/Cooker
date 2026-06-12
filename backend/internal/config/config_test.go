@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoad_Defaults(t *testing.T) {
@@ -605,5 +606,70 @@ func TestValidate_ProductionMultiReplicaWithRedisOK(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("redis backends should satisfy multi-replica guard, got: %v", err)
+	}
+}
+
+// prodBase returns a minimal config that passes production Validate(),
+// for layering cloud-inventory assertions on top.
+func prodBase() *Config {
+	return &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+	}
+}
+
+func TestValidate_CloudAWSEnabledRequiresRegion(t *testing.T) {
+	cfg := prodBase()
+	cfg.CloudInventory.AWS.Enabled = true // Region intentionally empty
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected production to require COOKER_CLOUD_AWS_REGION when AWS provider enabled")
+	}
+	if !strings.Contains(err.Error(), "COOKER_CLOUD_AWS_REGION") {
+		t.Errorf("error should mention COOKER_CLOUD_AWS_REGION, got: %v", err)
+	}
+}
+
+func TestValidate_CloudGCPEnabledRequiresProjectID(t *testing.T) {
+	cfg := prodBase()
+	cfg.CloudInventory.GCP.Enabled = true // ProjectID intentionally empty
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected production to require COOKER_CLOUD_GCP_PROJECT_ID when GCP provider enabled")
+	}
+	if !strings.Contains(err.Error(), "COOKER_CLOUD_GCP_PROJECT_ID") {
+		t.Errorf("error should mention COOKER_CLOUD_GCP_PROJECT_ID, got: %v", err)
+	}
+}
+
+func TestValidate_CloudProvidersHappyPath(t *testing.T) {
+	cfg := prodBase()
+	// Region + ProjectID set; credentials omitted (chain/ADC) — must pass.
+	cfg.CloudInventory.AWS = CloudAWSConfig{Enabled: true, Region: "us-east-1"}
+	cfg.CloudInventory.GCP = CloudGCPConfig{Enabled: true, ProjectID: "my-proj"}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("cloud providers with locators set should validate, got: %v", err)
+	}
+}
+
+func TestValidate_CloudDisabledNeedsNothing(t *testing.T) {
+	cfg := prodBase()
+	// Both providers off (default): no region/project required.
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("disabled cloud inventory should not require any cloud env, got: %v", err)
+	}
+}
+
+func TestLoad_CloudInventoryDefaults(t *testing.T) {
+	// With nothing set, both providers are off and the cache TTL defaults.
+	cfg := Load()
+	if cfg.CloudInventory.AWS.Enabled || cfg.CloudInventory.GCP.Enabled {
+		t.Errorf("cloud providers should default to disabled")
+	}
+	if cfg.CloudInventory.CacheTTL != 5*time.Minute {
+		t.Errorf("expected default cache TTL 5m, got %v", cfg.CloudInventory.CacheTTL)
 	}
 }
