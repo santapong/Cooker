@@ -14,6 +14,9 @@ import (
 	"github.com/santapong/cooker/internal/auth"
 	"github.com/santapong/cooker/internal/auth/local"
 	"github.com/santapong/cooker/internal/builder"
+	"github.com/santapong/cooker/internal/cloudinventory"
+	cloudaws "github.com/santapong/cooker/internal/cloudinventory/aws"
+	cloudgcp "github.com/santapong/cooker/internal/cloudinventory/gcp"
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/crypto"
 	"github.com/santapong/cooker/internal/deployer"
@@ -306,6 +309,17 @@ func New(cfg *config.Config) (*Server, error) {
 	// exactly the cluster the pipeline deploys to. Lazy: a server with no
 	// cluster configured still boots and the read endpoints return 503.
 	h.Kube = kube.New(cfg.Kubernetes.Kubeconfig)
+	// Read-only cloud inventory & cost panel (OR-2). Constructs a
+	// provider per enabled cloud; with none enabled the service reports
+	// Enabled()=false and the endpoints return an empty payload. Boot
+	// fails if an enabled provider's SDK client can't be built (fail-fast,
+	// like the secrets/deploy adapters).
+	cloudInv, err := newCloudInventory(ctx, cfg.CloudInventory)
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
+	h.CloudInventory = cloudInv
 	// HostService coordinates the PEM-bytes-to-secrets-manager
 	// translation for SSH hosts. nil-safe handler-side: when secMgr
 	// is nil (dev without a secrets backend), SSH host create/update
@@ -872,6 +886,46 @@ func selectSecretsManager(cfg *config.Config, st *store.Store, codec *crypto.Cod
 	default:
 		return nil, fmt.Errorf("unknown secrets backend %q", cfg.SecretsBackend)
 	}
+}
+
+// newCloudInventory builds the read-only cloud inventory service from
+// COOKER_CLOUD_* config (OR-2). It constructs a provider for each
+// enabled cloud (AWS / GCP) and returns a Service that fans out to them
+// with a TTL cache. When no provider is enabled it returns a Service
+// with zero providers — Enabled() is false and the handlers return an
+// empty, enabled=false payload.
+//
+// A provider whose SDK client fails to construct (bad region, malformed
+// credentials JSON) fails the boot, matching the fail-fast posture of
+// the other adapters — a misconfigured cloud should surface at startup,
+// not on the first panel load. The construction touches no cloud API.
+func newCloudInventory(ctx context.Context, cfg config.CloudInventoryConfig) (*cloudinventory.Service, error) {
+	var providers []cloudinventory.Provider
+	if cfg.AWS.Enabled {
+		p, err := cloudaws.New(ctx, cloudaws.Config{
+			Region:          cfg.AWS.Region,
+			AccessKeyID:     cfg.AWS.AccessKeyID,
+			SecretAccessKey: cfg.AWS.SecretAccessKey,
+			SessionToken:    cfg.AWS.SessionToken,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("cloud inventory: aws: %w", err)
+		}
+		providers = append(providers, p)
+		slog.Info("cloud inventory provider enabled", "provider", "aws", "region", cfg.AWS.Region)
+	}
+	if cfg.GCP.Enabled {
+		p, err := cloudgcp.New(ctx, cloudgcp.Config{
+			ProjectID:       cfg.GCP.ProjectID,
+			CredentialsJSON: cfg.GCP.CredentialsJSON,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("cloud inventory: gcp: %w", err)
+		}
+		providers = append(providers, p)
+		slog.Info("cloud inventory provider enabled", "provider", "gcp", "project", cfg.GCP.ProjectID)
+	}
+	return cloudinventory.New(providers, cloudinventory.WithTTL(cfg.CacheTTL)), nil
 }
 
 func originSet(allowed []string) (bool, map[string]bool) {

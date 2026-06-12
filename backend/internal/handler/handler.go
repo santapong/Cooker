@@ -126,6 +126,13 @@ type Handler struct {
 	// endpoints. The write path (scale/restart/apply/delete) stays a stub
 	// and does not use this field.
 	Kube *kube.Client
+	// CloudInventory backs the read-only cloud inventory & cost panel
+	// (OR-2): GET /cloud/inventory, GET /cloud/costs, POST /cloud/refresh.
+	// Set by server.New from COOKER_CLOUD_* config; nil (or a service with
+	// no provider enabled) makes the endpoints return 200 with
+	// enabled=false rather than an error. Read-only — never mutates any
+	// cloud resource.
+	CloudInventory CloudInventoryService
 }
 
 // New constructs a Handler bound to the given store. secs may be nil
