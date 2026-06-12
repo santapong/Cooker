@@ -49,7 +49,7 @@ What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-
 
 #### OR-1 — Pre-release / canary deploy mode (M, needs mini-ADR)
 
-Deploy a candidate version of an App *alongside* the current one — separate preview URL or percentage traffic split — validate it live, then promote-or-rollback with one click. Today's closest tools: environment promotion + approval gates, per-App deploy history + rollback, and Approval stages; what's missing is the side-by-side serving window. ADR must pick the traffic mechanism (K8s Service weight split vs header-routed preview Service vs Argo-Rollouts-style) and the target scope (Kubernetes targets first; docker-host/Cloud Run later or never). Pairs with the existing P3 "PR-preview environments" item — same plumbing, different trigger.
+✅ **Shipped** on `claude/canary-deploys` — see "Closed (recent)". Mechanism chosen: K8s **replica-weighted** split (a `<name>-canary` Deployment sized to the traffic weight runs alongside the stable one behind a single Service); target scope Kubernetes-only (non-K8s → 422). Auto-promote-after-health-window and manual promote/abort both land; header-routed preview / Argo-Rollouts deferred.
 
 #### OR-2 — Cloud-resource management around deployments (vision: cloud management platform; XL, ADR-gated)
 
@@ -323,6 +323,12 @@ These items were surfaced by the persona walkthroughs in `docs/audits/W11-user-j
 ## Closed (recent)
 
 Items that landed in the `claude/uat-ready-*` PR series, PR #6, the `claude/cooker-backlog-readme-com8z` PR (#17), the `claude/complete-p1-backlog-qN4FP` PR, the `claude/finish-backlog-priority-psf4D` PR, the `claude/implement-frontend-design-XVxz2` PR (the Aegis frontend port), the `claude/identify-failure-point-Duy02` PR (#21, the SPOF closeout), the `claude/review-production-rollout-MT3YO` PR (P0 follow-up batch), the `claude/plan-weekly-features-WoB0S` PR (weekly: agent-team complexity + retention CronJob), the `claude/frontend-bundle-split` PR (route-level lazy-load + Vite manualChunks), the `claude/w3-t1-t3-handler-f1` PR, the `claude/w4-t4-edge-condition-refuse` PR, the `claude/w4-f04-created-at` PR, the `claude/w4-t2-logwriter-push-deploy` PR, the `claude/w5-ci-cache-mode-min` PR, the `claude/w5-adr-0004-finalize` PR, the `claude/w5-f3-parse-compose-graph` PR, the `claude/w5-security-drift-bundle` PR, the `claude/w5-f2-executor-runresult` PR, and the `claude/fervent-sagan-q50XA` branch:
+
+### `claude/canary-deploys` — canary deployments (OR-1)
+
+- ✅ **Canary deploy mode (opt-in per app)** — `model.CanaryConfig` (strategy `rolling`|`canary`, weight 1–99, auto-promote, health-window) on `App` + live `model.AppCanary` state; migration 024 adds `apps.canary_config` (JSONB) and the `app_canaries` table (partial unique index → one progressing canary per app, mapped to 409). `store.AppCanaryStore` in postgres + memory. `service.CanaryService`: `Start` builds+pushes the new image (new `AppDeployer.BuildAndPushImage`, a deploy-stage-stripped build) then establishes the split via `deployer.WeightedDeployer`; `Promote` → 100%, `Abort` → 0%, and a background `RunSweeper` auto-promotes a healthy canary past its window (or auto-rolls-back an unhealthy one via the app `Prober`); manual canaries wait for an operator.
+- ✅ **Weighted-traffic deployer capability** — optional `deployer.WeightedDeployer` (embeds `Deployer`, adds `DeployWeighted`) implemented by `Kubectl` + `ClientGo` via replica weighting (a `<name>-canary` Deployment proportional to the weight behind one Service); `splitReplicas` keeps ≥1 pod on each side mid-rollout. Non-K8s backends don't implement it → typed `ErrCanaryUnsupported` → HTTP 422.
+- ✅ **API + UI** — `DeployApp` branches to the canary path when the app opts in (response carries `"strategy"`); `GET /apps/:id/canary`, `POST /apps/:id/canary/{promote,abort}` (writeRole); live state embedded under `activeCanary` on `GET /apps/:id`. AppDetailPage gains a Deploy-strategy card (toggle + weight/auto-promote/window, saved via update; hint when target isn't K8s) and a Canary-rollout panel (traffic %, healthy/unhealthy, Promote/Abort), polling at 5s while progressing. Docs: design.md §2.1/§11 (optional-capability pattern) + UAT Scenario 1b. No new env var.
 
 ### `claude/feat-enterprise` — queryable audit trail + secrets connectivity test (roadmap M5)
 

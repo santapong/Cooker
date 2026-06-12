@@ -48,11 +48,14 @@ The pipeline executor doesn't know how to build, push, or deploy — it delegate
 | `builder.Builder` | `internal/builder/builder.go:49` | `DockerSock`, `Kaniko` (in-cluster Job), `Buildah` (in-cluster Job, full Dockerfile parity), `BuildKit` (gRPC), `Noop` |
 | `pusher.Pusher` | `internal/pusher/pusher.go:37` | `DockerSock`, `Crane` (`go-containerregistry`), `Noop` |
 | `deployer.Deployer` | `internal/deployer/deployer.go:54` | `Kubectl`, `ClientGo` (dynamic client + server-side apply), `Noop` |
+| `deployer.WeightedDeployer` (optional) | `internal/deployer/deployer.go` | `Kubectl`, `ClientGo` — canary traffic split via replica weighting (OR-1). Backends that can't split traffic simply don't implement it; the service returns 422. |
 | `secrets.Manager` | `internal/secrets/manager.go` | `database` (AES-GCM), `keepsave`, `vault`, `awsm` (AWS Secrets Manager), `gcpsm` (GCP Secret Manager) |
 | `deploytarget.Target` | `internal/deploytarget/target.go` | `kubernetes`, `cloudrun`, `ecs` (Fargate), `flyio`, `render`. Self-register on non-empty config. |
 | `gitops.Writer` | `internal/gitops/writer.go` | `gogit` (`go-git/v5`), `noop` |
 
 **Why:** lets us run UAT end-to-end against `docker` + `kubectl` (operationally simple) and ship a production deploy with `buildkit` + `client-go` (no shell-out, no docker-cli dependency) without changing handler or service code. Unknown values fall back to `Noop` with a log line so a typo'd env var doesn't crash boot.
+
+**Optional capabilities.** When only *some* implementations of an interface can do a thing, model it as a second, narrow interface that embeds the base one rather than widening the base (which would force every backend to stub a method it can't honour). The consumer type-asserts for the capability and degrades gracefully when it's absent. Canary deployments (OR-1) use this: `deployer.WeightedDeployer` embeds `Deployer` and adds `DeployWeighted`. Only the Kubernetes-backed deployers implement it; `service.CanaryService` type-asserts at construction and returns `ErrCanaryUnsupported` (→ HTTP 422) when the configured deployer can't split traffic. The same shape backs the per-target-kind `service.Prober` registry for app health.
 
 ### 2.2 Repository pattern — pluggable persistence
 
@@ -389,6 +392,13 @@ For a new pluggable backend (e.g., a new pusher):
 2. Add the constructor case to the `select<Kind>` switch in `server.go`.
 3. Document the env-var value in `.env.uat.example` and `docs/UAT.md`.
 4. Add a contract test against the interface.
+
+For a new *optional capability* on an existing adapter interface (e.g., the canary `WeightedDeployer`):
+
+1. Declare a narrow interface that embeds the base (`type WeightedDeployer interface { Deployer; DeployWeighted(...) }`) plus a typed sentinel error for "unsupported".
+2. Implement it only on the adapters that can honour it; assert `var _ Capability = (*Impl)(nil)` so a missing method is a compile error there.
+3. In `server.go`, type-assert the selected adapter for the capability and pass the result (possibly nil) to the consuming service.
+4. The service checks for nil / asserts and returns the typed "unsupported" error, which the handler maps to 422.
 
 ---
 

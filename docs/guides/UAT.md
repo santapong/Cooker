@@ -89,6 +89,35 @@ What `uat-up` brings up (compose services):
    kubectl get deploy,svc demo -n default
    ```
 
+### Scenario 1b — Canary deployment (OR-1)
+
+Canary is opt-in per app and needs a **Kubernetes** deploy target with a
+weighted-capable deployer (`COOKER_DEPLOYER=kubectl` or `clientgo` — the
+UAT default is `kubectl`). No new env var is involved; it's all per-app
+config. With `COOKER_DEPLOYER=noop` the canary endpoints return **422**.
+
+1. Create (or reuse) a Kubernetes-target app as in Scenario 1.
+2. Open the app → **Deploy strategy** card → switch **Strategy** to
+   *Canary*. Set **Canary weight** to e.g. `25`, leave **Auto-promote**
+   off for a manual run, **Save strategy**.
+3. Click **Deploy**. The 202 response now reports `"strategy":"canary"`.
+   The log panel streams the build/push, then `[canary] progressing at
+   25% ...`. A **Canary rollout** panel appears with the live weight and
+   a healthy/unhealthy pill.
+4. Verify the split landed — two Deployments behind one Service:
+
+   ```sh
+   make uat-shell
+   kubectl get deploy -l app=demo -n default     # demo + demo-canary
+   ```
+
+5. **Promote** (shifts to 100%) or **Abort** (rolls back to 0%) from the
+   panel. The panel disappears once the rollout resolves.
+6. **Auto-promote variant:** re-enable *Auto-promote* with a short
+   **Health window** (e.g. `30`s) and deploy again. After the window the
+   background sweeper promotes a healthy canary automatically (or rolls
+   it back if a probe reports it unhealthy).
+
 ### Scenario 2 — Fails gracefully with missing CLI
 
 1. Edit `docker-compose.uat.yml` → set `COOKER_BUILDER: noop` on
@@ -276,6 +305,7 @@ curl -s http://localhost:5001/v2/cooker/demo/tags/list | jq
 |------|-------|
 | App CRUD | Real — Postgres |
 | Deploy button (Clone→Build→Push→Deploy) | Real — uses `git`, `docker`, `kubectl` |
+| Canary deploy (weighted split + promote/abort/auto-promote) | Real — Kubernetes targets only (replica-weighted); non-K8s → 422. See [Scenario 1b](#scenario-1b--canary-deployment-or-1) |
 | Live build log over WebSocket | Real |
 | Stage-log replay / `?since=` reconnect | Real — in-memory backend (single-replica); see [Stage-log replay config](#stage-log-replay-config) |
 | GitHub webhook HMAC | Real — SHA-256 constant-time compare |
