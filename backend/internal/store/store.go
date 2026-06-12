@@ -135,6 +135,32 @@ type AppDeployStore interface {
 	Get(ctx context.Context, id string) (*model.AppDeploy, error)
 }
 
+// AppCanaryStore persists the live state of canary rollouts (OR-1).
+// At most one progressing canary exists per app at a time; the service
+// guards this and a partial unique index (migration 024) enforces it at
+// the DB level. Rows are created when a canary deploy starts, updated as
+// the rollout progresses, and stamped terminal on promote / abort /
+// failure. Unlike CanaryConfig (intent on the App), AppCanary is observed
+// progress driven by service.CanaryService — never set by the user.
+type AppCanaryStore interface {
+	// Create inserts a new canary state row. Returns ErrConflict when a
+	// progressing canary already exists for the same app (the partial
+	// unique index rejects the second insert).
+	Create(ctx context.Context, c *model.AppCanary) error
+	// Get returns a canary by id. ErrNotFound if absent.
+	Get(ctx context.Context, id string) (*model.AppCanary, error)
+	// GetActive returns the single progressing canary for an app, or
+	// ErrNotFound when the app has no canary in flight.
+	GetActive(ctx context.Context, appID string) (*model.AppCanary, error)
+	// Update writes the mutable fields (weight, status, healthy, message,
+	// promote_after, resolved_at) of an existing canary. ErrNotFound if
+	// the row is gone.
+	Update(ctx context.Context, c *model.AppCanary) error
+	// ListProgressing returns every canary still in the progressing state
+	// across all apps, oldest-first. Backs the auto-promote sweep.
+	ListProgressing(ctx context.Context) ([]*model.AppCanary, error)
+}
+
 // AuditQuery filters an audit-trail read (roadmap M5). Zero values
 // mean "no filter"; Limit <= 0 falls back to a server-side default.
 type AuditQuery struct {
@@ -241,6 +267,7 @@ type Store struct {
 	StageApprovals StageApprovalStore
 	Apps           AppStore
 	AppDeploys     AppDeployStore
+	AppCanaries    AppCanaryStore
 	AuditEvents    AuditEventStore
 	Hosts          HostStore
 	Registries     RegistryConfigStore
@@ -254,7 +281,7 @@ type Store struct {
 // New builds a Store. closeFn may be nil when no cleanup is required
 // (e.g., in-memory stores). pingFn may be nil for backends without a
 // liveness probe; Ping then reports healthy unconditionally.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa StageApprovalStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, at APITokenStore, closeFn func() error, pingFn func(context.Context) error) *Store {
+func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa StageApprovalStore, a AppStore, ad AppDeployStore, ac AppCanaryStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, at APITokenStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
 		Pipelines:      p,
 		Runs:           r,
@@ -263,6 +290,7 @@ func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa 
 		StageApprovals: sa,
 		Apps:           a,
 		AppDeploys:     ad,
+		AppCanaries:    ac,
 		AuditEvents:    ae,
 		Hosts:          h,
 		Registries:     rc,
