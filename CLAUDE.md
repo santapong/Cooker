@@ -101,6 +101,7 @@ The honest production-readiness verdict and the open work are in `backlog.md`'s 
 - Don't change `COOKER_ENV` defaults globally; production-mode strictness is gated by it on purpose.
 - Don't add new fields to `internal/handler/*.go` requests without a corresponding store migration in `internal/store/postgres/migrations/`.
 - Don't change the Go version pin unilaterally. The repo is on Go 1.25 (`backend/go.mod` + `.github/workflows/ci.yml`) with `golang.org/x/time` at v0.15.0; keep `go.mod` and the CI `go-version` in lockstep if either ever moves.
+- **Never run `go mod tidy` in `backend/`.** Tidy evaluates imports as if all build tags are enabled, so it pulls `tailscale.com` in via the opt-in `tsnet` tag (`internal/transport/tsnet/real.go`) — that module requires Go ≥ 1.26 and breaks the docker CI job on `golang:1.25-alpine` (`GOTOOLCHAIN=local`). Add dependencies with targeted `go get <module>@<version>` instead.
 
 ## Open backlog highlights
 
