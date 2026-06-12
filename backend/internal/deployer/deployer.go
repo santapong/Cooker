@@ -13,6 +13,13 @@ import (
 // reachable or not configured.
 var ErrUnavailable = errors.New("deployer: unavailable")
 
+// ErrCanaryUnsupported is returned by DeployWeighted when the backend
+// cannot split traffic for the requested target (e.g. a docker-host or
+// cloud-runtime deploy, or a Noop deployer). The service layer maps it
+// to HTTP 422 so the UI can explain that canary needs a Kubernetes
+// target. Callers should check with errors.Is.
+var ErrCanaryUnsupported = errors.New("deployer: canary not supported for this target")
+
 // Kind identifies the flavour of the deployment request.
 type Kind string
 
@@ -88,4 +95,55 @@ type Result struct {
 // use by multiple goroutines.
 type Deployer interface {
 	Deploy(ctx context.Context, req Request) (Result, error)
+}
+
+// WeightedRequest describes a canary traffic split (OR-1). The backend
+// runs CanaryImage alongside the stable workload so that approximately
+// Weight percent of traffic reaches the new version. On vanilla
+// Kubernetes (no service mesh) this is achieved by replica weighting: a
+// "<name>-canary" Deployment is sized proportionally to Weight while the
+// stable Deployment keeps the remainder, both selected by the same
+// Service. A Weight of 100 promotes (stable scaled to zero / canary to
+// full); a Weight of 0 aborts (canary removed).
+type WeightedRequest struct {
+	// Namespace is the Kubernetes namespace to apply into.
+	Namespace string
+	// Name is the base workload name; the canary Deployment is
+	// "<Name>-canary".
+	Name string
+	// StableImage is the image currently serving production traffic.
+	StableImage string
+	// CanaryImage is the new image under evaluation.
+	CanaryImage string
+	// Weight is the target traffic percent (0–100) for CanaryImage.
+	Weight int
+	// Replicas is the total desired replica count across stable+canary
+	// (the pool the weight is split over). Zero means a sane default.
+	Replicas int
+	// LogWriter, when non-nil, receives human-readable progress lines.
+	// Implementations must tolerate a nil LogWriter.
+	LogWriter io.Writer
+}
+
+// WeightedResult reports the realised split after a DeployWeighted call.
+type WeightedResult struct {
+	// CanaryReplicas / StableReplicas are the replica counts the backend
+	// actually set (after rounding the weight onto whole pods).
+	CanaryReplicas int
+	StableReplicas int
+	// AppliedResources lists "kind/namespace/name" strings for what landed.
+	AppliedResources []string
+}
+
+// WeightedDeployer is the optional capability a Deployer advertises when
+// it can split traffic between a stable and a canary workload. Only the
+// Kubernetes-backed deployers (Kubectl, ClientGo) implement it; the
+// service layer type-asserts for it and returns ErrCanaryUnsupported
+// when the configured deployer does not. Kept separate from Deployer so
+// non-K8s backends don't have to stub a method they can't honour.
+type WeightedDeployer interface {
+	Deployer
+	// DeployWeighted establishes (or re-balances) the canary split. It is
+	// idempotent: calling it again with the same Weight is a no-op apply.
+	DeployWeighted(ctx context.Context, req WeightedRequest) (WeightedResult, error)
 }
