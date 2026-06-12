@@ -26,6 +26,7 @@ const DeploymentPage = lazy(() => import('./pages/DeploymentPage'))
 const DockerPage = lazy(() => import('./pages/DockerPage'))
 const ComposePage = lazy(() => import('./pages/ComposePage'))
 const KubernetesPage = lazy(() => import('./pages/KubernetesPage'))
+const CloudPage = lazy(() => import('./pages/CloudPage'))
 const EnvironmentsPage = lazy(() => import('./pages/EnvironmentsPage'))
 const HostsPage = lazy(() => import('./pages/HostsPage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
@@ -74,6 +75,7 @@ export default function App() {
                     <Route path="/docker" element={<MainLayout><DockerPage /></MainLayout>} />
                     <Route path="/docker/compose" element={<MainLayout fullBleed><ComposePage /></MainLayout>} />
                     <Route path="/kubernetes" element={<MainLayout><KubernetesPage /></MainLayout>} />
+                    <Route path="/cloud" element={<MainLayout><CloudPage /></MainLayout>} />
                     <Route path="/environments" element={<MainLayout><EnvironmentsPage /></MainLayout>} />
                     <Route path="/hosts" element={<MainLayout><HostsPage /></MainLayout>} />
                     <Route path="/settings" element={<MainLayout><SettingsPage /></MainLayout>} />
