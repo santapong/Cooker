@@ -389,6 +389,40 @@ no configuration is required.
   reports reachability + latency. Key names/values are never returned.
   In default UAT (database backend) expect `ok` with ~0 ms latency.
 
+## Cloud inventory & cost panel (OR-2)
+
+- **Off by default.** With no provider enabled, the **Cloud** page
+  (sidebar, pro mode) shows a friendly "No cloud accounts configured"
+  empty state and `GET /api/v1/cloud/inventory` returns
+  `200 {"enabled":false}`. Nothing is queried and no SDK client is
+  built — UAT smoke tests pass without any cloud credentials.
+- **Read-only.** When enabled, Cooker lists compute instances, managed
+  Kubernetes clusters, and container registries, plus month-to-date
+  spend grouped by service. It only ever calls list/describe/cost APIs;
+  there is no mutation path.
+
+  | Env var | Default | Meaning |
+  |---|---|---|
+  | `COOKER_CLOUD_AWS_ENABLED` | `false` | Enable the AWS provider. |
+  | `COOKER_CLOUD_AWS_REGION` | — | Required when AWS enabled (e.g. `ap-southeast-1`). |
+  | `COOKER_CLOUD_AWS_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` | — | Optional static creds; omit to use the AWS chain (IRSA / instance profile / env / shared config). |
+  | `COOKER_CLOUD_GCP_ENABLED` | `false` | Enable the GCP provider. |
+  | `COOKER_CLOUD_GCP_PROJECT_ID` | — | Required when GCP enabled. |
+  | `COOKER_CLOUD_GCP_CREDENTIALS_JSON` | — | Optional SA-key JSON; omit to use ADC / Workload Identity (`GOOGLE_APPLICATION_CREDENTIALS`). |
+  | `COOKER_CLOUD_CACHE_TTL` | `5m` | How often the cloud APIs are re-queried. AWS Cost Explorer bills per request. |
+
+- **Partial failure is isolated.** If one provider's credentials are
+  wrong, its tile shows a per-provider error banner and the other
+  provider still renders — the request does not 500.
+- **Refresh** (button, or `POST /api/v1/cloud/refresh`, operator role +
+  rate-limited) busts the server cache and re-fetches.
+- **GCP cost shows 0.00.** GCP month-to-date spend lives in the BigQuery
+  billing export, not the Cloud Billing v1 API, so the GCP cost figure
+  is a labelled zero until that export is wired — **this is expected**,
+  don't file a bug. GCP *resources* are real.
+- **Least privilege** — grant a read-only IAM identity. See
+  [SECURITY.md → Cloud inventory credentials](../../SECURITY.md#cloud-inventory-credentials-read-only-opt-in).
+
 ## What's scaffolded (don't file bugs about these)
 
 These are intentional placeholders documented as such. They'll
