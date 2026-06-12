@@ -1,5 +1,11 @@
 import { get, post, put, del } from './client';
-import type { AppModel, AppDeployResponse, AppDeployRecord, AppDriftReport } from '../types/app';
+import type {
+  AppModel,
+  AppDeployResponse,
+  AppDeployRecord,
+  AppDriftReport,
+  AppCanary,
+} from '../types/app';
 
 export const appsApi = {
   list: () => get<AppModel[]>('/apps'),
@@ -23,4 +29,9 @@ export const appsApi = {
   drift: (id: string) => get<AppDriftReport>(`/apps/${id}/drift`),
   setWebhookSecret: (id: string, secret: string) =>
     put<{ status: string }>(`/apps/${id}/webhook`, { secret }),
+  // Canary deployments (OR-1).
+  getCanary: (id: string) => get<{ canary: AppCanary }>(`/apps/${id}/canary`),
+  promoteCanary: (id: string) => post<{ canary: AppCanary }>(`/apps/${id}/canary/promote`),
+  abortCanary: (id: string, reason?: string) =>
+    post<{ canary: AppCanary }>(`/apps/${id}/canary/abort`, reason ? { reason } : {}),
 };
