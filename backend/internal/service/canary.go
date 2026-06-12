@@ -288,6 +288,30 @@ func (s *CanaryService) SweepAutoPromote(ctx context.Context) {
 	}
 }
 
+// defaultCanarySweepInterval is how often the auto-promote loop runs.
+// Short enough that an auto-promote fires within a tick of its window
+// closing; cheap because it only touches progressing canaries.
+const defaultCanarySweepInterval = 15 * time.Second
+
+// RunSweeper blocks until ctx is cancelled, running SweepAutoPromote on
+// a ticker. Returns nil on a clean cancel — the signal the caller
+// (server shutdown) waits for before declaring drain complete. Mirrors
+// AppHealthChecker.Run. A nil weighted deployer makes every sweep a
+// no-op, so wiring this unconditionally is harmless.
+func (s *CanaryService) RunSweeper(ctx context.Context) error {
+	s.SweepAutoPromote(ctx)
+	t := time.NewTicker(defaultCanarySweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+			s.SweepAutoPromote(ctx)
+		}
+	}
+}
+
 // evaluate probes one canary's health and promotes or aborts it. Used by
 // the sweep; split out so the health decision is testable in isolation.
 func (s *CanaryService) evaluate(ctx context.Context, c *model.AppCanary) {

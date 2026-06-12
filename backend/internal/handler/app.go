@@ -34,6 +34,14 @@ func validateAppInput(a *model.App) error {
 	if err := validate.GitRefName("branch", a.Branch); err != nil {
 		return err
 	}
+	// Canary config (OR-1): normalise first so omitted optional fields get
+	// defaults, then reject out-of-range values (weight outside 1–99, an
+	// unknown strategy). Persisted in the same request, satisfying the
+	// "new request field => migration" rule (apps.canary_config, mig 024).
+	a.Canary = a.Canary.Normalize()
+	if err := a.Canary.Validate(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -55,7 +63,41 @@ func (h *Handler) GetApp(c *gin.Context) {
 	if abortStoreErr(c, err, "app not found") {
 		return
 	}
+	// Embed the live canary state (OR-1) when one is in flight so the
+	// detail page renders the canary panel on first load without a second
+	// round trip. Absent / errored canary state is simply omitted — it
+	// must never block the app GET.
+	if canary := h.activeCanary(c.Request.Context(), a.ID); canary != nil {
+		redacted := a.Redact()
+		c.JSON(http.StatusOK, appWithCanary{App: redacted, ActiveCanary: canary})
+		return
+	}
 	c.JSON(http.StatusOK, a.Redact())
+}
+
+// appWithCanary is the GetApp response shape when a canary is active. It
+// embeds *model.App so every existing field (including the canary
+// *config* under "canary") serialises unchanged, and adds the live
+// rollout *state* under "activeCanary". The two are distinct: "canary"
+// is the policy, "activeCanary" is the in-flight progress.
+type appWithCanary struct {
+	*model.App
+	ActiveCanary *model.AppCanary `json:"activeCanary"`
+}
+
+// activeCanary returns the app's progressing canary, or nil when none is
+// in flight or the canary service isn't wired. Errors other than
+// "no active canary" are swallowed — canary state is additive and must
+// not fail the app read.
+func (h *Handler) activeCanary(ctx context.Context, appID string) *model.AppCanary {
+	if h.Canary == nil {
+		return nil
+	}
+	canary, err := h.Canary.Status(ctx, appID)
+	if err != nil {
+		return nil
+	}
+	return canary
 }
 
 func (h *Handler) CreateApp(c *gin.Context) {
@@ -203,23 +245,44 @@ func (h *Handler) DeployApp(c *gin.Context) {
 		}
 	}
 
-	if h.Runs != nil {
-		h.Runs.Spawn(context.Background(), runID, func(ctx context.Context) error {
+	// Canary path (OR-1): when the app opts into canary deploys and the
+	// canary service is wired, the Deploy button starts a weighted canary
+	// instead of a rolling replace. The worker mirrors runAppDeployCtx
+	// (stub row + WS channel) but drives CanaryService.Start.
+	canary := a.Canary.Normalize().IsCanary() && h.Canary != nil
+	work := func(ctx context.Context) error {
+		if canary {
+			h.runCanaryStartCtx(ctx, a, runID, channel)
+		} else {
 			h.runAppDeployCtx(ctx, a, runID, channel)
-			return nil
-		})
+		}
+		return nil
+	}
+	if h.Runs != nil {
+		h.Runs.Spawn(context.Background(), runID, work)
+	} else if canary {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			defer cancel()
+			_ = work(ctx)
+		}()
 	} else {
 		go h.runAppDeploy(a, runID, channel)
 	}
 
+	deployStrategy := "rolling"
+	if canary {
+		deployStrategy = "canary"
+	}
 	c.JSON(http.StatusAccepted, gin.H{
-		"appId":   a.ID,
-		"runId":   runID,
-		"channel": channel,
-		"status":  "running",
-		"stream":  "/ws/app-run/" + runID,
-		"repo":    a.GitHubRepo,
-		"branch":  a.Branch,
+		"appId":    a.ID,
+		"runId":    runID,
+		"channel":  channel,
+		"status":   "running",
+		"strategy": deployStrategy,
+		"stream":   "/ws/app-run/" + runID,
+		"repo":     a.GitHubRepo,
+		"branch":   a.Branch,
 		// pipelineId is the deterministic ID the compose deploy will
 		// persist; the deployment view loads the grouped DAG from it.
 		// Meaningful only for compose-based apps (harmless otherwise).

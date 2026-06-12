@@ -74,6 +74,12 @@ type Handler struct {
 	// token (own-token deletes are exempt). Empty disables the gate.
 	MFAACRValues []string
 	AppDeployer  *service.AppDeployer
+	// Canary orchestrates canary deployments (OR-1): the weighted split,
+	// the live AppCanary state, and promote/abort. Set by server.New when
+	// the configured deployer can split traffic (a WeightedDeployer);
+	// nil-safe — the canary endpoints return 422/503 and DeployApp falls
+	// back to a rolling deploy when it is nil.
+	Canary *service.CanaryService
 	// Triage backs the opt-in AI failure-triage endpoint (roadmap M4).
 	// Set by server.New when COOKER_AI_TRIAGE_ENABLED=true; nil keeps
 	// the route returning 503 and hides the frontend button via

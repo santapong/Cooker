@@ -232,6 +232,15 @@ func (s *Server) registerRoutes() {
 		apps.GET("/:id/deploys", h.ListAppDeploys)
 		apps.POST("/:id/rollback", writeRole, expensive, idempotencyMiddleware(s.idempotency), govDeploy, h.RollbackApp)
 		apps.GET("/:id/drift", writeRole, h.GetAppDrift)
+		// Canary deployments (OR-1). Status is read-level (the detail-page
+		// panel polls it). Promote / abort mutate the live rollout, so they
+		// carry writeRole — same gate as deploy/rollback. They are
+		// fast control-plane ops (re-balance an existing split), not new
+		// builds, so they skip the expensive rate limiter and idempotency
+		// middleware that the deploy/rollback entrypoints use.
+		apps.GET("/:id/canary", h.GetAppCanary)
+		apps.POST("/:id/canary/promote", writeRole, h.PromoteAppCanary)
+		apps.POST("/:id/canary/abort", writeRole, h.AbortAppCanary)
 		apps.PUT("/:id/webhook",
 			adminRole, mfa,
 			auth.RequirePermission(auth.ResourceWebhook, auth.ActionUpdate),

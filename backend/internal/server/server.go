@@ -235,10 +235,14 @@ func New(cfg *config.Config) (*Server, error) {
 	// resolve it. Both share this one service over the same store.
 	stageApprovals := service.NewStageApprovalService(st.StageApprovals)
 
+	// Hoisted so it can be shared between the executor (deploy stages) and
+	// the canary service (weighted traffic split). Type-asserted below for
+	// the optional WeightedDeployer capability.
+	deploy := selectDeployer(cfg.DeployerBackend, cfg.Kubernetes.Kubeconfig)
 	exec := service.NewExecutor(
 		service.WithBuilder(bld),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
-		service.WithDeployer(selectDeployer(cfg.DeployerBackend, cfg.Kubernetes.Kubeconfig)),
+		service.WithDeployer(deploy),
 		// Docker-host per-service deploy runtimes (compose deployment DAGs
 		// targeting DeployTargetDockerHost). They shell out to the local
 		// docker CLI; harmless when unused.
@@ -257,6 +261,17 @@ func New(cfg *config.Config) (*Server, error) {
 	appDeployer.CacheRef = cfg.BuildCacheRepo
 	appDeployer.Deploys = st.AppDeploys
 
+	// Canary deployments (OR-1). The weighted split needs a deployer that
+	// can rebalance replicas — only the Kubernetes-backed deployers
+	// (kubectl/clientgo) advertise WeightedDeployer. When the configured
+	// deployer can't (Noop in dev), canaryWeighted stays nil and the
+	// service surfaces 422 for any canary attempt.
+	var canaryWeighted deployer.WeightedDeployer
+	if wd, ok := deploy.(deployer.WeightedDeployer); ok {
+		canaryWeighted = wd
+	}
+	canarySvc := service.NewCanaryService(st.Apps, st.AppCanaries, appDeployer, canaryWeighted)
+
 	runs := NewRunCoordinator(st)
 
 	const idempotencyMaxBytes = 32 << 20
@@ -266,6 +281,7 @@ func New(cfg *config.Config) (*Server, error) {
 	h := handler.New(st, codec, secMgr)
 	h.SecretsBackend = cfg.SecretsBackend
 	h.AppDeployer = appDeployer
+	h.Canary = canarySvc
 	// Persistent promotion/approval flow (HS26-05-01 / -08 / -14):
 	// promote/approve/env-status route through this service, which
 	// persists promotions + approvals and enforces RequiredApprovers.
@@ -406,6 +422,27 @@ func New(cfg *config.Config) (*Server, error) {
 				case <-healthDone:
 				case <-time.After(2 * time.Second):
 				}
+			}
+		})
+	}
+
+	// Canary auto-promote sweep (OR-1): a background loop that promotes
+	// healthy canaries past their window and rolls back unhealthy ones.
+	// Only started when a weighted deployer is configured — otherwise no
+	// canary can exist to sweep. Same cancel+drain shape as the health
+	// checker above.
+	if canaryWeighted != nil {
+		canaryCtx, canaryCancel := context.WithCancel(context.Background())
+		canaryDone := make(chan struct{})
+		go func() {
+			defer close(canaryDone)
+			_ = canarySvc.RunSweeper(canaryCtx)
+		}()
+		cleanups = append(cleanups, func() {
+			canaryCancel()
+			select {
+			case <-canaryDone:
+			case <-time.After(2 * time.Second):
 			}
 		})
 	}
