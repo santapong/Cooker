@@ -187,6 +187,24 @@ Controls:
 
 Residual risk: stage logs can contain whatever the user's build prints. If your builds may log sensitive material, leave triage disabled or scrub at the build level — Cooker cannot distinguish a secret a build chose to print from ordinary output.
 
+### Cloud inventory credentials (read-only, opt-in)
+
+`COOKER_CLOUD_AWS_ENABLED` / `COOKER_CLOUD_GCP_ENABLED` add the read-only cloud inventory & cost panel (`GET /api/v1/cloud/{inventory,costs}`, `POST /api/v1/cloud/refresh`). When enabled, Cooker calls **only list/describe/cost APIs** — EC2 `DescribeInstances`, EKS `ListClusters`/`DescribeCluster`, ECR `DescribeRepositories`, Cost Explorer `GetCostAndUsage` on AWS; Compute `aggregatedList`, Container `clusters.list`, Artifact Registry `repositories.list` on GCP. There is **no mutating call path** in `internal/cloudinventory/` (the package and its providers expose `ListResources` + `CostSummary` only), so even a compromised Cooker cannot create, modify, or delete a cloud resource through this feature.
+
+Controls:
+
+- **Off by default.** With neither provider enabled the endpoints return `200 {"enabled":false}` and the SDK clients are never constructed (`GET /api/v1/capabilities` reports `cloudInventory:false`, hiding the page).
+- **Least-privilege IAM is the operator's responsibility — and the primary control.** Grant a **read-only** identity:
+  - **AWS**: the managed `ReadOnlyAccess` policy is sufficient but broad; prefer a scoped policy allowing only `ec2:DescribeInstances`, `eks:ListClusters`, `eks:DescribeCluster`, `ecr:DescribeRepositories`, and `ce:GetCostAndUsage`.
+  - **GCP**: the predefined roles `roles/compute.viewer`, `roles/container.viewer`, and `roles/artifactregistry.reader` (Cost is not read via API — see below).
+- **Prefer workload identity over static keys.** On EKS use **IRSA** (annotate the ServiceAccount with `eks.amazonaws.com/role-arn`); on GKE use **Workload Identity** (`iam.gke.io/gcp-service-account`). With either in place **no key env var or Secret is needed** — the Helm chart renders the enable flag + locator and nothing else. The static-credential fallback (`COOKER_CLOUD_AWS_SECRET_ACCESS_KEY`, `COOKER_CLOUD_GCP_CREDENTIALS_JSON`) is supported for non-managed runtimes and is wired via `secretKeyRef` into a **pre-created, operator-managed Secret** — never `values.yaml`, never a chart-created Secret. The keys are never logged (the providers log only the region/project on boot).
+- **Read-role exposure.** The two `GET` endpoints are read-level (any authenticated user), exposing **resource metadata and aggregate cost only** — instance IDs, cluster names, repository URIs, and per-service spend. No credential material is ever placed on a response. `POST /cloud/refresh` is `writeRole` + rate-limited because it forces a synchronous fan-out to the cloud APIs (AWS Cost Explorer bills per request).
+- **Caching bounds API spend.** Results are cached in memory for `COOKER_CLOUD_CACHE_TTL` (default 5m); a misconfigured non-positive TTL is ignored so the cost APIs can't be hammered.
+
+GCP cost note: GCP exposes month-to-date spend only through the BigQuery billing export (or the Budgets API), **not** the Cloud Billing v1 API. To avoid fabricating a figure, the GCP provider returns a labelled **zero** cost summary; GCP resources are still real. Wiring the BigQuery export is tracked as follow-up.
+
+Residual risk: the inventory reflects whatever the granted identity can see. Scope the IAM role to the accounts/projects you intend to surface; a broad `ReadOnlyAccess` role makes the panel enumerate everything in the account.
+
 ## Data Security
 
 - **Database**: Pipeline definitions, run history, and environment configs stored in PostgreSQL
@@ -330,4 +348,5 @@ Referrer-Policy: strict-origin-when-cross-origin
 - [x] Run the container as non-root *(image runs as UID 65532 by default)*
 - [x] Enable network policies to restrict pod-to-pod traffic *(NetworkPolicy ships with the Helm chart, gated by `networkPolicy.enabled`; raw manifest at `deploy/kubernetes/network-policy.yaml`)*
 - [ ] Regularly update base images and dependencies
+- [ ] If the cloud inventory panel is enabled (`COOKER_CLOUD_{AWS,GCP}_ENABLED`), bind a **read-only** identity — IRSA / Workload Identity over static keys — scoped to the minimum describe/list/cost permissions *(see "Cloud inventory credentials")*
 - [x] Verify release artifact signatures *(cosign keyless signing ships with every release from v0.1.0; see "Supply chain and release signing" and `docs/RELEASING.md §Step 4`)*

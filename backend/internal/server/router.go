@@ -174,6 +174,20 @@ func (s *Server) registerRoutes() {
 		kubernetes.DELETE("/:ns/:kind/:name", adminRole, handler.DeleteResource)
 	}
 
+	// Read-only cloud inventory & cost panel (OR-2). The GET endpoints
+	// are read-level (any authenticated user) — they expose only resource
+	// metadata and aggregate cost, never credentials. POST /cloud/refresh
+	// busts the server-side TTL cache and triggers a synchronous fan-out
+	// to the cloud APIs (one of which, AWS Cost Explorer, is billed per
+	// request), so it carries the writeRole gate AND the per-user rate
+	// limiter like the other expensive POST actions.
+	cloud := api.Group("/cloud")
+	{
+		cloud.GET("/inventory", h.GetCloudInventory)
+		cloud.GET("/costs", h.GetCloudCosts)
+		cloud.POST("/refresh", writeRole, expensive, h.RefreshCloud)
+	}
+
 	environments := api.Group("/environments")
 	{
 		environments.GET("", h.ListEnvironments)

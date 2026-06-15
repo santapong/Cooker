@@ -20,6 +20,7 @@ const navItems: NavItem[] = [
   { path: '/docker', label: 'Docker', icon: 'box', proOnly: true },
   { path: '/docker/compose', label: 'Compose', icon: 'compose' },
   { path: '/kubernetes', label: 'Clusters', icon: 'servers', proOnly: true },
+  { path: '/cloud', label: 'Cloud', icon: 'box', proOnly: true },
   { path: '/hosts', label: 'Hosts', icon: 'servers', proOnly: true },
   { path: '/environments', label: 'Environments', icon: 'flask' },
   { path: '/analytics', label: 'Insights', icon: 'spark', proOnly: true },

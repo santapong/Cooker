@@ -43,6 +43,41 @@ secrets:
       existingSecret: ""    # name of a pre-created Secret
       existingSecretKey: "api-key"
 
+# Cloud inventory & cost panel (OR-2). Read-only: Cooker lists compute
+# instances, managed Kubernetes clusters, and container registries, plus
+# month-to-date spend, across the enabled providers. Each provider is
+# enabled independently and off by default.
+#
+# Credentials: prefer the platform identity (IRSA on EKS / Workload
+# Identity on GKE) wired through serviceAccount.annotations — then NO key
+# needs to live in a Secret. Static keys are supported as a fallback and
+# are pulled via secretKeyRef from a pre-created Secret (operator-managed;
+# the chart does not create it). Grant a read-only IAM policy
+# (ec2/eks/ecr/ce:Describe*+List* on AWS; compute/container/
+# artifactregistry viewer on GCP) — see SECURITY.md.
+cloudInventory:
+  # How long the server caches a fan-out before re-querying the cloud
+  # APIs. AWS Cost Explorer is billed per request, so keep this coarse.
+  # Empty uses the backend default (5m).
+  cacheTTL: ""
+  aws:
+    enabled: false
+    region: ""            # required when enabled (e.g. ap-southeast-1)
+    # Optional static access key id (prefer IRSA — leave empty).
+    accessKeyId: ""
+    # Optional static secret access key, via a pre-created Secret.
+    secretAccessKey:
+      existingSecret: ""   # name of a pre-created Secret
+      existingSecretKey: "secret-access-key"
+  gcp:
+    enabled: false
+    projectId: ""          # required when enabled
+    # Optional service-account key JSON, via a pre-created Secret
+    # (prefer Workload Identity — leave empty).
+    credentialsJson:
+      existingSecret: ""   # name of a pre-created Secret
+      existingSecretKey: "credentials.json"
+
 image:
   repository: ghcr.io/santapong/cooker
   tag: latest

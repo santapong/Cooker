@@ -116,6 +116,48 @@ spec:
                   name: {{ required "secrets.keepsave.apiKey.existingSecret is required when secrets.backend=keepsave" .Values.secrets.keepsave.apiKey.existingSecret | quote }}
                   key: {{ .Values.secrets.keepsave.apiKey.existingSecretKey | quote }}
             {{- end }}
+            {{- if .Values.cloudInventory.cacheTTL }}
+            - name: COOKER_CLOUD_CACHE_TTL
+              value: {{ .Values.cloudInventory.cacheTTL | quote }}
+            {{- end }}
+            {{- if .Values.cloudInventory.aws.enabled }}
+            - name: COOKER_CLOUD_AWS_ENABLED
+              value: "true"
+            - name: COOKER_CLOUD_AWS_REGION
+              value: {{ required "cloudInventory.aws.region is required when cloudInventory.aws.enabled" .Values.cloudInventory.aws.region | quote }}
+            {{- if .Values.cloudInventory.aws.accessKeyId }}
+            - name: COOKER_CLOUD_AWS_ACCESS_KEY_ID
+              value: {{ .Values.cloudInventory.aws.accessKeyId | quote }}
+            {{- end }}
+            {{- if .Values.cloudInventory.aws.secretAccessKey.existingSecret }}
+            # Static credentials are OPTIONAL: prefer IRSA (an IAM role
+            # bound to the ServiceAccount via serviceAccount.annotations).
+            # When provided, the secret access key comes from a
+            # pre-created Secret, never values.yaml.
+            - name: COOKER_CLOUD_AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloudInventory.aws.secretAccessKey.existingSecret | quote }}
+                  key: {{ .Values.cloudInventory.aws.secretAccessKey.existingSecretKey | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.cloudInventory.gcp.enabled }}
+            - name: COOKER_CLOUD_GCP_ENABLED
+              value: "true"
+            - name: COOKER_CLOUD_GCP_PROJECT_ID
+              value: {{ required "cloudInventory.gcp.projectId is required when cloudInventory.gcp.enabled" .Values.cloudInventory.gcp.projectId | quote }}
+            {{- if .Values.cloudInventory.gcp.credentialsJson.existingSecret }}
+            # Optional: prefer Workload Identity (bind a GCP service
+            # account to the ServiceAccount via serviceAccount.annotations).
+            # When provided, the SA key JSON comes from a pre-created
+            # Secret, never values.yaml.
+            - name: COOKER_CLOUD_GCP_CREDENTIALS_JSON
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloudInventory.gcp.credentialsJson.existingSecret | quote }}
+                  key: {{ .Values.cloudInventory.gcp.credentialsJson.existingSecretKey | quote }}
+            {{- end }}
+            {{- end }}
             - name: COOKER_SECRET_KEY
               valueFrom:
                 secretKeyRef:

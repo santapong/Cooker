@@ -46,6 +46,38 @@ spec:
               value: "redis://cooker-redis:6379"
             - name: COOKER_K8S_IN_CLUSTER
               value: "true"
+            # --- Cloud inventory & cost panel (OR-2), opt-in -------------
+            # Read-only AWS/GCP inventory + month-to-date cost. Both
+            # providers are off unless enabled here. Uncomment a provider
+            # block and set its locator (AWS region / GCP project).
+            #
+            # Credentials: prefer the platform identity — IRSA (annotate
+            # the ServiceAccount with eks.amazonaws.com/role-arn) or GKE
+            # Workload Identity (iam.gke.io/gcp-service-account). With those
+            # in place NO key env var is needed. The static-key fallback
+            # below pulls from a pre-created Secret via secretKeyRef; grant
+            # a read-only IAM policy (see SECURITY.md "Cloud inventory
+            # credentials").
+            #
+            # - name: COOKER_CLOUD_AWS_ENABLED
+            #   value: "true"
+            # - name: COOKER_CLOUD_AWS_REGION
+            #   value: "ap-southeast-1"
+            # - name: COOKER_CLOUD_AWS_SECRET_ACCESS_KEY   # omit when using IRSA
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: cooker-aws-cloud
+            #       key: secret-access-key
+            # - name: COOKER_CLOUD_GCP_ENABLED
+            #   value: "true"
+            # - name: COOKER_CLOUD_GCP_PROJECT_ID
+            #   value: "cooker-prod"
+            # - name: COOKER_CLOUD_GCP_CREDENTIALS_JSON     # omit when using Workload Identity
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: cooker-gcp-cloud
+            #       key: credentials.json
+            # ------------------------------------------------------------
           # NOTE: This raw manifest deliberately does NOT mount the host
           # /var/run/docker.sock. The Helm chart only mounts it when
           # `builder.kind == "docker"`; this parity path defaults to

@@ -62,6 +62,7 @@ type Config struct {
 	AWSSecrets        AWSSecretsConfig
 	GCPSecrets        GCPSecretsConfig
 	DeployTargets     DeployTargetsConfig
+	CloudInventory    CloudInventoryConfig
 	Audit             AuditConfig
 	Observability     ObservabilityConfig
 	AppHealthInterval time.Duration
@@ -220,6 +221,40 @@ type DeployTargetsConfig struct {
 	RenderOwnerID     string
 }
 
+// CloudInventoryConfig configures the read-only cloud inventory & cost
+// panel (OR-2). Each provider is enabled independently; when neither is
+// enabled the feature is dormant (the GET endpoints return 200 with
+// enabled=false). CacheTTL bounds how often the enabled providers are
+// queried — the cost APIs (AWS Cost Explorer) are billed per request, so
+// the default is deliberately coarse.
+type CloudInventoryConfig struct {
+	CacheTTL time.Duration
+	AWS      CloudAWSConfig
+	GCP      CloudGCPConfig
+}
+
+// CloudAWSConfig holds the AWS provider inputs. Region is required when
+// Enabled. AccessKeyID/SecretAccessKey are optional explicit static
+// credentials; empty means the standard AWS chain (IRSA / instance
+// profile / env / shared config), matching the awsm secrets backend.
+type CloudAWSConfig struct {
+	Enabled         bool
+	Region          string
+	AccessKeyID     string
+	SecretAccessKey string
+	SessionToken    string
+}
+
+// CloudGCPConfig holds the GCP provider inputs. ProjectID is required
+// when Enabled. CredentialsJSON is an optional service-account key (raw
+// JSON); empty means Application Default Credentials, matching the gcpsm
+// secrets backend.
+type CloudGCPConfig struct {
+	Enabled         bool
+	ProjectID       string
+	CredentialsJSON string
+}
+
 type AuditConfig struct {
 	Enabled bool
 	// Destination accepts a comma list: stdout | file | db, e.g.
@@ -343,6 +378,21 @@ func Load() *Config {
 			FlyRegion:         getEnv("COOKER_DEPLOY_FLY_REGION", ""),
 			RenderToken:       getEnv("COOKER_DEPLOY_RENDER_TOKEN", ""),
 			RenderOwnerID:     getEnv("COOKER_DEPLOY_RENDER_OWNER_ID", ""),
+		},
+		CloudInventory: CloudInventoryConfig{
+			CacheTTL: getEnvDuration("COOKER_CLOUD_CACHE_TTL", 5*time.Minute),
+			AWS: CloudAWSConfig{
+				Enabled:         getEnvBool("COOKER_CLOUD_AWS_ENABLED", false),
+				Region:          getEnv("COOKER_CLOUD_AWS_REGION", ""),
+				AccessKeyID:     getEnv("COOKER_CLOUD_AWS_ACCESS_KEY_ID", ""),
+				SecretAccessKey: getEnv("COOKER_CLOUD_AWS_SECRET_ACCESS_KEY", ""),
+				SessionToken:    getEnv("COOKER_CLOUD_AWS_SESSION_TOKEN", ""),
+			},
+			GCP: CloudGCPConfig{
+				Enabled:         getEnvBool("COOKER_CLOUD_GCP_ENABLED", false),
+				ProjectID:       getEnv("COOKER_CLOUD_GCP_PROJECT_ID", ""),
+				CredentialsJSON: getEnv("COOKER_CLOUD_GCP_CREDENTIALS_JSON", ""),
+			},
 		},
 		Audit: AuditConfig{
 			Enabled:     getEnvBool("COOKER_AUDIT_ENABLED", env.IsProduction()),
@@ -509,6 +559,18 @@ func (c *Config) Validate() error {
 	// Scheduler safety: depends on jobqueue.
 	if c.Scheduler.Enabled && !c.JobQueue.Enabled {
 		problems = append(problems, "COOKER_SCHEDULER_ENABLED=true requires COOKER_JOBQUEUE_ENABLED=true")
+	}
+	// Cloud inventory (OR-2): an enabled provider must have its required
+	// locator (AWS region / GCP project). Credentials are NOT forced here
+	// — both providers fall back to the platform credential chain (IRSA /
+	// Workload Identity / ADC), exactly like the awsm/gcpsm backends, so a
+	// pod using workload identity needs no key env var. A region/project,
+	// however, is not discoverable and must be set.
+	if c.CloudInventory.AWS.Enabled && c.CloudInventory.AWS.Region == "" {
+		problems = append(problems, "COOKER_CLOUD_AWS_REGION is required when COOKER_CLOUD_AWS_ENABLED=true")
+	}
+	if c.CloudInventory.GCP.Enabled && c.CloudInventory.GCP.ProjectID == "" {
+		problems = append(problems, "COOKER_CLOUD_GCP_PROJECT_ID is required when COOKER_CLOUD_GCP_ENABLED=true")
 	}
 	if len(problems) > 0 {
 		return errors.New("config: " + strings.Join(problems, "; "))
