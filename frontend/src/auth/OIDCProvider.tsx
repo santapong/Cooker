@@ -236,8 +236,16 @@ export function OIDCProvider({ children }: { children: ReactNode }) {
         currentAccessToken = u.access_token;
         setUser(toUser(u));
         setIsLoading(false);
-      } else if (!loadStoredLocalToken()) {
-        // No OIDC user AND no stored local token — we can stop loading.
+      } else {
+        // No valid OIDC session. The local-token effect runs concurrently
+        // and will set a user (and call setIsLoading(false)) if the stored
+        // token validates. If it fails or there is no stored token, the
+        // catch branch in that effect handles the loading state for
+        // !oidcEnabled only, leaving us deadlocked when OIDC is enabled
+        // but the local token is stale (FE-L6). Resolve loading here so
+        // the app can redirect to sign-in rather than hanging on the
+        // loading screen. The local-token effect will call setIsLoading(false)
+        // again if it resolves successfully — React no-ops on identical state.
         currentAccessToken = null;
         setUser(null);
         setIsLoading(false);

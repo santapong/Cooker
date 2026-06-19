@@ -207,15 +207,15 @@ Given that CLAUDE.md explicitly advertises `deploy/kubernetes/` as the "raw mani
 
 | ID | Title | Severity | Effort | Status |
 |----|-------|----------|--------|--------|
-| F-01 | Health-probe paths and tuning differ | Critical | 15 min | **Closed** — PR `claude/w2-f01-raw-k8s-probes` |
-| F-02 | COOKER_ENV, COOKER_REPLICA_COUNT, WS/rate-limit backends absent | High | 10 min | Open |
-| F-03 | Entire OIDC env-var block absent | High | 20 min | Open |
-| F-04 | COOKER_SECRET_KEY not in raw manifest | Critical | 5 min | Open |
-| F-05 | COOKER_BUILDER and builder config absent | Medium | 10 min | Open |
-| F-06 | COOKER_SECRETS_BACKEND absent | Medium | 5 min | Open |
-| F-07 | terminationGracePeriodSeconds absent (30s vs 60s) | Medium | 2 min | Open |
+| F-01 | Health-probe paths and tuning differ | Critical | 15 min | **Closed** — applied in full-audit Tier-1 fix (2026-06-19); previous "Closed" entry in this table was premature — the fix was recorded but never applied to the file. Now applied: `/health/live`, `/health/ready`, `port: http`, `initialDelaySeconds:60` on liveness, `timeoutSeconds:5`, `failureThreshold:5` on both, `successThreshold:1` on readiness. |
+| F-02 | COOKER_ENV, COOKER_REPLICA_COUNT, WS/rate-limit backends absent | High | 10 min | **Closed** — applied in full-audit Tier-1 fix (2026-06-19) |
+| F-03 | Entire OIDC env-var block absent | High | 20 min | **Closed** — applied in full-audit Tier-1 fix (2026-06-19); commented-out OIDC block with secretKeyRef added |
+| F-04 | COOKER_SECRET_KEY not in raw manifest | Critical | 5 min | **Closed** — applied in full-audit Tier-1 fix (2026-06-19) |
+| F-05 | COOKER_BUILDER and builder config absent | Medium | 10 min | **Closed** — applied in full-audit Tier-1 fix (2026-06-19) |
+| F-06 | COOKER_SECRETS_BACKEND absent | Medium | 5 min | **Closed** — applied in full-audit Tier-1 fix (2026-06-19) |
+| F-07 | terminationGracePeriodSeconds absent (30s vs 60s) | Medium | 2 min | **Closed** — applied in full-audit Tier-1 fix (2026-06-19) |
 | F-08 | Nginx proxy annotations only in raw ingress | Low | 10 min | Open |
-| F-09 | DATABASE_URL sslmode not enforced in raw path | Low | 5 min | Open |
+| F-09 | DATABASE_URL sslmode not enforced in raw path | Low | 5 min | Open (note added in deployment.yaml secretKeyRef comment) |
 
 Total remediation effort for F-02 through F-07: approximately 45 min remaining.
 
@@ -225,8 +225,10 @@ Total remediation effort for F-02 through F-07: approximately 45 min remaining.
 
 ### F-01 — Health-probe paths and probe tuning differ (CRITICAL) — Closed
 
-**Closed by**: PR `claude/w2-f01-raw-k8s-probes` — `fix(deploy/kubernetes): use /health/live + /health/ready probes`
+**Correction (2026-06-19)**: The prior "Closed" entry in the finding index above was premature. The fix was described but never applied to `deploy/kubernetes/deployment.yaml` — the full-audit CR-4 finding (2026-06-full-audit.md) re-identified this gap.
+
+**Closed by**: full-audit Tier-1 fix (2026-06-19) — `fix(deploy/kubernetes): bring probes to chart parity (CR-4)`
 
 **Was**: `deploy/kubernetes/deployment.yaml` probed `/health` (a non-existent route) with `initialDelaySeconds: 10`, no `timeoutSeconds`, no `failureThreshold`. The named port was hardcoded to `8080` instead of the symbolic `http`.
 
-**Now**: Paths updated to `/health/live` (liveness) and `/health/ready` (readiness), matching the chart. `initialDelaySeconds: 60` for liveness, `timeoutSeconds: 5`, `failureThreshold: 5` on both probes, `successThreshold: 1` on readiness, port reference changed to `http`. Fully in parity with `deploy/helm/cooker/templates/deployment.yaml:184-200` and `values.yaml:282-293`.
+**Now**: Paths updated to `/health/live` (liveness) and `/health/ready` (readiness), matching the chart. `initialDelaySeconds: 60` for liveness, `timeoutSeconds: 5`, `failureThreshold: 5` on both probes, `successThreshold: 1` on readiness, port reference changed to `http`. A `startupProbe` (failureThreshold:30, periodSeconds:10) was also added to both the raw manifest and the Helm template (IN-H5). Fully in parity with `deploy/helm/cooker/templates/deployment.yaml` and `values.yaml`.

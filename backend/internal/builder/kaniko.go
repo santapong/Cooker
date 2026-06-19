@@ -8,6 +8,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -140,11 +141,22 @@ func (k *Kaniko) Build(ctx context.Context, req Request) (Result, error) {
 		)
 	}()
 
+	// CR-3: join the log-streaming goroutine before Build returns so the
+	// goroutine and its kube-apiserver streaming connection don't leak
+	// per build. We start it unconditionally when LogWriter is set and
+	// wait for it after waitForCompletion (which cancels ctx on return,
+	// causing streamLogs to exit its context-scoped poll/scan loop).
+	var logsDone sync.WaitGroup
 	if req.LogWriter != nil {
-		go k.streamLogs(ctx, created.Name, req.LogWriter)
+		logsDone.Add(1)
+		go func() {
+			defer logsDone.Done()
+			k.streamLogs(ctx, created.Name, req.LogWriter)
+		}()
 	}
 
 	digest, err := k.waitForCompletion(ctx, created.Name)
+	logsDone.Wait() // join before returning regardless of outcome
 	if err != nil {
 		return Result{}, err
 	}

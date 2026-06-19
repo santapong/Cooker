@@ -38,7 +38,13 @@ type authHelper func(host string) (user, pass string, ok bool)
 func (a authHelper) Get(host string) (string, string, error) {
 	user, pass, ok := a(host)
 	if !ok {
-		return "", "", fmt.Errorf("crane: no credentials for %q", host)
+		// L crane.go:38-43: return empty credentials (not an error) for
+		// the no-credentials case so the go-containerregistry wrapper
+		// produces an anonymous authenticator rather than a hard failure.
+		// The wrapper already converts any error to Anonymous, but
+		// returning ("", "", nil) makes the intent explicit: this host is
+		// intentionally unauthenticated.
+		return "", "", nil
 	}
 	return user, pass, nil
 }
@@ -85,9 +91,12 @@ func (c *Crane) Push(ctx context.Context, req Request) (Result, error) {
 		crane.WithUserAgent(ua),
 	)
 	if err != nil {
-		// Digest fetch is best-effort; still report success of the push.
-		logf(req.LogWriter, "Pushed image to %s\n", req.Target)
-		return Result{}, nil
+		// M pusher/crane.go:82-91: digest fetch is best-effort; the push
+		// already succeeded. Log the error and return an explicit
+		// Result{Digest:""} so callers know the field is absent rather
+		// than silently receiving a zero-value struct.
+		logf(req.LogWriter, "Pushed image to %s (digest unavailable: %v)\n", req.Target, err)
+		return Result{Digest: ""}, nil
 	}
 	logf(req.LogWriter, "Pushed image to %s@%s\n", req.Target, digest)
 	return Result{Digest: digest}, nil

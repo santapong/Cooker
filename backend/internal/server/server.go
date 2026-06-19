@@ -68,6 +68,10 @@ type Server struct {
 	healthDone       chan struct{}
 	auditSweepCancel context.CancelFunc
 	auditSweepDone   chan struct{}
+	// rateLimiter is the in-memory per-user limiter created by
+	// registerRoutes; held here so Close() can stop its gc goroutine
+	// (BC-H1). nil when the redis backend or disabled limiter is used.
+	rateLimiter *rateLimiter
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -116,6 +120,12 @@ func New(cfg *config.Config) (*Server, error) {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := gin.New()
+	// Do not trust any proxy headers (X-Forwarded-For) by default.
+	// This prevents a remote client from spoofing its IP for rate-limit
+	// bypass (M-2). Operators who run behind a trusted proxy can set
+	// COOKER_TRUSTED_PROXIES (comma-separated CIDRs) — not yet exposed
+	// in config, so we unconditionally disable XFF trust here.
+	_ = router.SetTrustedProxies(nil)
 	router.Use(gin.Recovery())
 
 	var cleanups []func()
@@ -614,6 +624,19 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 func (s *Server) Close() error {
 	if s == nil {
 		return nil
+	}
+	// BC-L2: cancel background goroutines that RunContext also cancels on
+	// graceful shutdown but that Close() previously missed — so that callers
+	// who invoke Close() directly (tests, deferred cleanup) don't leak them.
+	if s.healthCancel != nil {
+		s.healthCancel()
+	}
+	if s.auditSweepCancel != nil {
+		s.auditSweepCancel()
+	}
+	// BC-H1: stop the rate-limiter gc goroutine.
+	if s.rateLimiter != nil {
+		s.rateLimiter.Close()
 	}
 	if s.traceShutdown != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

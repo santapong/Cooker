@@ -16,6 +16,10 @@ spec:
         app.kubernetes.io/name: cooker
     spec:
       serviceAccountName: cooker
+      # IN-H2: match the chart's 60s grace period so Cooker can drain
+      # in-flight HTTP (30s) + finish tracked pipeline runs (25s) before
+      # SIGKILL. Kubernetes default is 30s, which kills mid-drain.
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -25,7 +29,12 @@ spec:
           type: RuntimeDefault
       containers:
         - name: cooker
-          image: ghcr.io/santapong/cooker:latest
+          # IN-H4: do NOT use :latest. Pin to a specific release tag or
+          # a full digest. Replace <TAG> with the actual version before
+          # deploying, e.g. ghcr.io/santapong/cooker:v0.1.0 or
+          # ghcr.io/santapong/cooker@sha256:<digest>.
+          image: ghcr.io/santapong/cooker:<TAG>
+          imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -35,17 +44,68 @@ spec:
             - containerPort: 8080
               name: http
           env:
+            # IN-H1: Production runtime posture — must match Helm chart defaults.
+            # These vars gate Config.Validate() startup checks, CORS deny-all,
+            # MFA gate, and multi-replica safety validation.
+            - name: COOKER_ENV
+              value: "production"
+            - name: COOKER_REPLICA_COUNT
+              value: "1"
+            - name: COOKER_STICKY_SESSIONS
+              value: "false"
+            # WebSocket broadcast, ticket store, rate-limit storage.
+            # "redis" is the multi-replica-safe default; requires REDIS_URL below.
+            # Switch to "memory" only for a verified single-replica deployment
+            # that you know cannot HPA-scale (Config.Validate will refuse to
+            # boot with memory + replicaCount>1 and stickySessions=false).
+            - name: COOKER_WS_HUB_BACKEND
+              value: "redis"
+            - name: COOKER_WS_TICKET_BACKEND
+              value: "redis"
+            - name: COOKER_RATE_LIMIT_BACKEND
+              value: "redis"
             - name: COOKER_PORT
               value: "8080"
+            - name: COOKER_K8S_IN_CLUSTER
+              value: "true"
+            # M (BUILDER): explicit builder selection so the binary never
+            # silently falls back to the "docker" builder (which would need the
+            # host docker.sock — not mounted here). Kaniko submits a Job with no
+            # host paths; see SECURITY.md "Image build isolation".
+            # Values: kaniko | buildah | noop
+            - name: COOKER_BUILDER
+              value: "kaniko"
+            # M (SECRETS): explicit backend so operators know what they're
+            # getting. "database" stores secrets AES-GCM-encrypted in Postgres.
+            # Switch to "keepsave" and add COOKER_SECRETS_KEEPSAVE_* env vars
+            # if using the KeepSave secrets manager.
+            - name: COOKER_SECRETS_BACKEND
+              value: "database"
+            # CR-5: COOKER_SECRET_KEY via secretKeyRef (optional:false) —
+            # the pod will fail creation if the Secret is missing, rather than
+            # booting silently with an empty AES key that encrypts nothing.
+            # Create the Secret before deploying:
+            #   kubectl -n cooker create secret generic cooker-secret-key \
+            #     --from-literal=key="$(head -c 32 /dev/urandom | base64)"
+            - name: COOKER_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cooker-secret-key
+                  key: key
+                  optional: false
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: cooker-db
+                  # IMPORTANT: ensure the value in this Secret includes
+                  # '?sslmode=require' (or stronger). Example:
+                  # postgres://cooker:<password>@<host>:5432/cooker?sslmode=require
                   key: url
+            # Redis is required when WS/ticket/rate-limit backends are "redis".
+            # The value below assumes a Redis Deployment named cooker-redis in
+            # the same namespace (see deploy/kubernetes/redis.yaml).
             - name: REDIS_URL
               value: "redis://cooker-redis:6379"
-            - name: COOKER_K8S_IN_CLUSTER
-              value: "true"
             # --- Cloud inventory & cost panel (OR-2), opt-in -------------
             # Read-only AWS/GCP inventory + month-to-date cost. Both
             # providers are off unless enabled here. Uncomment a provider
@@ -78,6 +138,30 @@ spec:
             #       name: cooker-gcp-cloud
             #       key: credentials.json
             # ------------------------------------------------------------
+            # M (OIDC): OIDC authentication — disabled by default.
+            # Uncomment and populate to enable SSO.
+            # Pre-create the client-secret Secret before deploying:
+            #   kubectl -n cooker create secret generic cooker-oidc \
+            #     --from-literal=client-secret="<your-client-secret>"
+            #
+            # - name: COOKER_OIDC_ENABLED
+            #   value: "true"
+            # - name: COOKER_OIDC_ISSUER_URL
+            #   value: "https://accounts.example.com"
+            # - name: COOKER_OIDC_CLIENT_ID
+            #   value: "cooker"
+            # - name: COOKER_OIDC_REDIRECT_URL
+            #   value: "https://cooker.example.com/callback"
+            # - name: COOKER_OIDC_SCOPES
+            #   value: "openid,profile,email,groups"
+            # - name: COOKER_OIDC_CLIENT_SECRET
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: cooker-oidc
+            #       key: client-secret
+            #       optional: false
+            # - name: COOKER_ALLOWED_ORIGINS
+            #   value: "https://cooker.example.com"
           # NOTE: This raw manifest deliberately does NOT mount the host
           # /var/run/docker.sock. The Helm chart only mounts it when
           # `builder.kind == "docker"`; this parity path defaults to
@@ -90,18 +174,34 @@ spec:
             # readOnlyRootFilesystem makes everything else read-only.
             - name: tmp
               mountPath: /tmp
+          # IN-H5: startupProbe gives the binary up to 300s (30 × 10s) to
+          # pass its first liveness check before Kubernetes applies the
+          # liveness failureThreshold. This covers cold-boot OIDC discovery
+          # + Postgres migration without over-inflating initialDelaySeconds.
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          # CR-4: probe paths and tuning brought to chart parity.
           livenessProbe:
             httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 10
+              path: /health/live
+              port: http
+            initialDelaySeconds: 60
             periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
           readinessProbe:
             httpGet:
-              path: /health
-              port: 8080
+              path: /health/ready
+              port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+            successThreshold: 1
           resources:
             requests:
               cpu: 100m

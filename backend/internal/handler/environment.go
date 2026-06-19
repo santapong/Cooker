@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -134,7 +135,10 @@ func (h *Handler) PutSecret(c *gin.Context) {
 		return
 	}
 	if err := h.Secrets.Put(c.Request.Context(), c.Param("id"), c.Param("key"), []byte(req.Value)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// BC-H4: don't leak backend URLs/ARNs/paths via the error message;
+		// log server-side and return a generic message (mirrors RevealSecret).
+		slog.Warn("handler: PutSecret: backend error", "env", c.Param("id"), "key", c.Param("key"), "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "secret backend error"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "status": "stored"})
@@ -251,7 +255,10 @@ func (h *Handler) DeleteSecret(c *gin.Context) {
 		return
 	}
 	if err := h.Secrets.Delete(c.Request.Context(), c.Param("id"), c.Param("key")); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// BC-H4: don't leak backend URLs/ARNs/paths via the error message;
+		// log server-side and return a generic message (mirrors RevealSecret).
+		slog.Warn("handler: DeleteSecret: backend error", "env", c.Param("id"), "key", c.Param("key"), "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "secret backend error"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "status": "deleted"})

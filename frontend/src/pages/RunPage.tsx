@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { pipelineApi } from '../api/pipelines';
 import { useEnvironmentStore } from '../stores/environmentStore';
@@ -38,6 +38,13 @@ export default function RunPage() {
   const { id, runId } = useParams<{ id: string; runId: string }>();
 
   const [run, setRun] = useState<PipelineRun | null>(null);
+  // runRef mirrors run so the approval-poll effect can read the current
+  // status without having run in its dep array (which would restart the
+  // interval on every getRun response — FE-H2).
+  const runRef = useRef<PipelineRun | null>(null);
+  useEffect(() => {
+    runRef.current = run;
+  });
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
   const [aiTriage, setAiTriage] = useState(false);
   const [envStatuses, setEnvStatuses] = useState<EnvironmentStatus[]>([]);
@@ -93,6 +100,10 @@ export default function RunPage() {
     if (!id || !runId) return;
     let cancelled = false;
     const tick = () => {
+      // Stop polling once the run has reached a terminal status (FE-L RunPage).
+      // Read from runRef to avoid run being in the dep array.
+      const current = runRef.current;
+      if (current && current.status !== 'running' && current.status !== 'pending') return;
       pipelineApi
         .envStatus(id, runId)
         .then((s) => {
@@ -125,11 +136,17 @@ export default function RunPage() {
   // the persisted gate; polling lets the run page reflect an awaiting gate
   // (to offer Approve/Reject) and pick up the stage flipping to
   // succeeded/failed once a decision lands. Stops once the run is terminal.
+  //
+  // run is intentionally NOT in the dep array (FE-H2): including it would
+  // restart the interval on every getRun response. Instead we read the
+  // current status from runRef (kept in sync above) at tick time.
   useEffect(() => {
     if (!id || !runId) return;
-    if (run && run.status !== 'running' && run.status !== 'pending') return;
     let cancelled = false;
     const tick = () => {
+      // Read from ref so we see the latest run without it being a dep.
+      const current = runRef.current;
+      if (current && current.status !== 'running' && current.status !== 'pending') return;
       pipelineApi
         .stageApprovals(id, runId)
         .then((res) => {
@@ -149,7 +166,7 @@ export default function RunPage() {
       cancelled = true;
       window.clearInterval(t);
     };
-  }, [id, runId, run, refreshRun]);
+  }, [id, runId, refreshRun]);
 
   // Logs are now driven by the useStageLogs hook above (WebSocket
   // stream + REST backfill). The previous 3s-polling loop is gone.

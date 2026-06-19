@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -116,11 +117,20 @@ func (b *Buildah) Build(ctx context.Context, req Request) (Result, error) {
 		)
 	}()
 
+	// CR-3: join the log-streaming goroutine before Build returns so the
+	// goroutine and its kube-apiserver streaming connection don't leak
+	// per build (mirrors the BuildKit <-logsDone pattern).
+	var logsDone sync.WaitGroup
 	if req.LogWriter != nil {
-		go b.streamLogs(ctx, created.Name, req.LogWriter)
+		logsDone.Add(1)
+		go func() {
+			defer logsDone.Done()
+			b.streamLogs(ctx, created.Name, req.LogWriter)
+		}()
 	}
 
 	digest, err := b.waitForCompletion(ctx, created.Name)
+	logsDone.Wait() // join before returning regardless of outcome
 	if err != nil {
 		return Result{}, err
 	}
@@ -329,7 +339,12 @@ func (b *Buildah) streamLogs(ctx context.Context, jobName string, w io.Writer) {
 	// oversized line (P26-05-21).
 	scanner.Buffer(make([]byte, 64<<10), 1<<20)
 	for scanner.Scan() {
-		if _, err := fmt.Fprintln(w, scanner.Text()); err != nil {
+		// AD-H6: strip ANSI escape sequences before writing to the sink,
+		// matching Kaniko's stripANSI treatment. A hostile Dockerfile that
+		// emits terminal-control codes could otherwise confuse operators
+		// reading the WebSocket log stream.
+		line := stripANSI(scanner.Bytes())
+		if _, err := w.Write(append(line, '\n')); err != nil {
 			return
 		}
 	}

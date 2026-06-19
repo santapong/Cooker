@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -35,6 +36,13 @@ type Target struct {
 	// required by Fargate.
 	Subnets        []string
 	SecurityGroups []string
+
+	// AD-H1: cache the ECS client so we don't re-resolve credentials /
+	// hit IMDS on every Deploy/Status/Rollback call. sync.Once
+	// serialises the one-shot init; initErr captures any failure.
+	clientOnce sync.Once
+	cachedCli  *ecs.Client
+	clientErr  error
 }
 
 // New constructs an ECS target.
@@ -51,12 +59,20 @@ func (t *Target) requireConfig() error {
 	return nil
 }
 
+// client returns the cached ECS client, constructing it on the first
+// call. Subsequent calls return the same client without hitting IMDS or
+// re-resolving credentials (AD-H1). The background context is used for
+// the one-shot SDK init; per-call operations still use their own ctx.
 func (t *Target) client(ctx context.Context) (*ecs.Client, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(t.Region))
-	if err != nil {
-		return nil, err
-	}
-	return ecs.NewFromConfig(cfg), nil
+	t.clientOnce.Do(func() {
+		cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(t.Region))
+		if err != nil {
+			t.clientErr = err
+			return
+		}
+		t.cachedCli = ecs.NewFromConfig(cfg)
+	})
+	return t.cachedCli, t.clientErr
 }
 
 // Deploy registers a new task definition and updates the service to

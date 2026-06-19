@@ -48,8 +48,19 @@ func (s *PromotionStore) CreatePromotion(ctx context.Context, p *model.RunPromot
 	return nil
 }
 
+// GetPromotion fetches a promotion and its approvals inside a single
+// read transaction (TOCTOU fix, DA-M): the promotion row and the
+// approval rows are read from the same consistent snapshot, so a
+// concurrent AddApproval cannot produce a count that disagrees with
+// the approval list.
 func (s *PromotionStore) GetPromotion(ctx context.Context, runID, environmentID string) (*model.RunPromotion, error) {
-	row := s.db.QueryRowContext(ctx,
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("getting promotion: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // read-only rollback is always safe
+
+	row := tx.QueryRowContext(ctx,
 		`SELECT id, run_id, pipeline_id, environment_id, status, strategy,
 		        required_approvers, requested_by, promoted_at, created_at, updated_at
 		   FROM run_promotions WHERE run_id = $1 AND environment_id = $2`,
@@ -61,7 +72,7 @@ func (s *PromotionStore) GetPromotion(ctx context.Context, runID, environmentID 
 	if err != nil {
 		return nil, err
 	}
-	approvals, err := s.listApprovals(ctx, p.ID)
+	approvals, err := listApprovalsTx(ctx, tx, p.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +80,9 @@ func (s *PromotionStore) GetPromotion(ctx context.Context, runID, environmentID 
 	return p, nil
 }
 
+// ListPromotions returns all promotions for a run with their approvals.
+// Approvals are fetched in a single batched query (DA-H3 fix) rather
+// than one query per promotion, to avoid the N+1 pattern.
 func (s *PromotionStore) ListPromotions(ctx context.Context, runID string) ([]*model.RunPromotion, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, run_id, pipeline_id, environment_id, status, strategy,
@@ -81,24 +95,29 @@ func (s *PromotionStore) ListPromotions(ctx context.Context, runID string) ([]*m
 	defer rows.Close()
 
 	var out []*model.RunPromotion
+	var ids []string
 	for rows.Next() {
 		p, err := scanPromotion(rows)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, p)
+		ids = append(ids, p.ID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// Hydrate approvals per promotion. The promotion count per run is
-	// small (one per environment), so a query each is fine.
+	if len(ids) == 0 {
+		return out, nil
+	}
+
+	// Fetch all approvals for this run's promotions in one query (DA-H3).
+	approvalMap, err := s.listApprovalsBatch(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	for _, p := range out {
-		approvals, err := s.listApprovals(ctx, p.ID)
-		if err != nil {
-			return nil, err
-		}
-		p.Approvals = approvals
+		p.Approvals = approvalMap[p.ID]
 	}
 	return out, nil
 }
@@ -121,13 +140,23 @@ func (s *PromotionStore) UpdatePromotionStatus(ctx context.Context, id string, s
 	return nil
 }
 
+// AddApproval inserts an approval row and returns the post-insert count.
+// Both statements execute inside a single transaction (DA-H2 fix) so
+// concurrent approvals cannot observe a count that omits a just-inserted
+// peer row, which would cause a gate to stall permanently.
 func (s *PromotionStore) AddApproval(ctx context.Context, a *model.PromotionApproval) (bool, int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, 0, fmt.Errorf("adding approval: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
 	// ON CONFLICT DO NOTHING makes a repeat approval by the same identity
 	// a no-op rather than a unique-violation error. RETURNING id fires
 	// only when a row was actually inserted, so a missing scan row means
 	// "already approved".
 	var insertedID string
-	err := s.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`INSERT INTO promotion_approvals
 		   (id, promotion_id, approver_sub, approver_email, note)
 		 VALUES ($1,$2,$3,$4,$5)
@@ -147,16 +176,21 @@ func (s *PromotionStore) AddApproval(ctx context.Context, a *model.PromotionAppr
 	}
 
 	var count int
-	if err := s.db.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM promotion_approvals WHERE promotion_id = $1`,
 		a.PromotionID).Scan(&count); err != nil {
-		return added, 0, fmt.Errorf("counting approvals: %w", err)
+		return false, 0, fmt.Errorf("counting approvals: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, 0, fmt.Errorf("adding approval: commit: %w", err)
 	}
 	return added, count, nil
 }
 
-func (s *PromotionStore) listApprovals(ctx context.Context, promotionID string) ([]model.PromotionApproval, error) {
-	rows, err := s.db.QueryContext(ctx,
+// listApprovalsTx fetches approvals for a single promotion within the
+// supplied transaction (used by GetPromotion's TOCTOU-safe read tx).
+func listApprovalsTx(ctx context.Context, tx *sql.Tx, promotionID string) ([]model.PromotionApproval, error) {
+	rows, err := tx.QueryContext(ctx,
 		`SELECT id, promotion_id, approver_sub, approver_email, note, created_at
 		   FROM promotion_approvals WHERE promotion_id = $1
 		  ORDER BY created_at ASC`, promotionID)
@@ -172,6 +206,32 @@ func (s *PromotionStore) listApprovals(ctx context.Context, promotionID string) 
 			return nil, err
 		}
 		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// listApprovalsBatch fetches all approvals for the given set of
+// promotion IDs in a single query and returns them grouped by
+// promotion ID (DA-H3 fix). Never called with an empty ids slice.
+func (s *PromotionStore) listApprovalsBatch(ctx context.Context, ids []string) (map[string][]model.PromotionApproval, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, promotion_id, approver_sub, approver_email, note, created_at
+		   FROM promotion_approvals
+		  WHERE promotion_id = ANY($1)
+		  ORDER BY promotion_id, created_at ASC`,
+		pq.Array(ids))
+	if err != nil {
+		return nil, fmt.Errorf("batch listing approvals: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string][]model.PromotionApproval, len(ids))
+	for rows.Next() {
+		var a model.PromotionApproval
+		if err := rows.Scan(&a.ID, &a.PromotionID, &a.ApproverSub, &a.ApproverEmail, &a.Note, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[a.PromotionID] = append(out[a.PromotionID], a)
 	}
 	return out, rows.Err()
 }

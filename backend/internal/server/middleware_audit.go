@@ -32,6 +32,12 @@ func auditMiddleware(sink audit.Sink) gin.HandlerFunc {
 		if !isMutating(c.Request.Method) {
 			return
 		}
+		// M: c.FullPath() is "" for unmatched routes (404 SPA fallback,
+		// unknown paths). Emitting those would flood the audit trail with
+		// noise and no meaningful route information.
+		if c.FullPath() == "" {
+			return
+		}
 		claims := auth.GetUser(c)
 		if claims == nil {
 			return

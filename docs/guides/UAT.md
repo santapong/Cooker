@@ -606,6 +606,13 @@ Or `rm .env.uat && make uat-up` for a clean slate.
 
 ## Alternative: run from source for development
 
+> **Note on `make dev`**: `docker-compose.yml` (used by `make dev`) was
+> previously broken — it referenced non-existent
+> `deploy/docker/Dockerfile.frontend` and `deploy/docker/Dockerfile.backend`.
+> It now uses the single multi-stage `deploy/docker/Dockerfile`. For hot
+> frontend reload, running the backend and Vite dev server directly (below)
+> is still the better experience.
+
 If you're hacking on Cooker and want reload-on-save, skip
 `make uat-up` and run the backend + Vite dev server directly.
 You'll need Go 1.24+, Node 20+, and a local `git` / `docker` /

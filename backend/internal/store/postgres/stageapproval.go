@@ -46,8 +46,18 @@ func (s *StageApprovalStore) CreateGate(ctx context.Context, g *model.StageAppro
 	return nil
 }
 
+// GetGate fetches a gate and its votes inside a single read transaction
+// (TOCTOU fix, DA-M): the gate row and the vote rows are read from the
+// same consistent snapshot, so a concurrent AddVote cannot produce a
+// count that disagrees with the vote list.
 func (s *StageApprovalStore) GetGate(ctx context.Context, runID, stageID string) (*model.StageApproval, error) {
-	row := s.db.QueryRowContext(ctx,
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("getting gate: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // read-only rollback is always safe
+
+	row := tx.QueryRowContext(ctx,
 		`SELECT id, run_id, stage_id, status, required_approvers, resolved_by,
 		        resolved_at, created_at, updated_at
 		   FROM stage_approvals WHERE run_id = $1 AND stage_id = $2`,
@@ -59,7 +69,7 @@ func (s *StageApprovalStore) GetGate(ctx context.Context, runID, stageID string)
 	if err != nil {
 		return nil, err
 	}
-	votes, err := s.listVotes(ctx, g.ID)
+	votes, err := listVotesTx(ctx, tx, g.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +77,9 @@ func (s *StageApprovalStore) GetGate(ctx context.Context, runID, stageID string)
 	return g, nil
 }
 
+// ListGates returns all gates for a run with their votes. Votes are
+// fetched in a single batched query (DA-H3 fix) rather than one query
+// per gate, to avoid the N+1 pattern.
 func (s *StageApprovalStore) ListGates(ctx context.Context, runID string) ([]*model.StageApproval, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, run_id, stage_id, status, required_approvers, resolved_by,
@@ -79,22 +92,29 @@ func (s *StageApprovalStore) ListGates(ctx context.Context, runID string) ([]*mo
 	defer rows.Close()
 
 	var out []*model.StageApproval
+	var ids []string
 	for rows.Next() {
 		g, err := scanStageApproval(rows)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, g)
+		ids = append(ids, g.ID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+
+	// Fetch all votes for this run's gates in one query (DA-H3).
+	voteMap, err := s.listVotesBatch(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	for _, g := range out {
-		votes, err := s.listVotes(ctx, g.ID)
-		if err != nil {
-			return nil, err
-		}
-		g.Votes = votes
+		g.Votes = voteMap[g.ID]
 	}
 	return out, nil
 }
@@ -118,12 +138,22 @@ func (s *StageApprovalStore) UpdateGateStatus(ctx context.Context, id string, st
 	return nil
 }
 
+// AddVote inserts a vote row and returns the post-insert count. Both
+// statements execute inside a single transaction (DA-H2 fix) so
+// concurrent votes cannot observe a count that omits a just-inserted
+// peer row, which would cause a gate to stall permanently.
 func (s *StageApprovalStore) AddVote(ctx context.Context, v *model.StageApprovalVote) (bool, int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, 0, fmt.Errorf("adding vote: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
 	// ON CONFLICT DO NOTHING makes a repeat approval by the same identity
 	// a no-op rather than a unique-violation. RETURNING id fires only when
 	// a row was inserted; a missing scan row means "already approved".
 	var insertedID string
-	err := s.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`INSERT INTO stage_approval_votes
 		   (id, stage_approval_id, approver_sub, approver_email, note)
 		 VALUES ($1,$2,$3,$4,$5)
@@ -143,16 +173,21 @@ func (s *StageApprovalStore) AddVote(ctx context.Context, v *model.StageApproval
 	}
 
 	var count int
-	if err := s.db.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM stage_approval_votes WHERE stage_approval_id = $1`,
 		v.StageApprovalID).Scan(&count); err != nil {
-		return added, 0, fmt.Errorf("counting stage approval votes: %w", err)
+		return false, 0, fmt.Errorf("counting stage approval votes: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, 0, fmt.Errorf("adding vote: commit: %w", err)
 	}
 	return added, count, nil
 }
 
-func (s *StageApprovalStore) listVotes(ctx context.Context, gateID string) ([]model.StageApprovalVote, error) {
-	rows, err := s.db.QueryContext(ctx,
+// listVotesTx fetches votes for a single gate within the supplied
+// transaction (used by GetGate's TOCTOU-safe read tx).
+func listVotesTx(ctx context.Context, tx *sql.Tx, gateID string) ([]model.StageApprovalVote, error) {
+	rows, err := tx.QueryContext(ctx,
 		`SELECT id, stage_approval_id, approver_sub, approver_email, note, created_at
 		   FROM stage_approval_votes WHERE stage_approval_id = $1
 		  ORDER BY created_at ASC`, gateID)
@@ -168,6 +203,32 @@ func (s *StageApprovalStore) listVotes(ctx context.Context, gateID string) ([]mo
 			return nil, err
 		}
 		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// listVotesBatch fetches all votes for the given set of gate IDs in a
+// single query and returns them grouped by gate ID (DA-H3 fix). Never
+// called with an empty ids slice.
+func (s *StageApprovalStore) listVotesBatch(ctx context.Context, ids []string) (map[string][]model.StageApprovalVote, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, stage_approval_id, approver_sub, approver_email, note, created_at
+		   FROM stage_approval_votes
+		  WHERE stage_approval_id = ANY($1)
+		  ORDER BY stage_approval_id, created_at ASC`,
+		pq.Array(ids))
+	if err != nil {
+		return nil, fmt.Errorf("batch listing stage approval votes: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string][]model.StageApprovalVote, len(ids))
+	for rows.Next() {
+		var v model.StageApprovalVote
+		if err := rows.Scan(&v.ID, &v.StageApprovalID, &v.ApproverSub, &v.ApproverEmail, &v.Note, &v.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[v.StageApprovalID] = append(out[v.StageApprovalID], v)
 	}
 	return out, rows.Err()
 }

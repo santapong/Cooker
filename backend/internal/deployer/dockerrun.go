@@ -59,8 +59,13 @@ func (d *DockerRun) Deploy(ctx context.Context, req Request) (Result, error) {
 	}
 
 	// Replace any existing container of the same name (best-effort).
+	// L dockerrun.go:63: log the error (e.g. "No such container") to
+	// the writer so operators can see it in the run log rather than
+	// the error being fully discarded.
 	logf(out, "Removing existing container %s (if any)\n", name)
-	_ = exec.CommandContext(ctx, bin, "rm", "-f", name).Run()
+	if rmOut, rmErr := exec.CommandContext(ctx, bin, "rm", "-f", name).CombinedOutput(); rmErr != nil {
+		logf(out, "docker rm -f %s: %v (output: %s)\n", name, rmErr, strings.TrimSpace(string(rmOut)))
+	}
 
 	args := dockerRunArgs(name, req.Image, req.Env, req.Ports, req.Resources)
 	logf(out, "Running: docker %s\n", strings.Join(args, " "))

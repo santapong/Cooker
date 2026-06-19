@@ -125,8 +125,15 @@ func (m *Manager) Delete(ctx context.Context, envID, key string) error {
 
 func (m *Manager) List(ctx context.Context, envID string) ([]string, error) {
 	prefix := m.prefix + "__" + envID + "__"
+	// M gcpsm/gcpsm.go:128: PageSize:1000 reduces the number of RPCs for
+	// projects with many secrets. The filter is applied client-side
+	// (GCP Secret Manager doesn't support prefix-filter in ListSecrets)
+	// so every page still requires scanning all returned secrets; this is
+	// an inherent cost of the naming scheme. For projects with >1000
+	// secrets, iteration automatically continues across pages.
 	it := m.client.ListSecrets(ctx, &secretmanagerpb.ListSecretsRequest{
-		Parent: m.parent(),
+		Parent:   m.parent(),
+		PageSize: 1000,
 	})
 	var keys []string
 	for {

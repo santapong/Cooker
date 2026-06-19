@@ -257,6 +257,10 @@ func (h *Handler) UpdatePipeline(c *gin.Context) {
 	p.ID = id
 	p.CreatedAt = existing.CreatedAt
 	p.UpdatedAt = time.Now()
+	// BC-H2: use the server-fetched version for the OCC WHERE clause so
+	// the client cannot bypass the stale-check by supplying an arbitrary
+	// version field. ErrConflict → 409 is handled by abortStoreErr.
+	p.Version = existing.Version
 
 	if err := h.Store.Pipelines.Update(c.Request.Context(), &p); err != nil {
 		if abortStoreErr(c, err, "pipeline not found") {
@@ -493,10 +497,12 @@ func (h *Handler) GetRunDiff(c *gin.Context) {
 	var against *model.PipelineRun
 	switch {
 	case againstParam == "" || againstParam == "last-success":
-		// Unbounded on purpose: the newest green run may sit arbitrarily
-		// deep in history. The list path strips logs in the store, so
-		// the scan is cheap rows, not megabytes.
-		runs, err := h.Store.Runs.List(c.Request.Context(), pipelineID, 0, 0)
+		// Bounded at 200: looking further back than this to find a
+		// successful baseline is a reasonable cap; if no success exists
+		// in the last 200 runs we report "no successful prior run" below.
+		// The list path strips logs in the store, so rows are cheap.
+		const runDiffSearchLimit = 200
+		runs, err := h.Store.Runs.List(c.Request.Context(), pipelineID, runDiffSearchLimit, 0)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

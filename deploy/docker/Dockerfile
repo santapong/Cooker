@@ -55,6 +55,11 @@ FROM alpine:3.19
 # group_add so this user can still access the bind-mounted
 # /var/run/docker.sock; see docker-compose.uat.yml and Makefile.
 ARG KUBECTL_VERSION=v1.29.4
+# L (multi-arch): use ARG TARGETARCH so `docker buildx build --platform`
+# works correctly. BuildKit sets TARGETARCH automatically (amd64, arm64,
+# etc.) when building for a non-native platform. Without this, a cross-
+# platform build would download the amd64 binary into an arm64 image.
+ARG TARGETARCH=amd64
 # The alpine:3.19 base tag locks the apk package set. Pinning
 # individual apk versions on top of that is fragile because the
 # 3.19 line backports security fixes (so the -rN revision floats
@@ -69,9 +74,9 @@ ARG KUBECTL_VERSION=v1.29.4
 # binary that would run with docker.sock and kubeconfig access.
 RUN apk add --no-cache ca-certificates git docker-cli \
  && wget -qO /usr/local/bin/kubectl \
-      https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl \
+      https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl \
  && wget -qO /tmp/kubectl.sha256 \
-      https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256 \
+      https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl.sha256 \
  && echo "$(cat /tmp/kubectl.sha256)  /usr/local/bin/kubectl" | sha256sum -c - \
  && rm /tmp/kubectl.sha256 \
  && chmod +x /usr/local/bin/kubectl \
