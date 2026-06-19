@@ -308,22 +308,7 @@ func (s *Server) registerRoutes() {
 		settings.POST("/secrets/test", adminRole, mfa, h.TestSecretsBackend)
 	}
 
-	api.POST("/ws-tickets", func(c *gin.Context) {
-		claims := auth.GetUser(c)
-		if claims == nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
-			return
-		}
-		tok, exp, err := s.wsTickets.Issue(claims.Subject)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "ticket issuance failed"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"ticket":     tok,
-			"expires_at": exp.UTC().Format("2006-01-02T15:04:05Z"),
-		})
-	})
+	api.POST("/ws-tickets", s.issueWSTicket)
 
 	ws := s.router.Group("/ws", s.wsTicketGate())
 	{

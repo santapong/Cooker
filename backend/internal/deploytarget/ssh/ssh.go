@@ -411,22 +411,6 @@ func (t *Target) dialHostFresh(ctx context.Context, h *model.Host, lw io.Writer)
 	return t.dialHost(ctx, h, lw)
 }
 
-// runCmd opens a fresh session and runs cmd; stdout/stderr stream
-// into lw (the per-call log sink) so the operator tails docker
-// output in real time. The session is closed after Run.
-func runCmd(client sshClient, cmd string, lw io.Writer) error {
-	s, err := client.NewSession()
-	if err != nil {
-		return fmt.Errorf("session: %w", err)
-	}
-	defer s.Close()
-
-	stdout := writerFanout(lw, nil)
-	s.SetStdout(stdout)
-	s.SetStderr(stdout)
-	return s.Run(cmd)
-}
-
 // runCmdQuiet runs cmd and returns the combined output as a string
 // without streaming. Used by stop / rm where we want to swallow
 // "no such container" errors without polluting the log.

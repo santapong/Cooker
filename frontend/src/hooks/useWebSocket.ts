@@ -29,19 +29,37 @@ interface UseWebSocketOptions {
   onReconnect?: (count: number) => void;
 }
 
+// wsTicketPath strips the query string from a WS url so the resulting
+// path matches the route path the backend gate compares against. The
+// ticket is scoped to this exact path (CR-6): the backend binds the
+// caller's role + this resource path into the ticket at mint time and
+// rejects any connection whose path differs.
+function wsTicketPath(url: string): string {
+  const q = url.indexOf('?');
+  return q >= 0 ? url.slice(0, q) : url;
+}
+
 // fetchWSTicket exchanges the user's bearer token for a single-use
-// 60-second ticket. Browsers can't attach Authorization on a WS
-// upgrade, so this is the auth handoff for /ws/* connections.
+// 60-second ticket scoped to a specific WS path. Browsers can't attach
+// Authorization on a WS upgrade, so this is the auth handoff for /ws/*
+// connections. The `path` names the resource the ticket authorises; the
+// backend enforces role + resource scope against it (CR-6).
 // Uses API_ORIGIN so that split-origin deployments (SPA on Vercel,
 // API elsewhere) POST to the correct host.
 // On a 401 it calls triggerSignIn() — the session has expired and
 // silent backoff loops would never recover without re-authentication
-// (FE-H3).
-async function fetchWSTicket(): Promise<string | null> {
+// (FE-H3). A 403 means the user lacks the role for this resource; we
+// do NOT re-auth on 403 (re-login won't grant a missing role) and just
+// return null so the caller stops trying.
+async function fetchWSTicket(path: string): Promise<string | null> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getAccessToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${API_ORIGIN}/api/v1/ws-tickets`, { method: 'POST', headers });
+  const res = await fetch(`${API_ORIGIN}/api/v1/ws-tickets`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ path }),
+  });
   if (res.status === 401) {
     triggerSignIn();
     return null;
@@ -152,7 +170,10 @@ export function useWebSocket({
     }
     wsRef.current = null;
     closedByCallerRef.current = false;
-    const ticket = await fetchWSTicket();
+    // Scope the ticket to the path we are about to open (without query
+    // string) so the backend can bind role + resource and reject replay
+    // against any other resource (CR-6).
+    const ticket = await fetchWSTicket(wsTicketPath(url));
     if (closedByCallerRef.current) return; // FH-03: guard against unmount during ticket fetch
     if (!ticket) {
       // Auth failed — schedule a retry with backoff so an expired
