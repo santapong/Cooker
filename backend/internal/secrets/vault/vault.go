@@ -1,7 +1,25 @@
 // Package vault implements secrets.Manager backed by HashiCorp Vault's
-// KV v2 secrets engine. The Cooker environment ID is mapped to a path
-// segment under a configurable mount + prefix, so each environment
-// becomes one Vault secret holding all its keys as fields.
+// KV v2 secrets engine. The Cooker environment ID + key map to a path
+// segment under a configurable mount + prefix, so each Cooker secret
+// becomes its OWN Vault secret at <mount>/<prefix>/<envID>/<key>, with
+// the value stored under a single "value" field.
+//
+// This per-key layout (vs the older one-secret-per-environment map)
+// eliminates the read-modify-write race that the previous design had:
+// concurrent Put/Delete of different keys in the same environment used
+// to read the whole map, mutate one field, and write it back, so two
+// in-flight writers could clobber each other and silently drop a
+// secret (audit CR-2). With one Vault path per key, each Put/Delete is
+// a single atomic write/delete against its own path — no read, no
+// merge, no lost update.
+//
+// NOTE (layout change): this is NOT wire-compatible with secrets
+// written by the previous one-map-per-environment layout. A Vault that
+// already holds Cooker secrets under <prefix>/<envID> (map form) will
+// not be read by this adapter, which addresses <prefix>/<envID>/<key>.
+// Migrate by re-Putting each key (the handler layer re-seals on the
+// next write), or run a one-off copy from the old map fields into the
+// new per-key paths.
 //
 // Auth: token-based (VAULT_TOKEN). Operators using Vault Agent
 // injector / k8s auth can keep this adapter unchanged and source the
@@ -12,14 +30,18 @@ package vault
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/hashicorp/vault-client-go"
 	"github.com/hashicorp/vault-client-go/schema"
 	"github.com/santapong/cooker/internal/secrets"
 )
 
-// Manager satisfies secrets.Manager using Vault KV v2 under
-// <mount>/<prefix>/<envID> with one field per Cooker secret key.
+// valueField is the single KV v2 field name each per-key secret uses.
+const valueField = "value"
+
+// Manager satisfies secrets.Manager using Vault KV v2 with one secret
+// per key at <mount>/<prefix>/<envID>/<key>.
 type Manager struct {
 	client *vault.Client
 	mount  string
@@ -37,16 +59,15 @@ type Config struct {
 
 // New constructs a Manager from a config block.
 //
-// L vault.go:39-58: the vault-client-go SDK does not expose a
-// per-request response-body cap. The SDK streams through the
-// http.DefaultTransport (or whatever is configured at vault.New);
-// adding a transport wrapper with an io.LimitReader on the body
-// would require forking the SDK's internal HTTP layer. This is not
-// done here: the risk is bounded by Vault's own server-side payload
-// limits, and Cooker's Vault paths hold small KV maps (not blobs).
-// If an unbounded read becomes a concern, configure a custom
-// http.Transport via vault.WithHTTPClient before calling this
-// constructor.
+// L vault.go: the vault-client-go SDK does not expose a per-request
+// response-body cap. The SDK streams through the http.DefaultTransport
+// (or whatever is configured at vault.New); adding a transport wrapper
+// with an io.LimitReader on the body would require forking the SDK's
+// internal HTTP layer. This is not done here: the risk is bounded by
+// Vault's own server-side payload limits, and Cooker's Vault paths hold
+// small single-value secrets (not blobs). If an unbounded read becomes a
+// concern, configure a custom http.Transport via vault.WithHTTPClient
+// before calling this constructor.
 func New(cfg Config) (*Manager, error) {
 	if cfg.Address == "" {
 		return nil, errors.New("vault: COOKER_SECRETS_VAULT_ADDR is required")
@@ -69,42 +90,39 @@ func New(cfg Config) (*Manager, error) {
 	return &Manager{client: c, mount: mount, prefix: cfg.Prefix}, nil
 }
 
-func (m *Manager) path(envID string) string {
+// dirPath is the KV v2 path that holds all keys for an environment; it
+// is the listing prefix, e.g. "<prefix>/<envID>".
+func (m *Manager) dirPath(envID string) string {
 	if m.prefix == "" {
 		return envID
 	}
 	return m.prefix + "/" + envID
 }
 
-func (m *Manager) read(ctx context.Context, envID string) (map[string]any, error) {
-	resp, err := m.client.Secrets.KvV2Read(ctx, m.path(envID), vault.WithMountPath(m.mount))
-	if err != nil {
-		var rerr *vault.ResponseError
-		if errors.As(err, &rerr) && rerr.StatusCode == 404 {
-			return map[string]any{}, nil
-		}
-		return nil, err
-	}
-	if resp == nil || resp.Data.Data == nil {
-		return map[string]any{}, nil
-	}
-	return resp.Data.Data, nil
+// keyPath is the KV v2 path of a single secret, e.g.
+// "<prefix>/<envID>/<key>".
+func (m *Manager) keyPath(envID, key string) string {
+	return m.dirPath(envID) + "/" + key
 }
 
-func (m *Manager) write(ctx context.Context, envID string, data map[string]any) error {
-	_, err := m.client.Secrets.KvV2Write(ctx, m.path(envID),
-		schema.KvV2WriteRequest{Data: data},
-		vault.WithMountPath(m.mount),
-	)
-	return err
+func isNotFound(err error) bool {
+	var rerr *vault.ResponseError
+	return errors.As(err, &rerr) && rerr.StatusCode == 404
 }
 
 func (m *Manager) Get(ctx context.Context, envID, key string) ([]byte, error) {
-	data, err := m.read(ctx, envID)
+	resp, err := m.client.Secrets.KvV2Read(ctx, m.keyPath(envID, key), vault.WithMountPath(m.mount))
 	if err != nil {
+		if isNotFound(err) {
+			return nil, secrets.ErrNotFound
+		}
 		return nil, err
 	}
-	v, ok := data[key]
+	// A soft-deleted latest version returns 200 with a nil Data map.
+	if resp == nil || resp.Data.Data == nil {
+		return nil, secrets.ErrNotFound
+	}
+	v, ok := resp.Data.Data[valueField]
 	if !ok {
 		return nil, secrets.ErrNotFound
 	}
@@ -115,35 +133,45 @@ func (m *Manager) Get(ctx context.Context, envID, key string) ([]byte, error) {
 	return []byte(s), nil
 }
 
+// Put writes a single key atomically to its own path. No read-modify-
+// write, so concurrent Puts of different keys in the same environment
+// cannot clobber one another.
 func (m *Manager) Put(ctx context.Context, envID, key string, value []byte) error {
-	data, err := m.read(ctx, envID)
-	if err != nil {
-		return err
-	}
-	data[key] = string(value)
-	return m.write(ctx, envID, data)
+	_, err := m.client.Secrets.KvV2Write(ctx, m.keyPath(envID, key),
+		schema.KvV2WriteRequest{Data: map[string]any{valueField: string(value)}},
+		vault.WithMountPath(m.mount),
+	)
+	return err
 }
 
+// Delete removes a single key's path entirely (metadata + all
+// versions) so the key disappears from List, matching the previous
+// map-field delete semantics. Deleting a missing key is a no-op.
 func (m *Manager) Delete(ctx context.Context, envID, key string) error {
-	data, err := m.read(ctx, envID)
-	if err != nil {
+	_, err := m.client.Secrets.KvV2DeleteMetadataAndAllVersions(ctx, m.keyPath(envID, key), vault.WithMountPath(m.mount))
+	if err != nil && !isNotFound(err) {
 		return err
 	}
-	if _, ok := data[key]; !ok {
-		return nil
-	}
-	delete(data, key)
-	return m.write(ctx, envID, data)
+	return nil
 }
 
+// List enumerates the key names under an environment's directory.
 func (m *Manager) List(ctx context.Context, envID string) ([]string, error) {
-	data, err := m.read(ctx, envID)
+	resp, err := m.client.Secrets.KvV2List(ctx, m.dirPath(envID), vault.WithMountPath(m.mount))
 	if err != nil {
+		if isNotFound(err) {
+			return []string{}, nil
+		}
 		return nil, err
 	}
-	out := make([]string, 0, len(data))
-	for k := range data {
-		out = append(out, k)
+	if resp == nil {
+		return []string{}, nil
+	}
+	out := make([]string, 0, len(resp.Data.Keys))
+	for _, k := range resp.Data.Keys {
+		// KvV2List returns sub-directories with a trailing slash; a
+		// per-key layout has no nested dirs, but guard anyway.
+		out = append(out, strings.TrimSuffix(k, "/"))
 	}
 	return out, nil
 }
