@@ -80,7 +80,12 @@ cloudInventory:
 
 image:
   repository: ghcr.io/santapong/cooker
-  tag: latest
+  # IN-H4: do NOT leave this as "latest" in production. Pin to a specific
+  # release tag (e.g. "v0.1.0") or a full digest
+  # (e.g. "sha256:<64-hex-chars>"). The CI workflow tags images with the
+  # git semver tag; GoReleaser sets appVersion in Chart.yaml on release.
+  # Empty string ("") causes the chart to fall back to .Chart.AppVersion.
+  tag: ""
   pullPolicy: IfNotPresent
 
 service:
@@ -134,9 +139,12 @@ builder:
   # Config.Validate refuses production boot with kind=docker.
   kind: kaniko
   kaniko:
-    # Kaniko executor image. Pin to a known version for reproducible
-    # builds; "latest" is documented but not recommended in production.
-    image: gcr.io/kaniko-project/executor:latest
+    # IN-H6: pin to a specific Kaniko release tag for reproducible builds.
+    # "latest" is NOT recommended in production — a new Kaniko release
+    # could change build behaviour or introduce regressions between deploys.
+    # Check https://github.com/GoogleContainerTools/kaniko/releases for
+    # the current stable tag.
+    image: gcr.io/kaniko-project/executor:v1.23.2
     # Namespace the Job is created in. Cooker's ServiceAccount must
     # have Job + Pod RBAC here. Defaults to the release namespace.
     namespace: ""
@@ -150,9 +158,11 @@ builder:
     # source — only useful for chart smoke tests.
     contextPVC: ""
   buildah:
-    # Buildah image. Pin to a known version in production. Quay's
-    # `stable` tag is the project's tested release line.
-    image: quay.io/buildah/stable:latest
+    # IN-H6: pin to a specific Buildah release tag for reproducible builds.
+    # "stable" and "latest" float and can silently change between deploys.
+    # Check https://quay.io/repository/buildah/buildah?tab=tags for the
+    # current stable release tag.
+    image: quay.io/buildah/buildah:v1.38.0
     # Namespace the Job is created in. Defaults to the release
     # namespace. Must be PSA "baseline" (or a custom profile that
     # permits CAP_SETUID + CAP_SETGID); "restricted" drops both and
@@ -356,12 +366,20 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-# Liveness and readiness probe tuning. Defaults are deliberately
+# Liveness, readiness, and startup probe tuning. Defaults are deliberately
 # generous — Cooker performs an OIDC discovery + Postgres ping +
 # embedded migration on first boot and can take several seconds to
 # answer /health/ready under cold-cache conditions. Tighten these
 # in production once you've measured your own boot time.
+#
+# startupProbe: gives the binary up to (failureThreshold × periodSeconds)
+# = 300s to pass its first liveness check before Kubernetes applies the
+# liveness failureThreshold. This covers cold-boot without requiring an
+# inflated initialDelaySeconds on the liveness probe.
 probes:
+  startup:
+    failureThreshold: 30
+    periodSeconds: 10
   liveness:
     initialDelaySeconds: 60
     periodSeconds: 30
@@ -379,6 +397,11 @@ probes:
 # traffic shape. Anything that uses memory in-process state (the
 # in-memory rate limiter / WS ticket store) needs the redis
 # backends configured before HPA makes sense.
+#
+# M (HPA/PDB coupling): ALWAYS enable pdb.enabled=true alongside
+# hpa.enabled=true. Without a PodDisruptionBudget, a node drain
+# can evict every replica simultaneously while HPA is scaling —
+# leaving zero available pods and taking down the service.
 hpa:
   enabled: false
   minReplicas: 2
@@ -388,6 +411,7 @@ hpa:
 # Pod Disruption Budget. Recommended whenever replicaCount > 1 so
 # kubectl drain / node maintenance can't evict every replica at
 # once. minAvailable is the floor the cluster must keep up.
+# NOTE: enable this whenever hpa.enabled=true (see HPA note above).
 pdb:
   enabled: false
   minAvailable: 1

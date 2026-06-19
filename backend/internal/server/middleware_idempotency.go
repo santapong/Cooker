@@ -70,6 +70,17 @@ func (w *captureWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// WriteHeaderNow satisfies gin.ResponseWriter (Gin 1.9+). c.JSON uses
+// WriteHeaderNow to flush the status before writing the body; without
+// this override the captureWriter's status field would stay 0 and the
+// idempotency cache would never be populated for JSON responses (M).
+func (w *captureWriter) WriteHeaderNow() {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	w.ResponseWriter.WriteHeaderNow()
+}
+
 func (w *captureWriter) Write(b []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK

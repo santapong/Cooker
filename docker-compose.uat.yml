@@ -22,7 +22,7 @@ services:
     environment:
       POSTGRES_DB: cooker
       POSTGRES_USER: cooker
-      POSTGRES_PASSWORD: cooker
+      POSTGRES_PASSWORD: cooker  # UAT ONLY — do not copy to production
     volumes:
       - pg-uat:/var/lib/postgresql/data
     healthcheck:

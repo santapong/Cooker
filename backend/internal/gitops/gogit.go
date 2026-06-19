@@ -31,6 +31,9 @@ type GoGit struct {
 	Username   string
 	Password   string
 	Agent      bool
+	// GitTimeout caps each network call (clone + push). Zero uses the
+	// default (5 min). Set via COOKER_GITOPS_TIMEOUT if needed.
+	GitTimeout time.Duration
 }
 
 func NewGoGit() *GoGit { return &GoGit{} }
@@ -60,6 +63,16 @@ func (g *GoGit) auth(repoURL string) (transport.AuthMethod, error) {
 	return nil, nil
 }
 
+// gitTimeout returns the configured per-call deadline, defaulting to
+// 5 minutes. A slow git remote must not hang the executor for the
+// whole run deadline (M gitops/gogit.go:86,138).
+func (g *GoGit) gitTimeout() time.Duration {
+	if g.GitTimeout > 0 {
+		return g.GitTimeout
+	}
+	return 5 * time.Minute
+}
+
 // Commit clones req.Repo, writes req.Content at req.Path on
 // req.Branch, commits, and pushes back.
 func (g *GoGit) Commit(ctx context.Context, req Request) (Result, error) {
@@ -83,7 +96,11 @@ func (g *GoGit) Commit(ctx context.Context, req Request) (Result, error) {
 	}
 	defer os.RemoveAll(dir)
 
-	repo, err := git.PlainCloneContext(ctx, dir, false, &git.CloneOptions{
+	// M: apply a per-call deadline so a slow remote can't hang the
+	// executor for the entire run deadline (gogit.go:86,138).
+	cloneCtx, cloneCancel := context.WithTimeout(ctx, g.gitTimeout())
+	defer cloneCancel()
+	repo, err := git.PlainCloneContext(cloneCtx, dir, false, &git.CloneOptions{
 		URL:           req.Repo,
 		Auth:          auth,
 		ReferenceName: plumbing.NewBranchReferenceName(branch),
@@ -135,7 +152,9 @@ func (g *GoGit) Commit(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("gogit: commit: %w", err)
 	}
-	if err := repo.PushContext(ctx, &git.PushOptions{
+	pushCtx, pushCancel := context.WithTimeout(ctx, g.gitTimeout())
+	defer pushCancel()
+	if err := repo.PushContext(pushCtx, &git.PushOptions{
 		Auth:       auth,
 		RemoteName: "origin",
 		RefSpecs:   []config.RefSpec{config.RefSpec(plumbing.NewBranchReferenceName(branch) + ":" + plumbing.NewBranchReferenceName(branch))},

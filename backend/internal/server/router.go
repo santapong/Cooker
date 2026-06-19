@@ -36,7 +36,10 @@ func (s *Server) registerRoutes() {
 	case s.config.RateLimit.Backend == "redis" && s.redisClient != nil:
 		expensive = newRedisRateLimiter(s.redisClient, s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
 	default:
-		expensive = newRateLimiter(s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
+		// BC-H1: store a reference so Server.Close() can stop the gc goroutine.
+		rl := newRateLimiter(s.config.RateLimit.PerMinute, s.config.RateLimit.Burst)
+		s.rateLimiter = rl
+		expensive = rl.middleware()
 	}
 
 	pipelines := api.Group("/pipelines")

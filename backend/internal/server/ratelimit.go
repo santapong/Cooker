@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -32,6 +33,8 @@ type rateLimiter struct {
 	buckets  map[string]*rate.Limiter
 	lastMu   sync.Mutex
 	lastSeen map[string]time.Time
+	// done is closed by Close() to stop the gc goroutine (BC-H1).
+	done chan struct{}
 }
 
 // newRateLimiter constructs a limiter at perMinute requests per
@@ -47,6 +50,7 @@ func newRateLimiter(perMinute int, burst int) *rateLimiter {
 		burst:    burst,
 		buckets:  make(map[string]*rate.Limiter),
 		lastSeen: make(map[string]time.Time),
+		done:     make(chan struct{}),
 	}
 	if perMinute > 0 {
 		// Sweep idle buckets every 10 minutes so a long-running
@@ -54,6 +58,17 @@ func newRateLimiter(perMinute int, burst int) *rateLimiter {
 		go rl.gc(10 * time.Minute)
 	}
 	return rl
+}
+
+// Close signals the gc goroutine to exit. Safe to call on a
+// disabled limiter (perMinute<=0 — gc was never started, close is a no-op).
+func (rl *rateLimiter) Close() {
+	select {
+	case <-rl.done:
+		// already closed
+	default:
+		close(rl.done)
+	}
 }
 
 func (rl *rateLimiter) limiterFor(key string) *rate.Limiter {
@@ -88,7 +103,13 @@ func (rl *rateLimiter) limiterFor(key string) *rate.Limiter {
 func (rl *rateLimiter) gc(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-rl.done:
+			slog.Debug("ratelimiter: gc stopped")
+			return
+		case <-ticker.C:
+		}
 		cutoff := time.Now().Add(-interval)
 		// Collect stale keys under lastMu, then delete from buckets
 		// under the write-lock. This keeps the two locks non-nested

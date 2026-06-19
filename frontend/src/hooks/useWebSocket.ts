@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { getAccessToken } from '../auth/OIDCProvider';
+import { getAccessToken, triggerSignIn } from '../auth/OIDCProvider';
 import { API_ORIGIN, wsBase } from '../api/origin';
 
 interface UseWebSocketOptions {
@@ -34,11 +34,18 @@ interface UseWebSocketOptions {
 // upgrade, so this is the auth handoff for /ws/* connections.
 // Uses API_ORIGIN so that split-origin deployments (SPA on Vercel,
 // API elsewhere) POST to the correct host.
+// On a 401 it calls triggerSignIn() — the session has expired and
+// silent backoff loops would never recover without re-authentication
+// (FE-H3).
 async function fetchWSTicket(): Promise<string | null> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getAccessToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${API_ORIGIN}/api/v1/ws-tickets`, { method: 'POST', headers });
+  if (res.status === 401) {
+    triggerSignIn();
+    return null;
+  }
   if (!res.ok) return null;
   const body = (await res.json()) as { ticket?: string };
   return body.ticket ?? null;

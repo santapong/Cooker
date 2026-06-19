@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
@@ -18,6 +19,16 @@ import (
 type Target struct {
 	Project string
 	Region  string
+
+	// AD-H2: cache gRPC clients via sync.Once so we don't open a new
+	// gRPC connection on every Deploy/Status/Rollback call. Up to 4
+	// connections were being opened per Rollback before this fix.
+	svcOnce    sync.Once
+	svcCli     *run.ServicesClient
+	svcErr     error
+	revOnce    sync.Once
+	revCli     *run.RevisionsClient
+	revErr     error
 }
 
 // New returns a Cloud Run target bound to a GCP project and region.
@@ -42,17 +53,45 @@ func (t *Target) requireConfig() error {
 	return nil
 }
 
+// servicesClient returns the cached Cloud Run ServicesClient, creating
+// it on the first call (AD-H2). The background context is used for the
+// one-shot SDK init; per-call operations use their own ctx.
+func (t *Target) servicesClient(ctx context.Context) (*run.ServicesClient, error) {
+	t.svcOnce.Do(func() {
+		c, err := run.NewServicesClient(ctx)
+		if err != nil {
+			t.svcErr = fmt.Errorf("cloud-run: services client: %w", err)
+			return
+		}
+		t.svcCli = c
+	})
+	return t.svcCli, t.svcErr
+}
+
+// revisionsClient returns the cached Cloud Run RevisionsClient, creating
+// it on the first call (AD-H2).
+func (t *Target) revisionsClient(ctx context.Context) (*run.RevisionsClient, error) {
+	t.revOnce.Do(func() {
+		c, err := run.NewRevisionsClient(ctx)
+		if err != nil {
+			t.revErr = fmt.Errorf("cloud-run: revisions client: %w", err)
+			return
+		}
+		t.revCli = c
+	})
+	return t.revCli, t.revErr
+}
+
 // Deploy creates or updates a Cloud Run Service for spec.AppID and
 // waits for the resulting long-running operation to complete.
 func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 	if err := t.requireConfig(); err != nil {
 		return err
 	}
-	c, err := run.NewServicesClient(ctx)
+	c, err := t.servicesClient(ctx)
 	if err != nil {
-		return fmt.Errorf("cloud-run: services client: %w", err)
+		return err
 	}
-	defer c.Close()
 	envVars := make([]*runpb.EnvVar, 0, len(spec.Env))
 	for k, v := range spec.Env {
 		envVars = append(envVars, &runpb.EnvVar{Name: k, Values: &runpb.EnvVar_Value{Value: v}})
@@ -98,11 +137,10 @@ func (t *Target) Status(ctx context.Context, appID string) (deploytarget.Status,
 	if err := t.requireConfig(); err != nil {
 		return deploytarget.Status{}, err
 	}
-	c, err := run.NewServicesClient(ctx)
+	c, err := t.servicesClient(ctx)
 	if err != nil {
 		return deploytarget.Status{}, err
 	}
-	defer c.Close()
 	svc, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: t.serviceName(appID)})
 	if err != nil {
 		return deploytarget.Status{}, err
@@ -124,16 +162,14 @@ func (t *Target) Rollback(ctx context.Context, appID string) error {
 	if err := t.requireConfig(); err != nil {
 		return err
 	}
-	sc, err := run.NewServicesClient(ctx)
+	sc, err := t.servicesClient(ctx)
 	if err != nil {
 		return err
 	}
-	defer sc.Close()
-	rc, err := run.NewRevisionsClient(ctx)
+	rc, err := t.revisionsClient(ctx)
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
 	it := rc.ListRevisions(ctx, &runpb.ListRevisionsRequest{Parent: t.serviceName(appID)})
 	var prev string
 	for i := 0; i < 2; i++ {
