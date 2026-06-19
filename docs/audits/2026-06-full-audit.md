@@ -135,12 +135,19 @@ LOW: `keepsave/client.go:170` raw upstream body in error message.
 
 ---
 
-## Remediation sequencing
+## Remediation sequencing & status
 
-**Tier 0 — needs a design decision before code (flagged for sign-off):**
-- **CR-6 (WS authz):** bind role + resource into the ticket at mint time and enforce per-route in `wsTicketGate`, then update SECURITY.md. Touches the auth model — not auto-applied.
-- **CR-2 (Vault RMW race):** correct fix is per-key Vault paths (vs one path per env) or CAS with retry; the per-key change alters the on-Vault layout. Not auto-applied.
+**Tier 0 — design-sensitive, landed with sign-off (✅ DONE in this PR):**
+- **CR-6 (WS authz):** ✅ ticket now binds `{subject, roles, path}` at mint; `wsTicketGate` enforces resource-scope (path match → no cross-resource replay) AND role-scope (operator+ for `/ws/kubernetes/watch` and `/ws/runtime/*`) at mint and connect. `ws-subject`/`ws-roles` are now consumed. SECURITY.md WebSocket + Kubernetes-Access sections corrected.
+- **CR-2 (Vault RMW race):** ✅ moved to one Vault secret per key (`<prefix>/<envID>/<key>`); Put/Delete are now single atomic ops — read-modify-write eliminated. Layout change documented (not wire-compatible with the old map layout).
 
-**Tier 1 — safe, mechanical, landing in this PR series:** CR-1, CR-3, CR-4, CR-5, BC-2, BC-H1/H4/H5, DA-H1, DA-H2, DA-H3 (batch query), AD-H1/H2/H3/H4/H5/H6, IN-H1..H6, FE-H2/H3, plus the bulk of MEDIUM/LOW timeouts, client-reuse, goroutine-shutdown hooks, and unbounded-read caps. These are behaviour-preserving or strictly-more-correct.
+**Tier 1 — safe, mechanical (✅ DONE):** CR-1, CR-3, CR-4, CR-5, BC-2, BC-H1/H4/H5, DA-H1, DA-H2, DA-H3 (batch query), AD-H1/H2/H3/H4/H5/H6, IN-H1..H6, FE-H2/H3, plus the bulk of MEDIUM/LOW timeouts, client-reuse, goroutine-shutdown hooks, and unbounded-read caps. Behaviour-preserving / strictly-more-correct.
 
-**Tier 2 — quality/perf, opportunistic:** frontend virtualisation (FE-PERF-02/03), memory-store clone convention (DA-L1), GCP/Render caching, dead-code removal (FE-L5).
+> BC-H2/BC-L5 were re-verified during remediation and found over-stated: `abortStoreErr` already maps every non-nil store error → 500/409/404, so the "silent 200" path is unreachable. Only the OCC `Version` propagation was applied.
+
+**Deferred (documented, NOT in this PR):**
+- Migration-015 idempotency → needs a forward migration `024_…` (shipped migrations must not be edited).
+- Frontend log-view virtualisation (FE-PERF-02/03) and `useRuntimeLogs` ring-buffer — larger Tier-2 changes.
+- GCP/Render caching beyond `PageSize`, memory-store clone convention for non-`runs` entities (DA-L1), and a handful of LOW items noted inline.
+
+**Verification:** backend `go vet ./...` clean + `go test ./... -race` exit 0; frontend lint (0 errors) + `tsc --noEmit` clean + 86 tests pass + build OK; K8s/Helm YAML parse + constraint-checked (CI docker/helm jobs do the authoritative lint).
