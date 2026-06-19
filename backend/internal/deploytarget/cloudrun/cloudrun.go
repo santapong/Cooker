@@ -23,12 +23,12 @@ type Target struct {
 	// AD-H2: cache gRPC clients via sync.Once so we don't open a new
 	// gRPC connection on every Deploy/Status/Rollback call. Up to 4
 	// connections were being opened per Rollback before this fix.
-	svcOnce    sync.Once
-	svcCli     *run.ServicesClient
-	svcErr     error
-	revOnce    sync.Once
-	revCli     *run.RevisionsClient
-	revErr     error
+	svcOnce sync.Once
+	svcCli  *run.ServicesClient
+	svcErr  error
+	revOnce sync.Once
+	revCli  *run.RevisionsClient
+	revErr  error
 }
 
 // New returns a Cloud Run target bound to a GCP project and region.
