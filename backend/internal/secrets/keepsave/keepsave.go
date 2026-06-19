@@ -11,6 +11,15 @@ import (
 // Manager is the KeepSave-backed secrets.Manager. KeepSave is the
 // system of record for the configured project; Cooker neither stores
 // nor caches the plaintext locally.
+//
+// AD-H4 N+1 note: Get/Put/Delete each call ListSecrets to find the
+// target key. This is one HTTP round-trip per operation regardless of
+// the number of secrets. A safe improvement would be to add an
+// in-call scope cache (keyed by envID) shared across a single
+// pipeline-run context. That change requires a new cache type and API
+// surface and is deferred; the per-call cost is bounded by the number
+// of secrets per environment (typically O(10-100)) and by the
+// KeepSave API's response time.
 type Manager struct {
 	client    *Client
 	envs      store.EnvironmentStore

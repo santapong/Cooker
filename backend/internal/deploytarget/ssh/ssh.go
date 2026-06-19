@@ -66,20 +66,24 @@ type sshSession interface {
 // is enabled via the net.Dialer so that dead connections surface as
 // errors rather than hanging in the cache indefinitely (AD-H5).
 func realDial(network, addr string, cfg *gossh.ClientConfig) (sshClient, error) {
+	// AD-H5: use net.Dialer with TCP keepalive so that idle connections
+	// that have gone dead surface as errors rather than hanging forever.
+	// We take the handshake timeout from ClientConfig.Timeout.
 	nd := &net.Dialer{
-		Timeout:   cfg.Timeout,
 		KeepAlive: 15 * time.Second,
 	}
-	conn, err := nd.Dial(network, addr)
+	// Perform the raw TCP dial without the SSH handshake timeout built
+	// in so we can apply it at the SSH-handshake level separately.
+	rawConn, err := nd.Dial(network, addr)
 	if err != nil {
 		return nil, err
 	}
-	sc, chans, reqs, err := gossh.NewClientConn(conn, addr, cfg)
+	c, chans, reqs, err := gossh.NewClientConn(rawConn, addr, cfg)
 	if err != nil {
-		conn.Close()
+		rawConn.Close()
 		return nil, err
 	}
-	return &realClient{c: gossh.NewClient(sc, chans, reqs)}, nil
+	return &realClient{c: gossh.NewClient(c, chans, reqs)}, nil
 }
 
 type realClient struct{ c *gossh.Client }

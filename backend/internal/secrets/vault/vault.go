@@ -36,6 +36,17 @@ type Config struct {
 }
 
 // New constructs a Manager from a config block.
+//
+// L vault.go:39-58: the vault-client-go SDK does not expose a
+// per-request response-body cap. The SDK streams through the
+// http.DefaultTransport (or whatever is configured at vault.New);
+// adding a transport wrapper with an io.LimitReader on the body
+// would require forking the SDK's internal HTTP layer. This is not
+// done here: the risk is bounded by Vault's own server-side payload
+// limits, and Cooker's Vault paths hold small KV maps (not blobs).
+// If an unbounded read becomes a concern, configure a custom
+// http.Transport via vault.WithHTTPClient before calling this
+// constructor.
 func New(cfg Config) (*Manager, error) {
 	if cfg.Address == "" {
 		return nil, errors.New("vault: COOKER_SECRETS_VAULT_ADDR is required")
