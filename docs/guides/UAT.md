@@ -347,6 +347,54 @@ no configuration is required.
   at the end. Set `COOKER_EDGE_CONDITIONS_ENABLED=false` to restore
   the legacy abort-on-first-failure behaviour.
 
+## Self-hosted licensing (M2)
+
+Cooker verifies a self-hosted license **offline** with an Ed25519
+signature — no licensing server, no phone-home. **With no license
+configured, Cooker runs on the permissive Free tier**, which is how UAT
+runs by default (UAT is auth-off / unlicensed by design — do not enable
+licensing in the UAT defaults). The gate **fails open**: a missing or
+invalid license never locks the API, it only degrades to Free.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `COOKER_LICENSE_PUBLIC_KEY` | — | Base64 Ed25519 **public** key the operator sets to enable verification. Distributed by the vendor; the private signing key is held out-of-repo and never shipped. |
+| `COOKER_LICENSE_KEY` | — | A signed license token. Set it to install a license at **boot**; verified against `COOKER_LICENSE_PUBLIC_KEY`. Equivalent to installing one in the admin UI. |
+
+**Installing a license** — either set `COOKER_LICENSE_KEY` at boot, or
+paste the token into **Settings → License** in the admin UI
+(`POST /api/v1/license`, admin only). `GET /api/v1/license` (any
+authenticated user) returns the **decoded claims** — plan, customer,
+seats, features, expiry — but **never** the raw token.
+`DELETE /api/v1/license` (admin only) removes an installed license,
+reverting to Free.
+
+**Generating + signing a license (vendor side)** — the signing CLI is
+`backend/cmd/cooker-license` (keygen / sign / verify). The private key
+is the root of trust and is held out-of-repo:
+
+```bash
+# 1. One-time: generate the keypair. Distribute only the .pub.
+go run ./backend/cmd/cooker-license keygen -out cooker-license
+#   → cooker-license.key (private, 0600 — keep secret, never commit)
+#   → cooker-license.pub (public — give to operators as
+#     COOKER_LICENSE_PUBLIC_KEY)
+
+# 2. Sign a license token for a customer.
+go run ./backend/cmd/cooker-license sign \
+  -key cooker-license.key \
+  -plan crew -customer "Acme Inc" -seats 5 -expires 8760h
+#   → prints the signed token; set it as COOKER_LICENSE_KEY (or paste
+#     it into Settings → License).
+
+# 3. Optional: verify a token against the public key.
+go run ./backend/cmd/cooker-license verify \
+  -pub cooker-license.pub -token @license.tok
+```
+
+`-expires` accepts a Go duration (`8760h`), an RFC3339 timestamp, or
+`0` for perpetual; `-seats 0` means unlimited.
+
 ## AI failure triage + analytics (M4)
 
 - **AI triage** is off by default. `COOKER_AI_TRIAGE_ENABLED=true` +

@@ -102,6 +102,17 @@ HTTP/1.1 403 Forbidden
 
 The frontend API client recognises this response and re-issues the OIDC sign-in redirect with `acr_values=<configured>` so the IdP runs the second factor and the user retries the action with a fresh, MFA-bearing token. Empty config disables the gate (current default).
 
+### License verification (self-hosted entitlements, M2)
+
+Cooker's self-hosted edition gates paid-tier entitlements behind an **offline Ed25519-signed license** — there is no licensing server and no phone-home.
+
+- **Offline verification.** A license is a signed token. Cooker verifies it locally against an Ed25519 **public** key set by the operator via `COOKER_LICENSE_PUBLIC_KEY` (base64). No network call is made to validate a license.
+- **Private signing key is held by the vendor, out-of-repo.** The private key is the root of trust for every license ever issued. It is **never** committed to this repository and is **never** shipped in any binary, image, or chart. Only the vendor holds it; operators receive only the public key. The vendor-side signing CLI is `backend/cmd/cooker-license` (keygen / sign / verify) and is not distributed to customers.
+- **The entitlement gate fails OPEN.** A missing, malformed, expired, or signature-invalid license **never locks the API** — Cooker degrades to the permissive **Free** tier. Licensing is an entitlement/feature gate, not an authentication or authorization control: it cannot deny access to the API surface, only to paid-tier features. This is deliberate so a license problem can never take an operator's deployment offline.
+- **`GET /api/v1/license` exposes only decoded claims, never the raw token.** Any authenticated user may read the installed license's decoded claims (plan, customer, seats, features, issue/expiry dates) for display. The raw signed token is never returned on any response. Installing a license (`POST`) and removing it (`DELETE`) are **admin-only**; a license may also be installed at boot via `COOKER_LICENSE_KEY` (verified against `COOKER_LICENSE_PUBLIC_KEY`).
+
+Residual risk: an operator who holds a validly-signed token can install it on any number of instances — offline verification cannot enforce per-instance binding without a phone-home, which is an intentional trade-off. Seat/replica allowances in the claims are advisory to the operator, not hard-enforced by the verifier.
+
 ### Supply chain and release signing (v0.1.0+)
 
 Cooker releases are signed using **cosign keyless signing** via the Sigstore / Rekor transparency log. There are no long-lived signing keys stored in the repository or in CI secrets.
