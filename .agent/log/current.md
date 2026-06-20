@@ -27,3 +27,19 @@
   kubeconform deploy/kubernetes/ = 14/14 (CRDs via Datree catalog). helm render → CI.
 - Committed e754698.
 - Next: AUDIT (agent a228b2ce running — incl /metrics public-exposure check) → RESEARCH → push + draft PR.
+
+## [2026-06-20 ~07:00] M0 AUDIT+RESEARCH — 8 findings, 3 research items
+- Audit (Opus a228b2ce) over e754698. Headline: M0-1 unauth /metrics exposure.
+- PM correction: ingress.enabled=false by default → /metrics ClusterIP-only in default
+  install → M0-1 is MED (conditional on enabling ingress), not HIGH. Verified values.yaml.
+- Recorded full Risk register (M0-1..M0-8 + R-FOLLOWUP-1) + Research log in state.md.
+
+## [2026-06-20 ~07:20] M0 REMEDIATE — 3 Opus fix agents, all green
+- M0-5 (cooker-infra-ci): CI metrics-off gate now asserts SM/PR absent. ✅
+- M0-2 (cooker-security): security.txt Expires computed dynamically (now+1y). ✅
+- M0-1/M0-3/M0-4 (cooker-infra-deploy): /metrics ingress warning + nginx deny snippet +
+  RUNBOOK note; restored rule-annotation parity across all 3 copies (verified identical);
+  fixed comment typo + documented KSM prereq. ✅
+- PM re-verify: all YAML parse; kubeconform deploy/kubernetes/ = 14/14; go vet+tests -race green.
+- Committed in 2 parts (CI+security.txt; deploy). All M0 risks ✅ except R-FOLLOWUP-1 (tracked).
+- Next: push + open M0 draft PR; advance to M1/M2.
