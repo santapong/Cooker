@@ -65,3 +65,13 @@
   handler/gate/CLI. Gate built+tested but NOT wired to existing routes (regression guard).
 - Push HELD until M2-T2 lands → push M1+M2-T1+M2-T2 as one backend unit (single CI cycle).
 - Branch model: single `claude/launch-execution` (per user) → #117 is the ROLLING execution PR.
+
+## [2026-06-20 ~15:00] M2-T2✅ committed+pushed; M2-T3 launched
+- M2-T2 (license backend) done → PM full `go build/vet/test ./... -race` green; reviewed
+  verify.go (sig-before-unmarshal, secure) + entitlement.go (402, fails-open, NOT wired).
+- Committed `920f2ad`; pushed M1+M2-T1+M2-T2 → #117 (renamed to rolling M0–M2 PR).
+- #117 CI run 27874134638: helm✅ frontend✅, backend+docker building.
+- M2-T3 (cooker-frontend-ui aa95e7b3) launched: api/license.ts + licenseStore + Settings
+  License tab + tier cards (soft hints only, no hard-gating).
+- After M2-T3: review+verify, commit+push, then M2 docs follow-up (env vars in UAT/SECURITY)
+  + surface D5 (open-core split) to user. M3+ still gated on D4.
