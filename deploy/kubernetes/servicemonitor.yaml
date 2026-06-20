@@ -6,6 +6,12 @@
 #
 # Scrapes the existing cooker Service's "http" port at /metrics. Metrics are
 # only served when COOKER_METRICS_ENABLED=true (set in deployment.yaml).
+#
+# RECOMMENDED for ingress-exposed installs: serve /metrics on a dedicated
+# internal port (see COOKER_METRICS_PORT in deployment.yaml + the "metrics"
+# Service port in service.yaml). When you do, change the endpoint `port` below
+# from "http" to "metrics" so this scrapes the internal-only port instead of
+# the public app port. Chart equivalent: metrics.port.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -21,6 +27,7 @@ spec:
     matchLabels:
       app.kubernetes.io/name: cooker
   endpoints:
+    # Change to "metrics" when using a dedicated COOKER_METRICS_PORT (see header).
     - port: http
       path: /metrics
       interval: 30s

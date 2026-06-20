@@ -486,10 +486,25 @@ retention:
 # WARNING: if you enable the Ingress (ingress.enabled=true with the default
 # "/" prefix), /metrics becomes PUBLICLY ROUTABLE with no authentication.
 # Block it at the ingress — see the configuration-snippet example in the
-# `ingress.annotations` block below. The permanent fix (a dedicated,
-# separately-bound metrics port) is tracked.
+# `ingress.annotations` block below. The permanent fix is metrics.port below.
 metrics:
   enabled: true
+  # Dedicated internal metrics port (RECOMMENDED for ingress-exposed installs).
+  #
+  #   0 (default) — back-compat: /metrics is served on the main app port
+  #                 (service.port / 8080) alongside the API and UI. With
+  #                 ingress.enabled=false this is cluster-internal and safe;
+  #                 with the Ingress on the default "/" prefix it is publicly
+  #                 routable (see the WARNING above).
+  #   >0          — the backend serves /metrics ONLY on this separate internal
+  #                 container port (COOKER_METRICS_PORT) and NOT on the main
+  #                 app port. The chart exposes a named "metrics" containerPort
+  #                 + Service port for it, and the ServiceMonitor scrapes that
+  #                 port. The port is cluster-internal only — it is never wired
+  #                 into the Ingress, so /metrics stays off the public "/" path
+  #                 without needing an ingress deny-rule. Pick any free port,
+  #                 e.g. 9090.
+  port: 0
   serviceMonitor:
     enabled: false
     interval: 30s

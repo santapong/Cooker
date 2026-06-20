@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -73,6 +74,18 @@ type Server struct {
 	// registerRoutes; held here so Close() can stop its gc goroutine
 	// (BC-H1). nil when the redis backend or disabled limiter is used.
 	rateLimiter *rateLimiter
+}
+
+// registerMetricsRoute mounts /metrics on the main app router ONLY when no
+// dedicated metrics port is configured (metricsPort == 0). With a dedicated
+// port (> 0) the scrape endpoint lives on its own listener (see RunContext)
+// and must NOT be reachable via the public app ingress (audit finding
+// M0-1). Extracted so tests can assert the gating without booting a full
+// Server.
+func registerMetricsRoute(router *gin.Engine, metricsPort int) {
+	if metricsPort == 0 {
+		router.GET("/metrics", observability.MetricsHandler())
+	}
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -307,19 +320,24 @@ func New(cfg *config.Config) (*Server, error) {
 	// installs but still serves Free entitlements. Config.Validate() has
 	// already rejected the "key set, public key empty" combination, so a
 	// non-empty COOKER_LICENSE_KEY here implies a public key is present.
-	var licensePubKey []byte
-	if cfg.License.PublicKey != "" {
-		pk, err := license.DecodePublicKey(cfg.License.PublicKey)
+	// Decode each configured public key (COOKER_LICENSE_PUBLIC_KEYS plus the
+	// back-compat singular COOKER_LICENSE_PUBLIC_KEY, already unioned in
+	// config) into the verifier set. Multiple keys support rotation: a token
+	// signed by any of them verifies. Invalid keys are logged and skipped
+	// rather than failing boot — licensing must never take down the instance.
+	var licensePubKeys []ed25519.PublicKey
+	for _, raw := range cfg.License.PublicKeys {
+		pk, err := license.DecodePublicKey(raw)
 		if err != nil {
-			// Misconfigured public key: log and continue with no verifier
-			// (degrade to Free) rather than failing boot — licensing must
-			// never take down the instance.
-			slog.Error("invalid COOKER_LICENSE_PUBLIC_KEY; licensing disabled (Free tier)", "error", err)
-		} else {
-			licensePubKey = pk
+			slog.Error("invalid license public key; skipping it", "error", err)
+			continue
 		}
+		licensePubKeys = append(licensePubKeys, pk)
 	}
-	h.License = service.NewLicenseService(st.Licenses, licensePubKey)
+	if len(licensePubKeys) == 0 && len(cfg.License.PublicKeys) > 0 {
+		slog.Error("no valid license public keys configured; licensing disabled (Free tier)")
+	}
+	h.License = service.NewLicenseService(st.Licenses, licensePubKeys)
 	// Boot-time license install: an operator may set a signed token via
 	// COOKER_LICENSE_KEY. COOKER_LICENSE_KEY is declarative — env wins when
 	// the token changes — but the install must be IDEMPOTENT on token
@@ -564,8 +582,10 @@ func New(cfg *config.Config) (*Server, error) {
 	router.Use(securityHeadersMiddleware())
 	router.Use(corsMiddleware(cfg.AllowedOrigins))
 	if cfg.Observability.MetricsEnabled {
+		// MetricsMiddleware always runs on the main router — it records
+		// app traffic regardless of where /metrics is exposed.
 		router.Use(observability.MetricsMiddleware())
-		router.GET("/metrics", observability.MetricsHandler())
+		registerMetricsRoute(router, cfg.Observability.MetricsPort)
 	}
 	if cfg.Observability.TracingEnabled {
 		router.Use(observability.TracingMiddleware(cfg.Observability.ServiceName))
@@ -617,6 +637,31 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 		}
 		errCh <- err
 	}()
+
+	// Dedicated metrics listener (M0-1): when a metrics port is set, serve
+	// /metrics on its own http.ServeMux so the scrape endpoint is NOT
+	// reachable via the public app ingress. The main router omits /metrics
+	// in this mode (see New). When MetricsPort == 0, this block is skipped
+	// and behaviour is unchanged (single-port; /metrics on the app router).
+	var metricsSrv *http.Server
+	if s.config != nil && s.config.Observability.MetricsEnabled && s.config.Observability.MetricsPort > 0 {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", observability.MetricsHTTPHandler())
+		metricsSrv = &http.Server{
+			Addr:    fmt.Sprintf(":%d", s.config.Observability.MetricsPort),
+			Handler: mux,
+		}
+		go func() {
+			// A failure here (e.g. port already bound) must not take down
+			// the primary app server — but it must not be swallowed either.
+			// Log it; the absence of /metrics will surface in monitoring.
+			if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("metrics server failed", "addr", metricsSrv.Addr, "error", err)
+			}
+		}()
+		slog.Info("metrics server listening on dedicated port", "addr", metricsSrv.Addr)
+	}
+
 	select {
 	case err := <-errCh:
 		return err
@@ -624,6 +669,11 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 		slog.Info("shutdown: draining HTTP server", "timeout", shutdownTimeout.String())
 		drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
+		if metricsSrv != nil {
+			if err := metricsSrv.Shutdown(drainCtx); err != nil {
+				slog.Warn("shutdown: metrics server drain failed", "error", err)
+			}
+		}
 		if err := httpSrv.Shutdown(drainCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}

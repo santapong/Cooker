@@ -178,3 +178,68 @@ func TestDecodePublicKey(t *testing.T) {
 		t.Errorf("short: expected ErrBadKey, got %v", err)
 	}
 }
+
+func TestVerifyAny_EmptyKeysIsBadKey(t *testing.T) {
+	_, priv := newKeypair(t)
+	token := signClaims(t, priv, sampleClaims())
+	if _, err := VerifyAny(token, nil); !errors.Is(err, ErrBadKey) {
+		t.Fatalf("empty keys: expected ErrBadKey, got %v", err)
+	}
+}
+
+func TestVerifyAny_FirstKeyMatches(t *testing.T) {
+	pub1, priv1 := newKeypair(t)
+	pub2, _ := newKeypair(t)
+	token := signClaims(t, priv1, sampleClaims())
+	claims, err := VerifyAny(token, []ed25519.PublicKey{pub1, pub2})
+	if err != nil {
+		t.Fatalf("VerifyAny: %v", err)
+	}
+	if claims.Customer != "ACME Corp" {
+		t.Errorf("claims not decoded: %+v", claims)
+	}
+}
+
+func TestVerifyAny_SecondKeyMatches_Rotation(t *testing.T) {
+	pub1, _ := newKeypair(t)     // outgoing key, no longer the signer
+	pub2, priv2 := newKeypair(t) // incoming key
+	token := signClaims(t, priv2, sampleClaims())
+	claims, err := VerifyAny(token, []ed25519.PublicKey{pub1, pub2})
+	if err != nil {
+		t.Fatalf("VerifyAny with second key should succeed: %v", err)
+	}
+	if claims.Seats != 5 {
+		t.Errorf("claims not decoded: %+v", claims)
+	}
+}
+
+func TestVerifyAny_NoKeyMatchesIsBadSignature(t *testing.T) {
+	pub1, _ := newKeypair(t)
+	pub2, _ := newKeypair(t)
+	_, signer := newKeypair(t) // signed by an untrusted key
+	token := signClaims(t, signer, sampleClaims())
+	if _, err := VerifyAny(token, []ed25519.PublicKey{pub1, pub2}); !errors.Is(err, ErrBadSignature) {
+		t.Fatalf("expected ErrBadSignature, got %v", err)
+	}
+}
+
+func TestVerifyAny_SkipsUnusableKeys(t *testing.T) {
+	good, priv := newKeypair(t)
+	short := ed25519.PublicKey([]byte("too-short")) // wrong length, unusable
+	token := signClaims(t, priv, sampleClaims())
+	// The unusable key must be skipped, the good key must still verify.
+	if _, err := VerifyAny(token, []ed25519.PublicKey{short, good}); err != nil {
+		t.Fatalf("VerifyAny should skip the unusable key and verify: %v", err)
+	}
+	// All keys unusable -> ErrBadKey.
+	if _, err := VerifyAny(token, []ed25519.PublicKey{short}); !errors.Is(err, ErrBadKey) {
+		t.Fatalf("all-unusable keys: expected ErrBadKey, got %v", err)
+	}
+}
+
+func TestVerifyAny_MalformedTokenSurfacesMalformed(t *testing.T) {
+	pub, _ := newKeypair(t)
+	if _, err := VerifyAny("not-a-valid-token", []ed25519.PublicKey{pub}); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("expected ErrMalformed, got %v", err)
+	}
+}

@@ -21,7 +21,7 @@ func newLicenseService(t *testing.T) (*LicenseService, store.LicenseStore, ed255
 		t.Fatalf("GenerateKey: %v", err)
 	}
 	st := memory.New().Licenses
-	return NewLicenseService(st, pub), st, pub, priv
+	return NewLicenseService(st, []ed25519.PublicKey{pub}), st, pub, priv
 }
 
 func mintToken(t *testing.T, priv ed25519.PrivateKey, c *license.Claims) string {
@@ -95,6 +95,42 @@ func TestLicense_Install_VerificationDisabledWhenNoKey(t *testing.T) {
 	svc := NewLicenseService(st, nil) // no public key
 	if _, err := svc.Install(context.Background(), "x.y", "s", "e"); !errors.Is(err, ErrVerificationDisabled) {
 		t.Fatalf("expected ErrVerificationDisabled, got %v", err)
+	}
+}
+
+// TestLicense_Install_RotationAcceptsSecondKey simulates a vendor key
+// rollover: the service trusts two keys, and a token signed by the SECOND
+// key installs successfully. This is the W3 rotation guarantee.
+func TestLicense_Install_RotationAcceptsSecondKey(t *testing.T) {
+	pub1, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey key1: %v", err)
+	}
+	pub2, priv2, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey key2: %v", err)
+	}
+	st := memory.New().Licenses
+	svc := NewLicenseService(st, []ed25519.PublicKey{pub1, pub2})
+
+	// Token signed with key#2 — the "incoming" key during rotation.
+	token := mintToken(t, priv2, &license.Claims{
+		Plan: entitlements.PlanCrew, Seats: 5, Customer: "ROTATED",
+		IssuedAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	})
+	lic, err := svc.Install(context.Background(), token, "s", "e")
+	if err != nil {
+		t.Fatalf("Install with second key should succeed: %v", err)
+	}
+	if lic.Customer != "ROTATED" || lic.Seats != 5 {
+		t.Errorf("claims not mapped: %+v", lic)
+	}
+
+	// A token signed by a key in NEITHER set still fails.
+	_, otherPriv, _ := ed25519.GenerateKey(rand.Reader)
+	bad := mintToken(t, otherPriv, &license.Claims{Plan: entitlements.PlanCrew})
+	if _, err := svc.Install(context.Background(), bad, "s", "e"); !errors.Is(err, ErrLicenseInvalid) {
+		t.Fatalf("expected ErrLicenseInvalid for untrusted key, got %v", err)
 	}
 }
 

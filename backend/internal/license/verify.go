@@ -168,6 +168,62 @@ func Verify(token string, pubKey ed25519.PublicKey) (*Claims, error) {
 	return &claims, nil
 }
 
+// VerifyAny checks a license token against each public key in turn and
+// returns the decoded claims on the FIRST key that validates the
+// signature. It is the key-rotation path: an operator can trust both the
+// outgoing and incoming vendor keys during a rollover window and tokens
+// signed by either verify. Like Verify, it does NOT check expiry.
+//
+// Behaviour:
+//   - keys empty            -> ErrBadKey (nothing can verify a token)
+//   - any key validates     -> (claims, nil)
+//   - a key is malformed     -> skipped (wrong length); never aborts the loop
+//   - the token is malformed -> ErrMalformed (returned from the first
+//     usable key, since the failure is in the token, not the key)
+//   - no key validates       -> ErrBadSignature
+//
+// Because every usable key sees the same token, a structural problem
+// (ErrMalformed) is identical across keys; we surface it instead of a
+// misleading ErrBadSignature when there is at least one usable key.
+func VerifyAny(token string, keys []ed25519.PublicKey) (*Claims, error) {
+	if len(keys) == 0 {
+		return nil, ErrBadKey
+	}
+	usable := false
+	var malformedErr error
+	for _, k := range keys {
+		claims, err := Verify(token, k)
+		if err == nil {
+			return claims, nil
+		}
+		switch {
+		case errors.Is(err, ErrBadKey):
+			// This particular key is unusable (wrong length); skip it and
+			// keep trying the rest.
+			continue
+		case errors.Is(err, ErrMalformed):
+			// The token itself is structurally broken — the same for every
+			// usable key. Remember it; if no key ends up validating we
+			// return this rather than ErrBadSignature.
+			usable = true
+			if malformedErr == nil {
+				malformedErr = err
+			}
+		default:
+			// ErrBadSignature for this key — this key just isn't the signer.
+			usable = true
+		}
+	}
+	if !usable {
+		// Every supplied key was unusable (all wrong length).
+		return nil, ErrBadKey
+	}
+	if malformedErr != nil {
+		return nil, malformedErr
+	}
+	return nil, ErrBadSignature
+}
+
 // DecodePublicKey parses a base64-encoded Ed25519 public key (the value
 // an operator sets in COOKER_LICENSE_PUBLIC_KEY). It accepts both the
 // URL-safe (no padding) and the standard base64 alphabets so an operator

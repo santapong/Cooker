@@ -102,8 +102,16 @@ type LicenseConfig struct {
 	// PublicKey is the base64-encoded Ed25519 public key
 	// (COOKER_LICENSE_PUBLIC_KEY) used to verify license tokens. Empty
 	// disables verification entirely (every install attempt fails, Free
-	// is used). Required whenever Key is set.
+	// is used). Kept for back-compat; it is appended to PublicKeys.
 	PublicKey string
+	// PublicKeys is the set of base64-encoded Ed25519 public keys
+	// (COOKER_LICENSE_PUBLIC_KEYS, comma-separated) any of which may
+	// verify a license token. This supports key rotation: an operator can
+	// trust both the outgoing and incoming vendor keys during a rollover
+	// window. The singular PublicKey is appended for back-compat, so a
+	// deployment that only sets COOKER_LICENSE_PUBLIC_KEY keeps working.
+	// Verification succeeds if ANY configured key validates the token.
+	PublicKeys []string
 }
 
 // TriageConfig wires the Anthropic Messages API client behind
@@ -158,6 +166,12 @@ type ObservabilityConfig struct {
 	OTLPInsecure   bool
 	ServiceName    string
 	ServiceVersion string
+	// MetricsPort, when > 0, serves /metrics on a SEPARATE HTTP listener
+	// (COOKER_METRICS_PORT) instead of registering it on the public app
+	// router. This keeps /metrics off the public app ingress (audit
+	// finding M0-1). 0 (default) preserves the single-port behaviour:
+	// /metrics is mounted on the main router.
+	MetricsPort int
 }
 
 type RateLimitConfig struct {
@@ -432,6 +446,7 @@ func Load() *Config {
 			OTLPInsecure:   getEnvBool("COOKER_OTLP_INSECURE", false),
 			ServiceName:    getEnv("COOKER_SERVICE_NAME", "cooker"),
 			ServiceVersion: getEnv("COOKER_SERVICE_VERSION", "dev"),
+			MetricsPort:    getEnvInt("COOKER_METRICS_PORT", 0),
 		},
 		AppHealthInterval: getEnvDuration("COOKER_APP_HEALTH_INTERVAL", 30*time.Second),
 		JobQueue: JobQueueConfig{
@@ -456,10 +471,7 @@ func Load() *Config {
 			Model:   getEnv("COOKER_AI_TRIAGE_MODEL", ""),
 			APIKey:  getEnv("ANTHROPIC_API_KEY", ""),
 		},
-		License: LicenseConfig{
-			Key:       getEnv("COOKER_LICENSE_KEY", ""),
-			PublicKey: getEnv("COOKER_LICENSE_PUBLIC_KEY", ""),
-		},
+		License: licenseConfigFromEnv(),
 	}
 }
 
@@ -475,8 +487,8 @@ func (c *Config) Validate() error {
 	// token without a public key cannot be verified — boot would silently
 	// degrade to Free and the operator would never know their paid license
 	// didn't take. Fail fast so the misconfiguration is obvious.
-	if c.License.Key != "" && c.License.PublicKey == "" {
-		return fmt.Errorf("config: COOKER_LICENSE_KEY is set but COOKER_LICENSE_PUBLIC_KEY is empty; a license cannot be verified without the public key")
+	if c.License.Key != "" && len(c.License.PublicKeys) == 0 {
+		return fmt.Errorf("config: COOKER_LICENSE_KEY is set but no public key is configured (COOKER_LICENSE_PUBLIC_KEY / COOKER_LICENSE_PUBLIC_KEYS); a license cannot be verified without a public key")
 	}
 	if strings.Contains(c.Audit.Destination, "db") && c.Env.IsProduction() && c.DatabaseURL == "" {
 		return fmt.Errorf("config: COOKER_AUDIT_DESTINATION=db requires DATABASE_URL in production")
@@ -746,4 +758,38 @@ func getEnvCSV(key string, fallback []string) []string {
 		return fallback
 	}
 	return out
+}
+
+// licenseConfigFromEnv assembles LicenseConfig, unioning the plural
+// COOKER_LICENSE_PUBLIC_KEYS (comma-separated, rotation-friendly) with the
+// singular COOKER_LICENSE_PUBLIC_KEY (back-compat). The singular value is
+// appended last and de-duplicated so a deployment that sets only one, the
+// other, or both ends up with a clean key set.
+func licenseConfigFromEnv() LicenseConfig {
+	singular := getEnv("COOKER_LICENSE_PUBLIC_KEY", "")
+	plural := getEnvCSV("COOKER_LICENSE_PUBLIC_KEYS", nil)
+
+	keys := make([]string, 0, len(plural)+1)
+	seen := make(map[string]struct{}, len(plural)+1)
+	add := func(k string) {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			return
+		}
+		if _, ok := seen[k]; ok {
+			return
+		}
+		seen[k] = struct{}{}
+		keys = append(keys, k)
+	}
+	for _, k := range plural {
+		add(k)
+	}
+	add(singular)
+
+	return LicenseConfig{
+		Key:        getEnv("COOKER_LICENSE_KEY", ""),
+		PublicKey:  singular,
+		PublicKeys: keys,
+	}
 }

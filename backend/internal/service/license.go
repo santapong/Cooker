@@ -30,19 +30,22 @@ import (
 // entitlements engine — it never errors and never bricks the instance.
 type LicenseService struct {
 	store store.LicenseStore
-	// pubKey is the vendor Ed25519 public key used to verify tokens. nil
-	// (operator set no COOKER_LICENSE_PUBLIC_KEY) disables installs: every
-	// Install returns ErrVerificationDisabled and Current falls back to the
-	// stored license / Free.
-	pubKey ed25519.PublicKey
+	// pubKeys are the vendor Ed25519 public keys used to verify tokens. A
+	// token verifies if ANY key in the set validates its signature, which
+	// supports key rotation (trust the outgoing and incoming keys during a
+	// rollover window). An empty/nil slice (operator set no public key)
+	// disables installs: every Install returns ErrVerificationDisabled and
+	// Current falls back to the stored license / Free.
+	pubKeys []ed25519.PublicKey
 }
 
 // NewLicenseService wires the service to its store and the configured
-// vendor public key. pubKey may be nil when no public key is configured;
-// the service then refuses installs but still serves the current license
-// and Free entitlements.
-func NewLicenseService(st store.LicenseStore, pubKey ed25519.PublicKey) *LicenseService {
-	return &LicenseService{store: st, pubKey: pubKey}
+// vendor public keys. pubKeys may be nil/empty when no public key is
+// configured; the service then refuses installs but still serves the
+// current license and Free entitlements. When multiple keys are supplied,
+// a token signed by any of them verifies (key rotation).
+func NewLicenseService(st store.LicenseStore, pubKeys []ed25519.PublicKey) *LicenseService {
+	return &LicenseService{store: st, pubKeys: pubKeys}
 }
 
 // Sentinel errors the handler maps to HTTP status codes.
@@ -74,10 +77,10 @@ func (s *LicenseService) Install(ctx context.Context, rawToken, installedBySub, 
 	if rawToken == "" {
 		return nil, ErrLicenseEmpty
 	}
-	if len(s.pubKey) != ed25519.PublicKeySize {
+	if len(s.pubKeys) == 0 {
 		return nil, ErrVerificationDisabled
 	}
-	claims, err := license.Verify(rawToken, s.pubKey)
+	claims, err := license.VerifyAny(rawToken, s.pubKeys)
 	if err != nil {
 		// Malformed / bad-signature / wrong-key all surface as "invalid"
 		// to the operator — we wrap the specific cause for logs/debugging.

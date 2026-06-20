@@ -2,7 +2,8 @@
 # Prometheus Operator ServiceMonitor. Gated behind metrics.enabled AND
 # metrics.serviceMonitor.enabled so a default install never references the
 # monitoring.coreos.com CRDs (they may be absent on a fresh cluster).
-# Scrapes the existing Service's "http" port at /metrics.
+# Scrapes /metrics on the dedicated "metrics" Service port when
+# metrics.port > 0, otherwise on the existing "http" port.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -17,7 +18,7 @@ spec:
     matchLabels:
       {{- include "cooker.selectorLabels" . | nindent 6 }}
   endpoints:
-    - port: http
+    - port: {{ if gt (int .Values.metrics.port) 0 }}metrics{{ else }}http{{ end }}
       path: /metrics
       interval: {{ .Values.metrics.serviceMonitor.interval | default "30s" }}
       scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout | default "10s" }}
