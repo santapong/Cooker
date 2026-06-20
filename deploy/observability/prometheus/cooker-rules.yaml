@@ -80,9 +80,11 @@ spec:
 
         - alert: CookerReadinessFailing
           # Pods report NotReady — the readiness probe (/health/ready) is
-          # failing for at least one replica. kube-state-metrics exposes
-          # kube_pod_container_status_ready; adjust the pod regex if your
+          # failing for at least one replica. Adjust the pod regex if your
           # release name differs from "cooker".
+          # PREREQUISITE: this alert depends on kube-state-metrics (KSM)
+          # exporting the kube_pod_status_ready series. Without KSM scraped
+          # into the same Prometheus this alert never fires (no data, not "OK").
           expr: |
             max by (namespace, pod) (
               kube_pod_status_ready{condition="true", pod=~"cooker.*"}

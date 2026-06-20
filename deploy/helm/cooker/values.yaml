@@ -110,6 +110,12 @@ ingress:
   # See README §Deployment → TLS at ingress.
   tls: []
   annotations: {}
+    # SECURITY: /metrics is unauthenticated (see the metrics: block). When the
+    # Ingress is enabled with the default "/" prefix it is publicly routable.
+    # Uncomment the snippet below (nginx ingress controller) to deny /metrics
+    # externally while leaving the cluster-internal ServiceMonitor scrape intact:
+    #   nginx.ingress.kubernetes.io/configuration-snippet: |
+    #     location = /metrics { deny all; }
 
 # Builder selection.
 #   docker  — shells out to the local Docker daemon via the bind-
@@ -470,6 +476,18 @@ retention:
 # default install never references the Prometheus-Operator CRDs
 # (monitoring.coreos.com/v1), which are absent on a fresh cluster. Flip
 # them on once the Operator is installed.
+# SECURITY: /metrics is served UNAUTHENTICATED on the public app port
+# (8080) — see backend/internal/server/server.go. With the default install
+# (ingress.enabled=false → ClusterIP only) this is safe: the endpoint is
+# reachable only inside the cluster. The secure scrape path is the
+# cluster-internal Service via the Prometheus Operator ServiceMonitor
+# (serviceMonitor.enabled=true), which never leaves the cluster network.
+#
+# WARNING: if you enable the Ingress (ingress.enabled=true with the default
+# "/" prefix), /metrics becomes PUBLICLY ROUTABLE with no authentication.
+# Block it at the ingress — see the configuration-snippet example in the
+# `ingress.annotations` block below. The permanent fix (a dedicated,
+# separately-bound metrics port) is tracked.
 metrics:
   enabled: true
   serviceMonitor:
