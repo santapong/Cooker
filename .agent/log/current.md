@@ -43,3 +43,25 @@
 - PM re-verify: all YAML parse; kubeconform deploy/kubernetes/ = 14/14; go vet+tests -race green.
 - Committed in 2 parts (CI+security.txt; deploy). All M0 risks ✅ except R-FOLLOWUP-1 (tracked).
 - Next: push + open M0 draft PR; advance to M1/M2.
+
+## [2026-06-20 ~14:10] M0 SHIP — pushed; draft PR #117; watching
+- Pushed claude/launch-execution; opened draft PR #117 (M0).
+- CI #117: helm ✅ (real helm render validates M0 templates!), frontend ✅, backend+docker in progress.
+- Subscribed to PR #117 activity. send_later NOT available → re-check CI on next agent completion.
+
+## [2026-06-20 ~14:12] M1+M2 DELEGATE — 3 Opus agents launched (disjoint)
+- M1-T1 cooker-infra-ci (a36d64c1): scripts/backup-restore-drill.sh + Makefile target + docs/guides/DR.md.
+- M1-T2 general-purpose (add8633a): docs/legal/* (ToS/Privacy/AUP/SLA) + STATUS_PAGE.md + INSTALL.md.
+- M2-T1 cooker-backend-data (af2ccc3c): license model + store (mem+pg parity) + migration 024_licenses.
+- M2-T2 (logic) + M2-T3 (frontend) queued AFTER M2-T1 (dependency chain).
+
+## [2026-06-20 ~14:40] M1✅ + M2-T1✅ committed; M2-T2 launched
+- #117 CI (M0): helm✅ docker✅ frontend✅ backend (in progress, no failures).
+- M1-T1 (DR drill) + M1-T2 (legal/status docs) done → reviewed (shellcheck clean, 5/5 legal
+  banners) → committed `d21a55f` (M1 = Lane A finish ✅).
+- M2-T1 (license data layer) done → PM re-verify go build/vet/test -race green; reviewed
+  store.go interface + migration → committed `58260bd`.
+- M2-T2 launched (cooker-backend-api ace59cdf): verify(Ed25519)/entitlements/config/service/
+  handler/gate/CLI. Gate built+tested but NOT wired to existing routes (regression guard).
+- Push HELD until M2-T2 lands → push M1+M2-T1+M2-T2 as one backend unit (single CI cycle).
+- Branch model: single `claude/launch-execution` (per user) → #117 is the ROLLING execution PR.
