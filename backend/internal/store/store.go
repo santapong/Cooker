@@ -231,6 +231,26 @@ type APITokenStore interface {
 	TouchLastUsed(ctx context.Context, id string, ts time.Time) error
 }
 
+// LicenseStore persists the single installed self-hosted license (M2
+// self-hosted licensing — docs/launch/01-billing-monetization.md §4).
+// There is at most one active license per Cooker instance: Set replaces
+// whatever is installed, GetActive returns it (or ErrNotFound when none
+// is installed), and Delete clears it. The store keeps only the decoded
+// claims plus the signed RawToken; signature verification is the
+// licensing service's job (M2-T2), not the store's.
+type LicenseStore interface {
+	// GetActive returns the currently installed license. ErrNotFound if
+	// no license has been installed.
+	GetActive(ctx context.Context) (*model.License, error)
+	// Set installs l as the active license, replacing any existing one
+	// (upsert: single-row semantics). Stamps InstalledAt when zero.
+	Set(ctx context.Context, l *model.License) error
+	// Delete removes the installed license, returning the instance to the
+	// unlicensed (free/explorer) baseline. Deleting when none is
+	// installed is a no-op (no error), matching "clear license" intent.
+	Delete(ctx context.Context) error
+}
+
 // Store aggregates all data-access interfaces and a cleanup hook.
 // Construct with New and pass to the server and handler layers.
 type Store struct {
@@ -247,6 +267,7 @@ type Store struct {
 	Clusters       ClusterConfigStore
 	Users          UserStore
 	APITokens      APITokenStore
+	Licenses       LicenseStore
 	close          func() error
 	ping           func(context.Context) error
 }
@@ -254,7 +275,7 @@ type Store struct {
 // New builds a Store. closeFn may be nil when no cleanup is required
 // (e.g., in-memory stores). pingFn may be nil for backends without a
 // liveness probe; Ping then reports healthy unconditionally.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa StageApprovalStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, at APITokenStore, closeFn func() error, pingFn func(context.Context) error) *Store {
+func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa StageApprovalStore, a AppStore, ad AppDeployStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, at APITokenStore, lic LicenseStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
 		Pipelines:      p,
 		Runs:           r,
@@ -269,6 +290,7 @@ func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa 
 		Clusters:       cc,
 		Users:          u,
 		APITokens:      at,
+		Licenses:       lic,
 		close:          closeFn,
 		ping:           pingFn,
 	}
