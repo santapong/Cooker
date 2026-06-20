@@ -67,6 +67,18 @@ Legend: ⚪ pending · 🔵 in progress · 🟢 done(merged) · 🔴 blocked/fai
 | M0-8 | No regression vs #115 (counters real, NetworkPolicy/securityContext/secretKeyRef untouched, no Allow-Credentials, no docker.sock). | INFO | — | none | ✅ accepted |
 | R-FOLLOWUP-1 | Permanent M0-1 fix: bind `/metrics` to a dedicated internal port (`COOKER_METRICS_PORT`), ServiceMonitor scrapes it — never traverses public ingress. Backend+deploy change, out of M0 deploy-only scope. | — | roadmap | Schedule as a small standalone PR (post-M0). | ⚪ tracked |
 
+### M2 audit (licensing — `58260bd`/`920f2ad`/`49cd5e0`) — no CRITICAL/HIGH; sec paths sound
+| ID | Risk | Severity | Recommended change | Status |
+|----|------|----------|--------------------|--------|
+| M2-01 | Boot installer re-installs every boot (new UUID/InstalledAt) + clobbers UI-installed license | MED | idempotent on token identity (skip when stored RawToken == env) | ✅ fixed (Fix-A) |
+| M2-02 | memory↔postgres ID parity break (pg forces id=`active`, memory keeps UUID) | MED | normalize memory ID to sentinel | 🔧 Fix-B running |
+| M2-03 | No postgres integration test for license store (CLAUDE.md parity rule) | MED | add `postgres/license_test.go` | 🔧 Fix-B running |
+| M2-04 | Install handler re-reads Current() — small inconsistency window | LOW | resolve entitlements from installed lic | ✅ fixed (Fix-A) |
+| M2-05 | store error wraps drop `license:` prefix (cosmetic) | INFO | optional align | ✅ accepted |
+| M2-06 | entitlement gate is dead code by design (dormant) | INFO | revisit at D5 wiring | ✅ accepted |
+| M2-07 | tier-card CTAs presentational (no checkout) | INFO | B1 follow-up | ✅ accepted |
+| R-FOLLOWUP-2 | Ed25519 key rotation: accept multiple pubkeys / `kid` so the signing key can roll with a grace window | — | fast-follow before key ages | ⚪ tracked |
+
 ---
 
 ## Research log (M0)
@@ -75,6 +87,9 @@ Legend: ⚪ pending · 🔵 in progress · 🟢 done(merged) · 🔴 blocked/fai
 | security.txt delivery | runtime Gin route + const body | `go:embed` static file | **Keep** — fine for a 4-line static doc; real defect was hardcoded Expires (M0-2), independent of delivery. | recorded |
 | `/metrics` exposure | default-on, unauth, public app port (when ingress on) | (a) off-by-default; (b) **separate internal metrics port**; (c) auth/basic-auth on /metrics | **Change** — mature Go services expose /metrics on a separate internal port or require auth; k8s idiom = cluster-internal Service scraped by ServiceMonitor (never via public ingress). M0: mitigate via ingress block + docs; permanent = separate port (R-FOLLOWUP-1). | recorded |
 | `CookerReadinessFailing` alert | depends on kube-state-metrics `kube_pod_status_ready` | `up{job="cooker"}==0` (Prometheus' own scrape via the shipped ServiceMonitor — no KSM dep) | **Change/document** — switch to `up==0` (no hidden KSM dependency) or document the KSM prerequisite. Folding into M0-3 fix. | recorded |
+| **M2** license token format | custom `base64url(payload).base64url(ed25519 sig)`, single shared impl | PASETO v4.public / JWS-EdDSA | **Keep** — already has PASETO's key safety (no `alg` field → no alg-confusion). Do NOT adopt JWT here. PASETO only if ever standardizing. | recorded |
+| **M2** entitlements model | hybrid: Go plan→feature map ∪ signed per-license `features[]` | pure claims-only (all features signed in) | **Keep** — signed features already allow one-off grants with no release; map gives a readable tier source-of-truth. | recorded |
+| **M2** key management | single pubkey via `COOKER_LICENSE_PUBLIC_KEY` | multiple accepted pubkeys / `kid` rotation window | **Change (fast-follow)** — offline signing needs an operator rotation story (no JWKS). Low risk at launch (fresh key); add before key ages → R-FOLLOWUP-2. | recorded |
 
 ---
 
