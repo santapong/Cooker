@@ -9,8 +9,8 @@
 - **Plan of record:** `docs/launch/README.md` + `/root/.claude/plans/can-you-give-me-swirling-hopper.md`
 - **Working branch:** `claude/launch-execution` (off `main` @ #116 merged)
 - **PM model:** Opus 4.8 (1M) · **Team policy:** Opus-only subagents
-- **Last updated:** 2026-06-20 (M0 kickoff)
-- **Phase:** EXECUTION → (per milestone) Implement → Review → Audit → Research
+- **Last updated:** 2026-06-20 (M0 implemented + committed `e754698`; audit in progress)
+- **Phase:** EXECUTION → M0 Implement✅ Review✅ Verify✅ → **Audit (running)** → Research → push+PR
 
 ---
 
@@ -41,12 +41,13 @@ Legend: ⚪ pending · 🔵 in progress · 🟢 done(merged) · 🔴 blocked/fai
 
 ---
 
-## Active tasks (current milestone: M0)
-| Task | Agent (Opus) | Files (non-overlapping) | Status | PR |
-|------|--------------|--------------------------|--------|----|
-| M0-T1 observability bundle | cooker-infra-deploy | `deploy/observability/**`, helm `servicemonitor.yaml`+`prometheusrule.yaml`, prod metrics-on values, raw-manifest parity | ⏳ queued | — |
-| M0-T2 security.txt + SECURITY.md contact | cooker-security | `SECURITY.md`, `/.well-known/security.txt` route/static | ⏳ queued | — |
-| M0-T3 CI: helm lint + kubeconform gate (P6.1) | cooker-infra-ci | `.github/workflows/ci.yml`, `Makefile` | ⏳ queued | — |
+## Active tasks (current milestone: M0)  →  committed `e754698`
+| Task | Agent (Opus) | Status | Notes |
+|------|--------------|--------|-------|
+| M0-T1 observability bundle | cooker-infra-deploy | ✅ done | reviewed + gates green |
+| M0-T2 security.txt + SECURITY.md contact | cooker-security | ✅ done | public Gin route (RFC 9116) + test |
+| M0-T3 CI helm/kubeconform hardening (P6.1) | cooker-infra-ci | ✅ done | gate renders + Datree CRD + raw pass |
+| M0-AUDIT independent audit + research | general-purpose (a228b2ce) | 🔵 running | incl. `/metrics` public-exposure check |
 
 ---
 
@@ -65,12 +66,12 @@ Legend: ⚪ pending · 🔵 in progress · 🟢 done(merged) · 🔴 blocked/fai
 ---
 
 ## Next actions (PM)
-1. Commit `.agent/` scaffolding.
-2. Launch M0 team (3 Opus agents, parallel, non-overlapping files).
-3. Review each diff + run `go vet`/`go test -race` + frontend build + `helm lint`/`kubeconform`.
-4. Audit M0 changes → populate Risk register.
-5. Research alternatives for any 🟡/🔴 → Research log.
-6. Commit + push + open draft PR for M0; advance board.
+1. ~~Commit `.agent/` scaffolding~~ ✅ (`af3fc19`).
+2. ~~Launch M0 team + review + verify~~ ✅ (committed `e754698`).
+3. Review audit findings (agent a228b2ce) → populate Risk register; fix CRITICAL/HIGH before push.
+4. Record research findings → Research log.
+5. Update `.agent/state.md` board; commit `.agent` updates.
+6. Push `claude/launch-execution`; open M0 draft PR; advance board → M1/M2.
 
 ## Log pointer
 - Current log: `.agent/log/current.md`
