@@ -85,3 +85,16 @@
 - Lane A (M0+M1) + Lane B0 (M2) = the self-hosted launch + first-revenue path — NEARLY DONE.
 - Pending user decisions: D5 (open-core: which features the gate guards) · D4 (Cooker Cloud
   go/no-go, gates M3 multi-tenancy → M4 Stripe → M5 SaaS).
+
+## [2026-06-20 ~16:00] M2 AUDIT+REMEDIATE+CLOSE
+- M2 audit (a4f23ffab): no CRITICAL/HIGH; sec paths sound (sig-before-unmarshal, boot
+  degrade-to-Free, gate dormant, no token leak, store.New callers OK). 3 MED + 4 INFO.
+- Fix-A (backend-api): M2-01 boot-install idempotent on token; M2-04 entitlements from lic. ✅
+- Fix-B (backend-data): M2-02 memory ID parity (id='active'); M2-03 pg integration test. ✅
+- PM full `go build/vet/test ./... -race` green. Pushed batch → `5eb8df5` (#117).
+- Research recorded: keep custom Ed25519 token (not JWT; PASETO only if standardizing);
+  keep hybrid entitlements; ADD key rotation before key ages (R-FOLLOWUP-2).
+- ===== LANE A (M0+M1) + LANE B0 (M2) COMPLETE = self-hosted launch + first-revenue path =====
+- BLOCKED on user: D4 (Cooker Cloud go/no-go → M3/M4/M5) + D5 (open-core: wire the gate).
+- Tracked fast-follows: R-FOLLOWUP-1 (metrics port), R-FOLLOWUP-2 (license key rotation),
+  M2-07 (tier CTAs → B1).

@@ -32,7 +32,7 @@
 |----|-----------|------|------|--------|
 | M0 | Observability artifacts + metrics-on + security.txt + CI gate | A | — | 🟢 done → draft PR |
 | M1 | DR drill + legal/status → self-hosted launch-ready | A | M0 | 🟢 done (committed `d21a55f`) |
-| M2 | Self-hosted licensing (Ed25519 + entitlements + UI) | B0 | — | 🔵 T1✅T2✅T3✅ `49cd5e0` · docs✅ · audit running |
+| M2 | Self-hosted licensing (Ed25519 + entitlements + UI) | B0 | — | 🟢 done `5eb8df5` (impl+docs+audit+remediation) |
 | M3 | Multi-tenancy (tenant_id + build-farm isolation) | C | D4 confirm | ⚪ blocked on decision |
 | M4 | Stripe Cloud billing + metering | B1/B2 | M3 | ⚪ blocked |
 | M5 | SaaS hosting (AWS) + GDPR + split-origin | SaaS | M3 | ⚪ blocked |
@@ -71,8 +71,8 @@ Legend: ⚪ pending · 🔵 in progress · 🟢 done(merged) · 🔴 blocked/fai
 | ID | Risk | Severity | Recommended change | Status |
 |----|------|----------|--------------------|--------|
 | M2-01 | Boot installer re-installs every boot (new UUID/InstalledAt) + clobbers UI-installed license | MED | idempotent on token identity (skip when stored RawToken == env) | ✅ fixed (Fix-A) |
-| M2-02 | memory↔postgres ID parity break (pg forces id=`active`, memory keeps UUID) | MED | normalize memory ID to sentinel | 🔧 Fix-B running |
-| M2-03 | No postgres integration test for license store (CLAUDE.md parity rule) | MED | add `postgres/license_test.go` | 🔧 Fix-B running |
+| M2-02 | memory↔postgres ID parity break (pg forces id=`active`, memory keeps UUID) | MED | normalize memory ID to sentinel | ✅ fixed (Fix-B) |
+| M2-03 | No postgres integration test for license store (CLAUDE.md parity rule) | MED | add `postgres/license_test.go` | ✅ fixed (Fix-B) |
 | M2-04 | Install handler re-reads Current() — small inconsistency window | LOW | resolve entitlements from installed lic | ✅ fixed (Fix-A) |
 | M2-05 | store error wraps drop `license:` prefix (cosmetic) | INFO | optional align | ✅ accepted |
 | M2-06 | entitlement gate is dead code by design (dormant) | INFO | revisit at D5 wiring | ✅ accepted |
