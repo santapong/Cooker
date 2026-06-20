@@ -294,6 +294,19 @@ func (s *Server) registerRoutes() {
 		tokens.DELETE("/:id", h.DeleteAPIToken)
 	}
 
+	// Self-hosted licensing (M2 — docs/launch/01-billing-monetization.md
+	// §4). GET is readable by any authenticated user (the UI shows/hides
+	// paid features from the status + entitlements); install/remove are
+	// admin-only operator actions. No entitlement gate is applied to any
+	// EXISTING route (open-core split is a pending product decision — see
+	// server.entitlementGate).
+	license := api.Group("/license")
+	{
+		license.GET("", h.GetLicense)
+		license.POST("", adminRole, h.InstallLicense)
+		license.DELETE("", adminRole, h.DeleteLicense)
+	}
+
 	settings := api.Group("/settings")
 	{
 		settings.GET("/registries", h.ListRegistryConfigs)

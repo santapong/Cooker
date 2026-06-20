@@ -251,6 +251,45 @@ func TestValidate_UATPermissive(t *testing.T) {
 	}
 }
 
+func TestValidate_LicensePermissiveByDefault(t *testing.T) {
+	// No license configured => Free, no error, in any env.
+	for _, env := range []Env{EnvDev, EnvUAT} {
+		if err := (&Config{Env: env}).Validate(); err != nil {
+			t.Errorf("no license should be permissive in %s, got: %v", env, err)
+		}
+	}
+}
+
+func TestValidate_LicenseKeyWithoutPublicKeyIsError(t *testing.T) {
+	// A license token with no public key cannot be verified — error in
+	// every env (env-independent rule).
+	for _, env := range []Env{EnvDev, EnvUAT, EnvProduction} {
+		cfg := &Config{Env: env, License: LicenseConfig{Key: "some.token"}}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatalf("expected error for key-without-public-key in %s", env)
+		}
+		if !strings.Contains(err.Error(), "COOKER_LICENSE_PUBLIC_KEY") {
+			t.Errorf("error should mention COOKER_LICENSE_PUBLIC_KEY, got: %v", err)
+		}
+	}
+}
+
+func TestValidate_LicenseKeyWithPublicKeyOK(t *testing.T) {
+	cfg := &Config{Env: EnvDev, License: LicenseConfig{Key: "some.token", PublicKey: "base64pubkey"}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("key + public key should validate, got: %v", err)
+	}
+}
+
+func TestValidate_LicensePublicKeyOnlyOK(t *testing.T) {
+	// Public key with no token is fine: the admin API can install later.
+	cfg := &Config{Env: EnvDev, License: LicenseConfig{PublicKey: "base64pubkey"}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("public key alone should validate, got: %v", err)
+	}
+}
+
 func TestValidate_ProductionRequiresSecretKey(t *testing.T) {
 	cfg := &Config{
 		Env:            EnvProduction,

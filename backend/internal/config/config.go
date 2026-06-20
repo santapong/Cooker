@@ -79,6 +79,31 @@ type Config struct {
 	// (roadmap M4). Enabled=false keeps the route returning 503 and
 	// no key is ever required. The API key stays server-side.
 	Triage TriageConfig
+	// License configures self-hosted offline licensing (M2 — see
+	// docs/launch/01-billing-monetization.md §4). Both fields empty =>
+	// the install runs on the Free (Explorer) tier with no license, which
+	// is the default and never an error.
+	License LicenseConfig
+}
+
+// LicenseConfig holds the self-hosted licensing inputs. An operator may
+// set a signed license token at boot (Key) which the server installs once
+// at startup; verification needs the vendor's Ed25519 public key
+// (PublicKey, base64). The model is permissive: no license means Free.
+// The only hard rule is that a Key without a PublicKey cannot be verified
+// and is therefore a misconfiguration (caught in Validate).
+type LicenseConfig struct {
+	// Key is an optional signed license token an operator sets at boot via
+	// COOKER_LICENSE_KEY. When set, the server attempts to install it once
+	// at startup, degrading to Free (with a log line) on any failure —
+	// never panicking. Empty = no boot-time install (the admin API can
+	// still install one later).
+	Key string
+	// PublicKey is the base64-encoded Ed25519 public key
+	// (COOKER_LICENSE_PUBLIC_KEY) used to verify license tokens. Empty
+	// disables verification entirely (every install attempt fails, Free
+	// is used). Required whenever Key is set.
+	PublicKey string
 }
 
 // TriageConfig wires the Anthropic Messages API client behind
@@ -431,6 +456,10 @@ func Load() *Config {
 			Model:   getEnv("COOKER_AI_TRIAGE_MODEL", ""),
 			APIKey:  getEnv("ANTHROPIC_API_KEY", ""),
 		},
+		License: LicenseConfig{
+			Key:       getEnv("COOKER_LICENSE_KEY", ""),
+			PublicKey: getEnv("COOKER_LICENSE_PUBLIC_KEY", ""),
+		},
 	}
 }
 
@@ -440,6 +469,14 @@ func (c *Config) Validate() error {
 	// every click. Fail at boot instead.
 	if c.Triage.Enabled && c.Triage.APIKey == "" {
 		return fmt.Errorf("config: COOKER_AI_TRIAGE_ENABLED=true requires ANTHROPIC_API_KEY")
+	}
+	// Self-hosted licensing (M2) is permissive: no license => Free, never
+	// an error. The single hard rule, env-independent, is that a license
+	// token without a public key cannot be verified — boot would silently
+	// degrade to Free and the operator would never know their paid license
+	// didn't take. Fail fast so the misconfiguration is obvious.
+	if c.License.Key != "" && c.License.PublicKey == "" {
+		return fmt.Errorf("config: COOKER_LICENSE_KEY is set but COOKER_LICENSE_PUBLIC_KEY is empty; a license cannot be verified without the public key")
 	}
 	if strings.Contains(c.Audit.Destination, "db") && c.Env.IsProduction() && c.DatabaseURL == "" {
 		return fmt.Errorf("config: COOKER_AUDIT_DESTINATION=db requires DATABASE_URL in production")

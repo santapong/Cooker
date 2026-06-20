@@ -69,6 +69,13 @@ type Handler struct {
 	// route ownership + role-cap + no-self-replication decisions through
 	// it. Set by server.New from the store; nil-safe (handlers return 503).
 	APITokens *service.APITokenService
+	// License backs the self-hosted licensing endpoints (M2 —
+	// docs/launch/01-billing-monetization.md §4): GET /license (status +
+	// entitlements) and the admin-only POST/DELETE /license. The
+	// verify-on-install + degrade-to-Free logic lives in the service; the
+	// handler stays thin. Set by server.New from the store + configured
+	// public key; nil-safe (handlers return 503).
+	License *service.LicenseService
 	// MFAACRValues mirrors COOKER_OIDC_MFA_ACR_VALUES. The token-delete
 	// handler uses it to step-up-gate an admin deleting ANOTHER user's
 	// token (own-token deletes are exempt). Empty disables the gate.

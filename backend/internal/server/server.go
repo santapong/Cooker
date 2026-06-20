@@ -24,6 +24,7 @@ import (
 	"github.com/santapong/cooker/internal/handler"
 	"github.com/santapong/cooker/internal/idempotency"
 	"github.com/santapong/cooker/internal/kube"
+	"github.com/santapong/cooker/internal/license"
 	"github.com/santapong/cooker/internal/logstore"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/observability"
@@ -299,6 +300,38 @@ func New(cfg *config.Config) (*Server, error) {
 	// method (OIDC / local / dev) is configured, so scripts and CI can
 	// authenticate even when no IdP is present.
 	oidcMW.EnableAPITokens(auth.NewAPITokenAuthenticator(st.APITokens))
+	// Self-hosted licensing (M2 — docs/launch/01-billing-monetization.md
+	// §4). The license service verifies pasted tokens against the vendor's
+	// Ed25519 public key (COOKER_LICENSE_PUBLIC_KEY) and resolves the
+	// current entitlements; with no public key configured it refuses
+	// installs but still serves Free entitlements. Config.Validate() has
+	// already rejected the "key set, public key empty" combination, so a
+	// non-empty COOKER_LICENSE_KEY here implies a public key is present.
+	var licensePubKey []byte
+	if cfg.License.PublicKey != "" {
+		pk, err := license.DecodePublicKey(cfg.License.PublicKey)
+		if err != nil {
+			// Misconfigured public key: log and continue with no verifier
+			// (degrade to Free) rather than failing boot — licensing must
+			// never take down the instance.
+			slog.Error("invalid COOKER_LICENSE_PUBLIC_KEY; licensing disabled (Free tier)", "error", err)
+		} else {
+			licensePubKey = pk
+		}
+	}
+	h.License = service.NewLicenseService(st.Licenses, licensePubKey)
+	// Boot-time license install: an operator may set a signed token via
+	// COOKER_LICENSE_KEY. Install it once at startup; on ANY failure log
+	// and degrade to Free — never panic (an expired/invalid env-set
+	// license must not block boot).
+	if cfg.License.Key != "" {
+		if lic, err := h.License.Install(ctx, cfg.License.Key, "system:boot", ""); err != nil {
+			slog.Warn("COOKER_LICENSE_KEY could not be installed; running on Free tier", "error", err)
+		} else {
+			slog.Info("self-hosted license installed from COOKER_LICENSE_KEY",
+				"plan", lic.Plan, "customer", lic.Customer, "expiresAt", lic.ExpiresAt)
+		}
+	}
 	// AI triage (M4): Validate() already guaranteed the key when
 	// enabled; nil keeps the route 503 and the frontend button hidden.
 	if cfg.Triage.Enabled {
