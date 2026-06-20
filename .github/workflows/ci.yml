@@ -379,6 +379,14 @@ jobs:
             echo "ERROR: NetworkPolicy rendered with networkPolicy.enabled=false" >&2
             exit 1
           fi
+          if grep -q 'kind: ServiceMonitor' /tmp/no-metrics-no-netpol.yaml; then
+            echo "ERROR: ServiceMonitor rendered with metrics.enabled=false" >&2
+            exit 1
+          fi
+          if grep -q 'kind: PrometheusRule' /tmp/no-metrics-no-netpol.yaml; then
+            echo "ERROR: PrometheusRule rendered with metrics.enabled=false" >&2
+            exit 1
+          fi
       - name: helm template (metrics ServiceMonitor + PrometheusRule)
         run: |
           # Gate render: exercise the metrics observability path that

@@ -51,17 +51,27 @@ Legend: ⚪ pending · 🔵 in progress · 🟢 done(merged) · 🔴 blocked/fai
 
 ---
 
-## Risk register (filled during AUDIT phase)
+## Risk register (M0 audit — commit e754698)
 | ID | Risk | Severity | Introduced by | Recommended change | Status |
 |----|------|----------|---------------|--------------------|--------|
-| _none yet — audit runs after each milestone's implementation_ | | | | | |
+| M0-1 | Unauth `/metrics` on public app port. Served on bare router (`server.go:511`); M0 flips deploy default `metrics.enabled=true`. **Safe in default install (ingress.enabled=false → ClusterIP only)**, but if ingress is enabled its `/`-prefix routes `/metrics` publicly (route inventory, latencies, error counters). | **MED** (conditional) | M0 deploy-default flip | M0: keep enabled (safe by default) + values/RUNBOOK warning + ready nginx `configuration-snippet` to 403 `/metrics`; document ServiceMonitor internal-scrape path. **Permanent fix (follow-up): separate metrics port/listener** → tracked as R-FOLLOWUP-1. | 🔧 fixing |
+| M0-2 | `security.txt` `Expires` hardcoded `2027-06-20` (`securitytxt.go:11`); lapses → RFC9116-invalid. Test is a tripwire (CI reds on that date). | LOW | T2 | Compute `Expires` at startup (`time.Now().AddDate(1,0,0)`) so it never lapses; keep test. | 🔧 fixing |
+| M0-3 | Triple-copy alert-rule drift: standalone YAML has `runbook_url`+`description`, Helm & raw copies dropped them. No single generator. | MED | T1 | Restore annotation parity across the 3 copies; add note that Helm template is canonical. | 🔧 fixing |
+| M0-4 | Comment/metric mismatch `cooker-rules.yaml:84` (comment says `kube_pod_container_status_ready`, expr uses correct `kube_pod_status_ready`). | LOW | T1 | Fix comment. | 🔧 fixing |
+| M0-5 | CI "metrics-off" gate asserts NetworkPolicy absent but NOT ServiceMonitor/PrometheusRule absent, despite comment claiming both. No live bug (templates double-gated). | LOW | T3 | Add SM/PR absence greps to match the comment. | 🔧 fixing |
+| M0-6 | `/.well-known/security.txt` route precedence vs NoRoute/`/assets` — verified no shadowing. | INFO | T2 | none | ✅ accepted |
+| M0-7 | Security-headers middleware avoids global `no-store` partly "so /metrics is cacheable" — mildly compounds M0-1 (intermediary caches). Pre-existing. | INFO | pre-existing | revisit if M0-1 permanent fix lands | ✅ accepted |
+| M0-8 | No regression vs #115 (counters real, NetworkPolicy/securityContext/secretKeyRef untouched, no Allow-Credentials, no docker.sock). | INFO | — | none | ✅ accepted |
+| R-FOLLOWUP-1 | Permanent M0-1 fix: bind `/metrics` to a dedicated internal port (`COOKER_METRICS_PORT`), ServiceMonitor scrapes it — never traverses public ingress. Backend+deploy change, out of M0 deploy-only scope. | — | roadmap | Schedule as a small standalone PR (post-M0). | ⚪ tracked |
 
 ---
 
-## Research log (filled during RESEARCH phase)
+## Research log (M0)
 | Topic | Current approach | Alternative considered | Verdict | State |
 |-------|------------------|------------------------|---------|-------|
-| _none yet — research runs after audit_ | | | | |
+| security.txt delivery | runtime Gin route + const body | `go:embed` static file | **Keep** — fine for a 4-line static doc; real defect was hardcoded Expires (M0-2), independent of delivery. | recorded |
+| `/metrics` exposure | default-on, unauth, public app port (when ingress on) | (a) off-by-default; (b) **separate internal metrics port**; (c) auth/basic-auth on /metrics | **Change** — mature Go services expose /metrics on a separate internal port or require auth; k8s idiom = cluster-internal Service scraped by ServiceMonitor (never via public ingress). M0: mitigate via ingress block + docs; permanent = separate port (R-FOLLOWUP-1). | recorded |
+| `CookerReadinessFailing` alert | depends on kube-state-metrics `kube_pod_status_ready` | `up{job="cooker"}==0` (Prometheus' own scrape via the shipped ServiceMonitor — no KSM dep) | **Change/document** — switch to `up==0` (no hidden KSM dependency) or document the KSM prerequisite. Folding into M0-3 fix. | recorded |
 
 ---
 
