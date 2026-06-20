@@ -11,5 +11,14 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    {{- if and .Values.metrics.enabled (gt (.Values.metrics.port | default 0 | int) 0) }}
+    # Cluster-internal metrics port for the ServiceMonitor to scrape. This is
+    # a ClusterIP Service port only; it is never referenced by the Ingress, so
+    # /metrics stays off the public "/" path.
+    - port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+    {{- end }}
   selector:
     {{- include "cooker.selectorLabels" . | nindent 4 }}

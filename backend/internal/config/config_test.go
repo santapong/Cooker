@@ -57,6 +57,51 @@ func TestLoad_CustomPort(t *testing.T) {
 	}
 }
 
+func TestLoad_MetricsPort(t *testing.T) {
+	// Default: 0 (single-port mode, back-compat).
+	cfg := Load()
+	if cfg.Observability.MetricsPort != 0 {
+		t.Errorf("default metrics port should be 0, got %d", cfg.Observability.MetricsPort)
+	}
+	os.Setenv("COOKER_METRICS_PORT", "9091")
+	defer os.Unsetenv("COOKER_METRICS_PORT")
+	cfg = Load()
+	if cfg.Observability.MetricsPort != 9091 {
+		t.Errorf("expected metrics port 9091, got %d", cfg.Observability.MetricsPort)
+	}
+}
+
+func TestLoad_LicensePublicKeys_Union(t *testing.T) {
+	os.Setenv("COOKER_LICENSE_PUBLIC_KEY", "singular")
+	os.Setenv("COOKER_LICENSE_PUBLIC_KEYS", "plural1, plural2 , singular")
+	defer os.Unsetenv("COOKER_LICENSE_PUBLIC_KEY")
+	defer os.Unsetenv("COOKER_LICENSE_PUBLIC_KEYS")
+
+	cfg := Load()
+	// Plural first, singular appended, duplicates removed.
+	want := []string{"plural1", "plural2", "singular"}
+	if len(cfg.License.PublicKeys) != len(want) {
+		t.Fatalf("expected %v, got %v", want, cfg.License.PublicKeys)
+	}
+	for i, k := range want {
+		if cfg.License.PublicKeys[i] != k {
+			t.Errorf("PublicKeys[%d] = %q, want %q", i, cfg.License.PublicKeys[i], k)
+		}
+	}
+	if cfg.License.PublicKey != "singular" {
+		t.Errorf("singular PublicKey should be preserved for back-compat, got %q", cfg.License.PublicKey)
+	}
+}
+
+func TestLoad_LicensePublicKeys_SingularOnlyBackCompat(t *testing.T) {
+	os.Setenv("COOKER_LICENSE_PUBLIC_KEY", "onlykey")
+	defer os.Unsetenv("COOKER_LICENSE_PUBLIC_KEY")
+	cfg := Load()
+	if len(cfg.License.PublicKeys) != 1 || cfg.License.PublicKeys[0] != "onlykey" {
+		t.Errorf("singular-only should yield one key, got %v", cfg.License.PublicKeys)
+	}
+}
+
 func TestLoad_InvalidPort(t *testing.T) {
 	os.Setenv("COOKER_PORT", "not-a-number")
 	defer os.Unsetenv("COOKER_PORT")
@@ -248,6 +293,54 @@ func TestValidate_UATPermissive(t *testing.T) {
 	cfg := &Config{Env: EnvUAT}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("uat should be permissive, got error: %v", err)
+	}
+}
+
+func TestValidate_LicensePermissiveByDefault(t *testing.T) {
+	// No license configured => Free, no error, in any env.
+	for _, env := range []Env{EnvDev, EnvUAT} {
+		if err := (&Config{Env: env}).Validate(); err != nil {
+			t.Errorf("no license should be permissive in %s, got: %v", env, err)
+		}
+	}
+}
+
+func TestValidate_LicenseKeyWithoutPublicKeyIsError(t *testing.T) {
+	// A license token with no public key cannot be verified — error in
+	// every env (env-independent rule).
+	for _, env := range []Env{EnvDev, EnvUAT, EnvProduction} {
+		cfg := &Config{Env: env, License: LicenseConfig{Key: "some.token"}}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatalf("expected error for key-without-public-key in %s", env)
+		}
+		if !strings.Contains(err.Error(), "COOKER_LICENSE_PUBLIC_KEY") {
+			t.Errorf("error should mention COOKER_LICENSE_PUBLIC_KEY, got: %v", err)
+		}
+	}
+}
+
+func TestValidate_LicenseKeyWithPublicKeyOK(t *testing.T) {
+	cfg := &Config{Env: EnvDev, License: LicenseConfig{Key: "some.token", PublicKey: "base64pubkey", PublicKeys: []string{"base64pubkey"}}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("key + public key should validate, got: %v", err)
+	}
+}
+
+func TestValidate_LicensePublicKeyOnlyOK(t *testing.T) {
+	// Public key with no token is fine: the admin API can install later.
+	cfg := &Config{Env: EnvDev, License: LicenseConfig{PublicKey: "base64pubkey", PublicKeys: []string{"base64pubkey"}}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("public key alone should validate, got: %v", err)
+	}
+}
+
+// TestValidate_LicenseKeyWithMultiplePublicKeysOK exercises the W3
+// rotation path: a license key plus several trusted public keys validates.
+func TestValidate_LicenseKeyWithMultiplePublicKeysOK(t *testing.T) {
+	cfg := &Config{Env: EnvDev, License: LicenseConfig{Key: "some.token", PublicKeys: []string{"key1", "key2"}}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("key + multiple public keys should validate, got: %v", err)
 	}
 }
 

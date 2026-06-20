@@ -1,4 +1,4 @@
-.PHONY: all build build-cli clean dev test lint uat-up uat-up-socketproxy uat-up-with-keycloak uat-down uat-logs uat-shell uat-reset test-e2e release release-snapshot
+.PHONY: all build build-cli clean dev test lint uat-up uat-up-socketproxy uat-up-with-keycloak uat-down uat-logs uat-shell uat-reset test-e2e backup-restore-drill release release-snapshot
 
 # Variables
 BINARY_NAME=cooker
@@ -102,6 +102,24 @@ migrate-up:
 migrate-down:
 	cd $(BACKEND_DIR) && go run ./cmd/cooker/ migrate down
 
+# --- Disaster recovery ---
+# Exercise the PostgreSQL backup → restore path end-to-end and print
+# PASS/FAIL: pg_dump (custom format) the source DB, restore into a
+# throwaway scratch DB, report per-table row counts, tear down. The
+# source DB is touched read-only (pg_dump only); the scratch DB is
+# created and dropped by the script. Proves the DR runbook
+# (docs/guides/DR.md) is runnable, not just documented.
+#
+# Configure via DATABASE_URL or the standard PG* env vars; defaults
+# target the local dev/UAT Postgres (localhost:5432 cooker/cooker).
+# Requires the PostgreSQL client tools (pg_dump/pg_restore/psql/
+# createdb/dropdb) on PATH.
+#
+#   make backup-restore-drill
+#   DATABASE_URL=postgres://u:p@host:5432/cooker make backup-restore-drill
+backup-restore-drill:
+	bash scripts/backup-restore-drill.sh
+
 # --- OpenAPI / Swagger ---
 # `make swagger` regenerates docs/api/swagger.{json,yaml,go} from
 # the swag annotations on cmd/cooker/main.go and the handlers.
@@ -149,6 +167,20 @@ helm-upgrade:
 
 helm-uninstall:
 	helm uninstall cooker
+
+# Mirror the CI helm job's kubeconform gates locally: render the chart
+# (default values) and validate it on stdin, then validate the raw
+# deploy/kubernetes/ parity manifests. CRD instances (e.g. the
+# monitoring.coreos.com ServiceMonitor/PrometheusRule that M0-T1 adds)
+# resolve against the Datree CRDs-catalog; -ignore-missing-schemas is the
+# fallback so an uncatalogued CRD is skipped, not failed. Requires `helm`
+# and `kubeconform` on PATH.
+KUBECONFORM_SCHEMAS=-schema-location default \
+	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+helm-validate:
+	helm template cooker $(DEPLOY_DIR)/helm/cooker | \
+		kubeconform -strict -summary -ignore-missing-schemas $(KUBECONFORM_SCHEMAS) -
+	kubeconform -strict -summary -ignore-missing-schemas $(KUBECONFORM_SCHEMAS) $(DEPLOY_DIR)/kubernetes/
 
 # --- UAT (self-contained testers' stack) ---
 # See docs/UAT.md for the full runbook. Brings up cooker + postgres

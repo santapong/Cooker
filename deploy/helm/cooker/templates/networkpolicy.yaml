@@ -25,6 +25,24 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.service.port }}
+    {{- if and .Values.metrics.enabled (gt (.Values.metrics.port | default 0 | int) 0) }}
+    # Allow Prometheus scrape of the dedicated internal metrics port. Same
+    # scoping as the HTTP rule above (same-namespace pods, plus the labeled
+    # ingress/monitoring namespace if set). Without this an enabled
+    # NetworkPolicy silently blocks the ServiceMonitor scrape of the
+    # dedicated port (metrics.port > 0), since the default policy is
+    # deny-all once policyTypes includes Ingress.
+    - from:
+        - podSelector: {}
+        {{- if .Values.networkPolicy.ingressNamespaceLabel }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespaceLabel | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.metrics.port }}
+    {{- end }}
   egress:
     # DNS — required for everything else to resolve.
     - to:

@@ -178,7 +178,9 @@ If the pod takes longer than the grace period, K8s SIGKILLs it; in-flight runs a
 
 ## Recommended Alertmanager rules
 
-These four counters are exposed on `/metrics` (when `COOKER_METRICS_ENABLED=true`). Each stays at zero on a healthy deployment; sustained `rate > 0` over 5 minutes indicates degradation worth paging on.
+The canonical rule set ships as a `PrometheusRule` CRD at `deploy/observability/prometheus/cooker-rules.yaml` (alerts: `CookerDBConnectionErrors`, `CookerRedisConnectionErrors`, `CookerJWKSFetchFailures`, `CookerOrphanedRunsHigh`, `CookerHTTP5xxRate`, `CookerReadinessFailing`). Apply it directly, or render the same rules from the Helm chart with `--set metrics.prometheusRule.enabled=true`. The static raw-manifest equivalent is `deploy/kubernetes/prometheusrule.yaml`. See `deploy/observability/README.md` for plain-Prometheus (non-Operator) wiring.
+
+All series require `COOKER_METRICS_ENABLED=true` (Helm: `metrics.enabled=true`, the chart default). Each resilience counter stays at zero on a healthy deployment; sustained `rate > 0` over 5 minutes indicates degradation worth paging on. The illustrative group below is kept for quick reference — the files above are authoritative.
 
 ```yaml
 groups:
@@ -274,6 +276,8 @@ groups:
 
 Cooker keeps everything operationally significant in PostgreSQL: pipelines, runs, environments, apps, hosts, users, schema_migrations, and the embedded run history (JSONB on `pipeline_runs`). Lose the database and you lose history; the schema can be re-created from an empty database via the embedded migrations.
 
+> For RPO/RTO targets, the full restore procedure, the `COOKER_SECRET_KEY`-escrow and EFS-not-backed-up caveats, and a runnable drill (`make backup-restore-drill`), see the [disaster-recovery runbook](./DR.md).
+
 ### Backup
 
 The chart does **not** ship a backup operator. Pick one of:
@@ -342,9 +346,19 @@ In every case the cooker pod logs the underlying error at `WARN`/`ERROR`; client
 
 ## Monitoring dashboards
 
-Pre-built dashboards live in `deploy/observability/dashboards/` (Grafana JSON, Prometheus rules). Key panels:
+A ready-to-import Grafana dashboard lives at `deploy/observability/dashboards/cooker-overview.json` (templated `$datasource`, so it binds to any Prometheus datasource on import). Import + provisioning steps are in `deploy/observability/README.md`. Key panels:
 
-- **HTTP request rate / latency** (`cooker_http_request_duration_seconds`) — split by route template.
-- **Stage duration** (`cooker_pipeline_stage_duration_seconds`, T18) — split by `type` and `status`.
-- **Resilience counters** — `cooker_db_connection_errors_total`, `cooker_redis_connection_errors_total`, `cooker_jwks_fetch_failures_total`, `cooker_audit_events_dropped_total`, `cooker_run_heartbeat_errors_total`, `cooker_pipeline_runs_orphaned_total`.
-- **Build SHA** — scrape `/version` into a `build_info` gauge per replica so the dashboard's title shows what's running.
+- **HTTP request rate / latency / 5xx ratio** (`cooker_http_requests_total`, `cooker_http_request_duration_seconds`) — the 5xx series is selected on the `status` label (`status=~"5.."`), not a `code` label.
+- **Jobqueue depth** (`cooker_jobqueue_depth`) — split by status.
+- **Stage duration** (`cooker_pipeline_stage_duration_seconds`) — p95 split by `type`.
+- **Resilience counters** — `cooker_db_connection_errors_total`, `cooker_redis_connection_errors_total`, `cooker_jwks_fetch_failures_total`, `cooker_pipeline_runs_orphaned_total`.
+
+All series require `COOKER_METRICS_ENABLED=true`. The Helm chart sets this by default (`metrics.enabled=true`); the raw manifests set it as a literal env var. The Go binary's own default is `false`.
+
+A `ServiceMonitor` and `PrometheusRule` ship for the Prometheus Operator — render them from the chart with `--set metrics.serviceMonitor.enabled=true` / `--set metrics.prometheusRule.enabled=true`, or apply the static `deploy/kubernetes/servicemonitor.yaml` + `deploy/kubernetes/prometheusrule.yaml`.
+
+> **SECURITY — `/metrics` is unauthenticated.** By default it is served on the public app port (8080) with no auth. The secure scrape path is the **cluster-internal Service via the ServiceMonitor**, which never leaves the cluster network — the default install (`ingress.enabled=false` → ClusterIP only) keeps `/metrics` cluster-internal.
+>
+> **RECOMMENDED for any ingress-exposed install: set a dedicated internal metrics port** (`COOKER_METRICS_PORT` / Helm `metrics.port`). With `metrics.port > 0` the backend binds `/metrics` **only** on that separate internal container port and **not** on the main app port, so it is structurally off the public `/` ingress — no deny-rule required. The chart then renders a named `metrics` containerPort, a cluster-internal `metrics` Service port, and points the ServiceMonitor at it; the raw manifests ship the same wiring as commented blocks (uncomment the `metrics` containerPort + `COOKER_METRICS_PORT` env in `deployment.yaml`, the `metrics` Service port in `service.yaml`, and switch the ServiceMonitor endpoint `port` to `metrics`). This is the proper fix for the unauthenticated-`/metrics`-over-ingress caveat.
+>
+> If you instead keep `metrics.port=0` (the back-compat default) **and** enable the Ingress with the default `/` prefix, `/metrics` becomes **publicly routable**; block it at the ingress as a stopgap (the `ingress.annotations` block in `values.yaml` ships a ready-to-uncomment nginx `configuration-snippet` that does `location = /metrics { deny all; }`).

@@ -16,6 +16,18 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    # Dedicated internal metrics port (chart equivalent: metrics.port > 0).
+    # If you serve /metrics on a separate internal port instead of 8080
+    # (see the commented "metrics" containerPort + COOKER_METRICS_PORT in
+    # deploy/kubernetes/deployment.yaml), you MUST also allow scrape traffic
+    # to that port here, or this NetworkPolicy silently blocks the Prometheus
+    # scrape (deny-all applies once policyTypes includes Ingress). Mirror the
+    # 8080 rule above with your chosen port (here 9090):
+    # - from:
+    #     - podSelector: {}
+    #   ports:
+    #     - protocol: TCP
+    #       port: 9090
   egress:
     # DNS
     - to:

@@ -132,6 +132,7 @@ func NewStore(ctx context.Context, databaseURL string) (*store.Store, error) {
 		NewClusterConfigStore(db),
 		NewUserStore(db),
 		NewAPITokenStore(db),
+		NewLicenseStore(db),
 		db.Close,
 		db.PingContext,
 	), nil
