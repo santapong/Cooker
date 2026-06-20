@@ -12,7 +12,9 @@ If you discover a security vulnerability in Cooker, please report it responsibly
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email: **security@cooker-ci.example.com**
+Instead, please email: **santapongsondhi@gmail.com**
+
+This disclosure contact is also advertised machine-readably at `/.well-known/security.txt` (RFC 9116).
 
 Include the following in your report:
 - Description of the vulnerability

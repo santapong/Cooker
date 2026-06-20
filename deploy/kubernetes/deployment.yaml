@@ -66,6 +66,12 @@ spec:
               value: "redis"
             - name: COOKER_PORT
               value: "8080"
+            # Expose Prometheus metrics on /metrics (HTTP port). The Go
+            # binary defaults this to false; set true here for parity with
+            # the Helm chart (metrics.enabled=true). Scraped by
+            # deploy/kubernetes/servicemonitor.yaml.
+            - name: COOKER_METRICS_ENABLED
+              value: "true"
             - name: COOKER_K8S_IN_CLUSTER
               value: "true"
             # M (BUILDER): explicit builder selection so the binary never

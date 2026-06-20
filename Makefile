@@ -150,6 +150,20 @@ helm-upgrade:
 helm-uninstall:
 	helm uninstall cooker
 
+# Mirror the CI helm job's kubeconform gates locally: render the chart
+# (default values) and validate it on stdin, then validate the raw
+# deploy/kubernetes/ parity manifests. CRD instances (e.g. the
+# monitoring.coreos.com ServiceMonitor/PrometheusRule that M0-T1 adds)
+# resolve against the Datree CRDs-catalog; -ignore-missing-schemas is the
+# fallback so an uncatalogued CRD is skipped, not failed. Requires `helm`
+# and `kubeconform` on PATH.
+KUBECONFORM_SCHEMAS=-schema-location default \
+	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+helm-validate:
+	helm template cooker $(DEPLOY_DIR)/helm/cooker | \
+		kubeconform -strict -summary -ignore-missing-schemas $(KUBECONFORM_SCHEMAS) -
+	kubeconform -strict -summary -ignore-missing-schemas $(KUBECONFORM_SCHEMAS) $(DEPLOY_DIR)/kubernetes/
+
 # --- UAT (self-contained testers' stack) ---
 # See docs/UAT.md for the full runbook. Brings up cooker + postgres
 # + a local CNCF Distribution registry + a single-node k3s cluster.

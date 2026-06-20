@@ -340,6 +340,7 @@ func (s *Server) registerRoutes() {
 	}
 
 	s.router.NoRoute(spaIndexHandler("/usr/share/cooker/static/index.html"))
+	s.router.GET("/.well-known/security.txt", securityTxtHandler())
 	s.router.GET("/assets/*filepath", assetsHandler("/usr/share/cooker/static/assets"))
 	s.router.HEAD("/assets/*filepath", assetsHandler("/usr/share/cooker/static/assets"))
 }

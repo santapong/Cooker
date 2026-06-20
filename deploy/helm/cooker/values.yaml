@@ -460,6 +460,33 @@ retention:
       cpu: 200m
       memory: 256Mi
 
+# Prometheus metrics. The /metrics endpoint is served on the HTTP port
+# (service.port) when COOKER_METRICS_ENABLED=true. The chart sets that env
+# var from metrics.enabled below.
+#
+# metrics.enabled defaults to TRUE so a default install always exposes
+# /metrics (closes the "deployed but no metrics" footgun; the Go binary's
+# own default is false). The two CRD sub-toggles default to FALSE so a
+# default install never references the Prometheus-Operator CRDs
+# (monitoring.coreos.com/v1), which are absent on a fresh cluster. Flip
+# them on once the Operator is installed.
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    # Extra labels (e.g. the Operator's release selector). Example:
+    #   labels:
+    #     release: kube-prometheus-stack
+    labels: {}
+  prometheusRule:
+    enabled: false
+    # Extra labels to match your Prometheus' ruleSelector. Example:
+    #   labels:
+    #     role: alert-rules
+    labels: {}
+
 # NetworkPolicy that restricts ingress to port 8080 from any pod in
 # the same namespace and (optionally) ingress controllers, plus egress
 # to DNS / Postgres / Redis / OCI registries / Kubernetes API. Disable

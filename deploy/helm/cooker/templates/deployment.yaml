@@ -46,6 +46,8 @@ spec:
               value: {{ .Values.cookerEnv | quote }}
             - name: COOKER_PORT
               value: {{ .Values.service.port | quote }}
+            - name: COOKER_METRICS_ENABLED
+              value: {{ .Values.metrics.enabled | quote }}
             - name: COOKER_K8S_IN_CLUSTER
               value: {{ .Values.kubernetes.inCluster | quote }}
             - name: COOKER_REPLICA_COUNT
