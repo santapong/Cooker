@@ -238,12 +238,25 @@ type APITokenStore interface {
 // is installed), and Delete clears it. The store keeps only the decoded
 // claims plus the signed RawToken; signature verification is the
 // licensing service's job (M2-T2), not the store's.
+//
+// Single-active-row sentinel-id contract: there is exactly one row, keyed
+// on the fixed sentinel id "active". Every implementation MUST normalise
+// the stored license's ID to "active" on Set — overwriting whatever the
+// caller passed (e.g. a UUID from service.Install) and mutating the
+// caller's pointer so the in-memory and Postgres backends are
+// indistinguishable for the same input. GetActive therefore always
+// returns a License whose ID is "active". Postgres enforces this in the
+// schema via the licenses_one_row CHECK (migration 024); the memory impl
+// mirrors it in code.
 type LicenseStore interface {
 	// GetActive returns the currently installed license. ErrNotFound if
-	// no license has been installed.
+	// no license has been installed. The returned license's ID is always
+	// the "active" sentinel.
 	GetActive(ctx context.Context) (*model.License, error)
 	// Set installs l as the active license, replacing any existing one
-	// (upsert: single-row semantics). Stamps InstalledAt when zero.
+	// (upsert: single-row semantics). Stamps InstalledAt when zero and
+	// normalises l.ID to the "active" sentinel (mutating l) so both
+	// backends yield an identical record for the same input.
 	Set(ctx context.Context, l *model.License) error
 	// Delete removes the installed license, returning the instance to the
 	// unlicensed (free/explorer) baseline. Deleting when none is

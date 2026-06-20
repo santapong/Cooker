@@ -36,16 +36,27 @@ func TestLicenseStore_SetGetActiveDelete(t *testing.T) {
 
 	exp := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 	lic := mkLicense("crew", &exp)
+	// service.Install hands the store a freshly-minted UUID; the store must
+	// normalise it to the "active" sentinel so memory and Postgres agree.
+	lic.ID = "11111111-2222-3333-4444-555555555555"
 	if err := st.Set(ctx, lic); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	if lic.InstalledAt.IsZero() {
 		t.Fatalf("Set should stamp InstalledAt when zero")
 	}
+	// Set mutates the caller's pointer to the sentinel id (parity with the
+	// Postgres impl, which does the same after the upsert).
+	if lic.ID != "active" {
+		t.Fatalf("Set should normalise caller's ID to \"active\"; got %q", lic.ID)
+	}
 
 	got, err := st.GetActive(ctx)
 	if err != nil {
 		t.Fatalf("GetActive: %v", err)
+	}
+	if got.ID != "active" {
+		t.Fatalf("GetActive should always return id \"active\"; got %q", got.ID)
 	}
 	if got.Plan != "crew" || got.Seats != 3 || got.Customer != "Acme Corp" {
 		t.Fatalf("unexpected license: %+v", got)
