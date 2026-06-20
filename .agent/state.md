@@ -32,7 +32,7 @@
 |----|-----------|------|------|--------|
 | M0 | Observability artifacts + metrics-on + security.txt + CI gate | A | — | 🟢 done → draft PR |
 | M1 | DR drill + legal/status → self-hosted launch-ready | A | M0 | 🟢 done (committed `d21a55f`) |
-| M2 | Self-hosted licensing (Ed25519 + entitlements + UI) | B0 | — | 🔵 T1✅ T2✅ `920f2ad` · T3 (UI) running |
+| M2 | Self-hosted licensing (Ed25519 + entitlements + UI) | B0 | — | 🔵 T1✅T2✅T3✅ `49cd5e0` · docs✅ · audit running |
 | M3 | Multi-tenancy (tenant_id + build-farm isolation) | C | D4 confirm | ⚪ blocked on decision |
 | M4 | Stripe Cloud billing + metering | B1/B2 | M3 | ⚪ blocked |
 | M5 | SaaS hosting (AWS) + GDPR + split-origin | SaaS | M3 | ⚪ blocked |

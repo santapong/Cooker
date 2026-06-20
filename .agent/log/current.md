@@ -75,3 +75,13 @@
   License tab + tier cards (soft hints only, no hard-gating).
 - After M2-T3: review+verify, commit+push, then M2 docs follow-up (env vars in UAT/SECURITY)
   + surface D5 (open-core split) to user. M3+ still gated on D4.
+
+## [2026-06-20 ~15:30] M2-T3✅ + M2 docs✅; M2 audit running
+- M2-T3 (license UI) done → PM gates green (lint 0 err, tsc clean, 91 tests) →
+  reviewed SettingsPage tab wiring → committed+pushed `49cd5e0`. #117 CI re-running.
+- M2 docs (env vars + SECURITY note) done → committed locally (push bundled w/ audit fixes).
+- M2 audit launched (general-purpose a4f23ffab): full licensing diff — verify path, store.New
+  ripple, route auth, gate-dormancy, + research (JWT/PASETO vs custom token, key rotation).
+- Lane A (M0+M1) + Lane B0 (M2) = the self-hosted launch + first-revenue path — NEARLY DONE.
+- Pending user decisions: D5 (open-core: which features the gate guards) · D4 (Cooker Cloud
+  go/no-go, gates M3 multi-tenancy → M4 Stripe → M5 SaaS).
