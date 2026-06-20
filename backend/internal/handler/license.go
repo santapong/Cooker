@@ -45,7 +45,9 @@ const (
 // GetLicense returns the current license status and resolved
 // entitlements. It is readable by any authenticated user (the frontend
 // uses it to show/hide paid features); it never echoes the raw license
-// token (model.License.RawToken is json:"-"). With no license installed it
+// token (model.License.RawToken is json:"-") and deliberately omits the
+// installer identity (installedByEmail / installedBySub) — that is admin PII
+// not needed for the entitlement UI (W1-08). With no license installed it
 // returns status "none" and the Free entitlements — a 200, not a 404.
 func (h *Handler) GetLicense(c *gin.Context) {
 	if !h.requireLicense(c) {
@@ -76,7 +78,12 @@ func (h *Handler) GetLicense(c *gin.Context) {
 		resp["issuedAt"] = lic.IssuedAt
 		resp["expiresAt"] = lic.ExpiresAt // nil => perpetual
 		resp["installedAt"] = lic.InstalledAt
-		resp["installedByEmail"] = lic.InstalledByEmail
+		// W1-08: installedByEmail / installedBySub are admin PII (the human
+		// who installed the license) and are NOT needed for the entitlement
+		// UI, which any authenticated user can read. Deliberately omitted
+		// here. The install/delete handlers are admin-only; if a future admin
+		// view needs the installer identity it must go behind an admin-only
+		// endpoint, not this shared GET.
 	}
 	c.JSON(http.StatusOK, resp)
 }

@@ -43,6 +43,31 @@ secrets:
       existingSecret: ""    # name of a pre-created Secret
       existingSecretKey: "api-key"
 
+# License configuration. Cooker runs as Free (unlicensed) when nothing
+# below is set — all keys are optional and empty by default. A license
+# unlocks paid tiers via a signed token verified against one or more
+# Ed25519 public keys.
+#
+#   publicKey   — a single license verification public key, plain text
+#                 (PUBLIC, not sensitive). Rendered as
+#                 COOKER_LICENSE_PUBLIC_KEY.
+#   publicKeys  — a list of additional verification public keys (e.g. for
+#                 key rotation). Joined with "," and rendered as
+#                 COOKER_LICENSE_PUBLIC_KEYS.
+#   tokenSecret — existingSecret reference for the license TOKEN itself,
+#                 which IS sensitive (it identifies the customer / tier).
+#                 Mirrors the oidc.clientSecretRef / secrets.keepsave.apiKey
+#                 pattern: the token comes from a pre-created Kubernetes
+#                 Secret via secretKeyRef, never a values literal. When
+#                 tokenSecret.name is set the chart renders COOKER_LICENSE_KEY
+#                 from secretKeyRef; otherwise it is omitted (= Free tier).
+license:
+  publicKey: ""
+  publicKeys: []
+  tokenSecret:
+    name: ""            # name of a pre-created Secret holding the license token
+    key: "license-key"
+
 # Cloud inventory & cost panel (OR-2). Read-only: Cooker lists compute
 # instances, managed Kubernetes clusters, and container registries, plus
 # month-to-date spend, across the enabled providers. Each provider is
@@ -109,7 +134,10 @@ ingress:
   #         - cooker.example.com
   # See README §Deployment → TLS at ingress.
   tls: []
-  annotations: {}
+  # Empty by default. NOTE: this is intentionally `annotations:` (null), NOT
+  # `annotations: {}` — so you can uncomment the snippet below directly without
+  # first deleting a `{}` (a `{}` followed by indented keys is invalid YAML).
+  annotations:
     # SECURITY: /metrics is unauthenticated (see the metrics: block). When the
     # Ingress is enabled with the default "/" prefix it is publicly routable.
     # Uncomment the snippet below (nginx ingress controller) to deny /metrics

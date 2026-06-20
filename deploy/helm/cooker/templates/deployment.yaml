@@ -41,7 +41,7 @@ spec:
           ports:
             - containerPort: {{ .Values.service.port }}
               name: http
-            {{- if and .Values.metrics.enabled (gt (int .Values.metrics.port) 0) }}
+            {{- if and .Values.metrics.enabled (gt (.Values.metrics.port | default 0 | int) 0) }}
             # Dedicated internal metrics port. /metrics is served ONLY here
             # (not on the app port), so it stays off the public "/" ingress.
             - containerPort: {{ .Values.metrics.port }}
@@ -54,7 +54,7 @@ spec:
               value: {{ .Values.service.port | quote }}
             - name: COOKER_METRICS_ENABLED
               value: {{ .Values.metrics.enabled | quote }}
-            {{- if and .Values.metrics.enabled (gt (int .Values.metrics.port) 0) }}
+            {{- if and .Values.metrics.enabled (gt (.Values.metrics.port | default 0 | int) 0) }}
             # >0 makes the backend bind /metrics on this separate internal
             # port only; 0/unset keeps it on the main app port (back-compat).
             - name: COOKER_METRICS_PORT
@@ -129,6 +129,23 @@ spec:
                 secretKeyRef:
                   name: {{ required "secrets.keepsave.apiKey.existingSecret is required when secrets.backend=keepsave" .Values.secrets.keepsave.apiKey.existingSecret | quote }}
                   key: {{ .Values.secrets.keepsave.apiKey.existingSecretKey | quote }}
+            {{- end }}
+            {{- if .Values.license.publicKey }}
+            - name: COOKER_LICENSE_PUBLIC_KEY
+              value: {{ .Values.license.publicKey | quote }}
+            {{- end }}
+            {{- if .Values.license.publicKeys }}
+            - name: COOKER_LICENSE_PUBLIC_KEYS
+              value: {{ join "," .Values.license.publicKeys | quote }}
+            {{- end }}
+            {{- if .Values.license.tokenSecret.name }}
+            # License token is sensitive — pulled from a pre-created Secret
+            # via secretKeyRef, never a values literal. Absent = Free tier.
+            - name: COOKER_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.license.tokenSecret.name | quote }}
+                  key: {{ .Values.license.tokenSecret.key | quote }}
             {{- end }}
             {{- if .Values.cloudInventory.cacheTTL }}
             - name: COOKER_CLOUD_CACHE_TTL

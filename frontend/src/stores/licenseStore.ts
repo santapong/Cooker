@@ -77,10 +77,11 @@ export const useLicenseStore = create<LicenseStore>((set) => ({
   remove: async () => {
     set({ mutating: true, error: null });
     try {
-      // The DELETE response is the reset (free) shape; merge it over the
-      // free baseline so the store always holds a complete License object.
+      // The DELETE response is the complete free shape (status:'none',
+      // plan:'free', empty entitlements) — trust it directly rather than
+      // forcing a local baseline, so the UI reflects the server's truth.
       const reset = await licenseApi.remove();
-      apply(set, { ...FREE_LICENSE, ...reset, entitlements: FREE_LICENSE.entitlements });
+      apply(set, reset);
       set({ mutating: false });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

@@ -104,6 +104,25 @@ spec:
             # if using the KeepSave secrets manager.
             - name: COOKER_SECRETS_BACKEND
               value: "database"
+            # --- License (A-3), opt-in ----------------------------------
+            # Cooker runs as Free (unlicensed) when none of these are set.
+            # The public key(s) are NOT sensitive (plain value); the license
+            # TOKEN is sensitive and comes from a pre-created Secret via
+            # secretKeyRef (never inline). Chart equivalent: the license.*
+            # block in deploy/helm/cooker/values.yaml.
+            #   kubectl -n cooker create secret generic cooker-license \
+            #     --from-literal=license-key="<your-license-token>"
+            #
+            # - name: COOKER_LICENSE_PUBLIC_KEY
+            #   value: "<base64-ed25519-public-key>"
+            # - name: COOKER_LICENSE_PUBLIC_KEYS   # comma-separated, for rotation
+            #   value: "<key-a>,<key-b>"
+            # - name: COOKER_LICENSE_KEY           # sensitive — from a Secret
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: cooker-license
+            #       key: license-key
+            # ------------------------------------------------------------
             # CR-5: COOKER_SECRET_KEY via secretKeyRef (optional:false) —
             # the pod will fail creation if the Secret is missing, rather than
             # booting silently with an empty AES key that encrypts nothing.

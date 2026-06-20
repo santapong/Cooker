@@ -41,6 +41,12 @@ At minimum, set in `my-values.yaml` (see the chart's `values.yaml` for the full 
 - **`COOKER_ENV`** — `production` enables strict CORS defaults and `Config.Validate()`
   startup checks. Use `dev`/`uat` only for non-production.
 - **OIDC** — issuer, client id, and the `secretKeyRef` for the client secret.
+- **Licensing (paid tiers only)** — set the `license:` values block: `license.publicKey`
+  (single base64 Ed25519 public key) or `license.publicKeys` (comma-separated list, for
+  zero-downtime key rotation — see `docs/guides/UAT.md` → *Self-hosted licensing*). The
+  license **token is sensitive**, so supply it via `license.tokenSecret.{name,key}`
+  (an existing `Secret` referenced by `secretKeyRef`) rather than inline. **Never put the
+  token in `values.yaml`.** With no license configured, Cooker runs on the Free tier.
 - **Postgres** — connection settings; production enforces TLS (`sslmode=require`+).
 - **HA (for any availability target)** — `≥ 2` replicas + PDB, and the Redis-backed
   rate-limit / WS-ticket / WS-hub backends (see `docs/guides/MULTI_REPLICA.md`).

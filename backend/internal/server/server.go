@@ -349,6 +349,15 @@ func New(cfg *config.Config) (*Server, error) {
 	// install when there is no active license OR the stored token differs.
 	// On ANY failure log and degrade to Free — never panic (an
 	// expired/invalid env-set license must not block boot).
+	//
+	// W1-09 (doc only): this boot-install is RACY under multi-replica. The
+	// read-then-install is not atomic and the store keeps a single 'active'
+	// license (last-write-wins via the active upsert), so N replicas booting
+	// the same COOKER_LICENSE_KEY may each install once. The result converges
+	// to the same token (idempotent on token identity), so the race is
+	// benign in practice — but if strict single-install semantics are ever
+	// required, gate this to a leader (or move it out of the per-replica boot
+	// path).
 	if envKey := strings.TrimSpace(cfg.License.Key); envKey != "" {
 		// Read the active license first. A load error here must not block
 		// boot: log and fall through to the install attempt, which carries
@@ -647,8 +656,15 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 	if s.config != nil && s.config.Observability.MetricsEnabled && s.config.Observability.MetricsPort > 0 {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", observability.MetricsHTTPHandler())
+		// Bind host for the dedicated metrics listener (W1-02). Default "" =
+		// all interfaces (back-compat; also required so an in-cluster
+		// ServiceMonitor can scrape the pod IP). Operators relying on this
+		// dedicated port MUST protect it via NetworkPolicy or bind it to a
+		// private interface (COOKER_METRICS_HOST) — it is not behind the app's
+		// auth middleware. The chart side is handled separately.
+		metricsHost := s.config.Observability.MetricsHost
 		metricsSrv = &http.Server{
-			Addr:    fmt.Sprintf(":%d", s.config.Observability.MetricsPort),
+			Addr:    fmt.Sprintf("%s:%d", metricsHost, s.config.Observability.MetricsPort),
 			Handler: mux,
 		}
 		go func() {
@@ -664,6 +680,14 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 
 	select {
 	case err := <-errCh:
+		// The primary app server exited (typically a bind/serve failure).
+		// Tear down the dedicated metrics listener too so it does not leak
+		// for the lifetime of the process (W1-01). The ctx.Done() path below
+		// drains it gracefully; here the app is already gone, so a hard Close
+		// is correct.
+		if metricsSrv != nil {
+			_ = metricsSrv.Close()
+		}
 		return err
 	case <-ctx.Done():
 		slog.Info("shutdown: draining HTTP server", "timeout", shutdownTimeout.String())

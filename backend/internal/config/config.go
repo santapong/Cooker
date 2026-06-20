@@ -172,6 +172,15 @@ type ObservabilityConfig struct {
 	// finding M0-1). 0 (default) preserves the single-port behaviour:
 	// /metrics is mounted on the main router.
 	MetricsPort int
+	// MetricsHost is the bind interface for the dedicated metrics listener
+	// (COOKER_METRICS_HOST). It is only consulted when MetricsPort > 0. The
+	// default "" binds all interfaces (back-compat, and required so an
+	// in-cluster Prometheus ServiceMonitor can scrape the pod IP). Operators
+	// who rely on the dedicated metrics port MUST restrict access to it via a
+	// NetworkPolicy (or bind it to a private interface here) — it is not
+	// gated by the app's auth middleware. The chart side is handled
+	// separately.
+	MetricsHost string
 }
 
 type RateLimitConfig struct {
@@ -447,6 +456,7 @@ func Load() *Config {
 			ServiceName:    getEnv("COOKER_SERVICE_NAME", "cooker"),
 			ServiceVersion: getEnv("COOKER_SERVICE_VERSION", "dev"),
 			MetricsPort:    getEnvInt("COOKER_METRICS_PORT", 0),
+			MetricsHost:    getEnv("COOKER_METRICS_HOST", ""),
 		},
 		AppHealthInterval: getEnvDuration("COOKER_APP_HEALTH_INTERVAL", 30*time.Second),
 		JobQueue: JobQueueConfig{
@@ -489,6 +499,21 @@ func (c *Config) Validate() error {
 	// didn't take. Fail fast so the misconfiguration is obvious.
 	if c.License.Key != "" && len(c.License.PublicKeys) == 0 {
 		return fmt.Errorf("config: COOKER_LICENSE_KEY is set but no public key is configured (COOKER_LICENSE_PUBLIC_KEY / COOKER_LICENSE_PUBLIC_KEYS); a license cannot be verified without a public key")
+	}
+	// Metrics port hygiene (W1-03 / W1-04), env-independent: a dedicated
+	// metrics listener must not collide with the app port (one of the two
+	// would fail to bind, non-deterministically), and a configured port must
+	// be a valid TCP port. 0 means "no dedicated listener" and is always
+	// allowed. These are misconfigurations in dev and prod alike — fail fast.
+	if c.Observability.MetricsPort > 0 {
+		if c.Observability.MetricsPort == c.Port {
+			return fmt.Errorf("config: COOKER_METRICS_PORT must differ from COOKER_PORT (%d)", c.Port)
+		}
+		if c.Observability.MetricsPort > 65535 {
+			return fmt.Errorf("config: COOKER_METRICS_PORT=%d is out of range (1..65535)", c.Observability.MetricsPort)
+		}
+	} else if c.Observability.MetricsPort < 0 {
+		return fmt.Errorf("config: COOKER_METRICS_PORT=%d is out of range (1..65535)", c.Observability.MetricsPort)
 	}
 	if strings.Contains(c.Audit.Destination, "db") && c.Env.IsProduction() && c.DatabaseURL == "" {
 		return fmt.Errorf("config: COOKER_AUDIT_DESTINATION=db requires DATABASE_URL in production")

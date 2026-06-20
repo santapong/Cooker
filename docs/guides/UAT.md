@@ -359,7 +359,20 @@ invalid license never locks the API, it only degrades to Free.
 | Env var | Default | Meaning |
 |---|---|---|
 | `COOKER_LICENSE_PUBLIC_KEY` | — | Base64 Ed25519 **public** key the operator sets to enable verification. Distributed by the vendor; the private signing key is held out-of-repo and never shipped. |
-| `COOKER_LICENSE_KEY` | — | A signed license token. Set it to install a license at **boot**; verified against `COOKER_LICENSE_PUBLIC_KEY`. Equivalent to installing one in the admin UI. |
+| `COOKER_LICENSE_PUBLIC_KEYS` | — | Comma-separated list of base64 Ed25519 **public** keys, **any** of which may verify a token. Supports key rotation (see below). Unioned with the singular `COOKER_LICENSE_PUBLIC_KEY` for back-compat — set either, both, or neither. |
+| `COOKER_LICENSE_KEY` | — | A signed license token. Set it to install a license at **boot**; verified against any configured public key. Equivalent to installing one in the admin UI. |
+
+**Key rotation (zero downtime)** — to rotate the vendor signing key
+without an outage:
+
+1. Generate a new keypair (`cooker-license keygen`).
+2. During the overlap window, set **both** the old and new public keys
+   in `COOKER_LICENSE_PUBLIC_KEYS` (comma-separated). Existing licenses
+   signed with the old key keep verifying because verification succeeds
+   if **any** configured key validates the token.
+3. Re-issue licenses to customers, signed with the **new** private key.
+4. Once every active license is on the new key, drop the old key from
+   `COOKER_LICENSE_PUBLIC_KEYS`. This retires trust in the old key.
 
 **Installing a license** — either set `COOKER_LICENSE_KEY` at boot, or
 paste the token into **Settings → License** in the admin UI
@@ -378,7 +391,8 @@ is the root of trust and is held out-of-repo:
 go run ./backend/cmd/cooker-license keygen -out cooker-license
 #   → cooker-license.key (private, 0600 — keep secret, never commit)
 #   → cooker-license.pub (public — give to operators as
-#     COOKER_LICENSE_PUBLIC_KEY)
+#     COOKER_LICENSE_PUBLIC_KEY, or list it in
+#     COOKER_LICENSE_PUBLIC_KEYS alongside the outgoing key when rotating)
 
 # 2. Sign a license token for a customer.
 go run ./backend/cmd/cooker-license sign \

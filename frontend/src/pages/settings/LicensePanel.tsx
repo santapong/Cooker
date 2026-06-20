@@ -528,14 +528,75 @@ function TierCard({ tier, current }: { tier: Tier; current: boolean }) {
         ))}
       </ul>
 
-      <Btn
-        kind={tier.featured ? 'primary' : 'secondary'}
-        disabled={current}
-        style={{ width: '100%', justifyContent: 'center' }}
-      >
-        {current ? 'Your plan' : tier.plan === 'constellation' ? 'Contact crew' : tier.plan === 'crew' ? 'Start 14-day trial' : 'Start free'}
-      </Btn>
+      <TierCta tier={tier} current={current} />
     </Card>
+  );
+}
+
+/**
+ * Honest tier call-to-action. There is no self-serve checkout in a self-hosted
+ * deployment, so we never imply a trial or an in-app purchase flow:
+ *  - the customer's current plan renders a disabled "Your plan",
+ *  - paid tiers (Crew / Constellation) link a "Contact about <tier>" mailto,
+ *  - the free tier renders a non-actionable "Self-hosted default" label.
+ */
+function TierCta({ tier, current }: { tier: Tier; current: boolean }) {
+  const t = useTheme();
+
+  if (current) {
+    return (
+      <Btn kind="secondary" disabled style={{ width: '100%', justifyContent: 'center' }}>
+        Your plan
+      </Btn>
+    );
+  }
+
+  if (tier.plan === 'free') {
+    // Free is the self-hosted default — nothing to buy, nothing to start.
+    return (
+      <Btn kind="secondary" disabled style={{ width: '100%', justifyContent: 'center' }}>
+        Self-hosted default
+      </Btn>
+    );
+  }
+
+  // Paid tier: contact the maintainer. mailto is allowed (not a backend URL).
+  const subject = encodeURIComponent(`Cooker ${tier.name} license`);
+  const primary = tier.featured;
+  return (
+    <a
+      href={`mailto:santapongsondhi@gmail.com?subject=${subject}`}
+      className="cc-btn"
+      style={{
+        width: '100%',
+        boxSizing: 'border-box',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 7,
+        padding: '8px 14px',
+        borderRadius: 9,
+        fontSize: 12.5,
+        fontFamily: t.sans,
+        fontWeight: 600,
+        letterSpacing: 0.1,
+        textDecoration: 'none',
+        border: '1px solid transparent',
+        transition: 'transform .15s, box-shadow .15s, filter .15s',
+        whiteSpace: 'nowrap',
+        ...(primary
+          ? {
+              background: `linear-gradient(135deg, ${t.violet}, ${t.violetGlow})`,
+              color: '#fff',
+              borderColor: hexA(t.violetGlow, 0.6),
+              boxShadow: `0 6px 18px ${hexA(t.violetGlow, 0.38)}`,
+            }
+          : { background: hexA(t.surfaceSolid, 0.6), color: t.text, borderColor: t.line }),
+      }}
+    >
+      Contact about {tier.name}
+      <Icon name="arrow" size={14} />
+    </a>
   );
 }
 

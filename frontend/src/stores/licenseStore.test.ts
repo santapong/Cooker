@@ -3,7 +3,7 @@
  *
  * The api/license module is mocked so the store's state transitions
  * (loading/mutating/error flags, applying the resolved License, and the
- * free-baseline merge on remove) can be exercised in isolation, with no
+ * server-truth reset applied on remove) can be exercised in isolation, with no
  * network or token injection involved.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -101,16 +101,30 @@ describe('licenseStore', () => {
     expect(s.mutating).toBe(false);
   });
 
-  it('remove merges the reset response over the free baseline', async () => {
+  it('remove applies the server reset response directly', async () => {
     // seed an active license first
     useLicenseStore.setState({ license: ACTIVE, status: 'active', entitlements: ACTIVE.entitlements });
-    removeMock.mockResolvedValue({ status: 'none', plan: 'free' });
+    // The backend DELETE returns the complete free shape; the store trusts it.
+    const FREE: License = {
+      status: 'none',
+      plan: 'free',
+      seats: 0,
+      features: [],
+      entitlements: { plan: 'free', seats: 0, features: {} },
+      customer: '',
+      issuedAt: '',
+      expiresAt: null,
+      installedAt: '',
+      installedByEmail: '',
+    };
+    removeMock.mockResolvedValue(FREE);
     await useLicenseStore.getState().remove();
     const s = useLicenseStore.getState();
     expect(s.status).toBe('none');
     expect(s.license.plan).toBe('free');
-    // entitlements reset to the empty free map, not the prior crew one
+    // entitlements reflect the server's free map, not the prior crew one
     expect(s.entitlements.features).toEqual({});
     expect(s.license.customer).toBe('');
+    expect(s.mutating).toBe(false);
   });
 });

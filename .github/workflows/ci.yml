@@ -389,19 +389,26 @@ jobs:
           fi
       - name: helm template (metrics ServiceMonitor + PrometheusRule)
         run: |
-          # Gate render: exercise the metrics observability path that
-          # M0-T1 lands (ServiceMonitor + PrometheusRule are
-          # monitoring.coreos.com CRDs). This permutation is inert before
-          # M0-T1 (no metrics templates yet → renders the base set) and
-          # becomes load-bearing once those templates exist, at which point
-          # kubeconform validates the CRD instances against the Datree
-          # catalog below. Kept in place now so the toggle can't ship
-          # un-rendered.
+          # Gate render: exercise the metrics observability path
+          # (ServiceMonitor + PrometheusRule are monitoring.coreos.com
+          # CRDs). The positive grep assertions below fail the step if the
+          # toggle stops rendering the CRDs, so the gate can't pass
+          # vacuously should the metrics gating regress to always-false.
+          # kubeconform then validates the rendered CRD instances against
+          # the Datree catalog below.
           helm template cooker deploy/helm/cooker \
             --set metrics.enabled=true \
             --set metrics.serviceMonitor.enabled=true \
             --set metrics.prometheusRule.enabled=true \
             > /tmp/metrics.yaml
+          # Positive assertions: the toggle must actually render the CRDs.
+          # Without these the step passes vacuously if the metrics gating
+          # ever regresses to always-false (mirrors the retention step's
+          # 'kind: CronJob' guard).
+          grep -q 'kind: ServiceMonitor' /tmp/metrics.yaml || {
+            echo "ERROR: ServiceMonitor not rendered when metrics.serviceMonitor.enabled=true" >&2; exit 1; }
+          grep -q 'kind: PrometheusRule' /tmp/metrics.yaml || {
+            echo "ERROR: PrometheusRule not rendered when metrics.prometheusRule.enabled=true" >&2; exit 1; }
       - name: kubeconform
         run: |
           curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz -o /tmp/kc.tar.gz

@@ -18,7 +18,7 @@ spec:
     matchLabels:
       {{- include "cooker.selectorLabels" . | nindent 6 }}
   endpoints:
-    - port: {{ if gt (int .Values.metrics.port) 0 }}metrics{{ else }}http{{ end }}
+    - port: {{ if gt (.Values.metrics.port | default 0 | int) 0 }}metrics{{ else }}http{{ end }}
       path: /metrics
       interval: {{ .Values.metrics.serviceMonitor.interval | default "30s" }}
       scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout | default "10s" }}
