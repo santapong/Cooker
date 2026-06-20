@@ -106,7 +106,12 @@ func (h *Handler) InstallLicense(c *gin.Context) {
 		h.abortLicenseErr(c, err)
 		return
 	}
-	_, ent, _ := h.License.Current(c.Request.Context())
+	// Resolve entitlements directly from the just-installed license rather
+	// than re-reading via Current() (M2-04): the extra round-trip opened a
+	// small inconsistency window where a concurrent Delete could make an
+	// "installed" 201 report Free. FromLicense is the same pure resolver the
+	// service uses, so the response stays identical in shape and content.
+	ent := entitlements.FromLicense(lic, time.Now())
 	c.JSON(http.StatusCreated, gin.H{
 		"status":           licenseStatusActive,
 		"plan":             lic.Plan,

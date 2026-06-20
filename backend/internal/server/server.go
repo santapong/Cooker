@@ -321,15 +321,39 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	h.License = service.NewLicenseService(st.Licenses, licensePubKey)
 	// Boot-time license install: an operator may set a signed token via
-	// COOKER_LICENSE_KEY. Install it once at startup; on ANY failure log
-	// and degrade to Free — never panic (an expired/invalid env-set
-	// license must not block boot).
-	if cfg.License.Key != "" {
-		if lic, err := h.License.Install(ctx, cfg.License.Key, "system:boot", ""); err != nil {
-			slog.Warn("COOKER_LICENSE_KEY could not be installed; running on Free tier", "error", err)
-		} else {
-			slog.Info("self-hosted license installed from COOKER_LICENSE_KEY",
-				"plan", lic.Plan, "customer", lic.Customer, "expiresAt", lic.ExpiresAt)
+	// COOKER_LICENSE_KEY. COOKER_LICENSE_KEY is declarative — env wins when
+	// the token changes — but the install must be IDEMPOTENT on token
+	// identity (M2-01): re-installing the same token on every boot would
+	// churn the row (fresh UUID + InstalledAt) and clobber a license an
+	// admin installed via the UI (overwriting installed_by with
+	// system:boot). So before installing, read the active license; if one
+	// already exists whose RawToken equals the configured key, skip. Only
+	// install when there is no active license OR the stored token differs.
+	// On ANY failure log and degrade to Free — never panic (an
+	// expired/invalid env-set license must not block boot).
+	if envKey := strings.TrimSpace(cfg.License.Key); envKey != "" {
+		// Read the active license first. A load error here must not block
+		// boot: log and fall through to the install attempt, which carries
+		// its own degrade-to-Free-on-error handling below.
+		current, _, curErr := h.License.Current(ctx)
+		switch {
+		case curErr != nil:
+			slog.Warn("could not read active license before boot install; attempting install", "error", curErr)
+		case current != nil && current.RawToken == envKey:
+			// Identical token already installed — do nothing. This is the
+			// steady-state path on every boot after the first.
+			slog.Info("license already installed from COOKER_LICENSE_KEY; skipping boot install",
+				"plan", current.Plan, "customer", current.Customer, "expiresAt", current.ExpiresAt)
+		}
+		// Install only when there is no active license, the stored token
+		// differs from the env token, or the pre-read failed.
+		if curErr != nil || current == nil || current.RawToken != envKey {
+			if lic, err := h.License.Install(ctx, envKey, "system:boot", ""); err != nil {
+				slog.Warn("COOKER_LICENSE_KEY could not be installed; running on Free tier", "error", err)
+			} else {
+				slog.Info("self-hosted license installed from COOKER_LICENSE_KEY",
+					"plan", lic.Plan, "customer", lic.Customer, "expiresAt", lic.ExpiresAt)
+			}
 		}
 	}
 	// AI triage (M4): Validate() already guaranteed the key when
