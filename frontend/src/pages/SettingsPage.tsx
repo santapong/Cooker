@@ -20,8 +20,9 @@ import {
 import { DataTable } from '../components/ui/DataTable';
 import { useToastStore } from '../stores/toastStore';
 import { useAuth } from '../auth/OIDCProvider';
+import LicensePanel from './settings/LicensePanel';
 
-type Tab = 'registries' | 'clusters' | 'secrets' | 'tokens';
+type Tab = 'registries' | 'clusters' | 'secrets' | 'tokens' | 'license';
 
 export default function SettingsPage() {
   const t = useTheme();
@@ -46,7 +47,7 @@ export default function SettingsPage() {
           marginBottom: 22,
         }}
       >
-        {(['registries', 'clusters', 'secrets', 'tokens'] as const).map((id) => (
+        {(['registries', 'clusters', 'secrets', 'tokens', 'license'] as const).map((id) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -76,8 +77,10 @@ export default function SettingsPage() {
         <ClustersPanel />
       ) : tab === 'secrets' ? (
         <SecretsPanel />
-      ) : (
+      ) : tab === 'tokens' ? (
         <TokensPanel />
+      ) : (
+        <LicensePanel />
       )}
     </div>
   );
