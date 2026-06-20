@@ -276,6 +276,8 @@ groups:
 
 Cooker keeps everything operationally significant in PostgreSQL: pipelines, runs, environments, apps, hosts, users, schema_migrations, and the embedded run history (JSONB on `pipeline_runs`). Lose the database and you lose history; the schema can be re-created from an empty database via the embedded migrations.
 
+> For RPO/RTO targets, the full restore procedure, the `COOKER_SECRET_KEY`-escrow and EFS-not-backed-up caveats, and a runnable drill (`make backup-restore-drill`), see the [disaster-recovery runbook](./DR.md).
+
 ### Backup
 
 The chart does **not** ship a backup operator. Pick one of:

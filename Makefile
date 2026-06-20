@@ -1,4 +1,4 @@
-.PHONY: all build build-cli clean dev test lint uat-up uat-up-socketproxy uat-up-with-keycloak uat-down uat-logs uat-shell uat-reset test-e2e release release-snapshot
+.PHONY: all build build-cli clean dev test lint uat-up uat-up-socketproxy uat-up-with-keycloak uat-down uat-logs uat-shell uat-reset test-e2e backup-restore-drill release release-snapshot
 
 # Variables
 BINARY_NAME=cooker
@@ -101,6 +101,24 @@ migrate-up:
 
 migrate-down:
 	cd $(BACKEND_DIR) && go run ./cmd/cooker/ migrate down
+
+# --- Disaster recovery ---
+# Exercise the PostgreSQL backup → restore path end-to-end and print
+# PASS/FAIL: pg_dump (custom format) the source DB, restore into a
+# throwaway scratch DB, report per-table row counts, tear down. The
+# source DB is touched read-only (pg_dump only); the scratch DB is
+# created and dropped by the script. Proves the DR runbook
+# (docs/guides/DR.md) is runnable, not just documented.
+#
+# Configure via DATABASE_URL or the standard PG* env vars; defaults
+# target the local dev/UAT Postgres (localhost:5432 cooker/cooker).
+# Requires the PostgreSQL client tools (pg_dump/pg_restore/psql/
+# createdb/dropdb) on PATH.
+#
+#   make backup-restore-drill
+#   DATABASE_URL=postgres://u:p@host:5432/cooker make backup-restore-drill
+backup-restore-drill:
+	bash scripts/backup-restore-drill.sh
 
 # --- OpenAPI / Swagger ---
 # `make swagger` regenerates docs/api/swagger.{json,yaml,go} from
