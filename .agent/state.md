@@ -9,8 +9,8 @@
 - **Plan of record:** `docs/launch/README.md` + `/root/.claude/plans/can-you-give-me-swirling-hopper.md`
 - **Working branch:** `claude/launch-execution` (off `main` @ #116 merged)
 - **PM model:** Opus 4.8 (1M) · **Team policy:** Opus-only subagents
-- **Last updated:** 2026-06-20 (M0 implemented + audited + remediated; ready to push/PR)
-- **Phase:** EXECUTION → M0 Implement✅ Review✅ Verify✅ Audit✅ Research✅ Remediate✅ → **push + draft PR**
+- **Last updated:** 2026-06-20 (Lanes A+B0 shipped; wrap-up W2/W3 pushed; W1 final audit running)
+- **Phase:** WRAP-UP (D4=pause SaaS, D5=gate dormant) → W2✅ W3✅ → **W1 final audit running** → W4 merge (await user)
 
 ---
 
@@ -20,10 +20,10 @@
 | D1 | Scope | Entire 3-lane roadmap | ✅ confirmed |
 | D2 | Branch setup | Merge #116, new branch `claude/launch-execution` | ✅ confirmed |
 | D3 | Team | Opus-only subagents; PM reviews every change | ✅ confirmed |
-| D4 | Cooker Cloud go/no-go | **Go**, but Lane C/B1/B2/SaaS only after A+B0 ship | 🟡 assumed |
-| D5 | Pricing mockup binding | Yes (Explorer $0 / Crew $49-replica / Constellation custom) | 🟡 assumed |
-| D6 | License expiry posture | Degrade-to-Free + warn | 🟡 assumed |
-| D7 | Primary managed cloud | AWS (only complete IaC) | 🟡 assumed |
+| D4 | Cooker Cloud go/no-go | **PAUSE SaaS, ship self-hosted first** — M3/M4/M5 parked | ✅ confirmed |
+| D5 | Open-core split (wire the gate?) | **Keep entitlement gate DORMANT** — licensing ships, nothing hard-gated yet | ✅ confirmed |
+| D6 | License expiry posture | Degrade-to-Free + warn | 🟡 assumed (built this way) |
+| D7 | Primary managed cloud | AWS (only complete IaC) | 🟡 assumed (parked w/ M5) |
 
 ---
 
@@ -33,11 +33,16 @@
 | M0 | Observability artifacts + metrics-on + security.txt + CI gate | A | — | 🟢 done → draft PR |
 | M1 | DR drill + legal/status → self-hosted launch-ready | A | M0 | 🟢 done (committed `d21a55f`) |
 | M2 | Self-hosted licensing (Ed25519 + entitlements + UI) | B0 | — | 🟢 done `5eb8df5` (impl+docs+audit+remediation) |
-| M3 | Multi-tenancy (tenant_id + build-farm isolation) | C | D4 confirm | ⚪ blocked on decision |
-| M4 | Stripe Cloud billing + metering | B1/B2 | M3 | ⚪ blocked |
-| M5 | SaaS hosting (AWS) + GDPR + split-origin | SaaS | M3 | ⚪ blocked |
+| W | Wrap-up (W1 audit, W2 metrics-port, W3 key-rotation, W4 merge, W5 park) | A/B0 | — | 🔵 W2✅ W3✅ `5f34d7f` · W1 audit running · W4 await user |
+| M3 | Multi-tenancy (tenant_id + build-farm isolation) | C | D4 flip | ⏸️ PARKED (D4: pause SaaS) |
+| M4 | Stripe Cloud billing + metering | B1/B2 | M3 | ⏸️ PARKED |
+| M5 | SaaS hosting (AWS) + GDPR + split-origin | SaaS | M3 | ⏸️ PARKED |
 
-Legend: ⚪ pending · 🔵 in progress · 🟢 done(merged) · 🔴 blocked/failing · 🟡 needs decision
+Legend: ⚪ pending · 🔵 in progress · 🟢 done · ⏸️ parked · 🔴 blocked/failing · 🟡 needs decision
+
+**Resume pointer (if D4 → go):** start M3 = migration `024_owner_team` (closes IDOR S26-05-09)
+→ data-plane `tenant_id` scoping → build-farm isolation+pen-test → M4 Stripe (dormant gate +
+`internal/entitlements` are the seam) → M5 AWS SaaS. Full detail: plan file + docs/launch/.
 
 ---
 
@@ -65,7 +70,7 @@ Legend: ⚪ pending · 🔵 in progress · 🟢 done(merged) · 🔴 blocked/fai
 | M0-6 | `/.well-known/security.txt` route precedence vs NoRoute/`/assets` — verified no shadowing. | INFO | T2 | none | ✅ accepted |
 | M0-7 | Security-headers middleware avoids global `no-store` partly "so /metrics is cacheable" — mildly compounds M0-1 (intermediary caches). Pre-existing. | INFO | pre-existing | revisit if M0-1 permanent fix lands | ✅ accepted |
 | M0-8 | No regression vs #115 (counters real, NetworkPolicy/securityContext/secretKeyRef untouched, no Allow-Credentials, no docker.sock). | INFO | — | none | ✅ accepted |
-| R-FOLLOWUP-1 | Permanent M0-1 fix: bind `/metrics` to a dedicated internal port (`COOKER_METRICS_PORT`), ServiceMonitor scrapes it — never traverses public ingress. Backend+deploy change, out of M0 deploy-only scope. | — | roadmap | Schedule as a small standalone PR (post-M0). | ⚪ tracked |
+| R-FOLLOWUP-1 | Permanent M0-1 fix: dedicated `/metrics` port (`COOKER_METRICS_PORT`) off the public ingress. | — | roadmap | Delivered in W2 (+ W1-01/02/03 hardening). | ✅ done |
 
 ### M2 audit (licensing — `58260bd`/`920f2ad`/`49cd5e0`) — no CRITICAL/HIGH; sec paths sound
 | ID | Risk | Severity | Recommended change | Status |
@@ -77,7 +82,27 @@ Legend: ⚪ pending · 🔵 in progress · 🟢 done(merged) · 🔴 blocked/fai
 | M2-05 | store error wraps drop `license:` prefix (cosmetic) | INFO | optional align | ✅ accepted |
 | M2-06 | entitlement gate is dead code by design (dormant) | INFO | revisit at D5 wiring | ✅ accepted |
 | M2-07 | tier-card CTAs presentational (no checkout) | INFO | B1 follow-up | ✅ accepted |
-| R-FOLLOWUP-2 | Ed25519 key rotation: accept multiple pubkeys / `kid` so the signing key can roll with a grace window | — | fast-follow before key ages | ⚪ tracked |
+| R-FOLLOWUP-2 | Ed25519 key rotation: accept multiple pubkeys so the signing key can roll | — | fast-follow | Delivered in W3 (`COOKER_LICENSE_PUBLIC_KEYS` + `VerifyAny`). | ✅ done |
+
+### W1 FINAL consolidated audit (whole launch delta `origin/main..HEAD`) — all triaged
+| ID | Risk | Sev | Resolution | Status |
+|----|------|-----|------------|--------|
+| W1-01 | dedicated metrics server leaks on main-server-error exit path | **HIGH** | `metricsSrv.Close()` in errCh case | ✅ fixed |
+| W1-02 | metrics binds all interfaces; NetworkPolicy didn't cover the port | MED | `COOKER_METRICS_HOST` + NetworkPolicy metrics-port rule | ✅ fixed |
+| W1-03/04 | no `MetricsPort != Port` / range validation (silent metrics loss) | MED | `Validate()` checks | ✅ fixed |
+| W1-06 | `handler/license` + `cmd/cooker-license` (root of trust) untested | MED | tests added; raw_token-never-in-body asserted on response | ✅ fixed |
+| A-1 | CI metrics-enabled render gate could pass vacuously | MED | positive SM/PR render asserts | ✅ fixed |
+| A-2 | `COOKER_LICENSE_PUBLIC_KEYS` (rotation) undocumented | MED | env docs + rotation runbook | ✅ fixed |
+| A-3 | license not first-class in Helm | MED | `license:` values block (token via secretKeyRef) | ✅ fixed |
+| W1-08 | GET /license leaked `installedByEmail` to any authed user | LOW | removed from response | ✅ fixed |
+| A-4 | ingress `annotations:{}` uncomment trap | LOW | fixed comment/example | ✅ fixed |
+| A-5 | `gt (int .port)` not nil-safe | LOW | `default 0 | int` | ✅ fixed |
+| A-6 | `licenseStore.remove()` discarded server entitlements | LOW | trust response | ✅ fixed |
+| A-7 | inert/overpromising tier CTAs | LOW | honest mailto CTAs | ✅ fixed |
+| W1-05 | metrics bind error fire-and-forget | LOW | kept log-and-continue (deliberate; W1-03 catches common misconfig) | ✅ accepted |
+| W1-07/09/10 | gate dormant by design / boot-install TOCTOU / no online revocation (offline licenses) | INFO | by design; documented (rotation = revocation) | ✅ accepted |
+
+**W1 clean confirmations:** rule triple-copy parity holds, `/metrics` dedicated-port mitigation tested, store memory↔pg parity, migration 024 idempotent/reversible, all signature-change call-sites correct, DR drill accurate, legal templates safe, frontend solid, **no #115 regression.** W1 remediation commit: correct author (`Claude <noreply@anthropic.com>`).
 
 ---
 
@@ -94,11 +119,11 @@ Legend: ⚪ pending · 🔵 in progress · 🟢 done(merged) · 🔴 blocked/fai
 ---
 
 ## Next actions (PM)
-1. ~~Scaffolding + M0 team + review + verify + audit + remediation~~ ✅ all committed.
-2. Push `claude/launch-execution`; open **M0 draft PR**.
-3. Advance board → **M1** (DR drill + legal/status) and **M2** (Lane B0 licensing) — parallelizable.
-4. Schedule **R-FOLLOWUP-1** (dedicated metrics port) as a standalone small PR.
-5. Confirm **D4 (Cooker Cloud go/no-go)** with user before unblocking M3+.
+1. ~~M0+M1+M2 + audits/remediation + W2/W3 fast-follows + W1 final audit + remediation~~ ✅ all committed.
+2. Push `claude/launch-execution` (W1 remediation) → #117; re-check CI.
+3. **Await user: W4 merge call** for #117 (Lanes A+B0 self-hosted launch). Then move backlog items to Closed.
+4. Optional (await user): authorize one-time force-push to clean ~20 "Unverified" historical commits (cosmetic; future commits already verified).
+5. M3–M5 parked (D4). Resume pointer in milestone board if D4 flips to go.
 
 ## Log pointer
 - Current log: `.agent/log/current.md`
