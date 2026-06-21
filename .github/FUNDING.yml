@@ -1,0 +1,5 @@
+# Cooker funding configuration — powers the "Sponsor" button on the repo.
+# Sponsorship is a signal and a contributor magnet, not a revenue line (see
+# docs/product-plan.md §7). Realistic early range: $0–200/mo.
+github: [santapong]
+# open_collective: cooker   # uncomment after creating the Open Collective at https://opencollective.com
