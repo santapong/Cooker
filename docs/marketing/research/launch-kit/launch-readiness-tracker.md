@@ -8,6 +8,18 @@
 
 ---
 
+## Phase-2 update (2026-06-21) — decisions applied + assets promoted (PR #118)
+
+- **License = Apache-2.0** (LICENSE + NOTICE + README + every published asset). Closes **G3**.
+- **Canonical sentence approved** and applied across README, `/llms.txt`, `docs/what-is-cooker.md`, schema. Closes decision **#5**.
+- **Promoted to live locations:** `/README.md` targeted edits (canonical line, "What's not done yet", `/compare/` links → **P5/P6** 🟢), `/CONTRIBUTING.md` (with DCO terms), `/.github/FUNDING.yml`, `docs/compare/*` (**G7-adjacent**), `/llms.txt`, `/llms-full.txt`, `docs/what-is-cooker.md`, `docs/software-application-schema.json`.
+- **G1** security contact is already a real address in `SECURITY.md` → 🟢 (consider a project alias later).
+- **G5/G6** (OIDC + SSH → Explorer) reflected in `pricing-page.md`, which stays a **draft** pending final sign-off → 🟡.
+- **G4** CLA/DCO documented in `CONTRIBUTING.md`; the check workflow is drafted but **not activated** (`launch-kit/cla-workflow.draft.yml`) → 🟡.
+- **Still open:** **G2** (AUP/ToS/Privacy are `[BRACKET]` templates — need counsel), Cloud lane **G8–G13**, decisions **#1 Cloud go/no-go** + **#4 Cloud price**, and launch preconditions needing artifacts (**P1–P4, P7, P8**: hero cast, docs site, GoReleaser, security quick-wins).
+
+---
+
 ## A. Launch preconditions — ALL must be 🟢 before announcing (strategy.md §4)
 
 The hero cast is the single hard gate; no channel plan compensates for its absence.

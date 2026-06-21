@@ -1,5 +1,7 @@
-<!-- DRAFT README rewrite — for review. Promote to /README.md after the license decision (§C of the
-launch-readiness tracker) and once the hero cast + demo URL exist. Placeholders are marked {{...}}. -->
+<!-- LANDING-PAGE DRAFT. The live /README.md received targeted edits instead of a full replace
+(2026-06-21): canonical sentence, "What's not done yet", /compare/ links, Apache-2.0, CONTRIBUTING link.
+This shorter draft is kept as a reference for a future cooker.dev landing page. The {{...}} slots
+(hero cast, demo URL, Discord, DOCS/REPO base) are intentional template placeholders. License: Apache-2.0. -->
 
 <p align="center">
   <img src="docs/assets/cooker-wordmark.svg" alt="cooker" height="64"><br>
@@ -8,14 +10,14 @@ launch-readiness tracker) and once the hero cast + demo URL exist. Placeholders 
 
 <p align="center">
   <!-- {{BADGES: build · release · license · OpenSSF Scorecard · Artifact Hub — add once published}} -->
-  <a href="#license"><img src="https://img.shields.io/badge/license-{{MIT_or_Apache--2.0}}-blue" alt="license"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-Apache_2.0-blue" alt="license"></a>
   <a href="https://github.com/santapong/Cooker/releases"><img src="https://img.shields.io/badge/release-v0.1.0-informational" alt="release"></a>
   <img src="https://img.shields.io/badge/single-binary-Go-00ADD8" alt="single Go binary">
 </p>
 
-> **Cooker is an open-source, self-hosted CI/CD tool with a drag-drop graph editor for building OCI images (Kaniko, BuildKit, Buildah) and deploying to Kubernetes, ECS, Cloud Run, Fly.io, and Render — single Go binary, {{MIT/Apache-2.0}}-licensed, no SaaS, no agents.**
+> **Cooker is an open-source, self-hosted CI/CD tool with a drag-drop graph editor for building OCI images (Kaniko, BuildKit, Buildah) and deploying to Kubernetes, ECS, Cloud Run, Fly.io, and Render — single Go binary, Apache-2.0-licensed, no SaaS, no agents.**
 >
-> <sub>{{CANONICAL SENTENCE — pending CMO/maintainer sign-off; keep identical to `llms.txt` and `what-is-cooker.md`}}</sub>
+> <sub>Canonical sentence — approved; keep identical to `llms.txt` and `docs/what-is-cooker.md`.</sub>
 
 <p align="center">
   <!-- {{HERO CAST — embed the 60s asciinema/gif here; this is the single highest-leverage asset (strategy.md §2). Demo URL goes ABOVE the install commands.}} -->
@@ -97,8 +99,7 @@ the first external PR merges — see launch-readiness tracker G4.}}
 
 ## License
 
-{{MIT or Apache-2.0 — maintainer decision pending. The team recommends Apache-2.0 (patent grant; matches
-Woodpecker / Argo / Tekton). Must be consistent across this README, LICENSE, and the binary `--version`.}}
+Released under the [Apache License 2.0](LICENSE). No EE/CE split, no open-core tier.
 
 ---
 

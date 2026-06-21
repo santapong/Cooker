@@ -13,16 +13,10 @@
 ## 1. Tagline
 
 ```
-CI/CD you can see. Self-hosted. Single binary. MIT.
+CI/CD you can see. Self-hosted. Single binary. Apache-2.0.
 ```
 
-Character count: 50 (Product Hunt limit is 60). No changes needed.
-
-Note: update the license token once the MIT vs Apache-2.0 decision is made. The tagline reads
-naturally with either; it is written as "MIT" as a placeholder. If the license is Apache-2.0,
-update to: `CI/CD you can see. Self-hosted. Single binary. Apache-2.0.` (52 chars, still under 60.)
-
-{{LICENSE: MIT or Apache-2.0 — maintainer decision pending}}
+Character count: 57 (Product Hunt limit is 60). No changes needed.
 
 ---
 
@@ -50,7 +44,7 @@ update to: `CI/CD you can see. Self-hosted. Single binary. Apache-2.0.` (52 char
 > - The docker builder mounts the host socket and is dev-only. Use Kaniko or buildah for production.
 >
 > **License and source**
-> {{LICENSE: MIT or Apache-2.0 — maintainer decision pending}}. Full source at
+> Apache-2.0. Full source at
 > github.com/santapong/cooker. No EE tier, no CE/EE split, no "open core." Everything is in
 > the public repo.
 

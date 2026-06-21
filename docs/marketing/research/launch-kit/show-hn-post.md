@@ -44,7 +44,7 @@ against the team and feel too plain.
 > images (your choice of docker / Kaniko / buildah / BuildKit), pushes them to any OCI-compliant
 > registry, and deploys to Kubernetes. There's no SaaS, no agent, no asterisks — `docker compose up`
 > and you've got a working install. Demo cast on the README. Source at github.com/santapong/cooker,
-> {{LICENSE: MIT or Apache-2.0 — maintainer decision pending}}.
+> Apache-2.0.
 
 Editorial notes (remove before posting):
 - The second paragraph ends with the license placeholder. Fill in the actual license before posting.
@@ -94,7 +94,7 @@ Order: strategy.md originals first, announce.md additions after a visual separat
 | "Single tenant means I can't use this." | Correct — we are not pitching this to multi-tenant SaaS platforms today. Roadmap item, documented in README. |
 | "Another CI tool, why?" | Because every existing OSS CI is either YAML-only or has a UI we wouldn't show to anyone. Specific opinion, willing to defend. |
 | "How is the visual editor different from Concourse?" | Concourse's UI is read-only and famously hard to learn; ours is the editor. Drag-drop, not "look at the YAML you already wrote." |
-| "License?" | {{LICENSE: MIT or Apache-2.0 — maintainer decision pending}}, full repo, no EE/CE split. |
+| "License?" | Apache-2.0, full repo, no EE/CE split. |
 | "What about Windows?" | Not supported. Shells to `kubectl` and `docker`. Not on the roadmap. |
 | "Why React Flow / why TypeScript?" | We needed a graph editor that didn't take 6 months to write. React Flow ships. The whole frontend is replaceable; nothing in the backend cares. |
 | "Why Go?" | Native Docker / K8s / OCI SDKs. No FFI. Single binary. Standard answer. |
@@ -106,7 +106,7 @@ Order: strategy.md originals first, announce.md additions after a visual separat
 | "The graph editor is just React Flow with a backend — that's not a differentiator." | Correct that we use React Flow. The differentiator is not the library choice; it is that the graph is the authoritative data model — the DAG you draw is what executes. Other CI tools use YAML as the model and add a UI on top as a viewer. We inverted that. |
 | "OCI compliance is table stakes. Every registry supports it." | Agreed — it's not a differentiator, it's a baseline. We name it because there are builders (notably the docker socket path) that produce non-OCI images; we default to compliant builders. |
 | "I already use Coolify / Dokploy. Why switch?" | You don't have to. Coolify and Dokploy are better than us today for PaaS-style deploy-from-git with zero config. We're for teams who need a build step that isn't "build pack magic" — OCI images built from a Dockerfile with a pipeline you can inspect, fail, and retry visually. |
-| "Why MIT and not AGPLv3? You'll get forked into oblivion." | The chosen license is a deliberate choice. If someone forks Cooker and sells it, it validates the idea. The moat is not the license; it is contributor momentum, docs quality, and being the best-maintained implementation. AGPL would scare off the enterprise users we do eventually want. (Note: update this response once the license decision is final.) |
+| "Why Apache-2.0 and not AGPLv3? You'll get forked into oblivion." | Apache-2.0 is a deliberate choice — permissive, with an explicit patent grant. If someone forks Cooker and sells it, it validates the idea. The moat is not the license; it is contributor momentum, docs quality, and being the best-maintained implementation. AGPL would scare off the enterprise users we do eventually want. |
 | "No Windows, no Mac native — you're excluding most developers from trying it." | The server runs on Linux (and Docker Desktop on Mac). The `docker compose up` quickstart works on Mac with Docker Desktop. We don't run natively on Windows; the target environment is a Linux server, not a dev laptop. |
 | "Your 'What's not done yet' list is long. Should I wait for v1.0?" | That list is a promise, not an excuse. If any item on it is a blocker for you, wait. If it isn't, `docker compose up` takes 30 seconds and you can decide yourself. |
 | "Single Go binary sounds great but what happens when it crashes?" | It restarts. The state is in Postgres (or the in-memory store for dev mode). The WebSocket tickets are 60-second TTL; a crash during a run is recoverable because the runner status is persisted before the run starts. |
@@ -117,8 +117,8 @@ Usage notes:
   adapt to what the person actually wrote.
 - If an objection comes up that is not on this table: "Good question — I don't have a satisfying
   answer right now. Filed at github.com/.../issues/NN." Never bluff.
-- If the license question comes up before the license is decided, use: "License is MIT or Apache-2.0
-  — the decision is in progress, the full source is on the repo either way, no EE split."
+- If the license question comes up, the answer is: "Apache-2.0 — full source on the repo, no EE split,
+  and an explicit patent grant."
 
 ---
 
