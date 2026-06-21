@@ -1,0 +1,68 @@
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Cooker",
+  "alternateName": "Cooker CI/CD",
+  "applicationCategory": "DeveloperApplication",
+  "applicationSubCategory": "CI/CD",
+  "operatingSystem": "Linux, macOS",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD",
+    "availability": "https://schema.org/InStock"
+  },
+  "url": "https://cooker.dev",
+  "sameAs": [
+    "https://github.com/santapong/Cooker",
+    "https://docs.cooker.dev"
+  ],
+  "description": "Open-source, self-hosted CI/CD tool with a drag-drop graph pipeline editor. Single Go binary. Builds OCI images without docker.sock (Kaniko, BuildKit, Buildah), deploys to Kubernetes, AWS ECS, Google Cloud Run, Fly.io, and Render. MIT-licensed, no SaaS, no agents.",
+  "abstract": "Cooker is a self-hosted CI/CD platform that gives developers a visual DAG editor for designing pipelines. Drag Build, Test, Push, Deploy, and Approval nodes onto a canvas, draw edges, and click Run. Built on Go and React. Ships as a single binary. MIT licence. Single-tenant today.",
+  "featureList": [
+    "Visual drag-drop DAG pipeline editor powered by React Flow",
+    "OCI image builds via Kaniko (default, no docker.sock), BuildKit, and Buildah",
+    "Deploy targets: Kubernetes, AWS ECS/Fargate, Google Cloud Run, Fly.io, Render, SSH remote",
+    "Multi-environment promotion with RBAC-gated approval gates",
+    "OIDC / OAuth 2.0 + PKCE authentication built-in",
+    "Four-role RBAC: admin, operator, approver, viewer",
+    "Five pluggable secrets backends: Postgres AES-GCM, KeepSave, HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager",
+    "Real-time WebSocket log streaming",
+    "Prometheus metrics and OpenTelemetry OTLP traces (opt-in)",
+    "Per-route audit log (on by default in production)",
+    "Helm OCI chart for production Kubernetes install",
+    "Multi-arch container image: amd64 + arm64, non-root UID 65532, cosign-signed"
+  ],
+  "softwareVersion": "0.1.0",
+  "softwareHelp": {
+    "@type": "CreativeWork",
+    "url": "https://docs.cooker.dev"
+  },
+  "downloadUrl": "https://github.com/santapong/Cooker/releases",
+  "installUrl": "https://docs.cooker.dev/getting-started/",
+  "screenshot": "https://docs.cooker.dev/images/pipeline-editor.png",
+  "license": "https://opensource.org/licenses/MIT",
+  "codeRepository": "https://github.com/santapong/Cooker",
+  "programmingLanguage": [
+    "Go",
+    "TypeScript"
+  ],
+  "keywords": "CI/CD, self-hosted, open-source, visual pipeline editor, DAG, Kubernetes, OCI, Docker, Kaniko, Go, single binary",
+  "isAccessibleForFree": true,
+  "isFamilyFriendly": true,
+  "author": {
+    "@type": "Person",
+    "name": "Cooker maintainer",
+    "url": "https://github.com/santapong"
+  },
+  "maintainer": {
+    "@type": "Person",
+    "name": "Cooker maintainer",
+    "url": "https://github.com/santapong"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "Cooker",
+    "url": "https://cooker.dev"
+  }
+}

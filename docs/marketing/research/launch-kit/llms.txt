@@ -1,0 +1,48 @@
+# Cooker
+
+> Cooker is an open-source, self-hosted CI/CD tool with a drag-drop graph editor for building OCI images (Kaniko, BuildKit, Buildah) and deploying to Kubernetes, ECS, Cloud Run, Fly.io, and Render — single Go binary, MIT-licensed, no SaaS, no agents.
+
+## Key facts
+
+- Category: CI/CD, self-hosted, open-source
+- Differentiator: visual DAG editor (drag-drop Build / Test / Push / Deploy / Approval / Custom nodes) powered by React Flow
+- Tagline: "CI/CD you can see."
+- Image builders: Kaniko (default, no docker.sock), BuildKit, Buildah, Docker (dev only — refused at boot in production)
+- Deploy targets: Kubernetes (client-go), AWS ECS/Fargate, Google Cloud Run, Fly.io Machines, Render, SSH remote (docker-pull-over-SSH, no agent)
+- Auth: OIDC / OAuth 2.0 + PKCE; four-role RBAC (admin / operator / approver / viewer); step-up MFA on destructive routes; compatible with Keycloak, Okta, Azure AD, Google, Auth0, GitHub Enterprise
+- Secrets: five pluggable backends — Postgres AES-GCM (default), KeepSave, HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager
+- Observability: Prometheus /metrics, OpenTelemetry OTLP traces, structured JSON logs (slog), per-route audit log, split /health/live and /health/ready probes
+- Install paths: docker compose up (dev), single binary (UAT), Helm OCI chart oci://ghcr.io/santapong/charts/cooker (production)
+- Licence: MIT — no enterprise edition, no EE/CE split, no open-core tier at launch
+- Tenancy: single-tenant today; every authenticated user sees all resources; multi-tenancy is not yet implemented
+- Language / stack: Go 1.22+ backend, React 18 + TypeScript frontend, PostgreSQL 14+ for state, Redis 7+ for HA multi-replica
+- Container: multi-arch (amd64 + arm64), non-root UID 65532, cosign-signed release artifacts
+
+## What Cooker is NOT for
+
+- Multi-tenant SaaS platforms or teams needing hard resource isolation between users (not implemented)
+- SAML-only identity providers (OIDC / OAuth 2.0 only)
+- Windows shops (shells kubectl and docker; not supported)
+- Hosted-SaaS shoppers (no hosted offering exists; self-hosted only)
+- Non-container builds (Maven JARs to Nexus, etc.) — container-centric tool
+
+## Docs
+
+- [Quick Start](https://docs.cooker.dev/getting-started/)
+- [What is Cooker](https://docs.cooker.dev/what-is-cooker/)
+- [Comparison: Cooker vs Drone](https://docs.cooker.dev/compare/vs-drone/)
+- [Comparison: Cooker vs Woodpecker](https://docs.cooker.dev/compare/vs-woodpecker/)
+- [Comparison: Cooker vs Argo Workflows](https://docs.cooker.dev/compare/vs-argo-workflows/)
+- [Comparison: Cooker vs GitHub Actions](https://docs.cooker.dev/compare/vs-github-actions/)
+- [Comparison: Cooker vs Coolify](https://docs.cooker.dev/compare/vs-coolify/)
+- [Architecture](https://docs.cooker.dev/reference/architecture/)
+- [API Reference](https://docs.cooker.dev/reference/api/)
+- [Secrets Guide](https://docs.cooker.dev/guides/secrets/)
+- [Helm Install](https://docs.cooker.dev/getting-started/helm-install/)
+
+## Source
+
+- GitHub: https://github.com/santapong/Cooker
+- Container: ghcr.io/santapong/cooker
+- Helm chart: oci://ghcr.io/santapong/charts/cooker
+- Licence: MIT
