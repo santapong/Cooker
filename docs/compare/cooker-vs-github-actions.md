@@ -1,5 +1,3 @@
-<!-- DRAFT — for docs site /compare/ -->
-
 ---
 title: "Cooker vs GitHub Actions: self-hosted CI/CD with a visual pipeline editor"
 description: "GitHub Actions is the default for hosted CI. Cooker is the self-hosted alternative that adds a drag-drop pipeline DAG and a first-class deploy story in one binary."

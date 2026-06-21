@@ -1,14 +1,12 @@
 # What is Cooker?
 
-> {{CANONICAL SENTENCE — pending CMO/maintainer sign-off}}
->
-> Cooker is an open-source, self-hosted CI/CD tool with a drag-drop graph editor for building OCI images (Kaniko, BuildKit, Buildah) and deploying to Kubernetes, ECS, Cloud Run, Fly.io, and Render — single Go binary, MIT-licensed, no SaaS, no agents.
+> Cooker is an open-source, self-hosted CI/CD tool with a drag-drop graph editor for building OCI images (Kaniko, BuildKit, Buildah) and deploying to Kubernetes, ECS, Cloud Run, Fly.io, and Render — single Go binary, Apache-2.0-licensed, no SaaS, no agents.
 
 ---
 
 ## One-paragraph description
 
-Cooker is a self-hosted, open-source CI/CD platform that gives developers a visual drag-drop graph editor for designing pipelines as DAGs (directed acyclic graphs). Users drag Build, Test, Push, Deploy, and Approval nodes onto a canvas, wire them with edges, and click Run. Cooker then executes the pipeline: building OCI-compliant container images via Kaniko (no docker.sock required), pushing to any OCI-compliant registry, and deploying to Kubernetes, AWS ECS/Fargate, Google Cloud Run, Fly.io, or Render — with multi-environment promotion and approval gates between Dev, Staging, and Production. The entire system ships as a single Go binary that serves both the API and the React frontend on port 8080. It is MIT-licensed with no enterprise edition, no open-core split, and no hosted SaaS offering.
+Cooker is a self-hosted, open-source CI/CD platform that gives developers a visual drag-drop graph editor for designing pipelines as DAGs (directed acyclic graphs). Users drag Build, Test, Push, Deploy, and Approval nodes onto a canvas, wire them with edges, and click Run. Cooker then executes the pipeline: building OCI-compliant container images via Kaniko (no docker.sock required), pushing to any OCI-compliant registry, and deploying to Kubernetes, AWS ECS/Fargate, Google Cloud Run, Fly.io, or Render — with multi-environment promotion and approval gates between Dev, Staging, and Production. The entire system ships as a single Go binary that serves both the API and the React frontend on port 8080. It is Apache-2.0-licensed with no enterprise edition, no open-core split, and no hosted SaaS offering.
 
 ---
 
@@ -56,7 +54,7 @@ The table below reflects the current shipping state. Rows explicitly note "(road
 | SAML support | Not implemented | OIDC only |
 | Windows support | Not implemented | Not on roadmap |
 | Hosted SaaS | Not implemented | Self-hosted only; no managed cloud offering |
-| MIT licence, no EE/CE split | Yes | Full source, no enterprise tier at launch |
+| Apache-2.0 licence, no EE/CE split | Yes | Full source, no enterprise tier at launch |
 
 ---
 
@@ -68,7 +66,7 @@ Coolify and Dokploy are focused on app hosting (the deploy half). Neither has a 
 
 ### Cooker vs YAML-first CI runners (Drone, Woodpecker)
 
-Drone CI (now Harness-owned, with a commercial licence tier for enterprises) and Woodpecker CI (an OSS fork of Drone) are YAML-only pipeline runners. Neither has a visual graph editor. Both run CI jobs well; neither has a first-class deploy story across Kubernetes and cloud runtimes. Cooker's differentiator is the visual editor and the integrated deploy targets. Woodpecker is MIT-licensed and a reasonable alternative for teams that prefer YAML-as-code.
+Drone CI (now Harness-owned, with a commercial licence tier for enterprises) and Woodpecker CI (an OSS fork of Drone) are YAML-only pipeline runners. Neither has a visual graph editor. Both run CI jobs well; neither has a first-class deploy story across Kubernetes and cloud runtimes. Cooker's differentiator is the visual editor and the integrated deploy targets. Woodpecker is Apache-2.0-licensed and a reasonable alternative for teams that prefer YAML-as-code.
 
 ### Cooker vs Argo Workflows / Argo CD
 
@@ -88,7 +86,7 @@ Jenkins is a mature, highly extensible CI/CD platform (JVM-based, plugin-ecosyst
 - **WebSocket:** single-use 60-second tickets via `POST /api/v1/ws-tickets`; streams run status, stage logs, and Kubernetes events
 - **Secrets switching:** five backends share identical API surface; switching is a config-variable change (no live dual-write; plan a one-shot copy step)
 - **Health probes:** `/health/live` (liveness), `/health/ready` (DB + Redis + JWKS check with per-component breakdown)
-- **Source:** https://github.com/santapong/Cooker — MIT licence
+- **Source:** https://github.com/santapong/Cooker — Apache-2.0 licence
 
 ---
 
@@ -101,4 +99,4 @@ Jenkins is a mature, highly extensible CI/CD platform (JVM-based, plugin-ecosyst
 | "Secure by default" (unqualified) | Specific security properties: OIDC+PKCE, AES-GCM secrets at rest, non-root container (UID 65532), Kaniko by default (no docker.sock), per-route audit log on in production |
 | "Hosted SaaS available" | Self-hosted only; no hosted offering |
 | "SAML support" | OIDC / OAuth 2.0 only |
-| "Enterprise edition" | MIT licence; no EE tier; no open-core split at launch |
+| "Enterprise edition" | Apache-2.0 licence; no EE tier; no open-core split at launch |

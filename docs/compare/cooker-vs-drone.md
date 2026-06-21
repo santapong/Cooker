@@ -1,8 +1,6 @@
-<!-- DRAFT — for docs site /compare/ -->
-
 ---
 title: "Cooker vs Drone CI: open-source CI/CD without the commercial licence tier"
-description: "Drone CI is mature and container-native but now under Harness's BSL licence. Cooker is MIT-licensed with a visual DAG editor and a built-in deploy story."
+description: "Drone CI is mature and container-native but now under Harness's BSL licence. Cooker is Apache-2.0-licensed with a visual DAG editor and a built-in deploy story."
 ---
 
 # Cooker vs Drone CI: open-source CI/CD without the commercial licence tier
@@ -11,7 +9,7 @@ description: "Drone CI is mature and container-native but now under Harness's BS
 
 ---
 
-Drone CI is a container-native, YAML-based CI runner originally created by Harshil Agrawal and now owned by Harness, Inc., which relicensed the enterprise edition under the Business Source License (BSL) — meaning the source is available but commercial use above a threshold requires a paid licence. Cooker is a fully MIT-licensed, self-hosted CI/CD tool with a drag-drop visual pipeline editor, native multi-target deployment, and no enterprise edition split.
+Drone CI is a container-native, YAML-based CI runner originally created by Harshil Agrawal and now owned by Harness, Inc., which relicensed the enterprise edition under the Business Source License (BSL) — meaning the source is available but commercial use above a threshold requires a paid licence. Cooker is a fully Apache-2.0-licensed, self-hosted CI/CD tool with a drag-drop visual pipeline editor, native multi-target deployment, and no enterprise edition split.
 
 ---
 
@@ -19,7 +17,7 @@ Drone CI is a container-native, YAML-based CI runner originally created by Harsh
 
 | Feature | Cooker | Drone CI |
 |---|---|---|
-| Licence | MIT — no EE tier, no usage gating | Community edition: Apache 2.0; Enterprise edition: BSL (Harness commercial terms) |
+| Licence | Apache-2.0 — no EE tier, no usage gating | Community edition: Apache 2.0; Enterprise edition: BSL (Harness commercial terms) |
 | Visual DAG pipeline editor | Yes — drag-drop React Flow canvas | No — YAML pipelines only |
 | Pipeline definition | Visual DAG (primary); CKR-DSL on roadmap | `.drone.yml` YAML |
 | OCI image builds | Yes — Kaniko, BuildKit, Buildah | Via Docker-in-Docker plugin (requires docker.sock) |
@@ -50,7 +48,7 @@ Drone CI is a container-native, YAML-based CI runner originally created by Harsh
 
 ## Where Cooker wins
 
-**MIT licence, no ambiguity.** Drone's enterprise edition is BSL-licensed. The Community Edition is Apache 2.0 but has capped features. If your organisation has a legal policy against BSL dependencies, or if you simply want a CI tool with no licence-tier anxiety, Cooker is MIT and there is no enterprise edition to worry about.
+**Apache-2.0 licence, no ambiguity.** Drone's enterprise edition is BSL-licensed. The Community Edition is Apache 2.0 but has capped features. If your organisation has a legal policy against BSL dependencies, or if you simply want a CI tool with no licence-tier anxiety, Cooker is Apache-2.0 and there is no enterprise edition to worry about.
 
 **Visual pipeline editor.** Cooker's drag-drop DAG editor is the primary authoring surface. Drone has no visual editor — pipelines are YAML only. For teams who find CI YAML maintenance a burden, or who want to onboard non-engineers to pipeline authoring, the visual model is a meaningful difference.
 

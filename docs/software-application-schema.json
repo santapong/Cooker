@@ -17,8 +17,8 @@
     "https://github.com/santapong/Cooker",
     "https://docs.cooker.dev"
   ],
-  "description": "Open-source, self-hosted CI/CD tool with a drag-drop graph pipeline editor. Single Go binary. Builds OCI images without docker.sock (Kaniko, BuildKit, Buildah), deploys to Kubernetes, AWS ECS, Google Cloud Run, Fly.io, and Render. MIT-licensed, no SaaS, no agents.",
-  "abstract": "Cooker is a self-hosted CI/CD platform that gives developers a visual DAG editor for designing pipelines. Drag Build, Test, Push, Deploy, and Approval nodes onto a canvas, draw edges, and click Run. Built on Go and React. Ships as a single binary. MIT licence. Single-tenant today.",
+  "description": "Open-source, self-hosted CI/CD tool with a drag-drop graph pipeline editor. Single Go binary. Builds OCI images without docker.sock (Kaniko, BuildKit, Buildah), deploys to Kubernetes, AWS ECS, Google Cloud Run, Fly.io, and Render. Apache-2.0-licensed, no SaaS, no agents.",
+  "abstract": "Cooker is a self-hosted CI/CD platform that gives developers a visual DAG editor for designing pipelines. Drag Build, Test, Push, Deploy, and Approval nodes onto a canvas, draw edges, and click Run. Built on Go and React. Ships as a single binary. Apache-2.0 licence. Single-tenant today.",
   "featureList": [
     "Visual drag-drop DAG pipeline editor powered by React Flow",
     "OCI image builds via Kaniko (default, no docker.sock), BuildKit, and Buildah",
@@ -41,7 +41,7 @@
   "downloadUrl": "https://github.com/santapong/Cooker/releases",
   "installUrl": "https://docs.cooker.dev/getting-started/",
   "screenshot": "https://docs.cooker.dev/images/pipeline-editor.png",
-  "license": "https://opensource.org/licenses/MIT",
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "codeRepository": "https://github.com/santapong/Cooker",
   "programmingLanguage": [
     "Go",

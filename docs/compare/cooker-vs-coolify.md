@@ -1,5 +1,3 @@
-<!-- DRAFT — for docs site /compare/ -->
-
 ---
 title: "Cooker vs Coolify: a self-hosted PaaS that also builds and runs CI pipelines"
 description: "Coolify deploys apps with Heroku-style ease but has no CI pipeline DAG. Cooker adds a visual build-push-deploy pipeline on top of the same self-hosted PaaS model."
@@ -31,7 +29,7 @@ Coolify is an open-source, self-hosted PaaS that lets you deploy applications, d
 | OIDC + RBAC | Yes — OIDC/PKCE, four roles | Partial — email/password + OAuth, basic team support |
 | Real-time streaming logs | Yes — WebSocket per stage | Yes |
 | Secrets management | Yes — 5 pluggable backends | Yes — env vars stored in DB |
-| MIT licence, no EE tier | Yes | Yes |
+| Apache-2.0 licence, no EE tier | Yes | Yes (Apache-2.0) |
 | Single-tenant today | Yes | Yes |
 | Community / installation size | Small (early launch) | Large — established community, 35k+ GitHub stars |
 

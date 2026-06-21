@@ -1,5 +1,3 @@
-<!-- DRAFT — for docs site /compare/ -->
-
 ---
 title: "Cooker vs Woodpecker CI: visual pipeline editor vs YAML-first CI runner"
 description: "Woodpecker CI is a clean OSS Drone fork with YAML pipelines and no enterprise tier. Cooker adds a visual DAG editor, multi-cloud deploy targets, and multi-environment promotion."
@@ -19,7 +17,7 @@ Woodpecker CI is a community-maintained, Apache 2.0-licensed fork of Drone CI th
 
 | Feature | Cooker | Woodpecker CI |
 |---|---|---|
-| Licence | MIT | Apache 2.0 |
+| Licence | Apache-2.0 | Apache 2.0 |
 | Visual DAG pipeline editor | Yes — drag-drop React Flow canvas | No — web UI shows run status only |
 | Pipeline definition | Visual DAG (primary); CKR-DSL on roadmap | `.woodpecker.yml` or `.drone.yml` YAML |
 | Agent-based runner architecture | No — single binary includes executor | Yes — separate server + one or more agents |

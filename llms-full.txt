@@ -8,7 +8,7 @@
 
 # Cooker
 
-> Cooker is an open-source, self-hosted CI/CD tool with a drag-drop graph editor for building OCI images (Kaniko, BuildKit, Buildah) and deploying to Kubernetes, ECS, Cloud Run, Fly.io, and Render — single Go binary, MIT-licensed, no SaaS, no agents.
+> Cooker is an open-source, self-hosted CI/CD tool with a drag-drop graph editor for building OCI images (Kaniko, BuildKit, Buildah) and deploying to Kubernetes, ECS, Cloud Run, Fly.io, and Render — single Go binary, Apache-2.0-licensed, no SaaS, no agents.
 
 ## Key facts
 
@@ -21,7 +21,7 @@
 - Secrets: five pluggable backends — Postgres AES-GCM (default), KeepSave, HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager
 - Observability: Prometheus /metrics, OpenTelemetry OTLP traces, structured JSON logs (slog), per-route audit log, split /health/live and /health/ready probes
 - Install paths: docker compose up (dev), single binary (UAT), Helm OCI chart oci://ghcr.io/santapong/charts/cooker (production)
-- Licence: MIT — no enterprise edition, no EE/CE split, no open-core tier at launch
+- Licence: Apache-2.0 — no enterprise edition, no EE/CE split, no open-core tier at launch
 - Tenancy: single-tenant today; every authenticated user sees all resources; multi-tenancy is not yet implemented
 - Language / stack: Go 1.22+ backend, React 18 + TypeScript frontend, PostgreSQL 14+ for state, Redis 7+ for HA multi-replica
 - Container: multi-arch (amd64 + arm64), non-root UID 65532, cosign-signed release artifacts
@@ -53,7 +53,7 @@
 - GitHub: https://github.com/santapong/Cooker
 - Container: ghcr.io/santapong/cooker
 - Helm chart: oci://ghcr.io/santapong/charts/cooker
-- Licence: MIT
+- Licence: Apache-2.0
 
 ---
 
@@ -73,7 +73,7 @@ Rows marked "(today)" reflect the current shipping state, not the roadmap.
 | Four-role RBAC | Yes (admin/operator/approver/viewer) | Partial (Matrix plugin) | Yes | Partial | Partial | Partial | Partial |
 | Pluggable secrets backends | Yes (5 backends) | Partial (Credentials plugin) | Partial (Vault plugin) | Partial (plugins) | Partial (plugins) | No | No |
 | Single binary (API + UI) | Yes | No (JVM + .war) | No (multi-service) | Yes | Yes | No | No |
-| MIT licence, no EE tier | Yes | Yes (MIT) | Yes (Apache 2.0) | Partial (BSL for enterprise) | Yes | Yes | Yes |
+| Permissive OSS licence, no EE tier | Yes (Apache-2.0) | Yes (MIT) | Yes (Apache 2.0) | Partial (BSL for enterprise) | Yes | Yes | Yes |
 | Single-tenant only (today) | Yes | N/A | N/A | N/A | N/A | Yes | Yes |
 | Real-time WebSocket log streaming | Yes | Partial (polling) | Partial | Yes | Partial | Yes | Yes |
 | GitOps write-back to git repo | Yes | No | Yes (core model) | No | No | No | No |

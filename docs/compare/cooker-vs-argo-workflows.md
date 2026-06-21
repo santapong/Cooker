@@ -1,5 +1,3 @@
-<!-- DRAFT — for docs site /compare/ -->
-
 ---
 title: "Cooker vs Argo Workflows: single-binary CI/CD vs Kubernetes-native workflow engine"
 description: "Argo Workflows is the Kubernetes-native DAG engine for data and ML pipelines. Cooker is a single-binary CI/CD tool with a visual editor and multi-cloud deploy targets."
@@ -33,7 +31,7 @@ Argo Workflows is a Kubernetes-native workflow engine from the Argo Project (CNC
 | Pluggable step executors | Yes — builder/deployer adapters | Yes — emissary, PNS, k8sapi executors |
 | Scalability for large ML/data pipelines | Not the target use case | Yes — purpose-built for high-volume, long-running workflow orchestration |
 | Single-tenant today | Yes | Namespace-isolated on Kubernetes RBAC |
-| Licence | MIT | Apache 2.0 |
+| Licence | Apache-2.0 | Apache 2.0 |
 | CNCF backing | No | Yes — Argo is a CNCF graduated project |
 
 ---
