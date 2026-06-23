@@ -1,0 +1,11 @@
+# DRAFT — move this file to .github/FUNDING.yml when ready to activate GitHub Sponsors.
+# Do not place this file directly in .github/ until the tiers in sponsors-tiers.md are reviewed
+# and the GitHub Sponsors profile is configured for the santapong account.
+
+github: [santapong]
+
+# open_collective: cooker
+# ^ Uncomment and set the correct slug once the Open Collective has been created at
+#   https://opencollective.com/create. The collective must exist before this line is
+#   active — GitHub will show a broken link otherwise. OSC charges a 10% fiscal-hosting
+#   fee on all donations received through this route.
