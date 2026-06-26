@@ -82,6 +82,7 @@ Scale to the ask: "find any bugs" → a few finders, single-vote verify. "Thorou
 |---|---|---|
 | [`cooker-review`](../../workflows/cooker-review.js) | Reviews the current git diff across {bugs, layering, security, migration-safety}, adversarially verifies each finding, synthesizes a go/no-go. Pairs with ADLC Phase 5. | `Workflow({ name: "cooker-review" })` |
 | [`cooker-audit-sweep`](../../workflows/cooker-audit-sweep.js) | Multi-modal finder fan-out over the codebase (mirrors `cooker-audit`'s anti-patterns), dedup + adversarial verify, loop until two dry rounds. Pairs with ADLC Phase 10. EXPENSIVE. | `Workflow({ name: "cooker-audit-sweep" })` |
+| [`cooker-health-sweep`](../../workflows/cooker-health-sweep.js) | Bug-hunt + perf/reliability initiative: finders across correctness/performance/reliability/concurrency → adversarial verify (must still be OPEN) → prioritized remediation plan with a fix method per finding. Pairs with ADLC Phase 0/10 → 1. | `Workflow({ name: "cooker-health-sweep" })` |
 
 Read those two before writing a new one — they're the reference implementations of the pipeline-verify and loop-until-dry patterns.
 

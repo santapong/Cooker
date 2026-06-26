@@ -6,5 +6,6 @@ Deterministic multi-agent orchestration scripts, invokable via the `Workflow` to
 |---|---|---|---|
 | [`cooker-review.js`](cooker-review.js) | pipeline + adversarial verify | ADLC Phase 5 (Review) | `Workflow({ name: "cooker-review" })` |
 | [`cooker-audit-sweep.js`](cooker-audit-sweep.js) | loop-until-dry + multi-modal sweep | ADLC Phase 10 (Improve) | `Workflow({ name: "cooker-audit-sweep" })` |
+| [`cooker-health-sweep.js`](cooker-health-sweep.js) | multi-modal finders → verify → remediation plan | ADLC Phase 0/10 → 1 (Plan) | `Workflow({ name: "cooker-health-sweep" })` |
 
 These are the reference implementations — read them before writing a new workflow. See [`../../docs/engineering/ADLC.md`](../../docs/engineering/ADLC.md) for where they fit in the lifecycle.
