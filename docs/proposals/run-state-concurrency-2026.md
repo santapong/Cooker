@@ -44,15 +44,21 @@ With those, the store never holds the executor's live pointer: `persistProgress`
 |---|---|---|
 | **F7** — `collectStageOutputs` scans the whole stage map per stage (O(stages²)) | Iterate the `allowed` (ancestor) set and look up in the map — O(ancestors), preserving the documented ancestor-only race-safety | **1** |
 | **F15** — `RunPipeline` encodes the live run after spawning the executor | Take a `Clone()` snapshot **before** `SpawnWithDeadline` (run is still single-threaded there) and respond with the snapshot | **1** |
-| **F16** — memory `runs.Get` shallow copy aliases the `StageRuns` backing array | `Get` returns `run.Clone()` | **2** |
-| **F2 / F9** — mid-run persistence (`WithRunUpdater`) is never wired in prod; the drain goroutine is therefore inert overhead | Add the per-run mutex; wire `WithRunUpdater(st.Runs.Update)`; `persistProgress` publishes a `Clone()` snapshot under the lock | **2** |
-| **F18 / F10** — `RunStore.Update` re-marshals all JSONB (incl. full logs) on every call; status-only writers (cancel) pay a full-row rewrite | Add `RunStore.UpdateStatus` (single column) and use it from the status-only paths | **3** |
+| **F18 / F10** — `RunStore.Update` re-marshals all JSONB (incl. full logs) on every call; status-only writers (cancel) pay a full-row rewrite | Add `RunStore.UpdateStatus` (status/finished_at/error only) and use it from cancel | **2** ✅ |
+| **F16** — memory `runs.Get` shallow copy aliases the `StageRuns` backing array | `Get` returns `run.Clone()` | **3** |
+| **F2 / F9** — mid-run persistence (`WithRunUpdater`) is never wired in prod; the drain goroutine is therefore inert overhead | Per-run mutex; persist a `Clone()` snapshot under the lock via a **heartbeat-safe** `UpdateProgress` (see below) | **3** |
 
-## PR sequence
+## Heartbeat constraint (discovered during F2 design)
 
-1. **Run-state read-safety + perf** *(this series' first PR)* — `Clone()` + F15 + F7 + this note. No schema change; standalone-correct; `-race`-verifiable.
-2. **Executor run-state ownership** — the per-run mutex + F2/F9 wiring + F16. Includes a `-race` regression test that wires a marshaling updater across parallel stages (the repro above, as a permanent guard).
-3. **Store write efficiency** — F10 `UpdateStatus` + F18, with memory/postgres parity.
+`persistProgress → RunStore.Update` cannot be wired naively: postgres `RunStore.Update` writes **`heartbeat_at` from `run.HeartbeatAt`** (`internal/store/postgres/run.go`), but the run coordinator maintains the heartbeat via a *separate* targeted `UpdateHeartbeat` column write — the executor's in-memory `run.HeartbeatAt` is stale. A drain flush through `Update` would therefore **overwrite `heartbeat_at` with a stale value on every flush**, defeating the boot orphan-sweep. This — on top of the data race — is why `WithRunUpdater` was never wired.
+
+**Consequence:** F2 must persist through a method that does **not** touch `heartbeat_at`. PR 2 added `RunStore.UpdateStatus` (lifecycle columns only); PR 3 adds the drain's `UpdateProgress` (status + `stage_runs` + env/vars, **no** `heartbeat_at`) plus the snapshot-under-lock.
+
+## PR sequence (revised)
+
+1. **Run-state read-safety + perf** — `Clone()` + F15 + F7 + this note. *(landed)*
+2. **Store targeted updates** — `RunStore.UpdateStatus` (F10) with memory/postgres parity; cancel switched off the full-row `Update` (F18). The heartbeat-safe foundation for F2. *(landed)*
+3. **Executor run-state ownership** — per-run mutex + `UpdateProgress` (heartbeat-safe) + wire mid-run persistence (F2/F9) + memory `Get` deep-copy (F16), with the `TestExecutor_RunUpdaterMarshalRace` parallel-stages `-race` guard.
 
 ## Test strategy
 

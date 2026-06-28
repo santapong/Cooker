@@ -177,6 +177,21 @@ func (s *runs) Update(_ context.Context, r *model.PipelineRun) error {
 	return nil
 }
 
+func (s *runs) UpdateStatus(_ context.Context, id string, status model.RunStatus, finishedAt *time.Time, errMsg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.m[id]
+	if !ok {
+		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+	}
+	// Mutate only the lifecycle fields in place (mirrors UpdateHeartbeat's
+	// targeted style); leaves StageRuns / HeartbeatAt untouched.
+	r.Status = status
+	r.FinishedAt = finishedAt
+	r.Error = errMsg
+	return nil
+}
+
 func (s *runs) UpdateHeartbeat(_ context.Context, id string, ts time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

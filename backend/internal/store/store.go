@@ -39,6 +39,14 @@ type RunStore interface {
 	Get(ctx context.Context, id string) (*model.PipelineRun, error)
 	Create(ctx context.Context, run *model.PipelineRun) error
 	Update(ctx context.Context, run *model.PipelineRun) error
+	// UpdateStatus writes only the lifecycle columns (status, finished_at,
+	// error). It must not re-marshal the JSONB blobs (stage_runs / env /
+	// variables) or touch heartbeat_at. Used by status-only transitions
+	// (e.g. cancel) so they avoid a full-row rewrite (F18) and never clobber
+	// the coordinator's heartbeat — the prerequisite for safely wiring
+	// mid-run progress persistence (F2). See
+	// docs/proposals/run-state-concurrency-2026.md.
+	UpdateStatus(ctx context.Context, id string, status model.RunStatus, finishedAt *time.Time, errMsg string) error
 	// UpdateHeartbeat is a cheap UPDATE-one-column write used by the
 	// run coordinator's ticker. Implementations should not re-marshal
 	// the JSONB columns.

@@ -173,6 +173,24 @@ func (s *RunStore) Update(ctx context.Context, r *model.PipelineRun) error {
 	return nil
 }
 
+// UpdateStatus writes only the lifecycle columns (status, finished_at,
+// error). It deliberately leaves stage_runs / env_statuses / variables and
+// heartbeat_at untouched, so a status-only transition neither re-marshals
+// the JSONB blobs (F18) nor clobbers the coordinator's heartbeat (F2).
+func (s *RunStore) UpdateStatus(ctx context.Context, id string, status model.RunStatus, finishedAt *time.Time, errMsg string) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE pipeline_runs SET status=$2, finished_at=$3, error=$4 WHERE id=$1`,
+		id, string(status), nullTime(finishedAt), errMsg)
+	if err != nil {
+		return fmt.Errorf("update run status: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+	}
+	return nil
+}
+
 // UpdateHeartbeat writes only the heartbeat_at column. Cheap and safe
 // to call from the run coordinator's 30-second ticker without
 // thrashing JSONB encoders.

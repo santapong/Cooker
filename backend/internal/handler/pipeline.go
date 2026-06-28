@@ -461,8 +461,10 @@ func (h *Handler) CancelPipelineRun(c *gin.Context) {
 	if !ok {
 		return
 	}
-	run.Status = model.RunStatusCancelled
-	if err := h.Store.Runs.Update(c.Request.Context(), run); err != nil {
+	// Status-only write: UpdateStatus touches just status/finished_at/error,
+	// so it neither re-marshals the run's JSONB blobs (F18) nor overwrites
+	// stage_runs / heartbeat_at with this handler's stale loaded copy.
+	if err := h.Store.Runs.UpdateStatus(c.Request.Context(), run.ID, model.RunStatusCancelled, run.FinishedAt, run.Error); err != nil {
 		if abortStoreErr(c, err, "run not found") {
 			return
 		}
