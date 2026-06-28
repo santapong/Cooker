@@ -262,10 +262,15 @@ func ensureOutputs(sr *model.StageRun) map[string]string {
 // -race). The allowed filter is what keeps this safe.
 func collectStageOutputs(m map[string]*model.StageRun, allowed map[string]bool) map[string]map[string]string {
 	out := make(map[string]map[string]string, len(allowed))
-	for id, sr := range m {
-		if !allowed[id] {
-			continue
-		}
+	// Iterate the (typically small) allowed/ancestor set and look each up
+	// in the stage map, rather than scanning the whole map on every call —
+	// the latter is O(stages) per stage, i.e. O(stages^2) across a run (F7,
+	// docs/proposals/run-state-concurrency-2026.md). The ancestor-only read
+	// stays the race-safety invariant documented above: allowed is built
+	// from ancestors, joined by the per-level WaitGroup barrier before this
+	// runs, so reading their StageRuns here is race-free.
+	for id := range allowed {
+		sr := m[id]
 		if sr == nil || sr.Status != model.RunStatusSuccess || len(sr.Outputs) == 0 {
 			continue
 		}

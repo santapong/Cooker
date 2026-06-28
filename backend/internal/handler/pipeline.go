@@ -384,17 +384,27 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 	// Do NOT re-derive run.Status from runCopy.Status here — Execute
 	// guarantees a terminal value and Cancelled stays Cancelled.
 	if h.Runs != nil && h.Executor != nil {
+		// Snapshot the run BEFORE spawning. Once SpawnWithDeadline starts
+		// the executor goroutine it mutates `run` (and its StageRuns) in
+		// place, so encoding `run` directly in the 202 response would race
+		// the executor (F15, docs/proposals/run-state-concurrency-2026.md).
+		// Taken here on this goroutine, the snapshot is sequenced-before
+		// the spawn.
+		snapshot := run.Clone()
 		// Per-pipeline RunDeadline override; 0 falls back to the
 		// cluster default inside the coordinator.
 		h.Runs.SpawnWithDeadline(context.Background(), run.ID, service.PipelineRunDeadline(p), func(ctx context.Context) error {
-			runCopy := run
-			_, execErr := h.Executor.Execute(ctx, p, runCopy)
-			if err := h.Store.Runs.Update(ctx, runCopy); err != nil {
+			_, execErr := h.Executor.Execute(ctx, p, run)
+			if err := h.Store.Runs.Update(ctx, run); err != nil {
 				return err
 			}
 			return execErr
 		})
+		c.JSON(http.StatusAccepted, snapshot)
+		return
 	}
+	// No executor/spawner wired: the run stays pending and is not mutated,
+	// so encoding it directly is safe.
 	c.JSON(http.StatusAccepted, run)
 }
 
@@ -451,8 +461,10 @@ func (h *Handler) CancelPipelineRun(c *gin.Context) {
 	if !ok {
 		return
 	}
-	run.Status = model.RunStatusCancelled
-	if err := h.Store.Runs.Update(c.Request.Context(), run); err != nil {
+	// Status-only write: UpdateStatus touches just status/finished_at/error,
+	// so it neither re-marshals the run's JSONB blobs (F18) nor overwrites
+	// stage_runs / heartbeat_at with this handler's stale loaded copy.
+	if err := h.Store.Runs.UpdateStatus(c.Request.Context(), run.ID, model.RunStatusCancelled, run.FinishedAt, run.Error); err != nil {
 		if abortStoreErr(c, err, "run not found") {
 			return
 		}
