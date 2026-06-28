@@ -39,6 +39,8 @@ deploy/
 |---|---|
 | [`docs/reference/architecture.md`](docs/reference/architecture.md) | You need the system map (what calls what) |
 | [`docs/reference/design.md`](docs/reference/design.md) | You're adding a new feature — patterns, conventions, "Adding a new feature" checklist at §11 |
+| [`docs/engineering/ADLC.md`](docs/engineering/ADLC.md) | You want the end-to-end development lifecycle and which agent/skill/workflow drives each phase |
+| [`docs/engineering/harness-engineering.md`](docs/engineering/harness-engineering.md) | You're adding or changing an agent, skill, or workflow under `.claude/` |
 | [`docs/guides/UAT.md`](docs/guides/UAT.md) | You're touching anything that affects `make uat-up` |
 | [`docs/system-design/`](docs/system-design/README.md) | You want the consolidated 17-chapter system design (overview → C4) |
 | [`SECURITY.md`](SECURITY.md) | You're touching auth, CORS, secrets, or the Dockerfile |
