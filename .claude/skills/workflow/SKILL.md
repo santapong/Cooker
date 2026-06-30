@@ -148,3 +148,21 @@ Off by default. The in-repo tracker stays the source of truth. If a team wants r
 mirrored into **ClickUp** or **GitHub Issues/Projects**, a framework's `## Tracker sync` section
 opts in and names the stage→status mapping (uses the ClickUp / GitHub MCP tools when connected).
 Nothing syncs unless a framework enables it and the user asks. Details in `frameworks/README.md`.
+
+
+## Model & orchestration
+
+Workflow agents **inherit the session model by default** (usually correct). You can pin the model
+per agent (`agent(prompt, { model: 'opus', effort: 'high' })`) or per phase (apply the same model
+to every `agent()` in it); `meta.phases[].model` is a display hint, not an enforced override. A
+script can *set* the model but can't read it back — the resolved model shows in `/workflows` and in
+`workflowProgress[].model`.
+
+For self-narrating runs, wrap `agent()` in a `runAgent({ role, model, phase })` helper that
+`log()`s `phase · role · model` before each call, so a live run tells you which model and role each
+step uses. To **auto-pick** the model, use a deterministic `pickModel(role)` policy (mechanical →
+`sonnet`, judgment/verify → `opus`) — it must honor this repo's model policy (see
+`frameworks/aidlc.md` Hard gates; Governance = never Haiku).
+
+Full guidance, the orchestration-layers table (script vs main-loop vs `workflow()` nesting vs agent
+rosters), and a worked example: **`ORCHESTRATION.md`** in this directory.
