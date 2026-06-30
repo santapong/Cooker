@@ -22,9 +22,15 @@ project_name: cooker
 
 before:
   hooks:
-    # Tidy the module before building so binaries reflect a clean
-    # dependency tree. go.mod lives in backend/ so we change into it.
-    - sh -c "cd backend && go mod tidy"
+    # Pre-download modules so the cross-compile builds below don't each
+    # re-fetch. go.mod lives in backend/ so we change into it.
+    #
+    # Deliberately uses download, NOT the module-tidy command: tidy evaluates
+    # imports with all build tags enabled, which pulls tailscale.com in via
+    # the opt-in `tsnet` tag and bumps the Go floor past 1.25, breaking the
+    # docker build on golang:1.25-alpine. See CLAUDE.md. A CI guard in
+    # .github/workflows/ci.yml enforces this.
+    - sh -c "cd backend && go mod download"
 
 # ---------------------------------------------------------------------------
 # Binary builds
