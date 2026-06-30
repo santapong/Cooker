@@ -112,3 +112,57 @@ Read those two before writing a new one — they're the reference implementation
 - [ ] Loop-until-dry (if used) dedups against `seen`, not the confirmed list.
 - [ ] No `Date.now()`/`Math.random()`; labels vary by index/round.
 - [ ] Saved at `.claude/workflows/<slug>.js` and listed in the table above (if it's reusable).
+
+
+---
+
+## Frameworks: AIDLC by default, pluggable, bring-your-own
+
+This skill is **framework-driven**. A *framework* is a markdown file in `frameworks/` that
+defines how a task moves from intake to done — its ordered stages, the exit gate per stage, which
+stages are human-gated, and the hard gates that block the run. The skill reads the selected
+framework and sequences the work (single agent or a multi-agent `Workflow`) to match it.
+
+### Selecting a framework
+- **Default:** invoking this skill with no framework uses `aidlc` (the file with `default: true`),
+  which encodes **this repo's** real gates — so the default behaviour follows the project's AIDLC.
+- **Switch per task:** `framework=<name>` (e.g. `framework=sdlc`, `framework=lightweight`) or just
+  ask in words ("run this as SDLC", "do this lazy/lightweight").
+- The skill resolves `<name>` → `frameworks/<name>.md`, **validates** it has `## Stages` and
+  `## Hard gates`, and follows it. A framework missing either is refused (fail-closed — a
+  framework with no gates is not a framework).
+
+### Bundled frameworks
+- `aidlc` — **default.** Full gates for anything non-trivial or security-sensitive in this repo.
+- `sdlc` — classic requirements→design→build→test→deploy→maintain phase gates.
+- `lightweight` — small, low-risk, reversible changes; skips heavy gates, keeps the safety floor.
+
+### Bring your own framework
+Copy `frameworks/TEMPLATE.md` to `frameworks/<your-name>.md`, fill the four sections, and run
+`framework=<your-name>`. No code change — the skill discovers it by filename. See
+`frameworks/README.md` for the file format and the full rules. (Pairs well with the `ponytail`
+skill for keeping each stage's output minimal.)
+
+### Optional external project-management sync
+Off by default. The in-repo tracker stays the source of truth. If a team wants run/stage status
+mirrored into **ClickUp** or **GitHub Issues/Projects**, a framework's `## Tracker sync` section
+opts in and names the stage→status mapping (uses the ClickUp / GitHub MCP tools when connected).
+Nothing syncs unless a framework enables it and the user asks. Details in `frameworks/README.md`.
+
+
+## Model & orchestration
+
+Workflow agents **inherit the session model by default** (usually correct). You can pin the model
+per agent (`agent(prompt, { model: 'opus', effort: 'high' })`) or per phase (apply the same model
+to every `agent()` in it); `meta.phases[].model` is a display hint, not an enforced override. A
+script can *set* the model but can't read it back — the resolved model shows in `/workflows` and in
+`workflowProgress[].model`.
+
+For self-narrating runs, wrap `agent()` in a `runAgent({ role, model, phase })` helper that
+`log()`s `phase · role · model` before each call, so a live run tells you which model and role each
+step uses. To **auto-pick** the model, use a deterministic `pickModel(role)` policy (mechanical →
+`sonnet`, judgment/verify → `opus`) — it must honor this repo's model policy (see
+`frameworks/aidlc.md` Hard gates; Governance = never Haiku).
+
+Full guidance, the orchestration-layers table (script vs main-loop vs `workflow()` nesting vs agent
+rosters), and a worked example: **`ORCHESTRATION.md`** in this directory.
