@@ -140,6 +140,13 @@ func (s *PromotionStore) UpdatePromotionStatus(ctx context.Context, id string, s
 	return nil
 }
 
+// afterApprovalInsertHook runs after the INSERT (and before the COUNT)
+// inside AddApproval's transaction. It is a no-op in production; tests
+// override it to deterministically land a mid-transaction failure (e.g.
+// cancelling ctx) between the two statements without racing a goroutine
+// against the driver. See promotion_test.go.
+var afterApprovalInsertHook = func() {}
+
 // AddApproval inserts an approval row and returns the post-insert count.
 // Both statements execute inside a single transaction (DA-H2 fix) so
 // concurrent approvals cannot observe a count that omits a just-inserted
@@ -174,6 +181,8 @@ func (s *PromotionStore) AddApproval(ctx context.Context, a *model.PromotionAppr
 		}
 		return false, 0, fmt.Errorf("adding approval: %w", err)
 	}
+
+	afterApprovalInsertHook()
 
 	var count int
 	if err := tx.QueryRowContext(ctx,
