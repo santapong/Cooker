@@ -188,6 +188,24 @@ type RateLimitConfig struct {
 	PerMinute int
 	Burst     int
 	Backend   string
+	// Webhook is a separate per-source-IP limiter for the unauthenticated
+	// git-provider webhook receivers (/webhooks/*). Those routes are NOT
+	// behind the /api/v1 per-user limiter, and each request costs a DB
+	// lookup + a secret decryption before the HMAC/token check — so an
+	// unauthenticated caller could amplify that work. This bounds it.
+	Webhook WebhookRateLimitConfig
+}
+
+// WebhookRateLimitConfig tunes the dedicated per-IP limiter on the
+// unauthenticated webhook receivers. It is independent of the per-user
+// limiter (different threat: unauthenticated amplification, not per-user
+// fairness), so it has its own enable flag and budget. Always in-memory /
+// per-process — multi-replica deployments should also enforce edge
+// rate-limiting, exactly like the per-user limiter.
+type WebhookRateLimitConfig struct {
+	Enabled   bool
+	PerMinute int
+	Burst     int
 }
 
 type WSTicketConfig struct {
@@ -358,6 +376,11 @@ func Load() *Config {
 			PerMinute: getEnvInt("COOKER_RATE_LIMIT_PER_MINUTE", 10),
 			Burst:     getEnvInt("COOKER_RATE_LIMIT_BURST", 3),
 			Backend:   getEnv("COOKER_RATE_LIMIT_BACKEND", "memory"),
+			Webhook: WebhookRateLimitConfig{
+				Enabled:   getEnvBool("COOKER_WEBHOOK_RATE_LIMIT_ENABLED", true),
+				PerMinute: getEnvInt("COOKER_WEBHOOK_RATE_LIMIT_PER_MINUTE", 60),
+				Burst:     getEnvInt("COOKER_WEBHOOK_RATE_LIMIT_BURST", 10),
+			},
 		},
 		WSTicket: WSTicketConfig{Backend: getEnv("COOKER_WS_TICKET_BACKEND", "memory")},
 		WSHub:    WSHubConfig{Backend: getEnv("COOKER_WS_HUB_BACKEND", "memory")},

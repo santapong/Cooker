@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -45,6 +46,38 @@ type Decision struct {
 
 // Allowed reports whether the decision permits the action.
 func (d Decision) Allowed() bool { return d.Decision == "allow" }
+
+// AuthorizeContext carries the optional ABAC context Cooker forwards to the
+// gate's POST /authorize `context` object, on top of the always-sent
+// request_id. Every field is optional: a zero AuthorizeContext produces the
+// same wire payload as before this struct existed (nothing beyond request_id).
+//
+// The field/JSON names mirror the Grovernance authorize request DTO
+// (internal/adapter/inbound/httpapi/authorize.go): `break_glass` and
+// `change_window` are pointer bools so "absent" (use the policy default) is
+// distinguishable from an explicit false; `attributes` is a free-form bag the
+// Cedar ABAC policy can read. Extend Attributes rather than adding new typed
+// fields unless the gate DTO grows a matching typed field.
+type AuthorizeContext struct {
+	// BreakGlass, when non-nil, sets context.break_glass on the outbound
+	// request. The middleware plumbs the X-Break-Glass-Justification header
+	// into this (true when a justification is present).
+	BreakGlass *bool
+	// ChangeWindow, when non-nil, sets context.change_window.
+	ChangeWindow *bool
+	// Attributes are folded into context.attributes verbatim.
+	Attributes map[string]any
+}
+
+// firstContext returns the first supplied AuthorizeContext, or a zero value.
+// The variadic option keeps the historical Authorize/AuthorizeOnBehalf
+// signatures source-compatible for callers that don't send ABAC context.
+func firstContext(opts []AuthorizeContext) AuthorizeContext {
+	if len(opts) > 0 {
+		return opts[0]
+	}
+	return AuthorizeContext{}
+}
 
 // Client is the HTTP client for Grovernance's authorize endpoint.
 type Client struct {
@@ -155,7 +188,7 @@ func (c *Client) InertReason(configured, isProduction bool) (string, bool) {
 // and request ID. The returned Decision indicates the verdict; the returned
 // error is non-nil only when the call cannot be completed AND the env is not
 // fail-open. Callers should treat a non-nil error as fail-closed.
-func (c *Client) Authorize(ctx context.Context, token, service, env, requestID string) (Decision, error) {
+func (c *Client) Authorize(ctx context.Context, token, service, env, requestID string, actx ...AuthorizeContext) (Decision, error) {
 	if !c.Enabled() {
 		return Decision{Decision: "allow", Reason: "governance disabled", PolicyID: "cooker.governance.disabled"}, nil
 	}
@@ -170,6 +203,7 @@ func (c *Client) Authorize(ctx context.Context, token, service, env, requestID s
 	payload.Resource.Service = service
 	payload.Resource.Env = env
 	payload.Context.RequestID = requestID
+	payload.applyContext(firstContext(actx))
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -187,12 +221,12 @@ func (c *Client) Authorize(ctx context.Context, token, service, env, requestID s
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return c.transportFallback(env, fmt.Errorf("governance: post: %w", err))
+		return c.transportFallback(ctx, service, env, fmt.Errorf("governance: post: %w", err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return c.transportFallback(env, fmt.Errorf("governance: unexpected status %d", resp.StatusCode))
+		return c.transportFallback(ctx, service, env, fmt.Errorf("governance: unexpected status %d", resp.StatusCode))
 	}
 
 	var decision Decision
@@ -205,16 +239,35 @@ func (c *Client) Authorize(ctx context.Context, token, service, env, requestID s
 	return decision, nil
 }
 
-// transportFallback returns Allow when the env is configured as fail-open,
-// otherwise returns the transport error so the caller can fail closed.
-func (c *Client) transportFallback(env string, cause error) (Decision, error) {
+// transportFallback resolves the fail-open / fail-closed posture when the gate
+// cannot be reached. When the env is configured fail-open it returns Allow —
+// but NEVER silently: it emits a loud slog.Warn stating the deploy gate was
+// UNREACHABLE and the deploy was permitted by fail-open policy, tagged with the
+// service and env so the allow is attributable in the log/audit trail. When the
+// env is not in the fail-open set it fails CLOSED (returns the joined transport
+// error); that path also logs, so an operator can see a fail-closed block was
+// caused by an unreachable gate rather than a genuine deny.
+func (c *Client) transportFallback(ctx context.Context, service, env string, cause error) (Decision, error) {
 	if _, ok := c.FailOpenEnvs[strings.ToLower(env)]; ok {
+		slog.WarnContext(ctx, "governance: DEPLOY GATE UNREACHABLE — allowed by fail-open policy",
+			"service", service,
+			"env", env,
+			"posture", "fail-open",
+			"decision", "allow",
+			"policy_id", "cooker.governance.fail_open",
+			"err", cause)
 		return Decision{
 			Decision: "allow",
 			Reason:   "governance unreachable; env is fail-open: " + cause.Error(),
 			PolicyID: "cooker.governance.fail_open",
 		}, nil
 	}
+	slog.WarnContext(ctx, "governance: DEPLOY GATE UNREACHABLE — blocked by fail-closed policy",
+		"service", service,
+		"env", env,
+		"posture", "fail-closed",
+		"decision", "deny",
+		"err", cause)
 	return Decision{}, errors.Join(ErrGovernanceUnreachable, cause)
 }
 
@@ -234,8 +287,20 @@ type authorizeRequest struct {
 		Env     string `json:"env"`
 	} `json:"resource"`
 	Context struct {
-		RequestID string `json:"request_id"`
+		RequestID    string         `json:"request_id"`
+		ChangeWindow *bool          `json:"change_window,omitempty"`
+		BreakGlass   *bool          `json:"break_glass,omitempty"`
+		Attributes   map[string]any `json:"attributes,omitempty"`
 	} `json:"context"`
+}
+
+// applyContext copies the optional ABAC fields from actx onto the request DTO.
+func (r *authorizeRequest) applyContext(actx AuthorizeContext) {
+	r.Context.BreakGlass = actx.BreakGlass
+	r.Context.ChangeWindow = actx.ChangeWindow
+	if len(actx.Attributes) > 0 {
+		r.Context.Attributes = actx.Attributes
+	}
 }
 
 // PreresolvedActor is the shape Cooker submits on AuthorizeOnBehalf. Matches
@@ -258,7 +323,7 @@ type preresolvedActor = PreresolvedActor
 // Treats an unset BaseURL or unset DelegateToken as "skip the call" and
 // returns Allow + a synthetic PolicyID. The executor's pre-stage hook
 // short-circuits in that case so partial rollouts keep working.
-func (c *Client) AuthorizeOnBehalf(ctx context.Context, actor PreresolvedActor, service, env, requestID string) (Decision, error) {
+func (c *Client) AuthorizeOnBehalf(ctx context.Context, actor PreresolvedActor, service, env, requestID string, actx ...AuthorizeContext) (Decision, error) {
 	if !c.DelegationEnabled() {
 		return Decision{Decision: "allow", Reason: "governance delegation disabled", PolicyID: "cooker.governance.delegation_disabled"}, nil
 	}
@@ -271,6 +336,7 @@ func (c *Client) AuthorizeOnBehalf(ctx context.Context, actor PreresolvedActor, 
 	payload.Resource.Service = service
 	payload.Resource.Env = env
 	payload.Context.RequestID = requestID
+	payload.applyContext(firstContext(actx))
 
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -285,12 +351,12 @@ func (c *Client) AuthorizeOnBehalf(ctx context.Context, actor PreresolvedActor, 
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return c.transportFallback(env, fmt.Errorf("governance: post: %w", err))
+		return c.transportFallback(ctx, service, env, fmt.Errorf("governance: post: %w", err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return c.transportFallback(env, fmt.Errorf("governance: unexpected status %d", resp.StatusCode))
+		return c.transportFallback(ctx, service, env, fmt.Errorf("governance: unexpected status %d", resp.StatusCode))
 	}
 	var decision Decision
 	if err := json.NewDecoder(resp.Body).Decode(&decision); err != nil {

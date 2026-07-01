@@ -74,6 +74,10 @@ type Server struct {
 	// registerRoutes; held here so Close() can stop its gc goroutine
 	// (BC-H1). nil when the redis backend or disabled limiter is used.
 	rateLimiter *rateLimiter
+	// webhookRateLimiter is the dedicated in-memory per-IP limiter for the
+	// unauthenticated /webhooks/* receivers (C-webhook-logs). Held here so
+	// Close() can stop its gc goroutine. nil when disabled.
+	webhookRateLimiter *rateLimiter
 }
 
 // registerMetricsRoute mounts /metrics on the main app router ONLY when no
@@ -784,6 +788,9 @@ func (s *Server) Close() error {
 	// BC-H1: stop the rate-limiter gc goroutine.
 	if s.rateLimiter != nil {
 		s.rateLimiter.Close()
+	}
+	if s.webhookRateLimiter != nil {
+		s.webhookRateLimiter.Close()
 	}
 	if s.traceShutdown != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

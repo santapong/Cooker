@@ -268,11 +268,22 @@ func (s *Server) registerRoutes() {
 	}
 
 	// Git provider webhook receivers (unauthenticated — each provider's
-	// signature / token header is the authentication).
-	s.router.POST("/webhooks/github", idempotencyMiddleware(s.idempotency), h.GitHubWebhook)
-	s.router.POST("/webhooks/gitlab", idempotencyMiddleware(s.idempotency), h.GitLabWebhook)
-	s.router.POST("/webhooks/bitbucket", idempotencyMiddleware(s.idempotency), h.BitbucketWebhook)
-	s.router.POST("/webhooks/gitea", idempotencyMiddleware(s.idempotency), h.GiteaWebhook)
+	// signature / token header is the authentication). These routes are NOT
+	// under the /api/v1 per-user limiter, and each request costs a DB lookup
+	// + a secret decryption BEFORE the signature check — so a dedicated
+	// per-source-IP limiter runs first to bound unauthenticated amplification
+	// (C-webhook-logs). It sits ahead of idempotency so a throttled request
+	// never touches the store or the crypto codec.
+	var webhookLimit gin.HandlerFunc = func(c *gin.Context) { c.Next() }
+	if s.config.RateLimit.Webhook.Enabled {
+		wl := newRateLimiter(s.config.RateLimit.Webhook.PerMinute, s.config.RateLimit.Webhook.Burst)
+		s.webhookRateLimiter = wl
+		webhookLimit = wl.webhookMiddleware()
+	}
+	s.router.POST("/webhooks/github", webhookLimit, idempotencyMiddleware(s.idempotency), h.GitHubWebhook)
+	s.router.POST("/webhooks/gitlab", webhookLimit, idempotencyMiddleware(s.idempotency), h.GitLabWebhook)
+	s.router.POST("/webhooks/bitbucket", webhookLimit, idempotencyMiddleware(s.idempotency), h.BitbucketWebhook)
+	s.router.POST("/webhooks/gitea", webhookLimit, idempotencyMiddleware(s.idempotency), h.GiteaWebhook)
 
 	if s.localAuth != nil {
 		api.GET("/auth/local/me", s.localAuth.Me)

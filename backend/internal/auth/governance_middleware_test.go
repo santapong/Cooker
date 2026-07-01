@@ -60,6 +60,76 @@ func TestMiddleware_AllowsWhenGrovernanceAllows(t *testing.T) {
 	}
 }
 
+// TestMiddleware_ForwardsBreakGlassJustificationAsABAC asserts the middleware
+// plumbs the X-Break-Glass-Justification header into the outbound /authorize
+// context.break_glass field (X-abac-context) when the gate is REACHABLE — so
+// the gate's Cedar policy can factor break-glass into the verdict, rather than
+// the header being silently discarded.
+func TestMiddleware_ForwardsBreakGlassJustificationAsABAC(t *testing.T) {
+	var gotBreakGlass *bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Context struct {
+				BreakGlass *bool `json:"break_glass"`
+			} `json:"context"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotBreakGlass = body.Context.BreakGlass
+		_ = json.NewEncoder(w).Encode(governance.Decision{Decision: "allow"})
+	}))
+	defer upstream.Close()
+
+	client := governance.New(upstream.URL, nil, nil)
+	r := gin.New()
+	r.POST("/deploy",
+		auth.RequireGovernanceAllow(client, fixedExtractor("svc-x", "prod"),
+			auth.BreakGlassOption{Enabled: true}),
+		func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/deploy", nil)
+	req.Header.Set("Authorization", "Bearer tok-alice")
+	req.Header.Set("X-Break-Glass-Justification", "INC-42 hot patch")
+	r.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if gotBreakGlass == nil || *gotBreakGlass != true {
+		t.Errorf("outbound context.break_glass = %v, want true", gotBreakGlass)
+	}
+}
+
+// TestMiddleware_NoBreakGlassHeader_OmitsABAC asserts the outbound request
+// carries no break_glass field when no justification header is present.
+func TestMiddleware_NoBreakGlassHeader_OmitsABAC(t *testing.T) {
+	var sawBreakGlass bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var raw map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		if ctx, ok := raw["context"].(map[string]any); ok {
+			_, sawBreakGlass = ctx["break_glass"]
+		}
+		_ = json.NewEncoder(w).Encode(governance.Decision{Decision: "allow"})
+	}))
+	defer upstream.Close()
+
+	client := governance.New(upstream.URL, nil, nil)
+	r := gin.New()
+	r.POST("/deploy",
+		auth.RequireGovernanceAllow(client, fixedExtractor("svc-x", "prod")),
+		func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/deploy", nil)
+	req.Header.Set("Authorization", "Bearer tok-alice")
+	r.ServeHTTP(w, req)
+
+	if sawBreakGlass {
+		t.Error("break_glass must be omitted when no justification header is present")
+	}
+}
+
 func TestMiddleware_403OnDeny(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(governance.Decision{
