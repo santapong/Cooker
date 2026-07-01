@@ -46,13 +46,7 @@ func (h *Handler) CreateEnvironment(c *gin.Context) {
 	env.Secrets = nil
 	env.ID = uuid.New().String()
 	env.CreatedAt = time.Now()
-	if env.PlainVars == nil {
-		env.PlainVars = env.Variables
-	}
-	if env.PlainVars == nil {
-		env.PlainVars = make(map[string]string)
-	}
-	env.Variables = nil
+	env.NormalisePlainVars()
 
 	if err := h.Store.Environments.Create(c.Request.Context(), &env); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -76,10 +70,7 @@ func (h *Handler) UpdateEnvironment(c *gin.Context) {
 	env.ID = id
 	env.CreatedAt = existing.CreatedAt
 	env.Secrets = existing.Secrets
-	if env.PlainVars == nil {
-		env.PlainVars = env.Variables
-	}
-	env.Variables = nil
+	env.NormalisePlainVars()
 
 	if err := h.Store.Environments.Update(c.Request.Context(), &env); err != nil {
 		if abortStoreErr(c, err, "environment not found") {

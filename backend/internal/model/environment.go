@@ -49,6 +49,23 @@ type PromotionPolicy struct {
 	AutoPromoteOn     []string `json:"autoPromoteOn,omitempty"`     // Conditions: ["tests_pass", "health_check"]
 }
 
+// NormalisePlainVars applies the Variables→PlainVars backward-compat
+// mapping. The model distinguishes plain vars from sealed secrets; the
+// API historically accepted plain vars through either field. This
+// promotes the deprecated Variables alias into PlainVars when PlainVars
+// is unset, guarantees PlainVars is a non-nil map, then clears Variables
+// so it isn't persisted as a second copy. Idempotent; safe to call on
+// both the create and update paths.
+func (e *Environment) NormalisePlainVars() {
+	if e.PlainVars == nil {
+		e.PlainVars = e.Variables
+	}
+	if e.PlainVars == nil {
+		e.PlainVars = make(map[string]string)
+	}
+	e.Variables = nil
+}
+
 // Redact returns a copy of e safe for clients that should not see
 // secret values. The raw Secrets map is dropped; SecretKeys carries
 // only the key names (sorted) so UIs can render an editor listing.

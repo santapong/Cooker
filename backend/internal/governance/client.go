@@ -112,6 +112,45 @@ func (c *Client) DelegationEnabled() bool {
 // short-circuits every Authorize call with Decision{Allow}.
 func (c *Client) Enabled() bool { return c != nil && c.BaseURL != "" }
 
+// InertReason classifies whether the client is wired in a way that
+// silently degrades the deploy gate to ALLOW, and returns a
+// human-readable reason for a startup warning. isProduction gates the
+// token checks: production already fails config validation when the
+// URL is set without a caller token (config.go), so the token warnings
+// are only meaningful in non-production where a missing token quietly
+// no-ops the gate. The bool is false when the client is fully wired
+// (nothing to warn about). It is the caller's responsibility to decide
+// whether an entirely-unconfigured integration (BaseURL == "") is worth
+// warning about — pass that decision via `configured`.
+func (c *Client) InertReason(configured, isProduction bool) (string, bool) {
+	if c == nil {
+		if configured {
+			return "governance is referenced in config but the client is nil; the deploy gate is INERT (every deploy is ALLOWED)", true
+		}
+		return "", false
+	}
+	if c.BaseURL == "" {
+		if configured {
+			return "COOKER_GOVERNANCE_URL is empty but other governance settings are present; the deploy gate is INERT (every deploy is ALLOWED)", true
+		}
+		return "", false
+	}
+	// URL is set: the HTTP admission middleware is live. Warn only about
+	// the paths that quietly no-op in non-production.
+	if isProduction {
+		return "", false
+	}
+	switch {
+	case c.CallerToken == "" && c.DelegateToken == "":
+		return "COOKER_GOVERNANCE_URL is set but both CALLER_TOKEN and DELEGATE_TOKEN are empty; the pipeline-deploy delegation hook is INERT and unauthenticated /authorize calls will be rejected if the gate requires caller auth", true
+	case c.DelegateToken == "":
+		return "COOKER_GOVERNANCE_URL is set but DELEGATE_TOKEN is empty; the pipeline-deploy AuthorizeOnBehalf hook is INERT (deploy stages skip the governance gate)", true
+	case c.CallerToken == "":
+		return "COOKER_GOVERNANCE_URL is set but CALLER_TOKEN is empty; direct /authorize calls are unauthenticated and will be rejected if the gate requires caller auth", true
+	}
+	return "", false
+}
+
 // Authorize calls POST /authorize with the supplied actor token, service, env,
 // and request ID. The returned Decision indicates the verdict; the returned
 // error is non-nil only when the call cannot be completed AND the env is not

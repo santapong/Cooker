@@ -241,3 +241,46 @@ func TestClient_AuthorizeOnBehalf_BootstrapBypass(t *testing.T) {
 		t.Errorf("decision = %+v, want bootstrap allow", d)
 	}
 }
+
+// TestClient_InertReason exercises the wired-but-inert classifier that
+// the server startup uses to WARN when the deploy gate silently degrades
+// to ALLOW (X-partial-rollout). The allow/deny path is unchanged; this
+// only pins which configurations get flagged.
+func TestClient_InertReason(t *testing.T) {
+	withTokens := func(url, caller, delegate string) *governance.Client {
+		c := governance.New(url, nil, nil)
+		return c.WithCallerToken(caller).WithDelegateToken(delegate)
+	}
+	tests := []struct {
+		name         string
+		client       *governance.Client
+		configured   bool
+		isProduction bool
+		wantInert    bool
+	}{
+		{"nil client, unconfigured", nil, false, false, false},
+		{"nil client, configured", nil, true, false, true},
+		{"empty URL, unconfigured (quiet default)", withTokens("", "", ""), false, false, false},
+		{"empty URL but tokens present (intent)", withTokens("", "tok", ""), true, false, true},
+		{"fully wired, non-prod", withTokens("https://gov", "c", "d"), true, false, false},
+		{"fully wired, prod", withTokens("https://gov", "c", "d"), true, true, false},
+		{"URL set, no delegate, non-prod", withTokens("https://gov", "c", ""), true, false, true},
+		{"URL set, no caller, non-prod", withTokens("https://gov", "", "d"), true, false, true},
+		{"URL set, no tokens, non-prod", withTokens("https://gov", "", ""), true, false, true},
+		{"URL set, missing tokens but prod (config.go validates)", withTokens("https://gov", "", ""), true, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reason, inert := tt.client.InertReason(tt.configured, tt.isProduction)
+			if inert != tt.wantInert {
+				t.Fatalf("InertReason() inert = %v, want %v (reason=%q)", inert, tt.wantInert, reason)
+			}
+			if inert && reason == "" {
+				t.Fatal("InertReason() returned inert=true with an empty reason")
+			}
+			if !inert && reason != "" {
+				t.Fatalf("InertReason() returned inert=false but non-empty reason %q", reason)
+			}
+		})
+	}
+}

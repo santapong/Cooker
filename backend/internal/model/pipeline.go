@@ -23,6 +23,22 @@ type Pipeline struct {
 	RunDeadline string `json:"runDeadline,omitempty" db:"run_deadline"`
 }
 
+// SetDefaults normalises nil collections on a Pipeline to their empty
+// (non-nil) forms so downstream code — JSON marshalling, DAG walks,
+// store writes — never has to nil-guard Variables/Stages/Edges. Model
+// policy lives here rather than in the create handler. Idempotent.
+func (p *Pipeline) SetDefaults() {
+	if p.Variables == nil {
+		p.Variables = make(map[string]string)
+	}
+	if p.Stages == nil {
+		p.Stages = []Stage{}
+	}
+	if p.Edges == nil {
+		p.Edges = []Edge{}
+	}
+}
+
 // StageType identifies the kind of pipeline stage.
 type StageType string
 

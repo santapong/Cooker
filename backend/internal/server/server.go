@@ -244,6 +244,22 @@ func New(cfg *config.Config) (*Server, error) {
 			"caller_auth", cfg.Governance.CallerToken != "",
 			"delegation", govClient.DelegationEnabled())
 	}
+	// X-partial-rollout: make it loud when governance is wired in a way
+	// that silently degrades the deploy gate to ALLOW. `configured`
+	// signals operator intent (a URL or a token is present) so a
+	// completely-unconfigured dev boot stays quiet; the classification
+	// itself lives in governance.Client.InertReason so it's unit-tested.
+	govConfigured := cfg.Governance.URL != "" ||
+		cfg.Governance.CallerToken != "" ||
+		cfg.Governance.DelegateToken != ""
+	if reason, inert := govClient.InertReason(govConfigured, cfg.Env.IsProduction()); inert {
+		slog.Warn("governance deploy gate is INERT — deploys are NOT being governed",
+			"reason", reason,
+			"url_set", cfg.Governance.URL != "",
+			"caller_token_set", cfg.Governance.CallerToken != "",
+			"delegate_token_set", cfg.Governance.DelegateToken != "",
+			"env", cfg.Env)
+	}
 	govDeployHook := governance.PipelineDeployHook(govClient, st, func(ctx context.Context, pipelineID string) (string, error) {
 		p, err := st.Pipelines.Get(ctx, pipelineID)
 		if err != nil || p == nil {
