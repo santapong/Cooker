@@ -10,10 +10,22 @@ import (
 
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/santapong/cooker/internal/deploytarget"
 	"github.com/santapong/cooker/internal/model"
 )
+
+// isNotFound reports whether err is a gRPC NotFound status. Cloud Run's
+// apiv2 client wraps transport errors in *apierror.APIError, which
+// implements GRPCStatus(); status.Code unwraps through that interface,
+// so a genuine "service does not exist yet" is distinguished from
+// permission-denied / throttling / wrong-region errors. Mirrors the ECS
+// adapter's errors.As(&ServiceNotFoundException) branch selection.
+func isNotFound(err error) bool {
+	return status.Code(err) == codes.NotFound
+}
 
 // Target is the Cloud Run adapter. Project + Region are required.
 type Target struct {
@@ -106,7 +118,14 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 		template.Scaling = &runpb.RevisionScaling{MinInstanceCount: int32(spec.Replicas)}
 	}
 
-	if _, gerr := c.GetService(ctx, &runpb.GetServiceRequest{Name: t.serviceName(spec.AppID)}); gerr == nil {
+	// Branch selection: an existing service is updated; a genuine
+	// NotFound falls through to create. Any OTHER GetService error
+	// (permission denied, throttling, wrong region) is returned wrapped
+	// — blindly creating on an ambiguous error would risk a ghost
+	// service or mask a misconfiguration. Mirrors the ECS adapter.
+	_, gerr := c.GetService(ctx, &runpb.GetServiceRequest{Name: t.serviceName(spec.AppID)})
+	switch {
+	case gerr == nil:
 		op, uerr := c.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: &runpb.Service{
 			Name:     t.serviceName(spec.AppID),
 			Template: template,
@@ -118,7 +137,10 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 			return fmt.Errorf("cloud-run: wait update %s: %w", spec.AppID, err)
 		}
 		return nil
+	case !isNotFound(gerr):
+		return fmt.Errorf("cloud-run: get service %s: %w", spec.AppID, gerr)
 	}
+	// NotFound — create the service.
 	op, cerr := c.CreateService(ctx, &runpb.CreateServiceRequest{
 		Parent:    t.parent(),
 		ServiceId: spec.AppID,

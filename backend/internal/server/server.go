@@ -74,6 +74,10 @@ type Server struct {
 	// registerRoutes; held here so Close() can stop its gc goroutine
 	// (BC-H1). nil when the redis backend or disabled limiter is used.
 	rateLimiter *rateLimiter
+	// webhookRateLimiter is the dedicated in-memory per-IP limiter for the
+	// unauthenticated /webhooks/* receivers (C-webhook-logs). Held here so
+	// Close() can stop its gc goroutine. nil when disabled.
+	webhookRateLimiter *rateLimiter
 }
 
 // registerMetricsRoute mounts /metrics on the main app router ONLY when no
@@ -243,6 +247,22 @@ func New(cfg *config.Config) (*Server, error) {
 			"bootstrap_services", cfg.Governance.BootstrapServices,
 			"caller_auth", cfg.Governance.CallerToken != "",
 			"delegation", govClient.DelegationEnabled())
+	}
+	// X-partial-rollout: make it loud when governance is wired in a way
+	// that silently degrades the deploy gate to ALLOW. `configured`
+	// signals operator intent (a URL or a token is present) so a
+	// completely-unconfigured dev boot stays quiet; the classification
+	// itself lives in governance.Client.InertReason so it's unit-tested.
+	govConfigured := cfg.Governance.URL != "" ||
+		cfg.Governance.CallerToken != "" ||
+		cfg.Governance.DelegateToken != ""
+	if reason, inert := govClient.InertReason(govConfigured, cfg.Env.IsProduction()); inert {
+		slog.Warn("governance deploy gate is INERT — deploys are NOT being governed",
+			"reason", reason,
+			"url_set", cfg.Governance.URL != "",
+			"caller_token_set", cfg.Governance.CallerToken != "",
+			"delegate_token_set", cfg.Governance.DelegateToken != "",
+			"env", cfg.Env)
 	}
 	govDeployHook := governance.PipelineDeployHook(govClient, st, func(ctx context.Context, pipelineID string) (string, error) {
 		p, err := st.Pipelines.Get(ctx, pipelineID)
@@ -768,6 +788,9 @@ func (s *Server) Close() error {
 	// BC-H1: stop the rate-limiter gc goroutine.
 	if s.rateLimiter != nil {
 		s.rateLimiter.Close()
+	}
+	if s.webhookRateLimiter != nil {
+		s.webhookRateLimiter.Close()
 	}
 	if s.traceShutdown != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -1,10 +1,59 @@
 package local
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/santapong/cooker/internal/model"
 )
+
+// fakeUserStore is a minimal store.UserStore for BootstrapRole tests. It
+// exercises only Count; the other methods panic if ever reached so a
+// wrong call surfaces loudly.
+type fakeUserStore struct {
+	count    int
+	countErr error
+}
+
+func (f *fakeUserStore) Count(context.Context) (int, error) { return f.count, f.countErr }
+func (f *fakeUserStore) GetByEmail(context.Context, string) (*model.User, error) {
+	panic("unexpected GetByEmail")
+}
+func (f *fakeUserStore) GetByID(context.Context, string) (*model.User, error) {
+	panic("unexpected GetByID")
+}
+func (f *fakeUserStore) Create(context.Context, *model.User) error { panic("unexpected Create") }
+func (f *fakeUserStore) Update(context.Context, *model.User) error { panic("unexpected Update") }
+
+// TestBootstrapRole pins the "first user becomes admin" policy that
+// moved out of the Signup handler (audit Finding 4). A Count failure
+// must degrade to viewer without erroring so account creation still
+// proceeds.
+func TestBootstrapRole(t *testing.T) {
+	tests := []struct {
+		name     string
+		store    *fakeUserStore
+		wantRole string
+	}{
+		{"empty store → admin", &fakeUserStore{count: 0}, roleAdmin},
+		{"non-empty store → viewer", &fakeUserStore{count: 1}, roleViewer},
+		{"count error → viewer (safe default)", &fakeUserStore{countErr: errors.New("db down")}, roleViewer},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			role, err := BootstrapRole(context.Background(), tt.store)
+			if err != nil {
+				t.Fatalf("BootstrapRole returned error: %v", err)
+			}
+			if role != tt.wantRole {
+				t.Fatalf("BootstrapRole = %q, want %q", role, tt.wantRole)
+			}
+		})
+	}
+}
 
 func TestHashAndVerifyPassword(t *testing.T) {
 	hash, err := HashPassword("hunter2-secure")

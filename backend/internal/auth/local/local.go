@@ -11,13 +11,17 @@
 package local
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/santapong/cooker/internal/store"
 )
 
 // IssuerName is encoded as the JWT `iss` claim. Used by the
@@ -50,6 +54,34 @@ var (
 	ErrTokenInvalid       = errors.New("token invalid or expired")
 	ErrSigningKeyTooShort = fmt.Errorf("local-auth JWT signing key must be at least %d bytes", MinSigningKeyLength)
 )
+
+// Role names used by the bootstrap policy. These mirror
+// auth.RoleAdmin / auth.RoleViewer by value; they are duplicated as
+// literals here because internal/auth imports this package (oidc.go),
+// so importing auth back would create a cycle.
+const (
+	roleAdmin  = "admin"
+	roleViewer = "viewer"
+)
+
+// BootstrapRole implements the "first user becomes admin" policy: it
+// grants admin to the very first account (users.Count == 0) and viewer
+// to everyone after. A failed Count call is not fatal — it logs and
+// falls back to viewer (the safe default), returning a nil error so the
+// caller can still create the account. This is the domain rule the
+// Signup handler consults; keeping it here (rather than in the handler)
+// makes the policy testable at the service tier.
+func BootstrapRole(ctx context.Context, users store.UserStore) (string, error) {
+	n, err := users.Count(ctx)
+	if err != nil {
+		slog.Warn("auth/local: count users failed; defaulting new user to viewer", "error", err)
+		return roleViewer, nil
+	}
+	if n == 0 {
+		return roleAdmin, nil
+	}
+	return roleViewer, nil
+}
 
 // HashPassword bcrypt-hashes a plaintext password. Cost is bcrypt's
 // DefaultCost (10) — matches what every other Go project ships and

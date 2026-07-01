@@ -64,6 +64,18 @@ jobs:
       - name: Vet
         working-directory: backend
         run: go vet ./...
+      - name: Guard — no module-tidy in release config
+        # The module-tidy command enables all build tags, pulling
+        # tailscale.com via the tsnet tag and bumping the Go floor past 1.25
+        # (breaks the docker job on golang:1.25-alpine). See CLAUDE.md. This
+        # guard fails the PR if it is reintroduced into the goreleaser config
+        # or the release workflow. (Scoped to those two files so this guard's
+        # own text in ci.yml is not a false positive.)
+        run: |
+          if grep -rnE 'go[[:space:]]+mod[[:space:]]+tidy' .goreleaser.yaml .github/workflows/release.yml; then
+            echo "::error::module-tidy is forbidden (breaks the Go 1.25 docker build). Use 'go get <module>@<version>' or download instead." >&2
+            exit 1
+          fi
       - name: golangci-lint
         uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
         # Keep going to the test step even on lint failure so a single

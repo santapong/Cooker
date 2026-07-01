@@ -162,3 +162,32 @@ func rateLimitKey(c *gin.Context) string {
 	}
 	return "ip:" + c.ClientIP()
 }
+
+// webhookMiddleware returns a Gin handler for the unauthenticated
+// /webhooks/* receivers. Unlike middleware(), it ALWAYS keys on the source
+// IP (there is no authenticated principal on these routes) so a single
+// hostile sender can't amplify the pre-verification DB lookup + secret
+// decryption each provider webhook performs before its HMAC/token check.
+//
+// The limiter runs BEFORE any handler work, so a throttled request never
+// reaches the store or the crypto codec. On throttle it returns 429 with a
+// Retry-After hint, matching the per-user limiter's response shape.
+//
+// Like the per-user limiter it is in-memory / per-process; multi-replica
+// deployments should also rate-limit at the edge (see SECURITY.md).
+func (rl *rateLimiter) webhookMiddleware() gin.HandlerFunc {
+	if rl.rps == 0 {
+		return func(c *gin.Context) { c.Next() }
+	}
+	return func(c *gin.Context) {
+		key := "webhook-ip:" + c.ClientIP()
+		if !rl.limiterFor(key).Allow() {
+			c.Header("Retry-After", "60")
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": "rate limit exceeded; try again in a moment",
+			})
+			return
+		}
+		c.Next()
+	}
+}

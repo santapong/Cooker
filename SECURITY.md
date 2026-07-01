@@ -300,6 +300,25 @@ Cooker emits a structured audit event for every authenticated mutating call (POS
 
 `POST /api/v1/settings/secrets/test` (admin + MFA) probes the configured secrets backend with a single authenticated `List` call. The response reveals **only** the backend kind (`database`, `keepsave`, …), reachability, latency, and a classified error (`authentication failed` / `backend unreachable` / raw message). Key names and values are never returned — the probe discards the list contents. The probe is rate-limited only by the admin+MFA gate; it makes one outbound request per click to the same endpoint the executor already talks to (no new egress class).
 
+### Git-provider webhook receivers
+
+The unauthenticated `/webhooks/{github,gitlab,gitea,bitbucket}` receivers accept push events and trigger an auto-deploy for the matching App. They are **not** behind the OIDC middleware or the `/api/v1` per-user limiter — each provider's HMAC signature / shared-token header **is** the authentication.
+
+**Authentication order (fail-early).** Each receiver does the minimum work needed to verify the request, in this order, and rejects as early as possible:
+
+1. Bound the body read (10 MiB `LimitReader`; over-limit → `413`).
+2. Ignore non-push events (`200 ignored`) and branch-delete / non-branch pushes.
+3. Look up the App by repo+branch (`GetByRepo`). Unknown repo → `204` (does not leak repo existence).
+4. Decrypt **only that repo's own webhook secret** (`Codec.Open`) — the single decryption unavoidably required for the HMAC/token check. **No other secret is decrypted before verification.**
+5. Verify the provider signature/token. **Failure → `401`/`403` and the request never reaches the deploy path** (no run row is created, no deploy is spawned).
+
+**Per-source-IP rate limit (C-webhook-logs).** Because steps 3–4 cost a DB lookup plus a secret decryption *before* the signature check, an unauthenticated attacker could amplify that work. A dedicated **in-memory per-source-IP** limiter runs **ahead of** the receiver (and ahead of the idempotency middleware), so a throttled request never touches the store or the crypto codec. It is independent of the per-user limiter (different threat: unauthenticated amplification, not per-user fairness).
+
+- Defaults: **60 requests/minute, burst 10**, keyed on `c.ClientIP()`.
+- Tunable via `COOKER_WEBHOOK_RATE_LIMIT_ENABLED` (default `true`), `COOKER_WEBHOOK_RATE_LIMIT_PER_MINUTE` (default `60`), `COOKER_WEBHOOK_RATE_LIMIT_BURST` (default `10`).
+- In-memory / per-process, exactly like the per-user limiter: **multi-replica deployments must also enforce edge rate-limiting** (and set a correct trusted-proxy config so `ClientIP()` reflects the real source). It is defense-in-depth, not a substitute for edge limiting.
+- Bitbucket **Cloud** does not sign payloads; only Bitbucket **Server / Data Center** (signed) is supported. Cloud users must IP-allowlist at the edge.
+
 ### Rate limiting
 
 Cooker applies a **per-user, in-memory rate limit** to **three** specific endpoints (S26-05-19) so a single user cannot accidentally fork-bomb builds. Defaults: 10 requests/minute, burst 3, keyed on the OIDC subject claim. The covered routes are exactly:
@@ -308,7 +327,7 @@ Cooker applies a **per-user, in-memory rate limit** to **three** specific endpoi
 - `POST /api/v1/docker/images/build`
 - `POST /api/v1/apps/:id/deploy`
 
-**Every other route in `/api/v1` — including environment / app / pipeline CRUD, webhook secret rotation, `POST /api/v1/environments/:id/secrets/promote`, and the unauthenticated `/webhooks/github` receiver and `/api/v1/auth/local/{signup,signin}` paths — is unbounded at the application layer.** Operators must enforce edge rate-limiting (NGINX `limit_req`, Traefik middleware, Cloudflare, AWS WAF) for those.
+The unauthenticated `/webhooks/*` receivers have their **own** per-source-IP limiter (see "Git-provider webhook receivers" above), enabled by default. **Every other route in `/api/v1` — including environment / app / pipeline CRUD, webhook secret rotation, `POST /api/v1/environments/:id/secrets/promote`, and the `/api/v1/auth/local/{signup,signin}` paths — is unbounded at the application layer.** Operators must enforce edge rate-limiting (NGINX `limit_req`, Traefik middleware, Cloudflare, AWS WAF) for those.
 
 - Tunable via `COOKER_RATE_LIMIT_ENABLED` (default `true`), `COOKER_RATE_LIMIT_PER_MINUTE` (default `10`), `COOKER_RATE_LIMIT_BURST` (default `3`).
 - **Multi-replica deployments must back per-process state with Redis** — or pin clients with sticky sessions. `Config.Validate()` (`backend/internal/config/config.go:482-499`) refuses to boot in production when `COOKER_REPLICA_COUNT > 1 && COOKER_STICKY_SESSIONS=false` unless **all three** of the per-process subsystems are pointed at Redis:

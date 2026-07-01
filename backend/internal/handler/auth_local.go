@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -95,7 +94,12 @@ func (h *LocalAuthHandler) Signup(c *gin.Context) {
 		return
 	}
 
-	role := bootstrapRole(ctx, h.users)
+	role, err := local.BootstrapRole(ctx, h.users)
+	if err != nil {
+		slog.Error("auth/local: bootstrap role", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
 	now := time.Now().UTC()
 	u := &model.User{
 		ID:           uuid.NewString(),
@@ -192,20 +196,6 @@ func newMeUser(u *model.User) meUser {
 		Role:  u.Role,
 		Roles: []string{u.Role},
 	}
-}
-
-// bootstrapRole grants admin to the first user; viewer to everyone
-// after. A failed Count call falls back to viewer (safe default).
-func bootstrapRole(ctx context.Context, users store.UserStore) string {
-	n, err := users.Count(ctx)
-	if err != nil {
-		slog.Warn("auth/local: count users failed; defaulting new user to viewer", "error", err)
-		return string(auth.RoleViewer)
-	}
-	if n == 0 {
-		return string(auth.RoleAdmin)
-	}
-	return string(auth.RoleViewer)
 }
 
 func primaryRole(roles []string) string {

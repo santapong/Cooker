@@ -1,10 +1,12 @@
 package governance_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -145,6 +147,155 @@ func TestClient_PassesContextAndPayload(t *testing.T) {
 	}
 }
 
+// TestClient_SendsABACContext asserts the optional ABAC context fields
+// (break_glass, change_window, attributes) are serialised into the outbound
+// /authorize request `context` object using the snake_case names the
+// Grovernance authorize DTO expects (internal/adapter/inbound/httpapi/
+// authorize.go). X-abac-context.
+func TestClient_SendsABACContext(t *testing.T) {
+	var got struct {
+		Context struct {
+			RequestID    string         `json:"request_id"`
+			ChangeWindow *bool          `json:"change_window"`
+			BreakGlass   *bool          `json:"break_glass"`
+			Attributes   map[string]any `json:"attributes"`
+		} `json:"context"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_ = json.NewEncoder(w).Encode(governance.Decision{Decision: "allow"})
+	}))
+	defer srv.Close()
+
+	bg := true
+	cw := false
+	c := governance.New(srv.URL, nil, nil)
+	_, err := c.Authorize(context.Background(), "tok", "svc-x", "prod", "req-abac",
+		governance.AuthorizeContext{
+			BreakGlass:   &bg,
+			ChangeWindow: &cw,
+			Attributes:   map[string]any{"ticket": "INC-42"},
+		})
+	if err != nil {
+		t.Fatalf("authorize: %v", err)
+	}
+	if got.Context.RequestID != "req-abac" {
+		t.Errorf("request_id = %q", got.Context.RequestID)
+	}
+	if got.Context.BreakGlass == nil || *got.Context.BreakGlass != true {
+		t.Errorf("break_glass = %v, want true", got.Context.BreakGlass)
+	}
+	if got.Context.ChangeWindow == nil || *got.Context.ChangeWindow != false {
+		t.Errorf("change_window = %v, want false", got.Context.ChangeWindow)
+	}
+	if got.Context.Attributes["ticket"] != "INC-42" {
+		t.Errorf("attributes.ticket = %v, want INC-42", got.Context.Attributes["ticket"])
+	}
+}
+
+// TestClient_OmitsABACContextWhenAbsent asserts the wire payload is unchanged
+// (no break_glass / change_window / attributes keys) when no AuthorizeContext
+// is supplied — backward compatibility for callers that never send ABAC.
+func TestClient_OmitsABACContextWhenAbsent(t *testing.T) {
+	var raw map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&raw)
+		_ = json.NewEncoder(w).Encode(governance.Decision{Decision: "allow"})
+	}))
+	defer srv.Close()
+
+	c := governance.New(srv.URL, nil, nil)
+	_, _ = c.Authorize(context.Background(), "tok", "svc-x", "prod", "req-1")
+	ctx, _ := raw["context"].(map[string]any)
+	if _, ok := ctx["break_glass"]; ok {
+		t.Error("break_glass should be omitted when no AuthorizeContext is passed")
+	}
+	if _, ok := ctx["change_window"]; ok {
+		t.Error("change_window should be omitted when no AuthorizeContext is passed")
+	}
+	if _, ok := ctx["attributes"]; ok {
+		t.Error("attributes should be omitted when no AuthorizeContext is passed")
+	}
+}
+
+// TestClient_AuthorizeOnBehalf_SendsABACContext asserts the delegated path
+// also forwards the ABAC context.
+func TestClient_AuthorizeOnBehalf_SendsABACContext(t *testing.T) {
+	var got struct {
+		Context struct {
+			BreakGlass *bool `json:"break_glass"`
+		} `json:"context"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_ = json.NewEncoder(w).Encode(governance.Decision{Decision: "allow"})
+	}))
+	defer srv.Close()
+
+	bg := true
+	c := governance.New(srv.URL, nil, nil).WithDelegateToken("delegate-tok")
+	_, err := c.AuthorizeOnBehalf(context.Background(),
+		governance.PreresolvedActor{Kind: "human", ID: "alice"},
+		"svc-x", "prod", "run-1",
+		governance.AuthorizeContext{BreakGlass: &bg})
+	if err != nil {
+		t.Fatalf("authorize on behalf: %v", err)
+	}
+	if got.Context.BreakGlass == nil || *got.Context.BreakGlass != true {
+		t.Errorf("break_glass = %v, want true", got.Context.BreakGlass)
+	}
+}
+
+// TestClient_FailOpen_LogsLoudWarning asserts that when a fail-open ALLOW is
+// served because the gate is UNREACHABLE, a loud slog.Warn fires naming the
+// service/env and the fail-open posture — the allow must be attributable, not
+// silent (X-failopen). The allow/deny outcome is unchanged (dev stays
+// fail-open); only the observability changes.
+func TestClient_FailOpen_LogsLoudWarning(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	defer slog.SetDefault(prev)
+
+	c := governance.New("http://127.0.0.1:1/this-port-is-not-listening", nil, []string{"dev"})
+	d, err := c.Authorize(context.Background(), "tok", "svc-x", "dev", "req-1")
+	if err != nil {
+		t.Fatalf("dev should be fail-open; got err %v", err)
+	}
+	if !d.Allowed() {
+		t.Fatalf("decision = %v, want allow", d)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "UNREACHABLE") {
+		t.Errorf("expected a loud UNREACHABLE warning, got: %s", out)
+	}
+	if !strings.Contains(out, "fail-open") {
+		t.Errorf("warning should name the fail-open posture, got: %s", out)
+	}
+	if !strings.Contains(out, "svc-x") || !strings.Contains(out, `"env":"dev"`) {
+		t.Errorf("warning should be attributable to service/env, got: %s", out)
+	}
+}
+
+// TestClient_FailClosed_LogsWarning asserts the fail-closed path also logs the
+// unreachable gate (so an operator can tell a fail-closed block was caused by
+// an outage rather than a genuine deny). Outcome (deny/err) is unchanged.
+func TestClient_FailClosed_LogsWarning(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	defer slog.SetDefault(prev)
+
+	c := governance.New("http://127.0.0.1:1/this-port-is-not-listening", nil, []string{"dev"})
+	_, err := c.Authorize(context.Background(), "tok", "svc-x", "prod", "req-1")
+	if err == nil {
+		t.Fatal("prod should be fail-closed when transport fails")
+	}
+	if !strings.Contains(buf.String(), "UNREACHABLE") || !strings.Contains(buf.String(), "fail-closed") {
+		t.Errorf("expected a fail-closed UNREACHABLE warning, got: %s", buf.String())
+	}
+}
+
 func TestClient_CallerToken_AttachesAuthorizationHeader(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -239,5 +390,48 @@ func TestClient_AuthorizeOnBehalf_BootstrapBypass(t *testing.T) {
 	}
 	if !d.Allowed() || d.PolicyID != "cooker.governance.bootstrap" {
 		t.Errorf("decision = %+v, want bootstrap allow", d)
+	}
+}
+
+// TestClient_InertReason exercises the wired-but-inert classifier that
+// the server startup uses to WARN when the deploy gate silently degrades
+// to ALLOW (X-partial-rollout). The allow/deny path is unchanged; this
+// only pins which configurations get flagged.
+func TestClient_InertReason(t *testing.T) {
+	withTokens := func(url, caller, delegate string) *governance.Client {
+		c := governance.New(url, nil, nil)
+		return c.WithCallerToken(caller).WithDelegateToken(delegate)
+	}
+	tests := []struct {
+		name         string
+		client       *governance.Client
+		configured   bool
+		isProduction bool
+		wantInert    bool
+	}{
+		{"nil client, unconfigured", nil, false, false, false},
+		{"nil client, configured", nil, true, false, true},
+		{"empty URL, unconfigured (quiet default)", withTokens("", "", ""), false, false, false},
+		{"empty URL but tokens present (intent)", withTokens("", "tok", ""), true, false, true},
+		{"fully wired, non-prod", withTokens("https://gov", "c", "d"), true, false, false},
+		{"fully wired, prod", withTokens("https://gov", "c", "d"), true, true, false},
+		{"URL set, no delegate, non-prod", withTokens("https://gov", "c", ""), true, false, true},
+		{"URL set, no caller, non-prod", withTokens("https://gov", "", "d"), true, false, true},
+		{"URL set, no tokens, non-prod", withTokens("https://gov", "", ""), true, false, true},
+		{"URL set, missing tokens but prod (config.go validates)", withTokens("https://gov", "", ""), true, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reason, inert := tt.client.InertReason(tt.configured, tt.isProduction)
+			if inert != tt.wantInert {
+				t.Fatalf("InertReason() inert = %v, want %v (reason=%q)", inert, tt.wantInert, reason)
+			}
+			if inert && reason == "" {
+				t.Fatal("InertReason() returned inert=true with an empty reason")
+			}
+			if !inert && reason != "" {
+				t.Fatalf("InertReason() returned inert=false but non-empty reason %q", reason)
+			}
+		})
 	}
 }

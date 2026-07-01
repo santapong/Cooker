@@ -117,15 +117,7 @@ func (h *Handler) createPipeline(c *gin.Context, p *model.Pipeline) {
 	// must not be able to seed it.
 	p.Version = 0
 
-	if p.Variables == nil {
-		p.Variables = make(map[string]string)
-	}
-	if p.Stages == nil {
-		p.Stages = []model.Stage{}
-	}
-	if p.Edges == nil {
-		p.Edges = []model.Edge{}
-	}
+	p.SetDefaults()
 
 	if err := h.Store.Pipelines.Create(c.Request.Context(), p); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
