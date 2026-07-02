@@ -202,6 +202,10 @@ Controls:
 
 Residual risk: stage logs can contain whatever the user's build prints. If your builds may log sensitive material, leave triage disabled or scrub at the build level — Cooker cannot distinguish a secret a build chose to print from ordinary output.
 
+### In-app feedback (opt-in outbound GitHub call)
+
+`COOKER_FEEDBACK_GITHUB_TOKEN` is a new server-side secret: a GitHub token (use a fine-grained PAT with Issues Read/Write on the single feedback repo) that `POST /api/v1/feedback` uses to file user feedback as GitHub issues. The token lives server-side only and is **never sent to the browser**; clients only ever see the created issue's URL and number. Off by default — an empty token keeps the route returning 503 and the frontend hides the button (`GET /api/v1/capabilities`). Submitter identity is derived server-side from the auth context and the User-Agent from the request header (never from client JSON); the message is embedded in a dynamic code fence, and the client-controlled page URL and User-Agent are each wrapped in an inline-code span (with a backtick delimiter that outruns any backticks in the value), so none of them can inject markdown, @-mentions, #-references or disguised links into the issue; GitHub error responses are logged but never relayed to clients, and the route carries the per-user rate limiter.
+
 ### Cloud inventory credentials (read-only, opt-in)
 
 `COOKER_CLOUD_AWS_ENABLED` / `COOKER_CLOUD_GCP_ENABLED` add the read-only cloud inventory & cost panel (`GET /api/v1/cloud/{inventory,costs}`, `POST /api/v1/cloud/refresh`). When enabled, Cooker calls **only list/describe/cost APIs** — EC2 `DescribeInstances`, EKS `ListClusters`/`DescribeCluster`, ECR `DescribeRepositories`, Cost Explorer `GetCostAndUsage` on AWS; Compute `aggregatedList`, Container `clusters.list`, Artifact Registry `repositories.list` on GCP. There is **no mutating call path** in `internal/cloudinventory/` (the package and its providers expose `ListResources` + `CostSummary` only), so even a compromised Cooker cannot create, modify, or delete a cloud resource through this feature.

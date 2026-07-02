@@ -332,6 +332,12 @@ func (s *Server) registerRoutes() {
 		settings.POST("/secrets/test", adminRole, mfa, h.TestSecretsBackend)
 	}
 
+	// In-app feedback → GitHub issue relay. Any authenticated user
+	// (viewers included) may submit — no writeRole gate — but the
+	// outbound GitHub call carries the per-user rate limiter like the
+	// other expensive POST actions.
+	api.POST("/feedback", expensive, h.SubmitFeedback)
+
 	api.POST("/ws-tickets", s.issueWSTicket)
 
 	ws := s.router.Group("/ws", s.wsTicketGate())

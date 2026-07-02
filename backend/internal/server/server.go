@@ -409,6 +409,14 @@ func New(cfg *config.Config) (*Server, error) {
 		h.Triage = triage.New(cfg.Triage.APIKey, cfg.Triage.Model)
 		slog.Info("ai triage enabled", "model", h.Triage.(*triage.Client).Model)
 	}
+	// In-app feedback → GitHub issue relay. Token empty = feature off;
+	// nil keeps the route 503 and the frontend button hidden.
+	if cfg.Feedback.Token != "" {
+		h.Feedback = service.NewFeedbackService(cfg.Feedback.Repo, cfg.Feedback.Token)
+		slog.Info("feedback enabled", "repo", cfg.Feedback.Repo)
+	} else {
+		slog.Info("feedback disabled (set COOKER_FEEDBACK_GITHUB_TOKEN to enable)")
+	}
 	h.AppDetector = service.NewAppDetector()
 	h.WSBroadcast = wsHub.Broadcast
 	h.Executor = exec

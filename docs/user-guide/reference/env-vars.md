@@ -199,6 +199,13 @@ Each cloud deploy target self-registers when its required config is non-empty.
 |---|---|---|---|
 | `COOKER_APP_HEALTH_INTERVAL` | `30s` | How often `AppHealthChecker` probes each App. `0` disables. | `config.go:353` |
 
+## Feedback
+
+| Variable | Default | Description | Source |
+|---|---|---|---|
+| `COOKER_FEEDBACK_GITHUB_TOKEN` | empty (feature off) | GitHub token used to file in-app feedback as issues. Use a fine-grained PAT scoped to Issues Read/Write on the one feedback repo. Server-side only — never sent to the browser. Empty keeps `POST /feedback` returning 503 and hides the frontend button. | `config.go` |
+| `COOKER_FEEDBACK_GITHUB_REPO` | `santapong/Cooker` | `owner/repo` that receives feedback issues. | `config.go` |
+
 ## Frontend (build-time)
 
 These are baked into the JS bundle at `npm run build`, not read at runtime. Setting them in Helm values requires rebuilding the image.
