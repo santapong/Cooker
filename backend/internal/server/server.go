@@ -78,6 +78,10 @@ type Server struct {
 	// unauthenticated /webhooks/* receivers (C-webhook-logs). Held here so
 	// Close() can stop its gc goroutine. nil when disabled.
 	webhookRateLimiter *rateLimiter
+	// localAuthRateLimiter is the dedicated in-memory per-IP limiter for the
+	// unauthenticated local-auth signup/signin endpoints (CWE-307). Held here
+	// so Close() can stop its gc goroutine. nil when local auth is disabled.
+	localAuthRateLimiter *rateLimiter
 }
 
 // registerMetricsRoute mounts /metrics on the main app router ONLY when no
@@ -799,6 +803,9 @@ func (s *Server) Close() error {
 	}
 	if s.webhookRateLimiter != nil {
 		s.webhookRateLimiter.Close()
+	}
+	if s.localAuthRateLimiter != nil {
+		s.localAuthRateLimiter.Close()
 	}
 	if s.traceShutdown != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

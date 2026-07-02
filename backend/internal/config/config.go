@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/url"
 	"os"
 	"strconv"
@@ -623,7 +622,11 @@ func (c *Config) Validate() error {
 		problems = append(problems, "COOKER_ALLOWED_ORIGINS=* is rejected in production; specify exact origins")
 	}
 	if !c.OIDC.Enabled && !c.LocalAuth.Enabled {
-		slog.Warn("OIDC and local auth both disabled in production; backend will inject dev admin user on every request")
+		// Fail closed: with both auth paths disabled the OIDC middleware
+		// falls back to devHandler(), which injects a dev admin user with
+		// RoleAdmin on every request — i.e. an unauthenticated admin API.
+		// This must never boot in production (CWE-1188).
+		problems = append(problems, "no authentication is enabled in production: set COOKER_OIDC_ENABLED=true or COOKER_LOCAL_AUTH_ENABLED=true (both disabled injects a dev admin user on every request)")
 	}
 	if c.LocalAuth.Enabled {
 		decoded, err := DecodeLocalAuthSigningKey(c.LocalAuth.JWTSigningKey)

@@ -12,8 +12,17 @@ import (
 
 func (s *Server) registerRoutes() {
 	if s.localAuth != nil {
-		s.router.POST("/api/v1/auth/local/signup", s.localAuth.Signup)
-		s.router.POST("/api/v1/auth/local/signin", s.localAuth.Signin)
+		// CWE-307: signup/signin are unauthenticated credential endpoints
+		// registered on s.router OUTSIDE the /api/v1 per-user limiter, so a
+		// dedicated per-source-IP limiter with a tight fixed budget runs
+		// first to bound brute-force / credential-stuffing (mirroring the
+		// webhook-limiter precedent below). Held on the Server so Close()
+		// can stop its gc goroutine.
+		lal := newRateLimiter(localAuthRateLimitPerMinute, localAuthRateLimitBurst)
+		s.localAuthRateLimiter = lal
+		localAuthLimit := lal.localAuthMiddleware()
+		s.router.POST("/api/v1/auth/local/signup", localAuthLimit, s.localAuth.Signup)
+		s.router.POST("/api/v1/auth/local/signin", localAuthLimit, s.localAuth.Signin)
 	}
 	s.router.GET("/api/v1/auth/methods", s.authMethods)
 

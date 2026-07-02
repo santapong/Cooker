@@ -39,6 +39,8 @@ Cooker offers two authentication paths. Operators can enable either or both:
 - **Generic verify-failure response** (S26-05-01): on a verify error the API returns `{"error":"authentication failed"}` with `401`, and `{"error":"provider unavailable"}` with `503 + Retry-After` when the IdP itself is unreachable. The upstream library's diagnostic detail (`iss mismatch`, `kid not found`, signature parse errors, etc.) is logged at `slog.Warn` / `slog.Error` server-side only — clients do not get an oracle for crafting valid-shaped tokens or fingerprinting JWKS rotation cadence.
 
 > **Default in local & UAT:** OIDC is **disabled** (`COOKER_OIDC_ENABLED=false`) and the backend injects a dev admin user so contributors and testers can exercise the API without an IdP. Production deployments should enable OIDC — see the checklist below and [docs/UAT.md](docs/guides/UAT.md#enabling-oidc-sign-in-for-uat) for how to wire Google or another provider.
+>
+> **Fail-closed in production (CWE-1188):** because that dev-admin injection grants `admin` on *every* request, `Config.Validate()` now **refuses to boot** when `COOKER_ENV=production` and **both** OIDC (`COOKER_OIDC_ENABLED`) and local auth (`COOKER_LOCAL_AUTH_ENABLED`) are disabled. Previously this only logged a warning and started an unauthenticated admin API. At least one real authentication path must be enabled in production.
 
 #### Path 2: Local email + password (homelab / single-user / fallback)
 
@@ -54,7 +56,7 @@ The same auth middleware accepts both kinds of bearer token: it inspects the JWT
 **Trade-offs and limits of the local path:**
 
 - **MFA gating does not apply.** `COOKER_OIDC_MFA_ACR_VALUES` is checked against the OIDC token's `acr`/`amr` claims; local-auth tokens carry neither. If your environment requires MFA on destructive admin routes, those users must come in through the OIDC path.
-- **Brute-force defence is rate-limit-only.** There's no account lockout, no CAPTCHA, no email verification, no password reset. The per-user rate limiter on `/api/v1` applies once a user is authenticated, but unauthenticated `/auth/local/signin` calls are not rate-limited at the application layer — operators should enforce that at the edge (NGINX `limit_req`, Traefik rate-limit middleware, etc.).
+- **Brute-force defence is rate-limit-only.** There's no account lockout, no CAPTCHA, no email verification, no password reset. A dedicated **in-memory per-source-IP** limiter (fixed budget: **5 requests/minute, burst 5**) now runs ahead of both `POST /auth/local/signup` and `POST /auth/local/signin` (S26-05: CWE-307). These routes are registered on the root router *outside* the `/api/v1` per-user limiter (there is no authenticated principal yet), so without this guard they had no application-layer throttle at all. Like the webhook and per-user limiters it is **in-memory / per-process**: multi-replica deployments must still enforce edge rate-limiting on the credential endpoints (NGINX `limit_req`, Traefik rate-limit middleware, etc.) and set a correct trusted-proxy config so `ClientIP()` reflects the real source.
 - **Signup can be closed.** Set `COOKER_LOCAL_AUTH_ALLOW_SIGNUP=false` to disable `/signup`; the UI hides the form and direct calls return 403. Use this when you want admin-created accounts only.
 - **Signing key requirement.** `COOKER_LOCAL_AUTH_JWT_SIGNING_KEY` must decode to ≥ 32 bytes (base64-decoded; raw bytes also accepted). `Config.Validate()` refuses to start in production with a shorter key.
 - **No revocation list.** A leaked JWT remains valid until its `exp` claim. Lower `COOKER_LOCAL_AUTH_TOKEN_TTL` (default `12h`) if that's a concern.
@@ -142,6 +144,13 @@ Cooker releases are signed using **cosign keyless signing** via the Sigstore / R
 #### Verifying a release
 
 See [`docs/RELEASING.md`](docs/guides/RELEASING.md#step-4--verify-the-release-artifacts) for the exact `cosign verify-blob` and `cosign verify` commands. For the security-side post-publish checklist (Rekor lookup, identity drift checks, expected workflow subjects), see [`docs/SECURITY-RELEASE-VERIFY.md`](docs/guides/SECURITY-RELEASE-VERIFY.md).
+
+#### Dependency / vulnerability scanning (CWE-1104)
+
+CI fails a PR on a known-vulnerable dependency:
+
+- **Backend:** the backend job runs `govulncheck` (pinned `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`). It is call-graph aware, so it only fails on advisories — including Go stdlib symbols — actually reachable from Cooker's code. The pinned `go run` invocation is used deliberately so it never mutates `go.mod` (`go mod tidy` is forbidden in this repo — it pulls `tailscale.com` via the `tsnet` build tag and breaks the Go 1.25 docker build).
+- **Frontend:** the frontend job runs `npm audit --audit-level=high --omit=dev`, scoped to production (browser-shipped) dependencies so build-tooling advisories that never reach users don't block a PR.
 
 ### OCI Registry Security
 
@@ -376,6 +385,7 @@ Referrer-Policy: strict-origin-when-cross-origin
 
 ## Security Checklist for Production Deployment
 
+- [x] Enable a real authentication path *(`Config.Validate()` refuses to boot in production when both `COOKER_OIDC_ENABLED` and `COOKER_LOCAL_AUTH_ENABLED` are false — otherwise the backend would inject a dev admin user on every request, CWE-1188)*
 - [ ] Enable OIDC authentication (`COOKER_OIDC_ENABLED=true`)
 - [ ] Configure TLS on ingress
 - [ ] Restrict CORS origins to your domain

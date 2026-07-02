@@ -415,6 +415,42 @@ func TestValidate_ProductionHappyPath(t *testing.T) {
 	}
 }
 
+func TestValidate_Production_NoAuth(t *testing.T) {
+	// CWE-1188: with both OIDC and local auth disabled the OIDC
+	// middleware falls back to devHandler(), injecting a dev admin user
+	// on every request. Production must fail closed rather than boot an
+	// unauthenticated admin API.
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		// OIDC.Enabled and LocalAuth.Enabled both false (zero value).
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error when no authentication is enabled in production")
+	}
+	if !strings.Contains(err.Error(), "no authentication is enabled") {
+		t.Errorf("error should explain that no auth path is enabled, got: %v", err)
+	}
+}
+
+func TestValidate_Production_LocalAuthOnlySatisfiesAuth(t *testing.T) {
+	// Local auth alone is a valid production auth path — it must not
+	// trip the no-auth guard.
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		LocalAuth:      LocalAuthConfig{Enabled: true, JWTSigningKey: validSecretKey},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("local-auth-only production config should validate, got: %v", err)
+	}
+}
+
 func TestValidate_ProductionRequiresGovernanceCallerToken(t *testing.T) {
 	cfg := &Config{
 		Env:            EnvProduction,
@@ -680,6 +716,7 @@ func TestValidate_ProductionMultiReplicaWithStickyOK(t *testing.T) {
 		RateLimit:      RateLimitConfig{Enabled: true, Backend: "memory"},
 		WSTicket:       WSTicketConfig{Backend: "memory"},
 		WSHub:          WSHubConfig{Backend: "memory"},
+		OIDC:           OIDCConfig{Enabled: true},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("sticky sessions should satisfy multi-replica guard, got: %v", err)
@@ -696,6 +733,7 @@ func TestValidate_ProductionMultiReplicaWithRedisOK(t *testing.T) {
 		RateLimit:      RateLimitConfig{Enabled: true, Backend: "redis"},
 		WSTicket:       WSTicketConfig{Backend: "redis"},
 		WSHub:          WSHubConfig{Backend: "redis"},
+		OIDC:           OIDCConfig{Enabled: true},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("redis backends should satisfy multi-replica guard, got: %v", err)
