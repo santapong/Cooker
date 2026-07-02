@@ -163,6 +163,41 @@ func rateLimitKey(c *gin.Context) string {
 	return "ip:" + c.ClientIP()
 }
 
+// localAuthRateLimit* is the fixed, tight per-source-IP budget for the
+// unauthenticated local-auth credential endpoints (signup/signin). It is
+// deliberately small to bound brute-force / credential-stuffing (CWE-307);
+// legitimate humans sign in far below 5 attempts/minute.
+const (
+	localAuthRateLimitPerMinute = 5
+	localAuthRateLimitBurst     = 5
+)
+
+// localAuthMiddleware returns a Gin handler for the unauthenticated local-auth
+// credential endpoints (POST /api/v1/auth/local/{signup,signin}). Like
+// webhookMiddleware it ALWAYS keys on the source IP — there is no authenticated
+// principal on these routes yet — so a single host can't brute-force passwords
+// or spam signups. These routes sit OUTSIDE the /api/v1 per-user limiter, so
+// without this guard they had no app-layer throttle at all.
+//
+// In-memory / per-process; multi-replica deployments must also throttle these
+// credential endpoints at the edge (see SECURITY.md).
+func (rl *rateLimiter) localAuthMiddleware() gin.HandlerFunc {
+	if rl.rps == 0 {
+		return func(c *gin.Context) { c.Next() }
+	}
+	return func(c *gin.Context) {
+		key := "localauth-ip:" + c.ClientIP()
+		if !rl.limiterFor(key).Allow() {
+			c.Header("Retry-After", "60")
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": "rate limit exceeded; try again in a moment",
+			})
+			return
+		}
+		c.Next()
+	}
+}
+
 // webhookMiddleware returns a Gin handler for the unauthenticated
 // /webhooks/* receivers. Unlike middleware(), it ALWAYS keys on the source
 // IP (there is no authenticated principal on these routes) so a single

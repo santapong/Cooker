@@ -95,6 +95,20 @@ jobs:
           # across packages (bounded by GOMAXPROCS). The race detector stays
           # on. P26-05-34: replaces the per-package sequential for-loop.
           go test -race -timeout 120s ./...
+      - name: govulncheck
+        working-directory: backend
+        # CWE-1104: surface known-vulnerable dependencies and reachable
+        # stdlib symbols (govulncheck is call-graph aware, so it only reports
+        # live paths). Run via a pinned 'go run' so it never modifies go.mod —
+        # module-tidy is forbidden in this repo (pulls tailscale.com via the
+        # tsnet tag and breaks the Go 1.25 docker build; see CLAUDE.md).
+        # Advisory (non-blocking): it also reports stdlib CVEs fixed only by
+        # newer Go patch releases — a moving frontier that would keep CI red
+        # between routine toolchain bumps. Real third-party dep CVEs are still
+        # surfaced and fixed by bumping the module (x/crypto, x/net were bumped
+        # for GO-2026-501x/5025). Review the output each run.
+        continue-on-error: true
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   frontend:
     runs-on: ubuntu-latest
@@ -108,6 +122,12 @@ jobs:
       - name: Install
         working-directory: frontend
         run: npm ci
+      - name: npm audit (production deps, high+)
+        working-directory: frontend
+        # CWE-1104: fail on a high/critical advisory in a runtime dependency
+        # that ships to the browser. Scoped to production deps (--omit=dev) so
+        # build-tooling advisories that never reach users don't block a PR.
+        run: npm audit --audit-level=high --omit=dev
       - name: Lint
         working-directory: frontend
         run: npm run lint

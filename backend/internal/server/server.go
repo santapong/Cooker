@@ -78,6 +78,10 @@ type Server struct {
 	// unauthenticated /webhooks/* receivers (C-webhook-logs). Held here so
 	// Close() can stop its gc goroutine. nil when disabled.
 	webhookRateLimiter *rateLimiter
+	// localAuthRateLimiter is the dedicated in-memory per-IP limiter for the
+	// unauthenticated local-auth signup/signin endpoints (CWE-307). Held here
+	// so Close() can stop its gc goroutine. nil when local auth is disabled.
+	localAuthRateLimiter *rateLimiter
 }
 
 // registerMetricsRoute mounts /metrics on the main app router ONLY when no
@@ -408,6 +412,14 @@ func New(cfg *config.Config) (*Server, error) {
 	if cfg.Triage.Enabled {
 		h.Triage = triage.New(cfg.Triage.APIKey, cfg.Triage.Model)
 		slog.Info("ai triage enabled", "model", h.Triage.(*triage.Client).Model)
+	}
+	// In-app feedback → GitHub issue relay. Token empty = feature off;
+	// nil keeps the route 503 and the frontend button hidden.
+	if cfg.Feedback.Token != "" {
+		h.Feedback = service.NewFeedbackService(cfg.Feedback.Repo, cfg.Feedback.Token)
+		slog.Info("feedback enabled", "repo", cfg.Feedback.Repo)
+	} else {
+		slog.Info("feedback disabled (set COOKER_FEEDBACK_GITHUB_TOKEN to enable)")
 	}
 	h.AppDetector = service.NewAppDetector()
 	h.WSBroadcast = wsHub.Broadcast
@@ -791,6 +803,9 @@ func (s *Server) Close() error {
 	}
 	if s.webhookRateLimiter != nil {
 		s.webhookRateLimiter.Close()
+	}
+	if s.localAuthRateLimiter != nil {
+		s.localAuthRateLimiter.Close()
 	}
 	if s.traceShutdown != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

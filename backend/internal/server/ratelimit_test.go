@@ -182,6 +182,60 @@ func TestWebhookRateLimit_DisabledIsPassthrough(t *testing.T) {
 	}
 }
 
+// hammerLocalAuth drives the unauthenticated signin path from a fixed source
+// IP, counting 200/429 like hammerFromIP but for the local-auth route.
+func hammerLocalAuth(t *testing.T, r *gin.Engine, remoteAddr string, n int) (ok, throttled int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/local/signin", nil)
+		req.RemoteAddr = remoteAddr
+		r.ServeHTTP(w, req)
+		switch w.Code {
+		case http.StatusOK:
+			ok++
+		case http.StatusTooManyRequests:
+			throttled++
+		default:
+			t.Fatalf("unexpected status %d", w.Code)
+		}
+	}
+	return
+}
+
+// TestLocalAuthRateLimit_ThrottlesPerIP proves the credential-endpoint limiter
+// (CWE-307) bounds brute-force from a single source IP after the burst.
+func TestLocalAuthRateLimit_ThrottlesPerIP(t *testing.T) {
+	rl := newRateLimiter(localAuthRateLimitPerMinute, localAuthRateLimitBurst)
+	defer rl.Close()
+	r := gin.New()
+	r.POST("/api/v1/auth/local/signin", rl.localAuthMiddleware(), func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	ok, throttled := hammerLocalAuth(t, r, "9.9.9.9:1111", 20)
+	if ok < localAuthRateLimitBurst || ok > localAuthRateLimitBurst+1 {
+		t.Errorf("expected ~%d ok within burst, got ok=%d throttled=%d", localAuthRateLimitBurst, ok, throttled)
+	}
+	if throttled == 0 {
+		t.Errorf("expected the rest throttled, got ok=%d throttled=%d", ok, throttled)
+	}
+}
+
+// TestLocalAuthRateLimit_PerIPIsolation proves one hostile IP exhausting its
+// bucket does not throttle a distinct (legitimate) source IP.
+func TestLocalAuthRateLimit_PerIPIsolation(t *testing.T) {
+	rl := newRateLimiter(60, 1) // 1 rps, burst 1
+	defer rl.Close()
+	r := gin.New()
+	r.POST("/api/v1/auth/local/signin", rl.localAuthMiddleware(), func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	if ok, throttled := hammerLocalAuth(t, r, "9.9.9.9:1111", 5); ok != 1 || throttled != 4 {
+		t.Fatalf("attacker IP: ok=%d throttled=%d, want ok=1 throttled=4", ok, throttled)
+	}
+	if ok, _ := hammerLocalAuth(t, r, "1.2.3.4:2222", 1); ok != 1 {
+		t.Errorf("distinct IP should be unaffected, got ok=%d", ok)
+	}
+}
+
 func TestRateLimit_KeyByUserOrIP(t *testing.T) {
 	r := gin.New()
 	c1, _ := gin.CreateTestContext(httptest.NewRecorder())

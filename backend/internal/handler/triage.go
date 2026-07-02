@@ -25,6 +25,7 @@ func (h *Handler) GetCapabilities(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"aiTriage":       h.Triage != nil,
 		"cloudInventory": h.CloudInventory != nil && h.CloudInventory.Enabled(),
+		"feedback":       h.Feedback != nil,
 	})
 }
 

@@ -89,6 +89,11 @@ type Handler struct {
 	// AppDetector backs POST /apps/detect-build (New-App wizard recipe
 	// suggestion). Set by server.New; nil returns 503.
 	AppDetector *service.AppDetector
+	// Feedback relays in-app feedback to GitHub issues (pure relay —
+	// nothing is persisted). Set by server.New when
+	// COOKER_FEEDBACK_GITHUB_TOKEN is non-empty; nil keeps the route
+	// returning 503 and hides the frontend button via /capabilities.
+	Feedback *service.FeedbackService
 	// Hosts coordinates host-CRUD side-effects (writing SSH private
 	// keys through secrets.Manager). Set by server.New; nil-safe in
 	// dev when no secrets backend is configured (SSH host create/
