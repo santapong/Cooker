@@ -291,6 +291,11 @@ func (g *gatedProvider) ListResources(ctx context.Context) ([]model.CloudResourc
 	if g.release != nil {
 		<-g.release
 	}
+	// Honour the fetch context: a real SDK client fails on cancellation.
+	// Lets a test prove the shared fetch is detached from a caller's ctx.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return []model.CloudResource{{ID: g.id}}, nil
 }
 func (g *gatedProvider) CostSummary(context.Context) (model.CostSummary, error) {
@@ -352,5 +357,58 @@ func TestService_FailedFetchNegativeTTL(t *testing.T) {
 	s.Inventory(context.Background())
 	if got := p.listCalls.Load(); got != 2 {
 		t.Errorf("past negativeTTL a failed snapshot must re-fetch, got %d calls (a good snapshot would still be cached for 1h)", got)
+	}
+}
+
+// Self-review #1/#5 (HIGH): the shared singleflight fetch must be detached
+// from the leader's request context. If the leader's client disconnects,
+// the fan-out must still complete and cache a GOOD snapshot — not fail for
+// everyone and poison the cache with an all-errored result.
+func TestService_LeaderCancelDoesNotPoisonCache(t *testing.T) {
+	g := &gatedProvider{name: model.CloudProviderAWS, id: "ok", started: make(chan struct{}), release: make(chan struct{})}
+	s := New([]Provider{g})
+
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	go func() { _ = s.Inventory(leaderCtx) }()
+	<-g.started      // leader is mid-fetch inside the provider
+	cancelLeader()   // the leader's client disconnects
+	close(g.release) // let the provider proceed
+
+	// Give the leader goroutine a moment to finish and cache.
+	deadline := time.Now().Add(2 * time.Second)
+	var inv model.CloudInventory
+	for time.Now().Before(deadline) {
+		inv = s.Inventory(context.Background())
+		if len(inv.Results) > 0 && inv.Results[0].Error == "" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(inv.Results) == 0 || inv.Results[0].Error != "" {
+		t.Fatalf("leader cancellation poisoned the shared fetch: %+v", inv.Results)
+	}
+	if inv.Results[0].Resources[0].ID != "ok" {
+		t.Errorf("expected the good snapshot to be cached, got %+v", inv.Results[0].Resources)
+	}
+}
+
+// Self-review #4 (MEDIUM): the negative TTL must be clamped to the
+// configured TTL, so a failed snapshot never outlives a good one when the
+// operator sets COOKER_CLOUD_CACHE_TTL below negativeTTL.
+func TestService_NegativeTTLClampedToConfiguredTTL(t *testing.T) {
+	clock := &fakeClock{t: time.Now()}
+	p := &fakeProvider{name: model.CloudProviderAWS, listErr: errors.New("throttled")}
+	s := New([]Provider{p}, WithTTL(5*time.Second), withClock(clock.Now)) // TTL < negativeTTL(30s)
+
+	s.Inventory(context.Background())
+	if p.listCalls.Load() != 1 {
+		t.Fatalf("precondition: 1 call")
+	}
+	// At 6s: past the 5s configured TTL, so even a FAILED snapshot must
+	// have expired (clamped) — not held for the full 30s negativeTTL.
+	clock.Advance(6 * time.Second)
+	s.Inventory(context.Background())
+	if got := p.listCalls.Load(); got != 2 {
+		t.Errorf("failed snapshot must expire at the clamped TTL (5s), got %d calls at 6s", got)
 	}
 }
