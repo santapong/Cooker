@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/santapong/cooker/internal/jobqueue"
 	"github.com/santapong/cooker/internal/model"
@@ -105,41 +104,11 @@ func (r *JobQueueRunner) Handle(ctx context.Context, job *jobqueue.Job) error {
 	return execErr
 }
 
-// dispatchOutcome picks the right notifier.EventType based on the
-// terminal run state and fans out via the dispatcher. Silent (no-op)
-// when the dispatcher is nil or the run somehow ended in a non-
-// terminal state (defensive — shouldn't happen given the executor's
-// guarantee, but a future regression would silently skip notification
-// rather than emit a misleading event).
-func (r *JobQueueRunner) dispatchOutcome(ctx context.Context, p *model.Pipeline, run *model.PipelineRun, execErr error) {
-	if r.dispatcher == nil {
-		return
-	}
-	event := notifier.Event{
-		PipelineID:   p.ID,
-		PipelineName: p.Name,
-		RunID:        run.ID,
-		Status:       string(run.Status),
-		Timestamp:    time.Now().UTC(),
-	}
-	switch {
-	case execErr != nil:
-		event.Type = notifier.EventRunFailed
-		event.Error = execErr.Error()
-	case run.Status == model.RunStatusCancelled:
-		event.Type = notifier.EventRunCancelled
-	case run.Status == model.RunStatusSuccess:
-		event.Type = notifier.EventRunSucceeded
-	case run.Status == model.RunStatusFailed:
-		event.Type = notifier.EventRunFailed
-		event.Error = run.Error
-	default:
-		// Non-terminal status at end of Handle is a programmer bug.
-		// Don't emit a misleading event; the executor team will
-		// notice when the surrounding tests catch the regression.
-		return
-	}
-	if dispErr := r.dispatcher.Dispatch(ctx, event); dispErr != nil {
-		slog.Warn("jobqueue runner: notifier dispatch failed", "run", run.ID, "err", dispErr)
-	}
+// dispatchOutcome delegates to the shared NotifyRunOutcome helper so
+// the queue path and the inline Spawn path (handler.RunPipeline)
+// emit identically. A run flows through exactly one of the two
+// paths, so there is no double-send. NotifyRunOutcome handles the
+// nil-dispatcher and non-terminal-status no-ops.
+func (r *JobQueueRunner) dispatchOutcome(_ context.Context, p *model.Pipeline, run *model.PipelineRun, execErr error) {
+	NotifyRunOutcome(r.dispatcher, p, run, execErr)
 }

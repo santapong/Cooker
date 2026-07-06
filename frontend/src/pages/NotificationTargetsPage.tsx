@@ -33,22 +33,37 @@ const EVENT_TYPES: NotificationEventType[] = [
   'deploy.succeeded',
   'deploy.failed',
   'build.failed',
+  'canary.promoted',
+  'canary.aborted',
+  'canary.failed',
+];
+
+// Failure / state-change events a new target subscribes to by default.
+// Mirrors the backend's defaultCreateEventTypes: pre-selecting only the
+// failures avoids the alert-fatigue trap of firing on every green run.
+// Operators can still tick the success events explicitly.
+const DEFAULT_EVENT_TYPES: NotificationEventType[] = [
+  'run.failed',
+  'deploy.failed',
+  'build.failed',
+  'canary.failed',
 ];
 
 const EMPTY_FORM: NotificationTargetInput = {
   name: '',
   kind: 'slack',
   config: {},
-  eventTypes: [],
+  eventTypes: DEFAULT_EVENT_TYPES,
   enabled: true,
 };
 
 /**
  * Admin page for notification targets (Slack / Discord / SMTP / generic
  * Webhook). Talks to GET/POST/PUT/DELETE /api/v1/admin/notification-
- * targets. The dispatcher only fires when COOKER_JOBQUEUE_ENABLED=true
- * on the backend; until then targets can be configured but won't
- * receive events.
+ * targets. The dispatcher is always on: run, deploy, and canary events
+ * are delivered whether or not the job queue is enabled. Email and
+ * generic webhook are the supported channels; Slack/Discord work but
+ * are less exercised.
  */
 export default function NotificationTargetsPage() {
   const t = useTheme();
@@ -165,7 +180,7 @@ export default function NotificationTargetsPage() {
         <Card>
           <EmptyState
             title="Notifier is not configured."
-            body="The notifier store is loaded by the jobqueue boot path. Set COOKER_JOBQUEUE_ENABLED=true on the backend to enable it."
+            body="The notification-target store failed to initialize on the backend. Check the server logs for a database connection error."
           />
         </Card>
       ) : (

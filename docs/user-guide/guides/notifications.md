@@ -1,69 +1,80 @@
 # Notifications
 
-> **Partial — read this first.** Cooker does NOT yet ship first-party notification sinks (Slack, Discord, Teams, email, PagerDuty). The roadmap tracks them as `A7` and `A8`. What works today is the **status surface** — anything that wants to know about a run can poll the API or subscribe to the WebSocket. This page documents both the gap and the workaround.
+Cooker sends outbound notifications when a run, deploy, or canary
+finishes. Configure destinations ("targets") under **Settings →
+Notification targets** (admin only), or via the
+`/api/v1/admin/notification-targets` API.
 
-## What exists today
+Notifications are **always on** — they work whether or not the async
+job queue (`COOKER_JOBQUEUE_ENABLED`) is enabled. An install with no
+targets configured simply sends nothing.
 
-- **Run status over WebSocket.** `/ws/pipeline-run/:runId` streams status changes; `/ws/runs/:runId/stages/:stageId/logs` streams per-stage logs.
-- **REST polling.** `GET /api/v1/pipelines/:id/runs` and `GET .../runs/:runId` return current status.
-- **Audit log.** Every authenticated mutating call produces a structured event (see [Audit logging](../../../SECURITY.md#audit-logging)). This is for compliance, not user-facing notifications.
+## Supported channels
 
-## What doesn't yet
+| Channel | `kind` | Config shape |
+|---|---|---|
+| **Email (SMTP)** | `email` | `{"host":"smtp.example.com","port":587,"username":"…","password":"…","from":"cooker@example.com","to":"oncall@example.com"}` |
+| **Generic webhook** | `webhook` | `{"url":"https://api.example.com/notify","bearerToken":"…"}` |
+| Slack | `slack` | `{"webhookUrl":"https://hooks.slack.com/services/…"}` |
+| Discord | `discord` | `{"webhookUrl":"https://discord.com/api/webhooks/…"}` |
 
-- No outbound notifier interface (`internal/notifier/` doesn't exist).
-- No Slack / Discord / Teams / email / SMS / PagerDuty / webhook sink.
-- No "notify when run fails" config on a pipeline.
+**Email and generic webhook are the supported, documented channels.**
+Slack and Discord adapters ship and work, but are less exercised — treat
+them as available rather than first-class for now.
 
-If you need these, the workaround is a **Custom stage** at the end of your pipeline (or a `failure`-edge cleanup) that `curl`s your chosen sink.
+## Events
 
-## Workaround: Slack
+| Event | Fires when |
+|---|---|
+| `run.failed` / `run.succeeded` / `run.cancelled` | a pipeline run reaches that terminal state |
+| `deploy.failed` / `deploy.succeeded` | an app deploy finishes |
+| `build.failed` | a deploy's build stage fails |
+| `canary.promoted` / `canary.aborted` / `canary.failed` | a canary rollout transitions |
 
-Add a Custom stage to the pipeline. Connect from the last business stage with both `success` and `failure` edge conditions, or two separate Custom stages.
+### Default filter avoids alert fatigue
 
-```text
-   Deploy-Prod ──(success)──► Notify-Success
-              ──(failure)──► Notify-Failure
-```
+A new target with **no** event filter subscribes to the **failure /
+state-change set** — `run.failed`, `deploy.failed`, `build.failed`,
+`canary.failed` — not every event. Firing on every green run is how
+teams end up muting the channel and then missing the failure it existed
+for. To receive success events too, tick them explicitly when creating
+the target (or pass them in `eventTypes`).
 
-Notify-Success config:
+## Credentials at rest
 
-```yaml
-type: custom
-config:
-  image: curlimages/curl:latest
-  command:
-    - sh
-    - -c
-    - |
-      curl -X POST $SLACK_WEBHOOK_URL \
-        -H 'Content-Type: application/json' \
-        -d "{\"text\":\":white_check_mark: Deploy of $REPO@$COMMIT_SHA to prod succeeded\"}"
-  secretRefs:
-    - SLACK_WEBHOOK_URL
-```
+Target configs carry secrets (the SMTP password; a Slack/Discord/webhook
+URL is itself a bearer credential). When `COOKER_SECRET_KEY` is set,
+Cooker encrypts the config column at rest with AES-GCM — the same codec
+as the database secrets backend. Set `COOKER_SECRET_KEY` in any
+install that stores real credentials. Without it, configs are stored in
+plaintext and the server warns at boot.
 
-Store `SLACK_WEBHOOK_URL` as an [Environment secret](secrets.md). Reference it in `secretRefs` so the executor injects it as an env var into the Custom stage.
-
-## Workaround: Discord
-
-Same pattern; Discord's webhook URL accepts the same Slack-shaped payload via the `/slack` suffix:
+## Example: create a webhook target via the API
 
 ```bash
-curl -X POST $DISCORD_WEBHOOK_URL/slack \
+curl -X POST "$COOKER_URL/api/v1/admin/notification-targets" \
+  -H "Authorization: Bearer $COOKER_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d "{\"text\":\":fire: Deploy failed: $REPO@$COMMIT_SHA\"}"
+  -d '{
+    "name": "ops-webhook",
+    "kind": "webhook",
+    "config": {"url": "https://ops.example.com/hook"}
+  }'
+# eventTypes omitted → subscribes to the failure set.
 ```
 
-## Workaround: Email
+## Status checks back to GitHub
 
-There's no SMTP code in Cooker. Use a service:
+Writing the run's success / failure back to the commit as a GitHub
+Commit Status is **planned** (the highest-voted item in this area) but
+not yet shipped. The inbound webhook-receive path works today (see
+[GitHub webhooks](github-webhooks.md)).
 
-- **SendGrid / Postmark / Mailgun / SES**: `curl` their API from a Custom stage.
-- **Internal SMTP relay**: a small image like `bytemark/smtp` runs the relay; your Custom stage `curl`s an HTTP-to-SMTP shim or runs `mailx` against it.
+## Fallback: notify an unsupported sink from a pipeline
 
-The Custom stage idiom is the same — POST to an HTTP endpoint with the run context in the body.
-
-## Workaround: PagerDuty
+For a destination Cooker doesn't have an adapter for (PagerDuty, Teams,
+SMS, …), add a **Custom stage** at the end of the pipeline that `curl`s
+it, connected with `success` / `failure` edge conditions:
 
 ```yaml
 type: custom
@@ -75,48 +86,18 @@ config:
     - |
       curl -X POST https://events.pagerduty.com/v2/enqueue \
         -H 'Content-Type: application/json' \
-        -d "{
-          \"routing_key\": \"$PAGERDUTY_INTEGRATION_KEY\",
-          \"event_action\": \"trigger\",
-          \"payload\": {
-            \"summary\": \"Cooker deploy failed: $REPO@$COMMIT_SHA\",
-            \"severity\": \"error\",
-            \"source\": \"cooker\"
-          }
-        }"
+        -d "{\"routing_key\":\"$PD_KEY\",\"event_action\":\"trigger\",
+             \"payload\":{\"summary\":\"Cooker: $REPO@$COMMIT_SHA failed\",
+             \"severity\":\"error\",\"source\":\"cooker\"}}"
   secretRefs:
-    - PAGERDUTY_INTEGRATION_KEY
+    - PD_KEY
 ```
 
-## What variables are available to Notify stages
-
-The executor injects these env vars into every stage's runtime:
-
-| Variable | Source |
-|---|---|
-| `${COMMIT_SHA}` | The git revision the run was built from. |
-| `${BRANCH}` | The branch the run was built from. |
-| `${REPO}` | `owner/name` of the GitHub repo. |
-| `${RUN_ID}` | Run UUID. |
-| `${PIPELINE_ID}` | Pipeline ID. |
-| `${STAGE_NAME}` | Current stage name. |
-| Pipeline / Environment variables | Anything you defined on Pipeline.Variables or Environment.PlainVars. |
-| Secrets referenced via `secretRefs` | The plaintext value. |
-
-> **TODO: verify** the exact list of executor-injected variables — the code lives under `internal/service/executor.go` but the documented contract is not yet in `docs/design.md`. Treat this list as best-effort. <!-- TODO: verify -->
-
-## Status checks back to GitHub
-
-Cooker can write the run's success / failure as a GitHub Commit Status, so PRs in GitHub see the green check or red X.
-
-> **Partial.** Roadmap `A1` flags this as "needs flesh-out — branch/path filters, status checks back to GitHub." Today the webhook-receive path works (see [GitHub webhooks](github-webhooks.md)); writing status back is not yet implemented.
-
-## When notifications land
-
-When roadmap `A7` ships, expect a new `internal/notifier/` package with a `Notifier` interface, a `selectNotifier`-style registration in `server.go`, and chart values like `notifier.slack.webhookUrlSecret`. The workaround Custom stages will continue to work; the notifier framework will reduce the boilerplate.
+Store the key as an [Environment secret](secrets.md) and reference it in
+`secretRefs`.
 
 ## Cross-references
 
-- **[Stages: Custom](../concepts/stages.md#custom-stagetypecustom)** — the workaround mechanic.
-- **[Secrets](secrets.md)** — storing the webhook URL.
-- **[Roadmap A7](https://github.com/santapong/cooker/blob/main/docs/roadmap-2026.md#a-integrations)** — when proper notifiers will land.
+- **[Stages: Custom](../concepts/stages.md#custom-stagetypecustom)** — the fallback mechanic.
+- **[Secrets](secrets.md)** — storing credentials.
+- **[Security: notification-target configs](../../../SECURITY.md#credential-handling--notification-target-configs)** — how configs are encrypted at rest.

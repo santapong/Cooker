@@ -57,6 +57,15 @@ Twelve adversarially-verified findings from [`docs/audits/2026-07-post-merge-aud
 
 UAT Scenario 1b (canary end-to-end) and the `025_canary` live down/up drill close out the batch — neither ran in the audit sandbox (no Docker daemon).
 
+### Notifications — wave 2 (planned; wave 1 shipped)
+
+Wave 1 (email + generic webhook always-on, creds encrypted, fatigue-safe default, deploy/canary events) shipped on `claude/notifications-rollout`. Remaining, evidence-ranked from the 2026-07 feature research (`docs/proposals/` synthesis):
+
+- **N2.1 — Commit-status reporting back to Git providers.** Map run/deploy outcomes to a commit status (green check / red X) on GitHub/GitLab/Bitbucket/Gitea via `internal/source/*`. The single highest-upvoted item in the competitor research (Coolify: 46). Needs per-provider status APIs + a commit SHA on the run.
+- **N2.2 — Telegram channel.** New adapter (`internal/notifier/telegram.go`) + a migration extending the `notification_targets.kind` CHECK in `011_notification_targets.up.sql`.
+- **N2.3 — Per-app / per-pipeline notification overrides.** Today targets are global; allow scoping a target (or a mute) to one app/pipeline.
+- **N2.4 — Promote Slack/Discord to supported.** Harden + document the two adapters that currently ship as available-but-experimental; add the `POST /admin/notification-targets/:id/test` endpoint + UI button.
+
 ### Owner-requested (2026-06-11)
 
 #### OR-1 — Pre-release / canary deploy mode (M, needs mini-ADR)

@@ -390,6 +390,10 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 			if err := h.Store.Runs.Update(ctx, run); err != nil {
 				return err
 			}
+			// Emit the terminal-run event. The inline path owns this;
+			// the queue path emits from JobQueueRunner instead. A run
+			// takes exactly one path, so this never double-sends.
+			service.NotifyRunOutcome(h.Dispatcher, p, run, execErr)
 			return execErr
 		})
 		c.JSON(http.StatusAccepted, snapshot)

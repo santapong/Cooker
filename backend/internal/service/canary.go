@@ -12,6 +12,7 @@ import (
 
 	"github.com/santapong/cooker/internal/deployer"
 	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/notifier"
 	"github.com/santapong/cooker/internal/store"
 )
 
@@ -67,8 +68,12 @@ type CanaryService struct {
 	// the health window. nil falls back to "assume healthy" so a target
 	// without a wired probe still auto-promotes after the window.
 	prober Prober
-	clock  func() time.Time
-	logger *slog.Logger
+	// notifier, when non-nil, receives canary.promoted / .aborted /
+	// .failed events. Best-effort — a channel failure never fails the
+	// rollout.
+	notifier *notifier.Dispatcher
+	clock    func() time.Time
+	logger   *slog.Logger
 }
 
 // CanaryOption configures a CanaryService.
@@ -86,6 +91,11 @@ func WithCanaryClock(now func() time.Time) CanaryOption {
 			s.clock = now
 		}
 	}
+}
+
+// WithCanaryNotifier registers the dispatcher for canary events.
+func WithCanaryNotifier(d *notifier.Dispatcher) CanaryOption {
+	return func(s *CanaryService) { s.notifier = d }
 }
 
 // NewCanaryService wires the service. weighted may be nil when the
@@ -230,6 +240,7 @@ func (s *CanaryService) Promote(ctx context.Context, appID string) (*model.AppCa
 		return nil, fmt.Errorf("canary: persist promote: %w", err)
 	}
 	s.logger.Info("canary promoted", "app", appID, "image", c.CanaryImage)
+	NotifyCanary(s.notifier, app, c, notifier.EventCanaryPromoted, "")
 	return c, nil
 }
 
@@ -264,6 +275,7 @@ func (s *CanaryService) Abort(ctx context.Context, appID, reason string) (*model
 		return nil, fmt.Errorf("canary: persist abort: %w", err)
 	}
 	s.logger.Info("canary aborted", "app", appID, "reason", c.Message)
+	NotifyCanary(s.notifier, app, c, notifier.EventCanaryAborted, c.Message)
 	return c, nil
 }
 
@@ -458,4 +470,5 @@ func (s *CanaryService) recordFailed(ctx context.Context, app *model.App, runID,
 	if err := s.canaries.Create(ctx, c); err != nil {
 		s.logger.Warn("canary: record failed state", "app", app.ID, "err", err)
 	}
+	NotifyCanary(s.notifier, app, c, notifier.EventCanaryFailed, cause.Error())
 }

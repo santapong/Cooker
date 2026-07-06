@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — outbound notifications on by default (email + generic webhook)
+
+- Notifications now fire on a **default install**, not only when the job
+  queue is enabled. The dispatcher + target store boot unconditionally
+  (`internal/server/notifier_boot.go`); run, deploy, build, and canary
+  events all emit through the same dispatcher. Previously the plumbing
+  existed (`internal/notifier/`) but only the opt-in job-queue path
+  dispatched, so a default install sent nothing.
+- **Deploy, build, and canary events** are now emitted (they were
+  defined but never fired): `deploy.succeeded/failed`, `build.failed`,
+  and `canary.promoted/aborted/failed`.
+- **Credentials encrypted at rest.** Notification-target configs (SMTP
+  password; Slack/Discord/webhook URLs are bearer secrets) are sealed
+  with the AES-GCM codec (`internal/crypto`) when `COOKER_SECRET_KEY` is
+  set. Legacy plaintext rows read back transparently and re-seal on
+  update — no migration. `SECURITY.md` documents the threat model.
+- **Alert-fatigue default.** A target created without an event filter
+  subscribes to the failure/state-change set (`run.failed`,
+  `deploy.failed`, `build.failed`, `canary.failed`) instead of every
+  event. The Settings UI pre-selects the same set.
+- Email and generic webhook are the documented, supported channels;
+  Slack/Discord ship but are less exercised. Rewrote the stale
+  notifications guide (it claimed `internal/notifier/` didn't exist).
+- **Planned (not in this change):** commit-status reporting back to Git
+  providers, a Telegram adapter, and per-app/pipeline notification
+  overrides — see `backlog.md`.
+
 ### Changed — harness: TheLoopSkill installed, `workflow` skill retired
 
 - Vendored the 12 `loop-*` skills from

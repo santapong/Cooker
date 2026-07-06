@@ -130,9 +130,13 @@ type Handler struct {
 	Schedules scheduler.Store
 	// NotificationTargets is the notifier-target catalog (Phase-2 / F1).
 	// nil returns 503 from the /admin/notification-targets endpoints.
-	// Set by server.New when COOKER_JOBQUEUE_ENABLED=true (the
-	// dispatcher only fires when the queue is running anyway).
+	// Always set by server.New (memory or Postgres) so the admin API
+	// works on a default install.
 	NotificationTargets notifier.TargetStore
+	// Dispatcher fires notification events. Used by the inline run
+	// path (RunPipeline) so a run that runs without the job queue
+	// still notifies. nil = no notifications. Set by server.New.
+	Dispatcher *notifier.Dispatcher
 	// Runtime inspects/tails the live container or pod backing a
 	// deployed compose service (deployment-view runtime panel). Set by
 	// server.New; nil returns 503 from the runtime endpoints.
