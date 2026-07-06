@@ -120,16 +120,18 @@ func feedbackTitle(category, message string) string {
 
 // feedbackBody renders the metadata lines then the message inside a
 // dynamic code fence (see feedbackFence) so a hostile message cannot
-// escape into markdown, @-mentions or a fence of its own. Client-
-// controlled metadata (the page URL and the request User-Agent) is
-// wrapped in an inline-code span (see inlineCode) for the same reason —
-// collapseSpace alone would leave @-mentions, #-references and
-// [links](…) live on the bullet line.
+// escape into markdown, @-mentions or a fence of its own. ALL client-
+// controlled metadata — the user id/email (from OIDC identity claims),
+// the page URL, and the request User-Agent — is wrapped in an inline-code
+// span (see inlineCode) for the same reason: collapseSpace alone would
+// leave @-mentions, #-references and [links](…) live on the bullet line
+// (PM26-07-10). Identity claims are attacker-influenced too — an OIDC
+// display name or email local-part can carry `@team` or `[x](url)`.
 func feedbackBody(in FeedbackInput) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "- App: Cooker\n")
 	fmt.Fprintf(&b, "- Category: %s\n", in.Category)
-	fmt.Fprintf(&b, "- User: %s (%s)\n", collapseSpace(in.UserID), collapseSpace(in.UserEmail))
+	fmt.Fprintf(&b, "- User: %s (%s)\n", inlineCode(collapseSpace(in.UserID)), inlineCode(collapseSpace(in.UserEmail)))
 	fmt.Fprintf(&b, "- Page URL: %s\n", inlineCode(collapseSpace(in.PageURL)))
 	fmt.Fprintf(&b, "- User-Agent: %s\n", inlineCode(collapseSpace(in.UserAgent)))
 	fmt.Fprintf(&b, "- Submitted: %s\n\n", time.Now().UTC().Format(time.RFC3339))

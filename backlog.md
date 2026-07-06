@@ -53,7 +53,7 @@ Twelve adversarially-verified findings from [`docs/audits/2026-07-post-merge-aud
 2. ✅ **Canary sweeper/concurrency batch** — `PM26-07-02` (CAS `ClaimTerminal` on the terminal transition, claimed before the K8s call), `PM26-07-05` (per-tick `context.WithTimeout` in the sweep), `PM26-07-06` (Start reserves a `pending` row before build/deploy; migration 026 widens the unique index) — closed by PR-2.
 3. ✅ **Canary lifecycle batch** — `PM26-07-04` (sweep probes the -canary Deployment's ready replicas via a new `deployer.CanaryProber`, falling back to the app prober), `PM26-07-07` (app delete tears down the live split before removing the row; sweep reaps app-gone manual canaries), `PM26-07-11` (promote/abort carry the `govDeploy` admission gate) — closed by PR-3.
 4. ✅ **Cloud-inventory cache batch** — `PM26-07-08` (manual singleflight: concurrent cache-miss reads share one billed fan-out), `PM26-07-09` (generation guard: a slow fetch can't clobber a newer Refresh), `PM26-07-12` (negative TTL: an all-failed fetch is cached ~30s, not the full TTL) — closed by PR-4.
-5. **Feedback sanitization (S)** — `PM26-07-10` (markdown/@-mention injection via OIDC claims into the GitHub issue body).
+5. ✅ **Feedback sanitization** — `PM26-07-10` (user id/email from OIDC identity claims now inline-code-wrapped like the other client metadata, neutralizing @-mention/markdown-link injection into the GitHub issue body) — closed by PR-5. **All 12 post-merge-audit findings are now closed.**
 
 UAT Scenario 1b (canary end-to-end) and the `025_canary` live down/up drill close out the batch — neither ran in the audit sandbox (no Docker daemon).
 
