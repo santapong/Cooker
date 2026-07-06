@@ -354,6 +354,25 @@ func (s *CanaryService) SweepAutoPromote(ctx context.Context) {
 	}
 	now := s.clock()
 	for _, c := range canaries {
+		// App-gone reaping applies to EVERY progressing canary, manual or
+		// auto (PM26-07-07): a manual (AutoPromote=false) canary whose app
+		// was deleted must still have its row reaped, not linger
+		// progressing forever. The app-delete handler tears down the live
+		// split while the app still exists; this is the defensive backstop
+		// (memory store without cascade, or a delete that raced the sweep).
+		app, err := s.apps.Get(ctx, c.AppID)
+		if errors.Is(err, store.ErrNotFound) {
+			s.reapAppGone(ctx, c)
+			continue
+		}
+		if err != nil {
+			// A transient store error (failover, timeout) must NOT be
+			// misread as "app deleted" — that would CAS-abort every live
+			// canary while leaving the cluster split serving. Skip this
+			// canary for this tick and retry next tick.
+			s.logger.Warn("canary sweep: app lookup failed; skipping this tick", "app", c.AppID, "err", err)
+			continue
+		}
 		if !c.AutoPromote || c.PromoteAfter == nil || now.Before(*c.PromoteAfter) {
 			continue
 		}
@@ -362,9 +381,27 @@ func (s *CanaryService) SweepAutoPromote(ctx context.Context) {
 		// progressing canary) indefinitely (PM26-07-05). Mirrors the
 		// audit-retention sweep's per-pass timeout.
 		evalCtx, cancel := context.WithTimeout(ctx, canaryEvalTimeout)
-		s.evaluate(evalCtx, c)
+		s.evaluate(evalCtx, app, c)
 		cancel()
 	}
+}
+
+// reapAppGone marks a progressing canary aborted when its app has been
+// deleted out from under it. Goes through the CAS so a concurrent
+// operator action isn't clobbered. It cannot tear down the live split
+// (the app — and its namespace/name — is gone); the app-delete handler
+// owns that teardown while the app still exists.
+func (s *CanaryService) reapAppGone(ctx context.Context, c *model.AppCanary) {
+	won, err := s.canaries.ClaimTerminal(ctx, c.ID, model.CanaryAborted)
+	if err != nil || !won {
+		return
+	}
+	s.logger.Warn("canary sweep: app gone, reaping canary row", "app", c.AppID)
+	now := s.clock()
+	c.Status = model.CanaryAborted
+	c.Message = "app deleted during canary"
+	c.ResolvedAt = &now
+	_ = s.canaries.Update(ctx, c)
 }
 
 // canaryEvalTimeout bounds a single canary's probe + promote/abort in
@@ -402,59 +439,90 @@ func (s *CanaryService) RunSweeper(ctx context.Context) error {
 	}
 }
 
-// evaluate probes one canary's health and promotes or aborts it. Used by
-// the sweep; split out so the health decision is testable in isolation.
-func (s *CanaryService) evaluate(ctx context.Context, c *model.AppCanary) {
-	app, err := s.apps.Get(ctx, c.AppID)
-	if err != nil {
-		// App deleted out from under an in-flight canary: mark the row
-		// aborted so the sweep stops re-evaluating it. Go through the CAS
-		// (ClaimTerminal) like every other terminal transition so a
-		// concurrent operator abort/promote can't be silently clobbered
-		// (PM26-07-02 consistency); if we lose the claim, another actor
-		// already resolved it.
-		won, cerr := s.canaries.ClaimTerminal(ctx, c.ID, model.CanaryAborted)
-		if cerr != nil || !won {
-			return
-		}
-		s.logger.Warn("canary sweep: app gone, aborting canary", "app", c.AppID, "err", err)
-		now := s.clock()
-		c.Status = model.CanaryAborted
-		c.Message = "app deleted during canary"
-		c.ResolvedAt = &now
-		_ = s.canaries.Update(ctx, c)
-		return
-	}
-	healthy, msg := s.probeHealthy(ctx, app)
-	if healthy {
+// canaryDecision is the sweep's per-canary verdict.
+type canaryDecision int
+
+const (
+	decisionWait     canaryDecision = iota // inconclusive / not ready yet — retry next tick
+	decisionPromote                        // canary is healthy → shift to 100%
+	decisionRollback                       // canary is failing → roll back to stable
+)
+
+// canaryHardDeadline is the absolute cap after which a canary that has
+// never become healthy is rolled back, regardless of the probe outcome.
+// It bounds the "wait" state so an unreadable or perpetually-not-ready
+// canary can't hold its slot forever. Comfortably beyond a normal
+// health window + pod-start time.
+const canaryHardDeadline = 30 * time.Minute
+
+// evaluate decides one canary's fate and acts on it. The app is passed in
+// (the sweep already fetched it and handled the app-gone case). A "wait"
+// decision is a no-op this tick — the sweep re-evaluates on the next.
+func (s *CanaryService) evaluate(ctx context.Context, app *model.App, c *model.AppCanary) {
+	switch decision, msg := s.decide(ctx, app, c); decision {
+	case decisionPromote:
 		if _, err := s.Promote(ctx, c.AppID); err != nil {
 			s.logger.Warn("canary sweep: auto-promote failed", "app", c.AppID, "err", err)
 		}
-		return
-	}
-	if _, err := s.Abort(ctx, c.AppID, "auto-rollback: "+msg); err != nil {
-		s.logger.Warn("canary sweep: auto-rollback failed", "app", c.AppID, "err", err)
+	case decisionRollback:
+		if _, err := s.Abort(ctx, c.AppID, "auto-rollback: "+msg); err != nil {
+			s.logger.Warn("canary sweep: auto-rollback failed", "app", c.AppID, "err", err)
+		}
+	default: // decisionWait
+		s.logger.Info("canary sweep: waiting", "app", c.AppID, "reason", msg)
 	}
 }
 
-// probeHealthy reports whether the canary workload is healthy. With no
-// prober wired it assumes healthy (a target without a probe still
-// auto-promotes after the window rather than hanging forever).
-func (s *CanaryService) probeHealthy(ctx context.Context, app *model.App) (bool, string) {
+// decide judges the CANARY workload during the window (PM26-07-04). It
+// prefers a canary-specific readiness check — the -canary Deployment's
+// ready replicas — over the app-level prober, which hits the shared
+// Service and is dominated by the stable pods: a crash-looping canary
+// behind a healthy stable would otherwise read "healthy" and promote.
+//
+// The three-state result is deliberate: a probe ERROR or a not-yet-ready
+// canary yields **wait** (retry next tick), never a blind promote — an
+// unverifiable canary must not be shifted to 100% (the failure mode the
+// gate exists to prevent). A hard deadline backstops "wait" so a canary
+// that never becomes healthy is eventually rolled back.
+func (s *CanaryService) decide(ctx context.Context, app *model.App, c *model.AppCanary) (canaryDecision, string) {
+	pastDeadline := s.clock().After(c.StartedAt.Add(canaryHardDeadline))
+	if cp, ok := s.weighted.(deployer.CanaryProber); ok {
+		ready, detail, err := cp.CanaryReady(ctx, app.DeployTarget.Namespace, app.Name)
+		switch {
+		case err != nil:
+			// Inconclusive: wait and retry, unless we've waited too long —
+			// then roll back to known-good stable rather than promote blind.
+			if pastDeadline {
+				return decisionRollback, "canary readiness unknown past deadline: " + err.Error()
+			}
+			return decisionWait, "canary readiness inconclusive: " + err.Error()
+		case ready:
+			return decisionPromote, "canary workload: " + detail
+		case pastDeadline:
+			return decisionRollback, "canary workload not ready past deadline: " + detail
+		default:
+			// Checked, not ready yet — give the pods time to come up.
+			return decisionWait, "canary workload not ready yet: " + detail
+		}
+	}
+	// No canary-readiness capability: fall back to the app prober.
 	if s.prober == nil {
-		return true, "no probe wired; assuming healthy"
+		return decisionPromote, "no probe wired; assuming healthy"
 	}
 	health, msg, _ := s.prober.Probe(ctx, app)
 	switch health {
 	case model.AppHealthHealthy:
-		return true, msg
+		return decisionPromote, msg
 	case model.AppHealthFailed:
-		return false, msg
+		return decisionRollback, msg
 	default:
-		// Unknown / degraded during the window is treated as not-yet-healthy;
-		// the conservative choice is to roll back rather than promote a
-		// workload we can't confirm is serving.
-		return false, fmt.Sprintf("health %s: %s", health, msg)
+		// Unknown / degraded: wait for a definitive verdict rather than
+		// roll back a canary we simply can't assess yet; the hard deadline
+		// is the backstop.
+		if pastDeadline {
+			return decisionRollback, fmt.Sprintf("health %s past deadline: %s", health, msg)
+		}
+		return decisionWait, fmt.Sprintf("health %s: %s", health, msg)
 	}
 }
 

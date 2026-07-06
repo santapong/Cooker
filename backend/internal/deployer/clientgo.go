@@ -226,7 +226,28 @@ func (c *ClientGo) DeployWeighted(ctx context.Context, req WeightedRequest) (Wei
 	}, nil
 }
 
+// CanaryReady reports whether the <name>-canary Deployment has all its
+// desired replicas ready (PM26-07-04). Reads the live Deployment via the
+// dynamic client and compares status.readyReplicas against spec.replicas.
+func (c *ClientGo) CanaryReady(ctx context.Context, namespace, name string) (bool, string, error) {
+	if err := c.ensureClients(); err != nil {
+		return false, "", err
+	}
+	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	obj, err := c.cli.Resource(gvr).Namespace(namespace).Get(ctx, sanitizeName(name)+"-canary", metav1.GetOptions{})
+	if err != nil {
+		return false, "", fmt.Errorf("%w: get canary deployment: %v", ErrUnavailable, err)
+	}
+	desired, _, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
+	ready, _, _ := unstructured.NestedInt64(obj.Object, "status", "readyReplicas")
+	detail := fmt.Sprintf("%d/%d ready", ready, desired)
+	// Healthy = every desired canary pod is ready, and there is at least
+	// one (a scaled-to-zero canary isn't "serving" and shouldn't promote).
+	return ready > 0 && ready >= desired, detail, nil
+}
+
 var (
 	_ Deployer         = (*ClientGo)(nil)
 	_ WeightedDeployer = (*ClientGo)(nil)
+	_ CanaryProber     = (*ClientGo)(nil)
 )

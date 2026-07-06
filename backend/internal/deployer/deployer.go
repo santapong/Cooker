@@ -147,3 +147,20 @@ type WeightedDeployer interface {
 	// idempotent: calling it again with the same Weight is a no-op apply.
 	DeployWeighted(ctx context.Context, req WeightedRequest) (WeightedResult, error)
 }
+
+// CanaryProber is the optional capability a WeightedDeployer advertises
+// when it can report the readiness of the "<name>-canary" Deployment
+// directly (PM26-07-04). The canary service prefers this over the
+// app-level health prober during the soak window: the app prober hits
+// the shared Service and is dominated by the stable pods, so a
+// crash-looping canary would read healthy. The K8s deployers implement
+// it (client-go Get / kubectl); non-K8s backends do not.
+type CanaryProber interface {
+	// CanaryReady reports whether the <name>-canary Deployment in
+	// namespace has all its desired replicas ready (and at least one
+	// pod). detail is a human-readable summary (e.g. "2/2 ready"). A
+	// non-nil error means readiness could not be determined — the caller
+	// should fall back to the app prober rather than treat it as
+	// unhealthy.
+	CanaryReady(ctx context.Context, namespace, name string) (ready bool, detail string, err error)
+}

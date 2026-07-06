@@ -567,3 +567,101 @@ func (b builderFunc) BuildAndPushImage(_ context.Context, _ *model.App, _ string
 	b()
 	return "reg/shop:new", &model.Pipeline{ID: "p"}, &model.PipelineRun{ID: "r", Status: model.RunStatusSuccess}, nil
 }
+
+// fakeCanaryProber is a weighted deployer that ALSO reports canary
+// readiness, so the service takes the PM26-07-04 canary-workload path.
+type fakeCanaryProber struct {
+	fakeWeighted
+	ready    bool
+	probeErr error
+}
+
+func (f *fakeCanaryProber) CanaryReady(_ context.Context, _, _ string) (bool, string, error) {
+	if f.probeErr != nil {
+		return false, "", f.probeErr
+	}
+	if f.ready {
+		return true, "2/2 ready", nil
+	}
+	return false, "0/2 ready", nil
+}
+
+// PM26-07-04: the sweep probes the CANARY workload, not the app. A
+// not-ready canary behind a (would-be healthy) app prober must NOT
+// auto-promote — it waits during the grace period, then rolls back at
+// the hard deadline (self-review #2/#5: never a blind promote).
+func TestCanary_SweepProbesCanaryWorkloadNotApp(t *testing.T) {
+	app := canaryApp()
+	fw := &fakeCanaryProber{ready: false} // canary pods not ready
+	now := time.Now()
+	clock := func() time.Time { return now }
+	// App prober would say HEALTHY (it sees the stable pods) — must be ignored.
+	appHealthy := ProberFunc(func(_ context.Context, _ *model.App) (model.AppHealth, string, string) {
+		return model.AppHealthHealthy, "stable ok", ""
+	})
+	svc, st := newCanaryFixture(t, app, fw, WithCanaryClock(clock), WithCanaryProber(appHealthy))
+	started, err := svc.Start(context.Background(), app, "run1", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Just past the window: must NOT promote (the canary workload isn't
+	// ready), and must NOT yet roll back — it waits for the pods.
+	now = now.Add(2 * time.Minute)
+	svc.SweepAutoPromote(context.Background())
+	if c, _ := st.AppCanaries.Get(context.Background(), started.ID); c.Status != model.CanaryProgressing {
+		t.Fatalf("a not-ready canary must wait (progressing), not resolve, at 2m; got %s", c.Status)
+	}
+	// Past the hard deadline: a canary that never became ready rolls back.
+	now = now.Add(31 * time.Minute)
+	svc.SweepAutoPromote(context.Background())
+	if c, _ := st.AppCanaries.Get(context.Background(), started.ID); c.Status != model.CanaryAborted {
+		t.Errorf("a never-ready canary must roll back past the hard deadline; got %s", c.Status)
+	}
+}
+
+// Self-review #2: a canary-readiness PROBE ERROR must never auto-promote
+// (production wires no app prober, so a fall-through to "assume healthy"
+// would shift an unverified canary to 100%). It waits instead.
+func TestCanary_SweepProbeErrorDoesNotPromote(t *testing.T) {
+	app := canaryApp()
+	fw := &fakeCanaryProber{probeErr: errors.New("get deployments forbidden")}
+	now := time.Now()
+	clock := func() time.Time { return now }
+	// No app prober wired (mirrors production).
+	svc, st := newCanaryFixture(t, app, fw, WithCanaryClock(clock))
+	started, err := svc.Start(context.Background(), app, "run1", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Minute) // past the window
+	svc.SweepAutoPromote(context.Background())
+	if c, _ := st.AppCanaries.Get(context.Background(), started.ID); c.Status == model.CanaryPromoted {
+		t.Error("a canary with an unreadable readiness probe must NOT auto-promote")
+	}
+}
+
+// PM26-07-07: the sweep reaps a MANUAL (AutoPromote=false) canary whose
+// app was deleted, rather than leaving it progressing forever.
+func TestCanary_SweepReapsManualCanaryWhenAppGone(t *testing.T) {
+	app := canaryApp()
+	app.Canary.AutoPromote = false
+	fw := &fakeWeighted{}
+	svc, st := newCanaryFixture(t, app, fw)
+	started, err := svc.Start(context.Background(), app, "run1", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Delete the app out from under the canary (memory store: no cascade).
+	if err := st.Apps.Delete(context.Background(), "app1"); err != nil {
+		t.Fatal(err)
+	}
+	svc.SweepAutoPromote(context.Background())
+
+	c, err := st.AppCanaries.Get(context.Background(), started.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Status != model.CanaryAborted {
+		t.Errorf("manual canary with a deleted app must be reaped (aborted), got %s", c.Status)
+	}
+}

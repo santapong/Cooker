@@ -58,7 +58,7 @@ remains a follow-up alongside UAT Scenario 1b.
 - **Failure scenario:** Prober's contract (service/app_health.go:37-39) is Probe(ctx, *model.App) — the interface carries no canary scoping, so the registered per-target prober checks the app's workload (the stable Deployment / ingress), not the -canary Deployment created by DeployWeighted. Scenario: canary image crash-loops at 10% weight while stable pods stay Ready; the window elapses; probeHealthy returns healthy from the stable workload; SweepAutoPromote calls Promote and shifts 100% of traffic onto the broken image — the exact outage canarying exists to prevent. (Conversely, if a selector-based prober does aggregate canary pods, an unhealthy CANARY marks the whole APP failed on the health badge — either behavior shows the probe isn't canary-scoped.)
 - **Suggested fix:** Give the canary path a canary-aware probe: either extend Prober (or add a CanaryProber) that takes the canary workload name/namespace from the AppCanary row, or have the weighted deployer expose readiness of the canary ReplicaSet and gate promotion on that.
 - **Adversarial verification:** CONFIRMED — The defect is real, and the shipped wiring is even weaker than the claim describes. Verified facts: (1) `probeHealthy` (backend/internal/service/canary.go:345-361) gates auto-promotion on `s.prober.Probe(ctx, app)`, and the `Prober` contract (backend/internal/service/app_health.go:37-39) takes only `*model.App` — there is no way to scope the probe to the `-canary` Deployment that `DeployWeighted` 
-- **Status:** Open
+- **Status:** Closed by PR-3 (canary-batch3)
 
 ### [PM26-07-05] MEDIUM — Sweeper's K8s and DB calls run on the long-lived background context with no per-tick timeout
 
@@ -82,7 +82,7 @@ remains a follow-up alongside UAT Scenario 1b.
 - **Failure scenario:** DeleteApp (handler/app.go:155-162) only deletes the apps row — it never checks h.Canary or calls Abort. The canary Deployment and weighted split established by DeployWeighted keep serving user traffic in the cluster. On the sweeper's next tick, evaluate's app-gone path flips the DB row to aborted but skips the DeployWeighted(Weight:0) teardown that real Abort performs — so the -canary workload serves N% of traffic forever with no API handle left (Promote/Abort now fail in loadActive at apps.Get → 500, not cleanup). Worse, that reap path only runs for AutoPromote canaries past their window: delete an app with a manual (AutoPromote=false) progressing canary and the app_canaries row stays 'progressing' forever, rescanned by every ListProgressing sweep, with the orphan pods still live.
 - **Suggested fix:** In DeleteApp (or an app service), call Canary.Abort before deleting the app (tolerating ErrNoActiveCanary). In evaluate's app-gone branch, also attempt the weighted teardown using the row's images/namespace snapshot. Extend the sweep (or the app-gone check) to cover manual progressing canaries whose app no longer exists.
 - **Adversarial verification:** CONFIRMED — The core defect is CONFIRMED. DeleteApp (backend/internal/handler/app.go:155-162) calls only h.Store.Apps.Delete — no reference to h.Canary, no Abort, no DeployWeighted(Weight:0). The route (backend/internal/server/router.go:252) wires the handler directly with no other cleanup hook, and no code anywhere else tears down a canary on app delete. Since real teardown only happens inside CanaryService.
-- **Status:** Open
+- **Status:** Closed by PR-3 (canary-batch3)
 
 ### [PM26-07-08] MEDIUM — Cache-miss stampede: concurrent requests each fan out to billed Cost Explorer (no singleflight)
 
@@ -114,7 +114,7 @@ remains a follow-up alongside UAT Scenario 1b.
 - **Failure scenario:** With COOKER_GOVERNANCE_URL set, an operator's initial canary deploy at 10% is admitted via govDeploy on /apps/:id/deploy, but promoting the canary to 100% of production traffic via POST /apps/:id/canary/promote never consults the governance service — a rollout that governance would deny at full weight goes live anyway. The inline comment documents skipping the rate limiter and idempotency (fast control-plane op) but says nothing about governance, while /rollback — also a traffic-state change, not a new build — explicitly carries govDeploy.
 - **Suggested fix:** Add the govDeploy middleware (or a canary-specific governance extractor) to /canary/promote; abort is arguably safe to leave open as it reduces exposure, but document that decision in the route comment either way.
 - **Adversarial verification:** CONFIRMED — Verified in source: router.go:253/259 attach govDeploy (RequireGovernanceAllow + AppDeployExtractor) to /apps/:id/deploy and /apps/:id/rollback, with the rollback comment explicitly stating rollbacks carry "the same ... governance gates" because a traffic-state change IS a deploy. router.go:268-269 give canary/promote and canary/abort only writeRole; the inline comment explains skipping the rate l
-- **Status:** Open
+- **Status:** Closed by PR-3 (canary-batch3)
 
 ### [PM26-07-12] LOW — Failed/canceled fetch result is cached for the full TTL as if it were a good snapshot
 
