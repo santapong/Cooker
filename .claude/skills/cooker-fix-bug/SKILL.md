@@ -5,6 +5,8 @@ description: Routine for fixing a bug in Cooker. Trigger on "fix this bug", "thi
 
 # Cooker — fix-a-bug routine
 
+> **Methodology lives in `/loop-debug`** (reproduce → localize → root-cause → fix → regression test). This skill is the Cooker overlay on it: triage against the catalogued audit corpus in `docs/audits/` before reading source, and maintain the audit ledger when you close a chain. For a bug in another repo, use `/loop-debug` directly.
+
 ## Inputs the user provides
 
 One of:

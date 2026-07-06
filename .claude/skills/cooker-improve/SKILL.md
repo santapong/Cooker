@@ -7,6 +7,8 @@ description: Quality / refactor / known-issue-fix workflow for the Cooker codeba
 
 Cooker has a published remediation plan and ~60 catalogued findings. Use this skill to land an improvement that fits the existing pattern instead of inventing a new one.
 
+> To *find* new defects, use `/cooker-audit` (Cooker corpus) or `/loop-review` (generic security/quality review — it stops at reporting). This skill is the landing half: it takes an already-scoped finding to a merged fix.
+
 ## Layering (do not break)
 
 ```

@@ -7,6 +7,8 @@ description: Triage a failing CI check on a Cooker PR. Trigger on "CI failed", "
 
 The four CI jobs (`backend`, `frontend`, `helm`, `docker`) have very different failure shapes. This skill walks the path from "I got a webhook saying X failed" to "I know exactly which step failed and what to do about it" without burning tokens on speculation.
 
+> This is Cooker's answer key for its four CI jobs. Once the failing step is identified and it isn't in the catalogue below, switch to `/loop-debug` for the general reproduce → localize → root-cause method.
+
 ## First: confirm the run is still red
 
 A webhook is a snapshot. By the time you investigate, a newer push may have re-run the same check. **Always reconfirm before debugging:**

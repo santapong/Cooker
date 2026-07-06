@@ -15,9 +15,11 @@ This skill encodes the anti-patterns that actually showed up in Cooker over the 
 | "Fix theme T<n>" — known target | `cooker-improve` |
 | "Pick this week's fix" — known target list | `cooker-weekly` |
 | "Why's CI red?" — known signal | `cooker-ci-debug` |
-| **"Find bugs in X" / "audit Y" / "is this safe?"** | **this skill** |
+| Generic security/quality review with no Cooker audit corpus (another repo, vendored code) | `loop-review` |
+| Impact/risk report for a diff, PR, or release | `loop-audit` |
+| **"Find bugs in X" / "audit Y" / "is this safe?" — in Cooker** | **this skill** |
 
-If the user wants a finding, this skill. If they want a known answer, one of the others.
+If the user wants a finding, this skill. If they want a known answer, one of the others. The methodology here matches `loop-review`; what this skill adds is the Cooker corpus — the known-false-positives table, the heat-map, and the don't-re-flag routing into `docs/audits/`.
 
 ## Read these first (don't re-discover what's already audited)
 

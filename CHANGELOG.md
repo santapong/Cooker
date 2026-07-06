@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — harness: TheLoopSkill installed, `workflow` skill retired
+
+- Vendored the 12 `loop-*` skills from
+  [santapong/TheLoopSkill](https://github.com/santapong/TheLoopSkill)
+  (v0.4.0) into `.claude/skills/` per its INSTALL.md — the commit-into-project
+  path that works in Claude Code web sessions.
+- Retired the repo-authored `workflow` skill: `loop-engine` does the same job
+  (authoring/running multi-agent Workflow scripts) with a superset of the
+  patterns and policies. Cooker's 10-phase AIDLC framework was ported to
+  `loop-engine/frameworks/Cooker-AIDLC.md` (run `/loop-engine --framework
+  Cooker-AIDLC`); `ORCHESTRATION.md` moved to `.claude/workflows/`; the
+  `sdlc`/`lightweight` framework variants and `new-workflow.sh` were dropped
+  (replaced by `loop-engine/templates/`).
+- Kept the other `cooker-*` and `ponytail-*` skills after a per-skill duplicate
+  review — they carry project protocol (audit-corpus routing, chain-ledger
+  bookkeeping, the Monday cron contract) or a job `loop-review` deliberately
+  refuses (aggressive deletion hunts). Each kept skill now routes the generic
+  half of its job to its `loop-*` counterpart; the skill roster and division
+  of labour are documented in `docs/engineering/harness-engineering.md`.
+
 ### Added — AWS/Vercel hosting design (IaC + overlays + guide)
 
 - New hosting track: UAT = Cooker SPA on **Vercel** (split-origin via

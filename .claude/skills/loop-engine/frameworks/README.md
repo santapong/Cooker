@@ -11,6 +11,7 @@ A framework defines the **lifecycle phases** a workflow follows: what each phase
 | Framework | Summary |
 |---|---|
 | [AIDLC](AIDLC.md) | AI-Driven Development Life Cycle — Inception → Construction → Operation, with a human gate after each phase. |
+| [Cooker-AIDLC](Cooker-AIDLC.md) | Cooker's 10-phase lifecycle from `docs/engineering/ADLC.md` with the repo's layering, store-parity, security, and docs-sync hard gates. **Prefer this for any work in the Cooker repo.** |
 
 ## Adding a framework
 

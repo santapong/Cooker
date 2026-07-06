@@ -40,7 +40,7 @@ There's no built-in difficulty detector. "Automatic" = a deterministic policy fu
 calls, keyed on the **role** of the work. Honest and predictable:
 
 ```js
-// Respect this repo's model policy — see frameworks/aidlc.md (Hard gates) and AGENTS-PLAN.md.
+// Respect this repo's model policy — see ../skills/loop-engine/frameworks/Cooker-AIDLC.md (Hard gates).
 // e.g. Governance forbids Haiku entirely; keep it out of the map there.
 const pickModel = (role) => ({
   read:       'sonnet',   // bulk reading / search / inventory

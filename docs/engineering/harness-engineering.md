@@ -7,7 +7,7 @@ The `.claude/` directory turns Claude Code into a **Cooker-specialized engineeri
 ```
 .claude/
 ├── agents/        26 role-scoped subagents (.md, frontmatter + body)
-├── skills/        8 procedural skills (SKILL.md + optional helper .sh)
+├── skills/        7 repo-authored cooker-* skills + vendored packs (12 loop-* from TheLoopSkill, 6 ponytail-*)
 └── workflows/     deterministic multi-agent orchestration scripts (.js)
 ```
 
@@ -31,7 +31,7 @@ The `.claude/` directory turns Claude Code into a **Cooker-specialized engineeri
 | Be *comprehensive* (cover everything) or *confident* (verify before committing) at a scale one context can't hold | **Workflow** | Deterministic fan-out + adversarial verify + synthesis. |
 | Run a routine on a schedule | **Skill + cron** | e.g. `cooker-weekly` + `.github/workflows/cooker-weekly.yml`. |
 
-Rule of thumb: **skill first, agent when you need isolation or a different model, workflow only when the user opts in** (see the [`/workflow`](../../.claude/skills/workflow/SKILL.md) skill for the opt-in contract).
+Rule of thumb: **skill first, agent when you need isolation or a different model, workflow only when the user opts in** (see the [`/loop-engine`](../../.claude/skills/loop-engine/SKILL.md) skill for the opt-in contract).
 
 ---
 
@@ -78,20 +78,31 @@ The CMO orchestrates; the monetization-lead runs the 10-analyst draft→critique
 
 ---
 
-## The skill library (8 skills)
+## The skill library
 
-| Skill | Trigger | Phase it serves |
-|---|---|---|
-| `cooker-find` | "where is X / how does Y work" | Intake (navigation) |
-| `cooker-audit` | "find bugs / is this safe" | Improve (findings) |
-| `cooker-fix-bug` | a stack trace / failing test / "X is broken" | Bug path |
-| `cooker-improve` | "refactor / close finding / fix theme T\<n\>" | Improve |
-| `cooker-new-feature` | "add a new \<thing\>" | Feature path |
-| `cooker-ci-debug` | "why is CI red" | Verify/Land |
-| `cooker-weekly` | the Monday cron | Improve (cadence) |
-| `workflow` | "create a workflow / fan out agents / run cooker-review" | Review + Improve |
+### Repo-authored (7 `cooker-*` skills)
 
-These are **repo-authored**. The harness also exposes built-in skills (`code-review`, `simplify`, `verify`, `run`, `deep-research`, …) — use those for general work, the `cooker-*` ones for Cooker-specific routines.
+| Skill | Trigger | Phase it serves | Generic counterpart |
+|---|---|---|---|
+| `cooker-find` | "where is X / how does Y work" | Intake (navigation) | — |
+| `cooker-audit` | "find bugs / is this safe" | Improve (findings) | `loop-review` |
+| `cooker-fix-bug` | a stack trace / failing test / "X is broken" | Bug path | `loop-debug` |
+| `cooker-improve` | "refactor / close finding / fix theme T\<n\>" | Improve | `loop-review` (find-only) |
+| `cooker-new-feature` | "add a new \<thing\>" | Feature path | `loop-scout` + `loop-design` |
+| `cooker-ci-debug` | "why is CI red" | Verify/Land | `loop-debug` |
+| `cooker-weekly` | the Monday cron | Improve (cadence) | `loop-autopilot` |
+
+### Vendored: TheLoopSkill (12 `loop-*` skills)
+
+Copied from [santapong/TheLoopSkill](https://github.com/santapong/TheLoopSkill) per its INSTALL.md. These are the **generic engineering routines**: `loop-engine` (author/run multi-agent workflows — replaced the retired repo-authored `workflow` skill; run with `--framework Cooker-AIDLC` for this repo's gated lifecycle), `loop-review`, `loop-debug`, `loop-test`, `loop-design`, `loop-docs`, `loop-audit`, `loop-research`, `loop-scout`, `loop-orchestrate`, `loop-harness`, `loop-autopilot`.
+
+**Division of labour:** a `loop-*` skill carries the methodology; the matching `cooker-*` skill carries the project protocol on top of it (audit-corpus routing, chain-ledger bookkeeping, path heat-maps, the Monday cron contract). For generic work — or work in another repo — use the `loop-*` skill directly; for Cooker-specific routines the `cooker-*` skill remains the entry point and defers methodology to its counterpart.
+
+### Vendored: ponytail (6 `ponytail-*` skills)
+
+Minimalism/anti-over-engineering pack (see `.claude/skills/ponytail/VENDORED_FROM.md`). Deliberately kept alongside `loop-review`: `ponytail-review`/`ponytail-audit` hunt deletions at an aggressiveness `loop-review`'s quality bar explicitly filters out.
+
+The harness also exposes built-in skills (`code-review`, `simplify`, `verify`, `run`, `deep-research`, …) — use those for general work, the `cooker-*` ones for Cooker-specific routines.
 
 The single most important skill convention is the **"which skill when" table** — every skill that overlaps with siblings carries one (see `cooker-audit`'s). It's what keeps a request from triggering the wrong routine.
 
@@ -184,7 +195,7 @@ The harness embeds facts about the codebase (file paths, version pins, extension
 - **Version pins.** When `CLAUDE.md` moves a pin, grep the agents for the old value and fix in lockstep. *Live example:* `cooker-planner.md`'s Hard-rules still cites "Go past 1.22 … `golang.org/x/time` … v0.5.0", while the authoritative `CLAUDE.md` now pins **Go 1.25 / `x/time` v0.15.0**. That's exactly the kind of drift to catch in review and correct in the same PR that touches the pin.
 - **Path maps.** `cooker-find/where-is.sh` and `cooker-audit`'s heat-map hard-code file paths. When a file moves, update the map — a stale map sends the next agent to the wrong file.
 - **Extension points.** The `selectXxx` switch list in agents must track the real switches in `server.go`.
-- **Skill rosters.** A skill's "which skill when" table must list every sibling — adding this `workflow` skill means the sibling tables should mention it.
+- **Skill rosters.** A skill's "which skill when" table must list every sibling that shares a trigger — when the vendored `loop-*` pack landed, the `cooker-*` routing tables gained rows deferring the generic version of each job to its `loop-*` counterpart. Keep those rows accurate as either side evolves.
 
 **Governance note.** Changing an agent's *Hard rules* is security-sensitive — it can silently widen what an automated agent is allowed to do. Surface such edits explicitly in review rather than bundling them into an unrelated change.
 
@@ -210,13 +221,13 @@ The harness embeds facts about the codebase (file paths, version pins, extension
 
 ## How to add a new workflow
 
-See the [`/workflow`](../../.claude/skills/workflow/SKILL.md) skill — it covers authoring (`new-workflow.sh` scaffolds the file), the patterns (pipeline / parallel / loop-until-dry / adversarial-verify), the opt-in safety contract, and how to save a reusable workflow under `.claude/workflows/`.
+See the [`/loop-engine`](../../.claude/skills/loop-engine/SKILL.md) skill (TheLoopSkill) — it covers authoring (start from a script in `loop-engine/templates/`), the patterns (pipeline / parallel / loop-until-dry / loop-until-budget / adversarial-verify), the harness & loop policies, and the opt-in safety contract. Run it with `--framework Cooker-AIDLC` to follow this repo's gated lifecycle. Save reusable scripts under [`.claude/workflows/`](../../.claude/workflows/README.md); model-selection guidance for scripts is in [`.claude/workflows/ORCHESTRATION.md`](../../.claude/workflows/ORCHESTRATION.md).
 
 ---
 
 ## See also
 
 - [`ADLC.md`](ADLC.md) — the lifecycle this harness drives.
-- [`../../.claude/skills/workflow/SKILL.md`](../../.claude/skills/workflow/SKILL.md) — the `/workflow` skill.
+- [`../../.claude/skills/loop-engine/SKILL.md`](../../.claude/skills/loop-engine/SKILL.md) — the `/loop-engine` skill (TheLoopSkill).
 - [`../../CLAUDE.md`](../../CLAUDE.md) — orientation + the hard rules every agent restates.
 - [`../reference/design.md`](../reference/design.md) — the code conventions the agents enforce.

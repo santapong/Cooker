@@ -2,7 +2,7 @@
 // adversarially verify each finding, and synthesize a go/no-go.
 //
 // Run:  Workflow({ name: "cooker-review" })
-// Pairs with ADLC Phase 5 (Review). See .claude/skills/workflow/SKILL.md.
+// Pairs with ADLC Phase 5 (Review). See .claude/skills/loop-engine/SKILL.md.
 //
 // Pattern: pipeline (each dimension's findings verify the moment that
 // dimension's review completes) + adversarial verify + synthesis.

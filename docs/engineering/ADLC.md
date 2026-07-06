@@ -172,7 +172,7 @@ make test
 **Driver.**
 - The **`code-review`** skill for the working diff (correctness bugs + simplification).
 - The **`cooker-security`** agent whenever the diff touches auth, secrets, CORS, the rate limiter, NetworkPolicy, or the Dockerfile.
-- For a diff-wide, multi-dimension pass, the **`cooker-review`** workflow (see [`harness-engineering.md`](harness-engineering.md) and the [`/workflow`](../../.claude/skills/workflow/SKILL.md) skill): it fans out reviewers over {bugs, layering, security, migration-safety}, **adversarially verifies each finding**, and synthesizes a go/no-go.
+- For a diff-wide, multi-dimension pass, the **`cooker-review`** workflow (see [`harness-engineering.md`](harness-engineering.md) and the [`/loop-engine`](../../.claude/skills/loop-engine/SKILL.md) skill): it fans out reviewers over {bugs, layering, security, migration-safety}, **adversarially verifies each finding**, and synthesizes a go/no-go.
 
 **Exit gate.** Confirmed findings are either fixed (loop back to Phase 3) or consciously deferred with a backlog entry. A security-relevant diff has a `cooker-security` sign-off and a `SECURITY.md` update if the threat model moved.
 
@@ -293,4 +293,4 @@ make test
 - [`../reference/design.md`](../reference/design.md) §11 — the canonical "adding a feature" checklist Phase 3 follows.
 - [`../../CLAUDE.md`](../../CLAUDE.md) — orientation, hard rules, current state.
 - [`../../backlog.md`](../../backlog.md) — what's open, what's closed, and the production-readiness verdict.
-- [`../../.claude/skills/workflow/SKILL.md`](../../.claude/skills/workflow/SKILL.md) — the `/workflow` skill used in Phases 5 and 10.
+- [`../../.claude/skills/loop-engine/SKILL.md`](../../.claude/skills/loop-engine/SKILL.md) — the `/loop-engine` skill (TheLoopSkill) used in Phases 5 and 10; `--framework Cooker-AIDLC` runs this lifecycle.
