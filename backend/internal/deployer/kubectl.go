@@ -120,7 +120,42 @@ func (k *Kubectl) DeployWeighted(ctx context.Context, req WeightedRequest) (Weig
 	}, nil
 }
 
+// CanaryReady reports whether the <name>-canary Deployment has all its
+// desired replicas ready (PM26-07-04), read via `kubectl get deployment
+// -o jsonpath`.
+func (k *Kubectl) CanaryReady(ctx context.Context, namespace, name string) (bool, string, error) {
+	bin := k.Bin
+	if bin == "" {
+		bin = "kubectl"
+	}
+	if _, err := exec.LookPath(bin); err != nil {
+		return false, "", fmt.Errorf("%w: kubectl not found: %v", ErrUnavailable, err)
+	}
+	args := []string{"get", "deployment", sanitizeName(name) + "-canary",
+		"-o", "jsonpath={.status.readyReplicas}/{.spec.replicas}"}
+	if namespace != "" {
+		args = append([]string{"--namespace", namespace}, args...)
+	}
+	if k.Kubeconfig != "" {
+		args = append([]string{"--kubeconfig", k.Kubeconfig}, args...)
+	}
+	var out, errBuf bytes.Buffer
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		return false, "", fmt.Errorf("%w: kubectl get canary: %v (%s)", ErrUnavailable, err, errBuf.String())
+	}
+	// jsonpath yields "<ready>/<desired>"; an absent readyReplicas prints
+	// as empty, so "/" or "/2" both parse to ready=0.
+	var ready, desired int
+	_, _ = fmt.Sscanf(out.String(), "%d/%d", &ready, &desired)
+	detail := fmt.Sprintf("%d/%d ready", ready, desired)
+	return ready > 0 && ready >= desired, detail, nil
+}
+
 var (
 	_ Deployer         = (*Kubectl)(nil)
 	_ WeightedDeployer = (*Kubectl)(nil)
+	_ CanaryProber     = (*Kubectl)(nil)
 )

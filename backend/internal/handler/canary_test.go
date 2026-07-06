@@ -165,3 +165,55 @@ func TestValidateAppInput_NormalizesCanary(t *testing.T) {
 		t.Errorf("canary weight not defaulted: got %d", a.Canary.Weight)
 	}
 }
+
+// recordingWeighted records the last DeployWeighted weight so a test can
+// assert the canary split was torn down.
+type recordingWeighted struct {
+	lastWeight int
+	calls      int
+}
+
+func (r *recordingWeighted) Deploy(context.Context, deployer.Request) (deployer.Result, error) {
+	return deployer.Result{}, nil
+}
+func (r *recordingWeighted) DeployWeighted(_ context.Context, req deployer.WeightedRequest) (deployer.WeightedResult, error) {
+	r.lastWeight = req.Weight
+	r.calls++
+	return deployer.WeightedResult{}, nil
+}
+
+// PM26-07-07: deleting an app with an in-flight canary tears down the
+// live split (DeployWeighted weight=0) before the app row is removed.
+func TestDeleteApp_TearsDownInFlightCanary(t *testing.T) {
+	h := newTestHandler(t)
+	rw := &recordingWeighted{}
+	wireCanary(h, rw)
+	app := seedCanaryApp(t, h)
+
+	// Start a canary (the split goes live at weight 20).
+	if _, err := h.Canary.Start(context.Background(), app, "run1", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if rw.lastWeight != 20 {
+		t.Fatalf("precondition: expected an active canary at weight 20, got %d", rw.lastWeight)
+	}
+
+	// Delete the app.
+	r := gin.New()
+	op := &auth.Claims{Email: "op@example.com", Roles: []string{string(auth.RoleAdmin)}}
+	r.DELETE("/apps/:id", withUser(h.DeleteApp, op))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/apps/app-1", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete code = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	// The canary split was collapsed to stable (weight 0) as part of delete.
+	if rw.lastWeight != 0 {
+		t.Errorf("app delete must tear down the canary split (weight 0), last weight was %d", rw.lastWeight)
+	}
+	// And the app is gone.
+	if _, err := h.Store.Apps.Get(context.Background(), "app-1"); err == nil {
+		t.Error("app should be deleted")
+	}
+}

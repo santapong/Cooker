@@ -354,6 +354,17 @@ func (s *CanaryService) SweepAutoPromote(ctx context.Context) {
 	}
 	now := s.clock()
 	for _, c := range canaries {
+		// App-gone reaping applies to EVERY progressing canary, manual or
+		// auto (PM26-07-07): a manual (AutoPromote=false) canary whose app
+		// was deleted must still have its row reaped, not linger
+		// progressing forever. The app-delete handler tears down the live
+		// split while the app still exists; this is the defensive backstop
+		// (memory store without cascade, or a delete that raced the sweep).
+		app, err := s.apps.Get(ctx, c.AppID)
+		if err != nil {
+			s.reapAppGone(ctx, c)
+			continue
+		}
 		if !c.AutoPromote || c.PromoteAfter == nil || now.Before(*c.PromoteAfter) {
 			continue
 		}
@@ -362,9 +373,27 @@ func (s *CanaryService) SweepAutoPromote(ctx context.Context) {
 		// progressing canary) indefinitely (PM26-07-05). Mirrors the
 		// audit-retention sweep's per-pass timeout.
 		evalCtx, cancel := context.WithTimeout(ctx, canaryEvalTimeout)
-		s.evaluate(evalCtx, c)
+		s.evaluate(evalCtx, app, c)
 		cancel()
 	}
+}
+
+// reapAppGone marks a progressing canary aborted when its app has been
+// deleted out from under it. Goes through the CAS so a concurrent
+// operator action isn't clobbered. It cannot tear down the live split
+// (the app — and its namespace/name — is gone); the app-delete handler
+// owns that teardown while the app still exists.
+func (s *CanaryService) reapAppGone(ctx context.Context, c *model.AppCanary) {
+	won, err := s.canaries.ClaimTerminal(ctx, c.ID, model.CanaryAborted)
+	if err != nil || !won {
+		return
+	}
+	s.logger.Warn("canary sweep: app gone, reaping canary row", "app", c.AppID)
+	now := s.clock()
+	c.Status = model.CanaryAborted
+	c.Message = "app deleted during canary"
+	c.ResolvedAt = &now
+	_ = s.canaries.Update(ctx, c)
 }
 
 // canaryEvalTimeout bounds a single canary's probe + promote/abort in
@@ -402,30 +431,11 @@ func (s *CanaryService) RunSweeper(ctx context.Context) error {
 	}
 }
 
-// evaluate probes one canary's health and promotes or aborts it. Used by
-// the sweep; split out so the health decision is testable in isolation.
-func (s *CanaryService) evaluate(ctx context.Context, c *model.AppCanary) {
-	app, err := s.apps.Get(ctx, c.AppID)
-	if err != nil {
-		// App deleted out from under an in-flight canary: mark the row
-		// aborted so the sweep stops re-evaluating it. Go through the CAS
-		// (ClaimTerminal) like every other terminal transition so a
-		// concurrent operator abort/promote can't be silently clobbered
-		// (PM26-07-02 consistency); if we lose the claim, another actor
-		// already resolved it.
-		won, cerr := s.canaries.ClaimTerminal(ctx, c.ID, model.CanaryAborted)
-		if cerr != nil || !won {
-			return
-		}
-		s.logger.Warn("canary sweep: app gone, aborting canary", "app", c.AppID, "err", err)
-		now := s.clock()
-		c.Status = model.CanaryAborted
-		c.Message = "app deleted during canary"
-		c.ResolvedAt = &now
-		_ = s.canaries.Update(ctx, c)
-		return
-	}
-	healthy, msg := s.probeHealthy(ctx, app)
+// evaluate probes one canary's health and promotes or aborts it. The app
+// is passed in (the sweep already fetched it and handled the app-gone
+// case). Split out so the health decision is testable in isolation.
+func (s *CanaryService) evaluate(ctx context.Context, app *model.App, c *model.AppCanary) {
+	healthy, msg := s.probeHealthy(ctx, app, c)
 	if healthy {
 		if _, err := s.Promote(ctx, c.AppID); err != nil {
 			s.logger.Warn("canary sweep: auto-promote failed", "app", c.AppID, "err", err)
@@ -437,10 +447,24 @@ func (s *CanaryService) evaluate(ctx context.Context, c *model.AppCanary) {
 	}
 }
 
-// probeHealthy reports whether the canary workload is healthy. With no
-// prober wired it assumes healthy (a target without a probe still
-// auto-promotes after the window rather than hanging forever).
-func (s *CanaryService) probeHealthy(ctx context.Context, app *model.App) (bool, string) {
+// probeHealthy reports whether the CANARY workload is healthy during the
+// window (PM26-07-04). It prefers a canary-specific readiness check — the
+// -canary Deployment's ready replicas — over the app-level prober, which
+// hits the shared Service and is dominated by the stable pods: a
+// crash-looping canary behind a healthy stable would otherwise read
+// "healthy" and auto-promote. Falls back to the app prober when the
+// deployer can't report canary readiness, and to "assume healthy" when
+// neither is available (a target without a probe still auto-promotes
+// after the window rather than hanging forever).
+func (s *CanaryService) probeHealthy(ctx context.Context, app *model.App, c *model.AppCanary) (bool, string) {
+	if cp, ok := s.weighted.(deployer.CanaryProber); ok {
+		ready, detail, err := cp.CanaryReady(ctx, app.DeployTarget.Namespace, app.Name)
+		if err == nil {
+			return ready, "canary workload: " + detail
+		}
+		s.logger.Warn("canary sweep: canary readiness probe failed; falling back to app probe",
+			"app", c.AppID, "err", err)
+	}
 	if s.prober == nil {
 		return true, "no probe wired; assuming healthy"
 	}

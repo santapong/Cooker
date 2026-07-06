@@ -567,3 +567,72 @@ func (b builderFunc) BuildAndPushImage(_ context.Context, _ *model.App, _ string
 	b()
 	return "reg/shop:new", &model.Pipeline{ID: "p"}, &model.PipelineRun{ID: "r", Status: model.RunStatusSuccess}, nil
 }
+
+// fakeCanaryProber is a weighted deployer that ALSO reports canary
+// readiness, so the service takes the PM26-07-04 canary-workload path.
+type fakeCanaryProber struct {
+	fakeWeighted
+	ready bool
+}
+
+func (f *fakeCanaryProber) CanaryReady(_ context.Context, _, _ string) (bool, string, error) {
+	if f.ready {
+		return true, "2/2 ready", nil
+	}
+	return false, "0/2 ready", nil
+}
+
+// PM26-07-04: the sweep must probe the CANARY workload, not the app. An
+// unhealthy canary behind a (would-be healthy) app prober must roll back,
+// not auto-promote.
+func TestCanary_SweepProbesCanaryWorkloadNotApp(t *testing.T) {
+	app := canaryApp()
+	fw := &fakeCanaryProber{ready: false} // canary pods crash-looping
+	now := time.Now()
+	clock := func() time.Time { return now }
+	// App prober would say HEALTHY (it sees the stable pods) — must be ignored.
+	appHealthy := ProberFunc(func(_ context.Context, _ *model.App) (model.AppHealth, string, string) {
+		return model.AppHealthHealthy, "stable ok", ""
+	})
+	svc, st := newCanaryFixture(t, app, fw, WithCanaryClock(clock), WithCanaryProber(appHealthy))
+	started, err := svc.Start(context.Background(), app, "run1", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Minute) // past the window
+	svc.SweepAutoPromote(context.Background())
+
+	c, err := st.AppCanaries.Get(context.Background(), started.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Status != model.CanaryAborted {
+		t.Errorf("unhealthy canary workload must auto-rollback despite a healthy app probe, got %s", c.Status)
+	}
+}
+
+// PM26-07-07: the sweep reaps a MANUAL (AutoPromote=false) canary whose
+// app was deleted, rather than leaving it progressing forever.
+func TestCanary_SweepReapsManualCanaryWhenAppGone(t *testing.T) {
+	app := canaryApp()
+	app.Canary.AutoPromote = false
+	fw := &fakeWeighted{}
+	svc, st := newCanaryFixture(t, app, fw)
+	started, err := svc.Start(context.Background(), app, "run1", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Delete the app out from under the canary (memory store: no cascade).
+	if err := st.Apps.Delete(context.Background(), "app1"); err != nil {
+		t.Fatal(err)
+	}
+	svc.SweepAutoPromote(context.Background())
+
+	c, err := st.AppCanaries.Get(context.Background(), started.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Status != model.CanaryAborted {
+		t.Errorf("manual canary with a deleted app must be reaped (aborted), got %s", c.Status)
+	}
+}

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -153,7 +154,19 @@ func (h *Handler) UpdateApp(c *gin.Context) {
 }
 
 func (h *Handler) DeleteApp(c *gin.Context) {
-	if err := h.Store.Apps.Delete(c.Request.Context(), c.Param("id")); err != nil {
+	id := c.Param("id")
+	// Tear down an in-flight canary BEFORE deleting the app (PM26-07-07):
+	// Abort scales the -canary Deployment down and collapses traffic back
+	// to stable. It needs the app's namespace/name, which are gone once
+	// the row is deleted (and the AppCanary row cascades away on Postgres),
+	// so the split would otherwise be orphaned live in the cluster.
+	// Best-effort: a teardown failure must not block the delete.
+	if h.Canary != nil {
+		if _, err := h.Canary.Abort(c.Request.Context(), id, "app deleted"); err != nil && !errors.Is(err, service.ErrNoActiveCanary) {
+			slog.Warn("DeleteApp: canary teardown failed", "app", id, "err", err)
+		}
+	}
+	if err := h.Store.Apps.Delete(c.Request.Context(), id); err != nil {
 		if abortStoreErr(c, err, "app not found") {
 			return
 		}
