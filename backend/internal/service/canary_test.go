@@ -572,22 +572,27 @@ func (b builderFunc) BuildAndPushImage(_ context.Context, _ *model.App, _ string
 // readiness, so the service takes the PM26-07-04 canary-workload path.
 type fakeCanaryProber struct {
 	fakeWeighted
-	ready bool
+	ready    bool
+	probeErr error
 }
 
 func (f *fakeCanaryProber) CanaryReady(_ context.Context, _, _ string) (bool, string, error) {
+	if f.probeErr != nil {
+		return false, "", f.probeErr
+	}
 	if f.ready {
 		return true, "2/2 ready", nil
 	}
 	return false, "0/2 ready", nil
 }
 
-// PM26-07-04: the sweep must probe the CANARY workload, not the app. An
-// unhealthy canary behind a (would-be healthy) app prober must roll back,
-// not auto-promote.
+// PM26-07-04: the sweep probes the CANARY workload, not the app. A
+// not-ready canary behind a (would-be healthy) app prober must NOT
+// auto-promote — it waits during the grace period, then rolls back at
+// the hard deadline (self-review #2/#5: never a blind promote).
 func TestCanary_SweepProbesCanaryWorkloadNotApp(t *testing.T) {
 	app := canaryApp()
-	fw := &fakeCanaryProber{ready: false} // canary pods crash-looping
+	fw := &fakeCanaryProber{ready: false} // canary pods not ready
 	now := time.Now()
 	clock := func() time.Time { return now }
 	// App prober would say HEALTHY (it sees the stable pods) — must be ignored.
@@ -599,15 +604,39 @@ func TestCanary_SweepProbesCanaryWorkloadNotApp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now = now.Add(2 * time.Minute) // past the window
+	// Just past the window: must NOT promote (the canary workload isn't
+	// ready), and must NOT yet roll back — it waits for the pods.
+	now = now.Add(2 * time.Minute)
 	svc.SweepAutoPromote(context.Background())
+	if c, _ := st.AppCanaries.Get(context.Background(), started.ID); c.Status != model.CanaryProgressing {
+		t.Fatalf("a not-ready canary must wait (progressing), not resolve, at 2m; got %s", c.Status)
+	}
+	// Past the hard deadline: a canary that never became ready rolls back.
+	now = now.Add(31 * time.Minute)
+	svc.SweepAutoPromote(context.Background())
+	if c, _ := st.AppCanaries.Get(context.Background(), started.ID); c.Status != model.CanaryAborted {
+		t.Errorf("a never-ready canary must roll back past the hard deadline; got %s", c.Status)
+	}
+}
 
-	c, err := st.AppCanaries.Get(context.Background(), started.ID)
+// Self-review #2: a canary-readiness PROBE ERROR must never auto-promote
+// (production wires no app prober, so a fall-through to "assume healthy"
+// would shift an unverified canary to 100%). It waits instead.
+func TestCanary_SweepProbeErrorDoesNotPromote(t *testing.T) {
+	app := canaryApp()
+	fw := &fakeCanaryProber{probeErr: errors.New("get deployments forbidden")}
+	now := time.Now()
+	clock := func() time.Time { return now }
+	// No app prober wired (mirrors production).
+	svc, st := newCanaryFixture(t, app, fw, WithCanaryClock(clock))
+	started, err := svc.Start(context.Background(), app, "run1", io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Status != model.CanaryAborted {
-		t.Errorf("unhealthy canary workload must auto-rollback despite a healthy app probe, got %s", c.Status)
+	now = now.Add(2 * time.Minute) // past the window
+	svc.SweepAutoPromote(context.Background())
+	if c, _ := st.AppCanaries.Get(context.Background(), started.ID); c.Status == model.CanaryPromoted {
+		t.Error("a canary with an unreadable readiness probe must NOT auto-promote")
 	}
 }
 

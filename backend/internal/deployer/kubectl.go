@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -147,9 +148,14 @@ func (k *Kubectl) CanaryReady(ctx context.Context, namespace, name string) (bool
 		return false, "", fmt.Errorf("%w: kubectl get canary: %v (%s)", ErrUnavailable, err, errBuf.String())
 	}
 	// jsonpath yields "<ready>/<desired>"; an absent readyReplicas prints
-	// as empty, so "/" or "/2" both parse to ready=0.
-	var ready, desired int
-	_, _ = fmt.Sscanf(out.String(), "%d/%d", &ready, &desired)
+	// as empty (the leading field is ""), so split on "/" and parse each
+	// side independently — a single Sscanf("%d/%d") would abort on the
+	// leading "/" and lose the desired count.
+	ready, desired := 0, 0
+	if parts := strings.SplitN(out.String(), "/", 2); len(parts) == 2 {
+		ready, _ = strconv.Atoi(strings.TrimSpace(parts[0]))
+		desired, _ = strconv.Atoi(strings.TrimSpace(parts[1]))
+	}
 	detail := fmt.Sprintf("%d/%d ready", ready, desired)
 	return ready > 0 && ready >= desired, detail, nil
 }

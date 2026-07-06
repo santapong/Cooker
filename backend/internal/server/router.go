@@ -259,17 +259,19 @@ func (s *Server) registerRoutes() {
 		apps.POST("/:id/rollback", writeRole, expensive, idempotencyMiddleware(s.idempotency), govDeploy, h.RollbackApp)
 		apps.GET("/:id/drift", writeRole, h.GetAppDrift)
 		// Canary deployments (OR-1). Status is read-level (the detail-page
-		// panel polls it). Promote / abort mutate the live rollout, so they
-		// carry writeRole AND the governance admission gate — the same
-		// gate deploy/rollback carry (PM26-07-11): shifting all traffic to
-		// a new version (promote) or rolling it back (abort) is a
-		// production change the governance policy must be able to veto.
-		// They are fast control-plane ops (re-balance an existing split),
-		// not new builds, so they skip the expensive rate limiter and
-		// idempotency middleware that the deploy/rollback entrypoints use.
+		// panel polls it). Promote shifts ALL traffic to the new version —
+		// a production change the governance policy must be able to veto,
+		// so it carries the govDeploy admission gate like deploy/rollback
+		// (PM26-07-11). Abort is the SAFE direction (roll traffic back to
+		// the current stable) and must stay available even when governance
+		// is unreachable (fail-closed 503) — gating the rollback path would
+		// block the exact recovery action an operator needs mid-incident —
+		// so it carries writeRole only. Both are fast control-plane ops
+		// (re-balance an existing split), not new builds, so they skip the
+		// expensive rate limiter and idempotency middleware.
 		apps.GET("/:id/canary", h.GetAppCanary)
 		apps.POST("/:id/canary/promote", writeRole, govDeploy, h.PromoteAppCanary)
-		apps.POST("/:id/canary/abort", writeRole, govDeploy, h.AbortAppCanary)
+		apps.POST("/:id/canary/abort", writeRole, h.AbortAppCanary)
 		apps.PUT("/:id/webhook",
 			adminRole, mfa,
 			auth.RequirePermission(auth.ResourceWebhook, auth.ActionUpdate),
