@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoad_Defaults(t *testing.T) {
@@ -53,6 +54,51 @@ func TestLoad_CustomPort(t *testing.T) {
 	cfg := Load()
 	if cfg.Port != 9090 {
 		t.Errorf("expected port 9090, got %d", cfg.Port)
+	}
+}
+
+func TestLoad_MetricsPort(t *testing.T) {
+	// Default: 0 (single-port mode, back-compat).
+	cfg := Load()
+	if cfg.Observability.MetricsPort != 0 {
+		t.Errorf("default metrics port should be 0, got %d", cfg.Observability.MetricsPort)
+	}
+	os.Setenv("COOKER_METRICS_PORT", "9091")
+	defer os.Unsetenv("COOKER_METRICS_PORT")
+	cfg = Load()
+	if cfg.Observability.MetricsPort != 9091 {
+		t.Errorf("expected metrics port 9091, got %d", cfg.Observability.MetricsPort)
+	}
+}
+
+func TestLoad_LicensePublicKeys_Union(t *testing.T) {
+	os.Setenv("COOKER_LICENSE_PUBLIC_KEY", "singular")
+	os.Setenv("COOKER_LICENSE_PUBLIC_KEYS", "plural1, plural2 , singular")
+	defer os.Unsetenv("COOKER_LICENSE_PUBLIC_KEY")
+	defer os.Unsetenv("COOKER_LICENSE_PUBLIC_KEYS")
+
+	cfg := Load()
+	// Plural first, singular appended, duplicates removed.
+	want := []string{"plural1", "plural2", "singular"}
+	if len(cfg.License.PublicKeys) != len(want) {
+		t.Fatalf("expected %v, got %v", want, cfg.License.PublicKeys)
+	}
+	for i, k := range want {
+		if cfg.License.PublicKeys[i] != k {
+			t.Errorf("PublicKeys[%d] = %q, want %q", i, cfg.License.PublicKeys[i], k)
+		}
+	}
+	if cfg.License.PublicKey != "singular" {
+		t.Errorf("singular PublicKey should be preserved for back-compat, got %q", cfg.License.PublicKey)
+	}
+}
+
+func TestLoad_LicensePublicKeys_SingularOnlyBackCompat(t *testing.T) {
+	os.Setenv("COOKER_LICENSE_PUBLIC_KEY", "onlykey")
+	defer os.Unsetenv("COOKER_LICENSE_PUBLIC_KEY")
+	cfg := Load()
+	if len(cfg.License.PublicKeys) != 1 || cfg.License.PublicKeys[0] != "onlykey" {
+		t.Errorf("singular-only should yield one key, got %v", cfg.License.PublicKeys)
 	}
 }
 
@@ -250,6 +296,54 @@ func TestValidate_UATPermissive(t *testing.T) {
 	}
 }
 
+func TestValidate_LicensePermissiveByDefault(t *testing.T) {
+	// No license configured => Free, no error, in any env.
+	for _, env := range []Env{EnvDev, EnvUAT} {
+		if err := (&Config{Env: env}).Validate(); err != nil {
+			t.Errorf("no license should be permissive in %s, got: %v", env, err)
+		}
+	}
+}
+
+func TestValidate_LicenseKeyWithoutPublicKeyIsError(t *testing.T) {
+	// A license token with no public key cannot be verified — error in
+	// every env (env-independent rule).
+	for _, env := range []Env{EnvDev, EnvUAT, EnvProduction} {
+		cfg := &Config{Env: env, License: LicenseConfig{Key: "some.token"}}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatalf("expected error for key-without-public-key in %s", env)
+		}
+		if !strings.Contains(err.Error(), "COOKER_LICENSE_PUBLIC_KEY") {
+			t.Errorf("error should mention COOKER_LICENSE_PUBLIC_KEY, got: %v", err)
+		}
+	}
+}
+
+func TestValidate_LicenseKeyWithPublicKeyOK(t *testing.T) {
+	cfg := &Config{Env: EnvDev, License: LicenseConfig{Key: "some.token", PublicKey: "base64pubkey", PublicKeys: []string{"base64pubkey"}}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("key + public key should validate, got: %v", err)
+	}
+}
+
+func TestValidate_LicensePublicKeyOnlyOK(t *testing.T) {
+	// Public key with no token is fine: the admin API can install later.
+	cfg := &Config{Env: EnvDev, License: LicenseConfig{PublicKey: "base64pubkey", PublicKeys: []string{"base64pubkey"}}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("public key alone should validate, got: %v", err)
+	}
+}
+
+// TestValidate_LicenseKeyWithMultiplePublicKeysOK exercises the W3
+// rotation path: a license key plus several trusted public keys validates.
+func TestValidate_LicenseKeyWithMultiplePublicKeysOK(t *testing.T) {
+	cfg := &Config{Env: EnvDev, License: LicenseConfig{Key: "some.token", PublicKeys: []string{"key1", "key2"}}}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("key + multiple public keys should validate, got: %v", err)
+	}
+}
+
 func TestValidate_ProductionRequiresSecretKey(t *testing.T) {
 	cfg := &Config{
 		Env:            EnvProduction,
@@ -318,6 +412,42 @@ func TestValidate_ProductionHappyPath(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("production happy path should validate, got: %v", err)
+	}
+}
+
+func TestValidate_Production_NoAuth(t *testing.T) {
+	// CWE-1188: with both OIDC and local auth disabled the OIDC
+	// middleware falls back to devHandler(), injecting a dev admin user
+	// on every request. Production must fail closed rather than boot an
+	// unauthenticated admin API.
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		// OIDC.Enabled and LocalAuth.Enabled both false (zero value).
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error when no authentication is enabled in production")
+	}
+	if !strings.Contains(err.Error(), "no authentication is enabled") {
+		t.Errorf("error should explain that no auth path is enabled, got: %v", err)
+	}
+}
+
+func TestValidate_Production_LocalAuthOnlySatisfiesAuth(t *testing.T) {
+	// Local auth alone is a valid production auth path — it must not
+	// trip the no-auth guard.
+	cfg := &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		LocalAuth:      LocalAuthConfig{Enabled: true, JWTSigningKey: validSecretKey},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("local-auth-only production config should validate, got: %v", err)
 	}
 }
 
@@ -586,6 +716,7 @@ func TestValidate_ProductionMultiReplicaWithStickyOK(t *testing.T) {
 		RateLimit:      RateLimitConfig{Enabled: true, Backend: "memory"},
 		WSTicket:       WSTicketConfig{Backend: "memory"},
 		WSHub:          WSHubConfig{Backend: "memory"},
+		OIDC:           OIDCConfig{Enabled: true},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("sticky sessions should satisfy multi-replica guard, got: %v", err)
@@ -602,8 +733,74 @@ func TestValidate_ProductionMultiReplicaWithRedisOK(t *testing.T) {
 		RateLimit:      RateLimitConfig{Enabled: true, Backend: "redis"},
 		WSTicket:       WSTicketConfig{Backend: "redis"},
 		WSHub:          WSHubConfig{Backend: "redis"},
+		OIDC:           OIDCConfig{Enabled: true},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("redis backends should satisfy multi-replica guard, got: %v", err)
+	}
+}
+
+// prodBase returns a minimal config that passes production Validate(),
+// for layering cloud-inventory assertions on top.
+func prodBase() *Config {
+	return &Config{
+		Env:            EnvProduction,
+		DatabaseURL:    "postgres://prod:prod@db.example.com:5432/cooker?sslmode=require",
+		SecretKey:      validSecretKey,
+		AllowedOrigins: []string{"https://cooker.example.com"},
+		OIDC:           OIDCConfig{Enabled: true},
+	}
+}
+
+func TestValidate_CloudAWSEnabledRequiresRegion(t *testing.T) {
+	cfg := prodBase()
+	cfg.CloudInventory.AWS.Enabled = true // Region intentionally empty
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected production to require COOKER_CLOUD_AWS_REGION when AWS provider enabled")
+	}
+	if !strings.Contains(err.Error(), "COOKER_CLOUD_AWS_REGION") {
+		t.Errorf("error should mention COOKER_CLOUD_AWS_REGION, got: %v", err)
+	}
+}
+
+func TestValidate_CloudGCPEnabledRequiresProjectID(t *testing.T) {
+	cfg := prodBase()
+	cfg.CloudInventory.GCP.Enabled = true // ProjectID intentionally empty
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected production to require COOKER_CLOUD_GCP_PROJECT_ID when GCP provider enabled")
+	}
+	if !strings.Contains(err.Error(), "COOKER_CLOUD_GCP_PROJECT_ID") {
+		t.Errorf("error should mention COOKER_CLOUD_GCP_PROJECT_ID, got: %v", err)
+	}
+}
+
+func TestValidate_CloudProvidersHappyPath(t *testing.T) {
+	cfg := prodBase()
+	// Region + ProjectID set; credentials omitted (chain/ADC) — must pass.
+	cfg.CloudInventory.AWS = CloudAWSConfig{Enabled: true, Region: "us-east-1"}
+	cfg.CloudInventory.GCP = CloudGCPConfig{Enabled: true, ProjectID: "my-proj"}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("cloud providers with locators set should validate, got: %v", err)
+	}
+}
+
+func TestValidate_CloudDisabledNeedsNothing(t *testing.T) {
+	cfg := prodBase()
+	// Both providers off (default): no region/project required.
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("disabled cloud inventory should not require any cloud env, got: %v", err)
+	}
+}
+
+func TestLoad_CloudInventoryDefaults(t *testing.T) {
+	// With nothing set, both providers are off and the cache TTL defaults.
+	cfg := Load()
+	if cfg.CloudInventory.AWS.Enabled || cfg.CloudInventory.GCP.Enabled {
+		t.Errorf("cloud providers should default to disabled")
+	}
+	if cfg.CloudInventory.CacheTTL != 5*time.Minute {
+		t.Errorf("expected default cache TTL 5m, got %v", cfg.CloudInventory.CacheTTL)
 	}
 }

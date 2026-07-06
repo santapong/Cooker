@@ -12,5 +12,13 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    # Cluster-internal metrics port. Uncomment alongside the dedicated
+    # COOKER_METRICS_PORT / "metrics" containerPort in deployment.yaml so the
+    # ServiceMonitor can scrape /metrics off the public app port. ClusterIP
+    # only — never wired into the Ingress. Chart equivalent: metrics.port.
+    # - port: 9090
+    #   targetPort: metrics
+    #   protocol: TCP
+    #   name: metrics
   selector:
     app.kubernetes.io/name: cooker

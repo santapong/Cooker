@@ -29,7 +29,7 @@ spec:
       {{- end }}
       containers:
         - name: cooker
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- if .Values.securityContext.enabled }}
           securityContext:
@@ -41,11 +41,25 @@ spec:
           ports:
             - containerPort: {{ .Values.service.port }}
               name: http
+            {{- if and .Values.metrics.enabled (gt (.Values.metrics.port | default 0 | int) 0) }}
+            # Dedicated internal metrics port. /metrics is served ONLY here
+            # (not on the app port), so it stays off the public "/" ingress.
+            - containerPort: {{ .Values.metrics.port }}
+              name: metrics
+            {{- end }}
           env:
             - name: COOKER_ENV
               value: {{ .Values.cookerEnv | quote }}
             - name: COOKER_PORT
               value: {{ .Values.service.port | quote }}
+            - name: COOKER_METRICS_ENABLED
+              value: {{ .Values.metrics.enabled | quote }}
+            {{- if and .Values.metrics.enabled (gt (.Values.metrics.port | default 0 | int) 0) }}
+            # >0 makes the backend bind /metrics on this separate internal
+            # port only; 0/unset keeps it on the main app port (back-compat).
+            - name: COOKER_METRICS_PORT
+              value: {{ .Values.metrics.port | quote }}
+            {{- end }}
             - name: COOKER_K8S_IN_CLUSTER
               value: {{ .Values.kubernetes.inCluster | quote }}
             - name: COOKER_REPLICA_COUNT
@@ -115,6 +129,65 @@ spec:
                 secretKeyRef:
                   name: {{ required "secrets.keepsave.apiKey.existingSecret is required when secrets.backend=keepsave" .Values.secrets.keepsave.apiKey.existingSecret | quote }}
                   key: {{ .Values.secrets.keepsave.apiKey.existingSecretKey | quote }}
+            {{- end }}
+            {{- if .Values.license.publicKey }}
+            - name: COOKER_LICENSE_PUBLIC_KEY
+              value: {{ .Values.license.publicKey | quote }}
+            {{- end }}
+            {{- if .Values.license.publicKeys }}
+            - name: COOKER_LICENSE_PUBLIC_KEYS
+              value: {{ join "," .Values.license.publicKeys | quote }}
+            {{- end }}
+            {{- if .Values.license.tokenSecret.name }}
+            # License token is sensitive — pulled from a pre-created Secret
+            # via secretKeyRef, never a values literal. Absent = Free tier.
+            - name: COOKER_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.license.tokenSecret.name | quote }}
+                  key: {{ .Values.license.tokenSecret.key | quote }}
+            {{- end }}
+            {{- if .Values.cloudInventory.cacheTTL }}
+            - name: COOKER_CLOUD_CACHE_TTL
+              value: {{ .Values.cloudInventory.cacheTTL | quote }}
+            {{- end }}
+            {{- if .Values.cloudInventory.aws.enabled }}
+            - name: COOKER_CLOUD_AWS_ENABLED
+              value: "true"
+            - name: COOKER_CLOUD_AWS_REGION
+              value: {{ required "cloudInventory.aws.region is required when cloudInventory.aws.enabled" .Values.cloudInventory.aws.region | quote }}
+            {{- if .Values.cloudInventory.aws.accessKeyId }}
+            - name: COOKER_CLOUD_AWS_ACCESS_KEY_ID
+              value: {{ .Values.cloudInventory.aws.accessKeyId | quote }}
+            {{- end }}
+            {{- if .Values.cloudInventory.aws.secretAccessKey.existingSecret }}
+            # Static credentials are OPTIONAL: prefer IRSA (an IAM role
+            # bound to the ServiceAccount via serviceAccount.annotations).
+            # When provided, the secret access key comes from a
+            # pre-created Secret, never values.yaml.
+            - name: COOKER_CLOUD_AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloudInventory.aws.secretAccessKey.existingSecret | quote }}
+                  key: {{ .Values.cloudInventory.aws.secretAccessKey.existingSecretKey | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.cloudInventory.gcp.enabled }}
+            - name: COOKER_CLOUD_GCP_ENABLED
+              value: "true"
+            - name: COOKER_CLOUD_GCP_PROJECT_ID
+              value: {{ required "cloudInventory.gcp.projectId is required when cloudInventory.gcp.enabled" .Values.cloudInventory.gcp.projectId | quote }}
+            {{- if .Values.cloudInventory.gcp.credentialsJson.existingSecret }}
+            # Optional: prefer Workload Identity (bind a GCP service
+            # account to the ServiceAccount via serviceAccount.annotations).
+            # When provided, the SA key JSON comes from a pre-created
+            # Secret, never values.yaml.
+            - name: COOKER_CLOUD_GCP_CREDENTIALS_JSON
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloudInventory.gcp.credentialsJson.existingSecret | quote }}
+                  key: {{ .Values.cloudInventory.gcp.credentialsJson.existingSecretKey | quote }}
+            {{- end }}
             {{- end }}
             - name: COOKER_SECRET_KEY
               valueFrom:
@@ -192,6 +265,12 @@ spec:
             - name: tmp
               mountPath: /tmp
             {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
           livenessProbe:
             httpGet:
               path: /health/live

@@ -31,6 +31,13 @@ type AppDeployer struct {
 	// Registry is the image registry prefix used when the App
 	// doesn't override it. Example: "registry.example.com/cooker".
 	Registry string
+	// cloneFn abstracts the git-clone step so tests can exercise Deploy's
+	// full orchestration (detect -> synthesize -> execute -> cleanup ->
+	// history) without a real network call or git binary. Nil (the zero
+	// value, and every production caller via NewAppDeployer) falls back
+	// to github.Clone via the clone() accessor below -- no behavior
+	// change for any existing caller.
+	cloneFn func(ctx context.Context, opts github.CloneOptions) (string, error)
 	// LogSink, when non-nil, receives Printf-style log output from
 	// the deployer itself (clone/detect messages). The executor
 	// writes stage logs into the returned run's stage runs.
@@ -57,6 +64,16 @@ func (d *AppDeployer) cacheSpec() *model.CacheSpec {
 // NewAppDeployer builds a deployer bound to exec and registry.
 func NewAppDeployer(exec *Executor, registry string) *AppDeployer {
 	return &AppDeployer{Executor: exec, Registry: registry}
+}
+
+// clone resolves the configured clone function, defaulting to the real
+// github.Clone. Tests set d.cloneFn to exercise Deploy's orchestration
+// without a real network call or git binary.
+func (d *AppDeployer) clone(ctx context.Context, opts github.CloneOptions) (string, error) {
+	if d.cloneFn != nil {
+		return d.cloneFn(ctx, opts)
+	}
+	return github.Clone(ctx, opts)
 }
 
 // recordDeploy persists one history row, best-effort.
@@ -116,7 +133,7 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 	logW = fanOut(logW, d.LogSink)
 
 	fmt.Fprintf(logW, "[clone] github.com/%s @ %s\n", app.GitHubRepo, app.Branch)
-	workdir, err := github.Clone(ctx, github.CloneOptions{
+	workdir, err := d.clone(ctx, github.CloneOptions{
 		Repo:      app.GitHubRepo,
 		Branch:    app.Branch,
 		Depth:     1,

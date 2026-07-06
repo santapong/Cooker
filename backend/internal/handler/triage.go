@@ -23,7 +23,9 @@ type TriageRunner interface {
 // Extensible map: add keys as opt-in features land.
 func (h *Handler) GetCapabilities(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"aiTriage": h.Triage != nil,
+		"aiTriage":       h.Triage != nil,
+		"cloudInventory": h.CloudInventory != nil && h.CloudInventory.Enabled(),
+		"feedback":       h.Feedback != nil,
 	})
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { settingsApi, type SecretsCheckResult } from '../api/settings';
 import { tokensApi } from '../api/tokens';
 import type { APIToken } from '../types/token';
@@ -20,8 +20,9 @@ import {
 import { DataTable } from '../components/ui/DataTable';
 import { useToastStore } from '../stores/toastStore';
 import { useAuth } from '../auth/OIDCProvider';
+import LicensePanel from './settings/LicensePanel';
 
-type Tab = 'registries' | 'clusters' | 'secrets' | 'tokens';
+type Tab = 'registries' | 'clusters' | 'secrets' | 'tokens' | 'license';
 
 export default function SettingsPage() {
   const t = useTheme();
@@ -46,7 +47,7 @@ export default function SettingsPage() {
           marginBottom: 22,
         }}
       >
-        {(['registries', 'clusters', 'secrets', 'tokens'] as const).map((id) => (
+        {(['registries', 'clusters', 'secrets', 'tokens', 'license'] as const).map((id) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -76,8 +77,10 @@ export default function SettingsPage() {
         <ClustersPanel />
       ) : tab === 'secrets' ? (
         <SecretsPanel />
-      ) : (
+      ) : tab === 'tokens' ? (
         <TokensPanel />
+      ) : (
+        <LicensePanel />
       )}
     </div>
   );
@@ -519,13 +522,25 @@ function fmtDate(iso?: string): string {
 function TokenCreatedModal({ token, onClose }: { token: string; onClose: () => void }) {
   const t = useTheme();
   const [copied, setCopied] = useState(false);
+  // Store the reset timer so it can be cancelled on unmount and avoid a
+  // setState-after-unmount warning (FE-M SettingsPage).
+  const copyTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
 
   const copy = () => {
     navigator.clipboard.writeText(token).then(
       () => setCopied(true),
       () => {},
     );
-    setTimeout(() => setCopied(false), 2000);
+    if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = window.setTimeout(() => setCopied(false), 2000);
   };
 
   return (

@@ -48,6 +48,20 @@ spec:
                 - >-
                   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c
                   "DELETE FROM pipeline_runs WHERE finished_at IS NOT NULL AND finished_at < NOW() - INTERVAL '{{ .Values.retention.daysToKeep | int }} days'"
+              {{- if .Values.securityContext.enabled }}
+              # M (CronJob /tmp): readOnlyRootFilesystem=true requires a
+              # writable /tmp for psql's temporary files (auth negotiation,
+              # .pgpass lookup, temp socket). Without this emptyDir the
+              # Job will fail at runtime even though the SQL is valid.
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              {{- end }}
               resources:
                 {{- toYaml .Values.retention.resources | nindent 16 }}
+          {{- if .Values.securityContext.enabled }}
+          volumes:
+            - name: tmp
+              emptyDir: {}
+          {{- end }}
 {{- end }}

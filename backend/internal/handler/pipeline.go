@@ -117,15 +117,7 @@ func (h *Handler) createPipeline(c *gin.Context, p *model.Pipeline) {
 	// must not be able to seed it.
 	p.Version = 0
 
-	if p.Variables == nil {
-		p.Variables = make(map[string]string)
-	}
-	if p.Stages == nil {
-		p.Stages = []model.Stage{}
-	}
-	if p.Edges == nil {
-		p.Edges = []model.Edge{}
-	}
+	p.SetDefaults()
 
 	if err := h.Store.Pipelines.Create(c.Request.Context(), p); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -257,6 +249,10 @@ func (h *Handler) UpdatePipeline(c *gin.Context) {
 	p.ID = id
 	p.CreatedAt = existing.CreatedAt
 	p.UpdatedAt = time.Now()
+	// BC-H2: use the server-fetched version for the OCC WHERE clause so
+	// the client cannot bypass the stale-check by supplying an arbitrary
+	// version field. ErrConflict → 409 is handled by abortStoreErr.
+	p.Version = existing.Version
 
 	if err := h.Store.Pipelines.Update(c.Request.Context(), &p); err != nil {
 		if abortStoreErr(c, err, "pipeline not found") {
@@ -380,17 +376,27 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 	// Do NOT re-derive run.Status from runCopy.Status here — Execute
 	// guarantees a terminal value and Cancelled stays Cancelled.
 	if h.Runs != nil && h.Executor != nil {
+		// Snapshot the run BEFORE spawning. Once SpawnWithDeadline starts
+		// the executor goroutine it mutates `run` (and its StageRuns) in
+		// place, so encoding `run` directly in the 202 response would race
+		// the executor (F15, docs/proposals/run-state-concurrency-2026.md).
+		// Taken here on this goroutine, the snapshot is sequenced-before
+		// the spawn.
+		snapshot := run.Clone()
 		// Per-pipeline RunDeadline override; 0 falls back to the
 		// cluster default inside the coordinator.
 		h.Runs.SpawnWithDeadline(context.Background(), run.ID, service.PipelineRunDeadline(p), func(ctx context.Context) error {
-			runCopy := run
-			_, execErr := h.Executor.Execute(ctx, p, runCopy)
-			if err := h.Store.Runs.Update(ctx, runCopy); err != nil {
+			_, execErr := h.Executor.Execute(ctx, p, run)
+			if err := h.Store.Runs.Update(ctx, run); err != nil {
 				return err
 			}
 			return execErr
 		})
+		c.JSON(http.StatusAccepted, snapshot)
+		return
 	}
+	// No executor/spawner wired: the run stays pending and is not mutated,
+	// so encoding it directly is safe.
 	c.JSON(http.StatusAccepted, run)
 }
 
@@ -447,8 +453,10 @@ func (h *Handler) CancelPipelineRun(c *gin.Context) {
 	if !ok {
 		return
 	}
-	run.Status = model.RunStatusCancelled
-	if err := h.Store.Runs.Update(c.Request.Context(), run); err != nil {
+	// Status-only write: UpdateStatus touches just status/finished_at/error,
+	// so it neither re-marshals the run's JSONB blobs (F18) nor overwrites
+	// stage_runs / heartbeat_at with this handler's stale loaded copy.
+	if err := h.Store.Runs.UpdateStatus(c.Request.Context(), run.ID, model.RunStatusCancelled, run.FinishedAt, run.Error); err != nil {
 		if abortStoreErr(c, err, "run not found") {
 			return
 		}
@@ -493,10 +501,12 @@ func (h *Handler) GetRunDiff(c *gin.Context) {
 	var against *model.PipelineRun
 	switch {
 	case againstParam == "" || againstParam == "last-success":
-		// Unbounded on purpose: the newest green run may sit arbitrarily
-		// deep in history. The list path strips logs in the store, so
-		// the scan is cheap rows, not megabytes.
-		runs, err := h.Store.Runs.List(c.Request.Context(), pipelineID, 0, 0)
+		// Bounded at 200: looking further back than this to find a
+		// successful baseline is a reasonable cap; if no success exists
+		// in the last 200 runs we report "no successful prior run" below.
+		// The list path strips logs in the store, so rows are cheap.
+		const runDiffSearchLimit = 200
+		runs, err := h.Store.Runs.List(c.Request.Context(), pipelineID, runDiffSearchLimit, 0)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

@@ -43,6 +43,9 @@ export default function AppDetailPage() {
   // streamRunId drives useWebSocket — null means "no active stream".
   const [streamRunId, setStreamRunId] = useState<string | null>(null);
   const logRef = useRef<HTMLPreElement | null>(null);
+  // Holds the post-rollback history-refresh timer so it can be cleared
+  // on unmount and avoid setState-after-unmount (FE-M AppDetailPage).
+  const rollbackTimerRef = useRef<number | null>(null);
 
   // Webhook rotation panel state.
   const [showWebhook, setShowWebhook] = useState(false);
@@ -95,6 +98,16 @@ export default function AppDetailPage() {
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logs]);
+
+  // Clear the post-rollback refresh timer on unmount so setState is never
+  // called after the component is gone (FE-M AppDetailPage).
+  useEffect(() => {
+    return () => {
+      if (rollbackTimerRef.current !== null) {
+        window.clearTimeout(rollbackTimerRef.current);
+      }
+    };
+  }, []);
 
   // Migrate away from raw new WebSocket() (PR #50 finding B3.2, FH-03 fix PR #49).
   // useWebSocket handles the 60s ticket flow, reconnect-with-backoff, and
@@ -234,7 +247,8 @@ export default function AppDetailPage() {
       const res = await appsApi.rollback(id, deployId);
       pushToast({ kind: 'success', message: `Rolling back to ${res.rolledBackTo.imageRef}.` });
       setStreamRunId(res.runId);
-      window.setTimeout(refreshHistory, 4000);
+      if (rollbackTimerRef.current !== null) window.clearTimeout(rollbackTimerRef.current);
+      rollbackTimerRef.current = window.setTimeout(refreshHistory, 4000);
     } catch (e) {
       pushToast({ kind: 'error', message: (e as Error).message });
     }

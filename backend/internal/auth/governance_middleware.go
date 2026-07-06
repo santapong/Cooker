@@ -76,7 +76,17 @@ func RequireGovernanceAllow(client *governance.Client, extract GovernanceResourc
 			return
 		}
 
-		decision, err := client.Authorize(c.Request.Context(), token, service, env, requestID(c))
+		// Forward the break-glass justification header (if present) as ABAC
+		// context so the gate's Cedar policy can see break_glass=true. This is
+		// distinct from Cooker's local break-glass escape hatch below (which
+		// only fires when the gate is UNREACHABLE): here the gate is reachable
+		// and gets to decide whether break-glass changes the verdict.
+		var actx governance.AuthorizeContext
+		if _, ok := breakGlassJustification(c); ok {
+			t := true
+			actx.BreakGlass = &t
+		}
+		decision, err := client.Authorize(c.Request.Context(), token, service, env, requestID(c), actx)
 		if err != nil {
 			if errors.Is(err, governance.ErrGovernanceUnreachable) {
 				if just, ok := breakGlassJustification(c); ok && bg.Enabled {

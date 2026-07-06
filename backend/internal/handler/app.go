@@ -301,16 +301,14 @@ func (h *Handler) runAppDeploy(a *model.App, runID, channel string) {
 }
 
 // runAppDeployCtx is the deploy worker bound to a caller-supplied ctx.
-// The RunCoordinator owns the lifetime; this function should not
-// install its own deadline so shutdown can cut off the work cleanly.
+// The RunCoordinator owns the lifetime (COOKER_RUN_DEADLINE governs);
+// this function must not install its own deadline so the coordinator's
+// deadline is the sole bound and shutdown can cut off work cleanly (BC-2).
 func (h *Handler) runAppDeployCtx(ctx context.Context, a *model.App, runID, channel string) {
-	deployCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
-
 	sink := &wsLogSink{channel: channel, broadcast: h.WSBroadcast}
 	sink.writef("[start] app=%s repo=%s branch=%s run=%s\n", a.Name, a.GitHubRepo, a.Branch, runID)
 
-	pipeline, run, err := h.AppDeployer.Deploy(deployCtx, a, runID, sink)
+	pipeline, run, err := h.AppDeployer.Deploy(ctx, a, runID, sink)
 	if err != nil {
 		sink.writef("[error] %v\n", err)
 	}
@@ -318,7 +316,7 @@ func (h *Handler) runAppDeployCtx(ctx context.Context, a *model.App, runID, chan
 	// deployment view can fetch its stages/edges/groups. Best-effort:
 	// the run is the source of truth, the pipeline is for visualization.
 	if pipeline != nil {
-		if createErr := h.Store.Pipelines.Create(deployCtx, pipeline); createErr != nil {
+		if createErr := h.Store.Pipelines.Create(ctx, pipeline); createErr != nil {
 			sink.writef("[warn] persist pipeline: %v\n", createErr)
 		}
 	}
@@ -326,10 +324,25 @@ func (h *Handler) runAppDeployCtx(ctx context.Context, a *model.App, runID, chan
 		// The stub run row was Created before Spawn (F-07 fix), so
 		// Update is always valid here and preserves any heartbeats
 		// written by the coordinator during the deploy.
-		if updateErr := h.Store.Runs.Update(deployCtx, run); updateErr != nil {
+		if updateErr := h.Store.Runs.Update(ctx, run); updateErr != nil {
 			sink.writef("[warn] persist run: %v\n", updateErr)
 		}
 		sink.writef("[final] status=%s\n", run.Status)
+	} else if err != nil && h.Runs != nil && h.Store != nil {
+		// BC-H5: Deploy returned (nil, nil, err) — the deployer could not
+		// produce a run record. The stub row we created before Spawn is still
+		// status=Running; mark it Failed so it doesn't stay stuck.
+		now := time.Now()
+		failed := &model.PipelineRun{
+			ID:         runID,
+			PipelineID: a.ID,
+			Status:     model.RunStatusFailed,
+			StartedAt:  &now,
+			FinishedAt: &now,
+		}
+		if updateErr := h.Store.Runs.Update(ctx, failed); updateErr != nil {
+			sink.writef("[warn] persist failed run: %v\n", updateErr)
+		}
 	}
 	sink.writef("[end] run=%s\n", runID)
 }
@@ -700,24 +713,23 @@ func (h *Handler) RollbackApp(c *gin.Context) {
 }
 
 // runRollbackCtx is the rollback worker; mirrors runAppDeployCtx.
+// The RunCoordinator owns the lifetime (COOKER_RUN_DEADLINE governs);
+// this function must not install its own deadline (BC-2).
 func (h *Handler) runRollbackCtx(ctx context.Context, a *model.App, imageRef, runID, channel string) {
-	deployCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
-
 	sink := &wsLogSink{channel: channel, broadcast: h.WSBroadcast}
 	sink.writef("[start] rollback app=%s image=%s run=%s\n", a.Name, imageRef, runID)
 
-	pipeline, run, err := h.AppDeployer.DeployImage(deployCtx, a, imageRef, runID, sink)
+	pipeline, run, err := h.AppDeployer.DeployImage(ctx, a, imageRef, runID, sink)
 	if err != nil {
 		sink.writef("[error] %v\n", err)
 	}
 	if pipeline != nil {
-		if createErr := h.Store.Pipelines.Create(deployCtx, pipeline); createErr != nil {
+		if createErr := h.Store.Pipelines.Create(ctx, pipeline); createErr != nil {
 			sink.writef("[warn] persist pipeline: %v\n", createErr)
 		}
 	}
 	if run != nil {
-		if updateErr := h.Store.Runs.Update(deployCtx, run); updateErr != nil {
+		if updateErr := h.Store.Runs.Update(ctx, run); updateErr != nil {
 			sink.writef("[warn] persist run: %v\n", updateErr)
 		}
 		sink.writef("[final] status=%s\n", run.Status)

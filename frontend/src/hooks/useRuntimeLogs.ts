@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useWebSocket } from './useWebSocket';
 import { runtimeApi } from '../api/pipelines';
 
@@ -39,22 +39,29 @@ export function useRuntimeLogs({
     setTruncated(false);
   }, [appId, serviceId, enabled]);
 
+  // Wrap onMessage in useCallback with an empty dep array — setLines and
+  // setTruncated are stable dispatcher references (React guarantees this)
+  // so no deps are needed. An inline arrow on every render would cause
+  // useWebSocket to see a new onMessage on each render, triggering
+  // unnecessary reconnects (FE-M useRuntimeLogs).
+  const onMessage = useCallback((data: unknown) => {
+    const raw = typeof data === 'string' ? data : JSON.stringify(data);
+    const line = raw.endsWith('\n') ? raw.slice(0, -1) : raw;
+    setLines((prev) => {
+      const next = prev.concat(line);
+      if (next.length > MAX_LINES) {
+        setTruncated(true);
+        return next.slice(next.length - MAX_LINES);
+      }
+      return next;
+    });
+  }, []);
+
   const wsUrl = enabled && appId && serviceId ? runtimeApi.logsPath(appId, serviceId) : '';
   const { connected } = useWebSocket({
     url: wsUrl,
     autoConnect: enabled && !!wsUrl,
-    onMessage: (data: unknown) => {
-      const raw = typeof data === 'string' ? data : JSON.stringify(data);
-      const line = raw.endsWith('\n') ? raw.slice(0, -1) : raw;
-      setLines((prev) => {
-        const next = prev.concat(line);
-        if (next.length > MAX_LINES) {
-          setTruncated(true);
-          return next.slice(next.length - MAX_LINES);
-        }
-        return next;
-      });
-    },
+    onMessage,
   });
 
   return { lines, connected, truncated };

@@ -101,7 +101,7 @@ type App struct {
 	// Canary is the opt-in canary deployment policy. The zero value
 	// (empty Strategy) means rolling deploys — the pre-canary behaviour —
 	// so existing apps are unaffected. Persisted as the apps.canary_config
-	// JSONB column (migration 024). Normalised on read so a stored-empty
+	// JSONB column (migration 025). Normalised on read so a stored-empty
 	// config reads back as an explicit rolling default.
 	Canary CanaryConfig `json:"canary"`
 

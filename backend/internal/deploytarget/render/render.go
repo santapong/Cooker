@@ -67,7 +67,9 @@ func (t *Target) do(ctx context.Context, method, path string, body any, out any)
 		return 0, err
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
+	// AD-H3: cap response reads at 4 MiB so a pathological API
+	// response can't exhaust the process heap (mirrors clientgo.go:160).
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode >= 400 {
 		return resp.StatusCode, fmt.Errorf("render: %s %s: %d %s", method, path, resp.StatusCode, string(data))
 	}

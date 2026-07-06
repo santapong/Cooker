@@ -1,4 +1,4 @@
--- 024_canary.up.sql
+-- 025_canary.up.sql
 --
 -- Canary deployments (OR-1). Two changes:
 --

@@ -12,7 +12,9 @@ If you discover a security vulnerability in Cooker, please report it responsibly
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email: **security@cooker-ci.example.com**
+Instead, please email: **santapongsondhi@gmail.com**
+
+This disclosure contact is also advertised machine-readably at `/.well-known/security.txt` (RFC 9116).
 
 Include the following in your report:
 - Description of the vulnerability
@@ -37,6 +39,8 @@ Cooker offers two authentication paths. Operators can enable either or both:
 - **Generic verify-failure response** (S26-05-01): on a verify error the API returns `{"error":"authentication failed"}` with `401`, and `{"error":"provider unavailable"}` with `503 + Retry-After` when the IdP itself is unreachable. The upstream library's diagnostic detail (`iss mismatch`, `kid not found`, signature parse errors, etc.) is logged at `slog.Warn` / `slog.Error` server-side only — clients do not get an oracle for crafting valid-shaped tokens or fingerprinting JWKS rotation cadence.
 
 > **Default in local & UAT:** OIDC is **disabled** (`COOKER_OIDC_ENABLED=false`) and the backend injects a dev admin user so contributors and testers can exercise the API without an IdP. Production deployments should enable OIDC — see the checklist below and [docs/UAT.md](docs/guides/UAT.md#enabling-oidc-sign-in-for-uat) for how to wire Google or another provider.
+>
+> **Fail-closed in production (CWE-1188):** because that dev-admin injection grants `admin` on *every* request, `Config.Validate()` now **refuses to boot** when `COOKER_ENV=production` and **both** OIDC (`COOKER_OIDC_ENABLED`) and local auth (`COOKER_LOCAL_AUTH_ENABLED`) are disabled. Previously this only logged a warning and started an unauthenticated admin API. At least one real authentication path must be enabled in production.
 
 #### Path 2: Local email + password (homelab / single-user / fallback)
 
@@ -52,7 +56,7 @@ The same auth middleware accepts both kinds of bearer token: it inspects the JWT
 **Trade-offs and limits of the local path:**
 
 - **MFA gating does not apply.** `COOKER_OIDC_MFA_ACR_VALUES` is checked against the OIDC token's `acr`/`amr` claims; local-auth tokens carry neither. If your environment requires MFA on destructive admin routes, those users must come in through the OIDC path.
-- **Brute-force defence is rate-limit-only.** There's no account lockout, no CAPTCHA, no email verification, no password reset. The per-user rate limiter on `/api/v1` applies once a user is authenticated, but unauthenticated `/auth/local/signin` calls are not rate-limited at the application layer — operators should enforce that at the edge (NGINX `limit_req`, Traefik rate-limit middleware, etc.).
+- **Brute-force defence is rate-limit-only.** There's no account lockout, no CAPTCHA, no email verification, no password reset. A dedicated **in-memory per-source-IP** limiter (fixed budget: **5 requests/minute, burst 5**) now runs ahead of both `POST /auth/local/signup` and `POST /auth/local/signin` (S26-05: CWE-307). These routes are registered on the root router *outside* the `/api/v1` per-user limiter (there is no authenticated principal yet), so without this guard they had no application-layer throttle at all. Like the webhook and per-user limiters it is **in-memory / per-process**: multi-replica deployments must still enforce edge rate-limiting on the credential endpoints (NGINX `limit_req`, Traefik rate-limit middleware, etc.) and set a correct trusted-proxy config so `ClientIP()` reflects the real source.
 - **Signup can be closed.** Set `COOKER_LOCAL_AUTH_ALLOW_SIGNUP=false` to disable `/signup`; the UI hides the form and direct calls return 403. Use this when you want admin-created accounts only.
 - **Signing key requirement.** `COOKER_LOCAL_AUTH_JWT_SIGNING_KEY` must decode to ≥ 32 bytes (base64-decoded; raw bytes also accepted). `Config.Validate()` refuses to start in production with a shorter key.
 - **No revocation list.** A leaked JWT remains valid until its `exp` claim. Lower `COOKER_LOCAL_AUTH_TOKEN_TTL` (default `12h`) if that's a concern.
@@ -100,6 +104,18 @@ HTTP/1.1 403 Forbidden
 
 The frontend API client recognises this response and re-issues the OIDC sign-in redirect with `acr_values=<configured>` so the IdP runs the second factor and the user retries the action with a fresh, MFA-bearing token. Empty config disables the gate (current default).
 
+### License verification (self-hosted entitlements, M2)
+
+Cooker's self-hosted edition gates paid-tier entitlements behind an **offline Ed25519-signed license** — there is no licensing server and no phone-home.
+
+- **Offline verification.** A license is a signed token. Cooker verifies it locally against an Ed25519 **public** key set by the operator via `COOKER_LICENSE_PUBLIC_KEY` (base64), or against any key in the comma-separated `COOKER_LICENSE_PUBLIC_KEYS` (the two are unioned; verification succeeds if **any** configured key validates the token). No network call is made to validate a license.
+- **Private signing key is held by the vendor, out-of-repo.** The private key is the root of trust for every license ever issued. It is **never** committed to this repository and is **never** shipped in any binary, image, or chart. Only the vendor holds it; operators receive only the public key. The vendor-side signing CLI is `backend/cmd/cooker-license` (keygen / sign / verify) and is not distributed to customers.
+- **The entitlement gate fails OPEN.** A missing, malformed, expired, or signature-invalid license **never locks the API** — Cooker degrades to the permissive **Free** tier. Licensing is an entitlement/feature gate, not an authentication or authorization control: it cannot deny access to the API surface, only to paid-tier features. This is deliberate so a license problem can never take an operator's deployment offline.
+- **`GET /api/v1/license` exposes only decoded claims, never the raw token.** Any authenticated user may read the installed license's decoded claims (plan, customer, seats, features, issue/expiry dates) for display. The raw signed token is never returned on any response. Installing a license (`POST`) and removing it (`DELETE`) are **admin-only**; a license may also be installed at boot via `COOKER_LICENSE_KEY` (verified against any configured public key).
+- **No online revocation; key rotation is the revocation / key-compromise mitigation.** Because verification is offline there is no way to revoke an individual issued token short of its `exp` claim. If the vendor private signing key is compromised — or a customer's license must be invalidated — the mitigation is to **rotate the signing key**: generate a new keypair, distribute the new public key, re-issue legitimate licenses signed with the new private key, and retire trust in the old public key. `COOKER_LICENSE_PUBLIC_KEYS` makes this zero-downtime: trust both the old and new keys during the overlap window, then drop the old key once every active license is re-issued under the new one. Any token still signed only by the retired key stops verifying (and degrades to Free) as soon as the old key is dropped. See `docs/guides/UAT.md` → *Self-hosted licensing* for the operator runbook.
+
+Residual risk: an operator who holds a validly-signed token can install it on any number of instances — offline verification cannot enforce per-instance binding without a phone-home, which is an intentional trade-off. Seat/replica allowances in the claims are advisory to the operator, not hard-enforced by the verifier.
+
 ### Supply chain and release signing (v0.1.0+)
 
 Cooker releases are signed using **cosign keyless signing** via the Sigstore / Rekor transparency log. There are no long-lived signing keys stored in the repository or in CI secrets.
@@ -129,6 +145,13 @@ Cooker releases are signed using **cosign keyless signing** via the Sigstore / R
 
 See [`docs/RELEASING.md`](docs/guides/RELEASING.md#step-4--verify-the-release-artifacts) for the exact `cosign verify-blob` and `cosign verify` commands. For the security-side post-publish checklist (Rekor lookup, identity drift checks, expected workflow subjects), see [`docs/SECURITY-RELEASE-VERIFY.md`](docs/guides/SECURITY-RELEASE-VERIFY.md).
 
+#### Dependency / vulnerability scanning (CWE-1104)
+
+CI fails a PR on a known-vulnerable dependency:
+
+- **Backend:** the backend job runs `govulncheck` (pinned `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`). It is call-graph aware, so it only fails on advisories — including Go stdlib symbols — actually reachable from Cooker's code. The pinned `go run` invocation is used deliberately so it never mutates `go.mod` (`go mod tidy` is forbidden in this repo — it pulls `tailscale.com` via the `tsnet` build tag and breaks the Go 1.25 docker build).
+- **Frontend:** the frontend job runs `npm audit --audit-level=high --omit=dev`, scoped to production (browser-shipped) dependencies so build-tooling advisories that never reach users don't block a PR.
+
 ### OCI Registry Security
 
 - **Authentication**: Registry credentials stored server-side only, never exposed to the frontend
@@ -143,6 +166,7 @@ See [`docs/RELEASING.md`](docs/guides/RELEASING.md#step-4--verify-the-release-ar
 - **External**: Kubeconfig-based access with configurable contexts
 - **RBAC** (S26-05-19): Cooker's ServiceAccount holds a Role *or* ClusterRole, chart-selectable via `rbac.clusterWide`. The chart default is **cluster-wide** for compatibility with the v0.1 raw manifests (`deploy/kubernetes/rbac.yaml`); namespace-scoped is encouraged once your deploy targets are confined. The chart-rendered ClusterRole is scoped to the resources Cooker needs (deployments, pods, services, configmaps, secrets, namespaces) — but "scoped to resources" is not the same as "scoped to a namespace", which is the property operators reading this section usually care about.
 - **Read API (list/inspect endpoints)**: `GET /api/v1/kubernetes/{namespaces,workloads,workloads/:ns/:kind/:name,pods/:ns/:name/logs}` perform **live, read-only** client-go reads against the server's configured cluster (the cluster target comes only from in-cluster config / `COOKER_KUBECONFIG` — never from the request, so there is no SSRF). These are gated at the **operator role** (`writeRole`), the same as the Kubernetes write path: a plain `viewer` cannot enumerate the cluster or read pod logs. This matters because pod logs can contain tokens/PII and — with the default `rbac.clusterWide: true` — span **every namespace** the ServiceAccount can see, not just Cooker's deploy targets. To narrow the blast radius, set `rbac.clusterWide: false` and confine the ServiceAccount to your deploy-target namespaces. Pod-log reads are bounded (`tailLines` clamped to ≤10000, response capped at 256 KiB). Write operations (scale/restart/apply/delete) remain unimplemented stubs.
+- **The same operator-role gate now applies over WebSocket** (CR-6, fixed). The live cluster watch `GET /ws/kubernetes/watch` and the runtime-log stream `GET /ws/runtime/:appId/:serviceId/logs` are operator-gated to mirror their HTTP equivalents. The role is enforced **twice**: a `viewer` is refused a ticket for these paths at mint time (`POST /api/v1/ws-tickets` returns 403), and the WS upgrade gate independently rejects a ticket whose bound roles don't satisfy the route. Before this fix, the `/ws` group carried no role guard and the ticket's subject was discarded, so any authenticated user — including a `viewer` — could watch arbitrary namespaces and stream runtime logs. See "WebSocket" below for the ticket scoping model.
 
 ### Image build isolation
 
@@ -186,6 +210,28 @@ Controls:
 - **Transport.** TLS ≥ 1.2 enforced on the outbound client; 90s timeout; one retry on 429/5xx.
 
 Residual risk: stage logs can contain whatever the user's build prints. If your builds may log sensitive material, leave triage disabled or scrub at the build level — Cooker cannot distinguish a secret a build chose to print from ordinary output.
+
+### In-app feedback (opt-in outbound GitHub call)
+
+`COOKER_FEEDBACK_GITHUB_TOKEN` is a new server-side secret: a GitHub token (use a fine-grained PAT with Issues Read/Write on the single feedback repo) that `POST /api/v1/feedback` uses to file user feedback as GitHub issues. The token lives server-side only and is **never sent to the browser**; clients only ever see the created issue's URL and number. Off by default — an empty token keeps the route returning 503 and the frontend hides the button (`GET /api/v1/capabilities`). Submitter identity is derived server-side from the auth context and the User-Agent from the request header (never from client JSON); the message is embedded in a dynamic code fence, and the client-controlled page URL and User-Agent are each wrapped in an inline-code span (with a backtick delimiter that outruns any backticks in the value), so none of them can inject markdown, @-mentions, #-references or disguised links into the issue; GitHub error responses are logged but never relayed to clients, and the route carries the per-user rate limiter.
+
+### Cloud inventory credentials (read-only, opt-in)
+
+`COOKER_CLOUD_AWS_ENABLED` / `COOKER_CLOUD_GCP_ENABLED` add the read-only cloud inventory & cost panel (`GET /api/v1/cloud/{inventory,costs}`, `POST /api/v1/cloud/refresh`). When enabled, Cooker calls **only list/describe/cost APIs** — EC2 `DescribeInstances`, EKS `ListClusters`/`DescribeCluster`, ECR `DescribeRepositories`, Cost Explorer `GetCostAndUsage` on AWS; Compute `aggregatedList`, Container `clusters.list`, Artifact Registry `repositories.list` on GCP. There is **no mutating call path** in `internal/cloudinventory/` (the package and its providers expose `ListResources` + `CostSummary` only), so even a compromised Cooker cannot create, modify, or delete a cloud resource through this feature.
+
+Controls:
+
+- **Off by default.** With neither provider enabled the endpoints return `200 {"enabled":false}` and the SDK clients are never constructed (`GET /api/v1/capabilities` reports `cloudInventory:false`, hiding the page).
+- **Least-privilege IAM is the operator's responsibility — and the primary control.** Grant a **read-only** identity:
+  - **AWS**: the managed `ReadOnlyAccess` policy is sufficient but broad; prefer a scoped policy allowing only `ec2:DescribeInstances`, `eks:ListClusters`, `eks:DescribeCluster`, `ecr:DescribeRepositories`, and `ce:GetCostAndUsage`.
+  - **GCP**: the predefined roles `roles/compute.viewer`, `roles/container.viewer`, and `roles/artifactregistry.reader` (Cost is not read via API — see below).
+- **Prefer workload identity over static keys.** On EKS use **IRSA** (annotate the ServiceAccount with `eks.amazonaws.com/role-arn`); on GKE use **Workload Identity** (`iam.gke.io/gcp-service-account`). With either in place **no key env var or Secret is needed** — the Helm chart renders the enable flag + locator and nothing else. The static-credential fallback (`COOKER_CLOUD_AWS_SECRET_ACCESS_KEY`, `COOKER_CLOUD_GCP_CREDENTIALS_JSON`) is supported for non-managed runtimes and is wired via `secretKeyRef` into a **pre-created, operator-managed Secret** — never `values.yaml`, never a chart-created Secret. The keys are never logged (the providers log only the region/project on boot).
+- **Read-role exposure.** The two `GET` endpoints are read-level (any authenticated user), exposing **resource metadata and aggregate cost only** — instance IDs, cluster names, repository URIs, and per-service spend. No credential material is ever placed on a response. `POST /cloud/refresh` is `writeRole` + rate-limited because it forces a synchronous fan-out to the cloud APIs (AWS Cost Explorer bills per request).
+- **Caching bounds API spend.** Results are cached in memory for `COOKER_CLOUD_CACHE_TTL` (default 5m); a misconfigured non-positive TTL is ignored so the cost APIs can't be hammered.
+
+GCP cost note: GCP exposes month-to-date spend only through the BigQuery billing export (or the Budgets API), **not** the Cloud Billing v1 API. To avoid fabricating a figure, the GCP provider returns a labelled **zero** cost summary; GCP resources are still real. Wiring the BigQuery export is tracked as follow-up.
+
+Residual risk: the inventory reflects whatever the granted identity can see. Scope the IAM role to the accounts/projects you intend to surface; a broad `ReadOnlyAccess` role makes the panel enumerate everything in the account.
 
 ## Data Security
 
@@ -246,7 +292,8 @@ private key body never lands on the `hosts` table. The flow is:
 
 - **CORS**: Configurable allowed origins via `COOKER_ALLOWED_ORIGINS`. Defaults to `localhost:5173,localhost:3000` for `COOKER_ENV=dev|uat`; defaults to **deny-all** for `COOKER_ENV=production` so missing config is loud, not silent. Boot **refuses to start** if `COOKER_ALLOWED_ORIGINS` is empty in production (`Config.Validate` — `backend/internal/config/config.go`); a wildcard `*` is also rejected (S26-05-19).
 - **`Allow-Credentials`**: explicitly **off**. Cooker authenticates via `Authorization: Bearer <jwt>` headers, not cookies — credentials mode adds no value and would block wildcard reflection.
-- **WebSocket**: two-layer auth — same-origin policy via `gorilla/websocket` `CheckOrigin` (sharing the CORS allowlist) **and** a single-use ticket. Clients `POST /api/v1/ws-tickets` over the authenticated API to obtain a 60-second ticket and open `/ws/...` with `?ticket=<value>`. Tickets are consumed on first use; replay is rejected. The per-stage log channel `/ws/runs/:runId/stages/:stageId/logs` (added with the AppHealthChecker work) uses the same ticket gate; no new ingress.
+- **WebSocket**: three-layer auth — same-origin policy via `gorilla/websocket` `CheckOrigin` (sharing the CORS allowlist), a single-use ticket, **and** role + resource scoping bound into that ticket (CR-6). Clients `POST /api/v1/ws-tickets` over the authenticated API with a `{"path":"/ws/..."}` body naming the exact resource they will connect to. The server captures the caller's `auth.Claims` (subject + roles) and binds `{subject, roles, path}` into a 60-second, single-use ticket; the client then opens `/ws/...` with `?ticket=<value>`. The upgrade gate enforces **both** scopes: (1) **resource** — the ticket's bound path must equal the request path, so a ticket minted for `/ws/pipeline-run/A` cannot be replayed against `/ws/pipeline-run/B` or any other route (the resource id lives in the path, so binding the path binds the resource — the WS analogue of the HTTP `loadRunForPipeline` ownership check); and (2) **role** — routes that require operator+ over HTTP (`/ws/kubernetes/watch`, `/ws/runtime/:appId/:serviceId/logs`) require the same role over WS, refused at mint time *and* re-checked at connect time. Read-level log streams (`/ws/pipeline-run/:runId`, `/ws/app-run/:runId`, `/ws/docker/build/:buildId`, `/ws/runs/:runId/stages/:stageId/logs`) require only authentication, matching their HTTP `GET` peers. Tickets are consumed on first use; replay is rejected. The grant's subject + roles are placed in the request context (`ws-subject`, `ws-roles`) for handlers and the audit trail.
+  - **Prior gap (now closed):** before CR-6, the `/ws` group had no `RequireRole` and the ticket subject set in context was never read by any handler, so any authenticated user (including a `viewer`) could stream any run/build/pod-log channel and watch arbitrary namespaces — bypassing the HTTP-layer IDOR and role checks. The ticket alone is no longer the only authz control; role and resource are bound at mint and enforced at connect.
 - **App health probe**: `AppHealthChecker` runs in-process inside the cooker pod and reads from each deploy target via the existing in-cluster credentials (kubeconfig / SDK clients). It does NOT add an inbound network surface; egress is to the same target-backend endpoints the executor already talks to.
 - **Ingress**: TLS termination recommended at the ingress controller level.
 - **Internal traffic**: Backend-to-database and backend-to-Redis communication should use encrypted connections in production.
@@ -266,6 +313,25 @@ Cooker emits a structured audit event for every authenticated mutating call (POS
 
 `POST /api/v1/settings/secrets/test` (admin + MFA) probes the configured secrets backend with a single authenticated `List` call. The response reveals **only** the backend kind (`database`, `keepsave`, …), reachability, latency, and a classified error (`authentication failed` / `backend unreachable` / raw message). Key names and values are never returned — the probe discards the list contents. The probe is rate-limited only by the admin+MFA gate; it makes one outbound request per click to the same endpoint the executor already talks to (no new egress class).
 
+### Git-provider webhook receivers
+
+The unauthenticated `/webhooks/{github,gitlab,gitea,bitbucket}` receivers accept push events and trigger an auto-deploy for the matching App. They are **not** behind the OIDC middleware or the `/api/v1` per-user limiter — each provider's HMAC signature / shared-token header **is** the authentication.
+
+**Authentication order (fail-early).** Each receiver does the minimum work needed to verify the request, in this order, and rejects as early as possible:
+
+1. Bound the body read (10 MiB `LimitReader`; over-limit → `413`).
+2. Ignore non-push events (`200 ignored`) and branch-delete / non-branch pushes.
+3. Look up the App by repo+branch (`GetByRepo`). Unknown repo → `204` (does not leak repo existence).
+4. Decrypt **only that repo's own webhook secret** (`Codec.Open`) — the single decryption unavoidably required for the HMAC/token check. **No other secret is decrypted before verification.**
+5. Verify the provider signature/token. **Failure → `401`/`403` and the request never reaches the deploy path** (no run row is created, no deploy is spawned).
+
+**Per-source-IP rate limit (C-webhook-logs).** Because steps 3–4 cost a DB lookup plus a secret decryption *before* the signature check, an unauthenticated attacker could amplify that work. A dedicated **in-memory per-source-IP** limiter runs **ahead of** the receiver (and ahead of the idempotency middleware), so a throttled request never touches the store or the crypto codec. It is independent of the per-user limiter (different threat: unauthenticated amplification, not per-user fairness).
+
+- Defaults: **60 requests/minute, burst 10**, keyed on `c.ClientIP()`.
+- Tunable via `COOKER_WEBHOOK_RATE_LIMIT_ENABLED` (default `true`), `COOKER_WEBHOOK_RATE_LIMIT_PER_MINUTE` (default `60`), `COOKER_WEBHOOK_RATE_LIMIT_BURST` (default `10`).
+- In-memory / per-process, exactly like the per-user limiter: **multi-replica deployments must also enforce edge rate-limiting** (and set a correct trusted-proxy config so `ClientIP()` reflects the real source). It is defense-in-depth, not a substitute for edge limiting.
+- Bitbucket **Cloud** does not sign payloads; only Bitbucket **Server / Data Center** (signed) is supported. Cloud users must IP-allowlist at the edge.
+
 ### Rate limiting
 
 Cooker applies a **per-user, in-memory rate limit** to **three** specific endpoints (S26-05-19) so a single user cannot accidentally fork-bomb builds. Defaults: 10 requests/minute, burst 3, keyed on the OIDC subject claim. The covered routes are exactly:
@@ -274,7 +340,7 @@ Cooker applies a **per-user, in-memory rate limit** to **three** specific endpoi
 - `POST /api/v1/docker/images/build`
 - `POST /api/v1/apps/:id/deploy`
 
-**Every other route in `/api/v1` — including environment / app / pipeline CRUD, webhook secret rotation, `POST /api/v1/environments/:id/secrets/promote`, and the unauthenticated `/webhooks/github` receiver and `/api/v1/auth/local/{signup,signin}` paths — is unbounded at the application layer.** Operators must enforce edge rate-limiting (NGINX `limit_req`, Traefik middleware, Cloudflare, AWS WAF) for those.
+The unauthenticated `/webhooks/*` receivers have their **own** per-source-IP limiter (see "Git-provider webhook receivers" above), enabled by default. **Every other route in `/api/v1` — including environment / app / pipeline CRUD, webhook secret rotation, `POST /api/v1/environments/:id/secrets/promote`, and the `/api/v1/auth/local/{signup,signin}` paths — is unbounded at the application layer.** Operators must enforce edge rate-limiting (NGINX `limit_req`, Traefik middleware, Cloudflare, AWS WAF) for those.
 
 - Tunable via `COOKER_RATE_LIMIT_ENABLED` (default `true`), `COOKER_RATE_LIMIT_PER_MINUTE` (default `10`), `COOKER_RATE_LIMIT_BURST` (default `3`).
 - **Multi-replica deployments must back per-process state with Redis** — or pin clients with sticky sessions. `Config.Validate()` (`backend/internal/config/config.go:482-499`) refuses to boot in production when `COOKER_REPLICA_COUNT > 1 && COOKER_STICKY_SESSIONS=false` unless **all three** of the per-process subsystems are pointed at Redis:
@@ -319,6 +385,7 @@ Referrer-Policy: strict-origin-when-cross-origin
 
 ## Security Checklist for Production Deployment
 
+- [x] Enable a real authentication path *(`Config.Validate()` refuses to boot in production when both `COOKER_OIDC_ENABLED` and `COOKER_LOCAL_AUTH_ENABLED` are false — otherwise the backend would inject a dev admin user on every request, CWE-1188)*
 - [ ] Enable OIDC authentication (`COOKER_OIDC_ENABLED=true`)
 - [ ] Configure TLS on ingress
 - [ ] Restrict CORS origins to your domain
@@ -330,4 +397,5 @@ Referrer-Policy: strict-origin-when-cross-origin
 - [x] Run the container as non-root *(image runs as UID 65532 by default)*
 - [x] Enable network policies to restrict pod-to-pod traffic *(NetworkPolicy ships with the Helm chart, gated by `networkPolicy.enabled`; raw manifest at `deploy/kubernetes/network-policy.yaml`)*
 - [ ] Regularly update base images and dependencies
+- [ ] If the cloud inventory panel is enabled (`COOKER_CLOUD_{AWS,GCP}_ENABLED`), bind a **read-only** identity — IRSA / Workload Identity over static keys — scoped to the minimum describe/list/cost permissions *(see "Cloud inventory credentials")*
 - [x] Verify release artifact signatures *(cosign keyless signing ships with every release from v0.1.0; see "Supply chain and release signing" and `docs/RELEASING.md §Step 4`)*

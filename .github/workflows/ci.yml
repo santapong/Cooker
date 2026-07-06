@@ -64,6 +64,18 @@ jobs:
       - name: Vet
         working-directory: backend
         run: go vet ./...
+      - name: Guard — no module-tidy in release config
+        # The module-tidy command enables all build tags, pulling
+        # tailscale.com via the tsnet tag and bumping the Go floor past 1.25
+        # (breaks the docker job on golang:1.25-alpine). See CLAUDE.md. This
+        # guard fails the PR if it is reintroduced into the goreleaser config
+        # or the release workflow. (Scoped to those two files so this guard's
+        # own text in ci.yml is not a false positive.)
+        run: |
+          if grep -rnE 'go[[:space:]]+mod[[:space:]]+tidy' .goreleaser.yaml .github/workflows/release.yml; then
+            echo "::error::module-tidy is forbidden (breaks the Go 1.25 docker build). Use 'go get <module>@<version>' or download instead." >&2
+            exit 1
+          fi
       - name: golangci-lint
         uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
         # Keep going to the test step even on lint failure so a single
@@ -83,6 +95,20 @@ jobs:
           # across packages (bounded by GOMAXPROCS). The race detector stays
           # on. P26-05-34: replaces the per-package sequential for-loop.
           go test -race -timeout 120s ./...
+      - name: govulncheck
+        working-directory: backend
+        # CWE-1104: surface known-vulnerable dependencies and reachable
+        # stdlib symbols (govulncheck is call-graph aware, so it only reports
+        # live paths). Run via a pinned 'go run' so it never modifies go.mod —
+        # module-tidy is forbidden in this repo (pulls tailscale.com via the
+        # tsnet tag and breaks the Go 1.25 docker build; see CLAUDE.md).
+        # Advisory (non-blocking): it also reports stdlib CVEs fixed only by
+        # newer Go patch releases — a moving frontier that would keep CI red
+        # between routine toolchain bumps. Real third-party dep CVEs are still
+        # surfaced and fixed by bumping the module (x/crypto, x/net were bumped
+        # for GO-2026-501x/5025). Review the output each run.
+        continue-on-error: true
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   frontend:
     runs-on: ubuntu-latest
@@ -96,6 +122,12 @@ jobs:
       - name: Install
         working-directory: frontend
         run: npm ci
+      - name: npm audit (production deps, high+)
+        working-directory: frontend
+        # CWE-1104: fail on a high/critical advisory in a runtime dependency
+        # that ships to the browser. Scoped to production deps (--omit=dev) so
+        # build-tooling advisories that never reach users don't block a PR.
+        run: npm audit --audit-level=high --omit=dev
       - name: Lint
         working-directory: frontend
         run: npm run lint
@@ -362,11 +394,88 @@ jobs:
               exit 1
             fi
           done
+      - name: helm template (metrics + networkPolicy disabled)
+        run: |
+          # Gate render: the chart must still produce a valid, install-able
+          # manifest set with the optional metrics integration and the
+          # NetworkPolicy both turned off. Catches templates that assume
+          # those toggles are always on (e.g. a dangling selector or a
+          # reference to a Service the metrics path would have created).
+          helm template cooker deploy/helm/cooker \
+            --set metrics.enabled=false \
+            --set networkPolicy.enabled=false \
+            > /tmp/no-metrics-no-netpol.yaml
+          # With both off, neither a NetworkPolicy nor metrics CRDs should
+          # appear in the render.
+          if grep -q 'kind: NetworkPolicy' /tmp/no-metrics-no-netpol.yaml; then
+            echo "ERROR: NetworkPolicy rendered with networkPolicy.enabled=false" >&2
+            exit 1
+          fi
+          if grep -q 'kind: ServiceMonitor' /tmp/no-metrics-no-netpol.yaml; then
+            echo "ERROR: ServiceMonitor rendered with metrics.enabled=false" >&2
+            exit 1
+          fi
+          if grep -q 'kind: PrometheusRule' /tmp/no-metrics-no-netpol.yaml; then
+            echo "ERROR: PrometheusRule rendered with metrics.enabled=false" >&2
+            exit 1
+          fi
+      - name: helm template (metrics ServiceMonitor + PrometheusRule)
+        run: |
+          # Gate render: exercise the metrics observability path
+          # (ServiceMonitor + PrometheusRule are monitoring.coreos.com
+          # CRDs). The positive grep assertions below fail the step if the
+          # toggle stops rendering the CRDs, so the gate can't pass
+          # vacuously should the metrics gating regress to always-false.
+          # kubeconform then validates the rendered CRD instances against
+          # the Datree catalog below.
+          helm template cooker deploy/helm/cooker \
+            --set metrics.enabled=true \
+            --set metrics.serviceMonitor.enabled=true \
+            --set metrics.prometheusRule.enabled=true \
+            > /tmp/metrics.yaml
+          # Positive assertions: the toggle must actually render the CRDs.
+          # Without these the step passes vacuously if the metrics gating
+          # ever regresses to always-false (mirrors the retention step's
+          # 'kind: CronJob' guard).
+          grep -q 'kind: ServiceMonitor' /tmp/metrics.yaml || {
+            echo "ERROR: ServiceMonitor not rendered when metrics.serviceMonitor.enabled=true" >&2; exit 1; }
+          grep -q 'kind: PrometheusRule' /tmp/metrics.yaml || {
+            echo "ERROR: PrometheusRule not rendered when metrics.prometheusRule.enabled=true" >&2; exit 1; }
       - name: kubeconform
         run: |
           curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.4/kubeconform-linux-amd64.tar.gz -o /tmp/kc.tar.gz
           tar -xzf /tmp/kc.tar.gz -C /tmp
-          /tmp/kubeconform -strict -summary -ignore-missing-schemas /tmp/default.yaml /tmp/prod.yaml /tmp/kaniko.yaml /tmp/buildah.yaml /tmp/keepsave.yaml /tmp/aws-starter.yaml /tmp/aws-team.yaml /tmp/aws-scale.yaml
+          # CRD validation: the Datree CRDs-catalog supplies schemas for
+          # off-tree CRDs (monitoring.coreos.com ServiceMonitor /
+          # PrometheusRule from M0-T1, etc.) keyed by group/kind/version.
+          # -ignore-missing-schemas stays as the fallback so a CRD the
+          # catalog doesn't carry yields a skip rather than a hard failure
+          # — schemas are validated where available, never silently
+          # required.
+          SCHEMA_LOCATIONS=(
+            -schema-location default
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          )
+          # Pass 1: every helm render permutation produced above.
+          /tmp/kubeconform -strict -summary -ignore-missing-schemas \
+            "${SCHEMA_LOCATIONS[@]}" \
+            /tmp/default.yaml \
+            /tmp/prod.yaml \
+            /tmp/kaniko.yaml \
+            /tmp/buildah.yaml \
+            /tmp/keepsave.yaml \
+            /tmp/retention-on.yaml \
+            /tmp/no-metrics-no-netpol.yaml \
+            /tmp/metrics.yaml \
+            /tmp/aws-starter.yaml \
+            /tmp/aws-team.yaml \
+            /tmp/aws-scale.yaml
+          # Pass 2: the raw manifests under deploy/kubernetes/ (parity set
+          # for non-Helm users). These can drift from the chart, so they
+          # get their own kubeconform pass with the same schema locations.
+          /tmp/kubeconform -strict -summary -ignore-missing-schemas \
+            "${SCHEMA_LOCATIONS[@]}" \
+            deploy/kubernetes/
 
   docker:
     # P26-05-38: drop needs:[backend,frontend,helm] so the docker build runs

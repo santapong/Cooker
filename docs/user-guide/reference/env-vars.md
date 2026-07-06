@@ -45,8 +45,11 @@ Every Cooker configuration variable. Generated from `backend/internal/config/con
 | `COOKER_RATE_LIMIT_ENABLED` | `true` | Per-user rate limit on expensive endpoints. | `config.go:263` |
 | `COOKER_RATE_LIMIT_PER_MINUTE` | `10` | Requests per minute per user. | `config.go:264` |
 | `COOKER_RATE_LIMIT_BURST` | `3` | Bucket capacity for short bursts. | `config.go:265` |
+| `COOKER_WEBHOOK_RATE_LIMIT_ENABLED` | `true` | Per-source-IP rate limit on the unauthenticated `/webhooks/*` receivers (independent of the per-user limiter). | `config.go` |
+| `COOKER_WEBHOOK_RATE_LIMIT_PER_MINUTE` | `60` | Webhook requests per minute per source IP. | `config.go` |
+| `COOKER_WEBHOOK_RATE_LIMIT_BURST` | `10` | Webhook bucket capacity for short bursts. | `config.go` |
 
-> Today the rate limiter only applies to three endpoints: `POST /pipelines/:id/run`, `POST /docker/images/build`, `POST /apps/:id/deploy`. See [`SECURITY.md` § Rate limiting](../../../SECURITY.md#rate-limiting) for the open coverage gap (`S26-05-22`).
+> Today the per-user rate limiter only applies to three endpoints: `POST /pipelines/:id/run`, `POST /docker/images/build`, `POST /apps/:id/deploy`. The `/webhooks/*` receivers have their own per-source-IP limiter (`COOKER_WEBHOOK_RATE_LIMIT_*`). See [`SECURITY.md` § Rate limiting](../../../SECURITY.md#rate-limiting) and [§ Git-provider webhook receivers](../../../SECURITY.md#git-provider-webhook-receivers) for details.
 
 ## OIDC
 
@@ -195,6 +198,13 @@ Each cloud deploy target self-registers when its required config is non-empty.
 | Variable | Default | Description | Source |
 |---|---|---|---|
 | `COOKER_APP_HEALTH_INTERVAL` | `30s` | How often `AppHealthChecker` probes each App. `0` disables. | `config.go:353` |
+
+## Feedback
+
+| Variable | Default | Description | Source |
+|---|---|---|---|
+| `COOKER_FEEDBACK_GITHUB_TOKEN` | empty (feature off) | GitHub token used to file in-app feedback as issues. Use a fine-grained PAT scoped to Issues Read/Write on the one feedback repo. Server-side only — never sent to the browser. Empty keeps `POST /feedback` returning 503 and hides the frontend button. | `config.go` |
+| `COOKER_FEEDBACK_GITHUB_REPO` | `santapong/Cooker` | `owner/repo` that receives feedback issues. | `config.go` |
 
 ## Frontend (build-time)
 

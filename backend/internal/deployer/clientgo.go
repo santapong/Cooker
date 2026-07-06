@@ -136,8 +136,16 @@ func (c *ClientGo) Deploy(ctx context.Context, req Request) (Result, error) {
 			Force:        boolPtr(true),
 		})
 		if err != nil {
+			// M clientgo.go:138-141: server-side apply Patch should not
+			// return AlreadyExists (it is an upsert). If it does, that
+			// signals a field-manager conflict or unexpected API-server
+			// behaviour; log a warning and return an error rather than
+			// silently skipping the object.
 			if apierrors.IsAlreadyExists(err) {
-				continue
+				logf(req.LogWriter, "WARNING: server-side apply returned AlreadyExists for %s/%s; "+
+					"this may indicate a field-manager conflict\n", gvk, obj.GetName())
+				return Result{}, fmt.Errorf("%w: apply %s %s: already exists (possible field-manager conflict): %v",
+					ErrUnavailable, gvk, obj.GetName(), err)
 			}
 			return Result{}, fmt.Errorf("%w: apply %s: %v", ErrUnavailable, gvk, err)
 		}

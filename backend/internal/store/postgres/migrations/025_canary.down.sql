@@ -1,4 +1,4 @@
--- 024_canary.down.sql
+-- 025_canary.down.sql
 --
 -- Reverse 024: drop the canary state table (its indexes go with it)
 -- and remove the apps.canary_config column.

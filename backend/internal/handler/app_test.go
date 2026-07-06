@@ -267,6 +267,46 @@ func TestGitHubWebhook_Rejects_BadSignature(t *testing.T) {
 	}
 }
 
+// TestGitHubWebhook_BadSignature_DispatchesNoDeploy proves the signature
+// check is a hard gate BEFORE any deploy work: an invalid HMAC returns 401
+// and never reaches triggerWebhookDeploy, so no run is spawned and no run row
+// is created (C-webhook-logs — reject early on signature failure).
+func TestGitHubWebhook_BadSignature_DispatchesNoDeploy(t *testing.T) {
+	h := newTestHandler(t)
+	h.AppDeployer = service.NewAppDeployer(service.NewExecutor(), "reg")
+	h.AppDeployer.Deploys = h.Store.AppDeploys
+	spawner := &captureSpawner{}
+	h.Runs = spawner
+
+	admin := &auth.Claims{Email: "a@example.com", Roles: []string{string(auth.RoleAdmin)}}
+	r := gin.New()
+	r.POST("/apps", withUser(h.CreateApp, admin))
+	r.PUT("/apps/:id/webhook", withUser(h.SetAppWebhookSecret, admin))
+	r.POST("/webhooks/github", h.GitHubWebhook)
+
+	got, _ := seedWebhookApp(t, r, "api", "acme/api", true)
+
+	payload := []byte(`{"ref":"refs/heads/main","after":"deadbeef","repository":{"full_name":"acme/api"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(payload))
+	req.Header.Set("X-GitHub-Event", "push")
+	// Signature over the WRONG secret — must be rejected before any deploy.
+	req.Header.Set("X-Hub-Signature-256", signedPush("attacker-secret", payload))
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("bad signature: got %d, want 401", w.Code)
+	}
+	if len(spawner.runIDs) != 0 {
+		t.Errorf("bad signature dispatched %d deploys; want 0", len(spawner.runIDs))
+	}
+	if runs, err := h.Store.Runs.List(context.Background(), got.ID, 0, 0); err != nil {
+		t.Fatal(err)
+	} else if len(runs) != 0 {
+		t.Errorf("bad signature created %d run rows; want 0", len(runs))
+	}
+}
+
 func TestGitHubWebhook_UnknownRepo_Returns204(t *testing.T) {
 	h := newTestHandler(t)
 	r := gin.New()

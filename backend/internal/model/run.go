@@ -117,3 +117,76 @@ const (
 	EnvStatusFailed           EnvStatus = "failed"
 	EnvStatusAwaitingApproval EnvStatus = "awaiting_approval"
 )
+
+// Clone returns a deep copy of the run that is safe to read while the
+// original is mutated elsewhere — provided the caller either holds the
+// run's owning lock or the original is no longer being written. The
+// executor mutates run.StageRuns[i] in place from per-stage goroutines
+// during a run, so every concurrent reader (the progress-persistence
+// drain, the HTTP response encoder, the in-memory store's Get) must
+// snapshot via Clone rather than share the live pointer.
+// See docs/proposals/run-state-concurrency-2026.md.
+func (r *PipelineRun) Clone() *PipelineRun {
+	if r == nil {
+		return nil
+	}
+	// Value copy first: scalars + slice/map headers. The reference-typed
+	// fields below are then replaced with independent copies.
+	cp := *r
+	cp.StartedAt = cloneTimePtr(r.StartedAt)
+	cp.FinishedAt = cloneTimePtr(r.FinishedAt)
+	cp.HeartbeatAt = cloneTimePtr(r.HeartbeatAt)
+
+	if r.StageRuns != nil {
+		cp.StageRuns = make([]StageRun, len(r.StageRuns))
+		for i := range r.StageRuns {
+			cp.StageRuns[i] = r.StageRuns[i].clone()
+		}
+	}
+	if r.EnvironmentStatuses != nil {
+		cp.EnvironmentStatuses = make([]EnvironmentStatus, len(r.EnvironmentStatuses))
+		for i := range r.EnvironmentStatuses {
+			es := r.EnvironmentStatuses[i]
+			es.PromotedAt = cloneTimePtr(r.EnvironmentStatuses[i].PromotedAt)
+			cp.EnvironmentStatuses[i] = es
+		}
+	}
+	if r.StartedByGroups != nil {
+		cp.StartedByGroups = append([]string(nil), r.StartedByGroups...)
+	}
+	if r.Variables != nil {
+		cp.Variables = make(map[string]string, len(r.Variables))
+		for k, v := range r.Variables {
+			cp.Variables[k] = v
+		}
+	}
+	return &cp
+}
+
+// clone returns a deep copy of a single StageRun (the per-element unit
+// the executor mutates in place).
+func (s StageRun) clone() StageRun {
+	cp := s
+	cp.StartedAt = cloneTimePtr(s.StartedAt)
+	cp.FinishedAt = cloneTimePtr(s.FinishedAt)
+	if s.Artifacts != nil {
+		cp.Artifacts = append([]Artifact(nil), s.Artifacts...)
+	}
+	if s.Outputs != nil {
+		cp.Outputs = make(map[string]string, len(s.Outputs))
+		for k, v := range s.Outputs {
+			cp.Outputs[k] = v
+		}
+	}
+	return cp
+}
+
+// cloneTimePtr copies a *time.Time so the snapshot does not alias the
+// original pointer's pointee.
+func cloneTimePtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	v := *t
+	return &v
+}

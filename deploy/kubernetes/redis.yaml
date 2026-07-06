@@ -1,0 +1,96 @@
+# M (Redis): deployment.yaml sets REDIS_URL=redis://cooker-redis:6379,
+# which means a Redis service named "cooker-redis" must exist in the
+# same namespace. This manifest provides a minimal single-instance Redis
+# for that purpose.
+#
+# IMPORTANT: this is a convenience manifest for small / single-replica
+# deployments. For production:
+#   - Use a managed Redis service (ElastiCache, MemoryStore, etc.) and
+#     update REDIS_URL in deployment.yaml accordingly, OR
+#   - Increase replicas and add Sentinel / Cluster mode for HA.
+# A single-pod Redis with no PersistentVolume loses state on restart —
+# acceptable for the WS hub / ticket / rate-limit backends (they are
+# ephemeral by design) but NOT for durable data.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cooker-redis
+  namespace: cooker
+  labels:
+    app.kubernetes.io/name: cooker-redis
+    app.kubernetes.io/component: cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cooker-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cooker-redis
+        app.kubernetes.io/component: cache
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: 6379
+              name: redis
+          args: ["--save", "", "--appendonly", "no"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cooker-redis
+  namespace: cooker
+  labels:
+    app.kubernetes.io/name: cooker-redis
+    app.kubernetes.io/component: cache
+spec:
+  selector:
+    app.kubernetes.io/name: cooker-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+  type: ClusterIP

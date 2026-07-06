@@ -1,0 +1,89 @@
+# REQUIRES the Prometheus Operator (monitoring.coreos.com/v1 CRDs). If your
+# cluster does not run the Operator, do NOT apply this file — copy the
+# `spec.groups` block into a plain Prometheus rule_files target instead
+# (see deploy/observability/README.md). `kubectl apply -f deploy/kubernetes/`
+# will fail on this object when the CRD is absent.
+#
+# CANONICAL SOURCE for the alert rules is
+# deploy/observability/prometheus/cooker-rules.yaml. This copy and the Helm
+# template (deploy/helm/cooker/templates/prometheusrule.yaml) MUST be kept
+# semantically identical to it — same alerts, expr, labels, and annotations
+# (summary/description/runbook_url). When you change a rule, edit all three.
+#
+# The HTTP 5xx series is selected on the `status` label (status=~"5.."), NOT a
+# `code` label — see backend/internal/observability/observability.go.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cooker
+  namespace: cooker
+  labels:
+    app.kubernetes.io/name: cooker
+    # Match this to your Prometheus Operator's ruleSelector.
+    role: alert-rules
+spec:
+  groups:
+    - name: cooker-resilience
+      rules:
+        - alert: CookerDBConnectionErrors
+          expr: rate(cooker_db_connection_errors_total[5m]) > 0
+          for: 5m
+          labels:
+            severity: page
+          annotations:
+            summary: "Cooker is failing to reach Postgres"
+            description: "cooker_db_connection_errors_total is incrementing — the Postgres ping is failing during the boot backoff or readiness probe."
+            runbook_url: "https://github.com/santapong/Cooker/blob/main/docs/guides/RUNBOOK.md#postgresql-is-down-or-unreachable"
+        - alert: CookerRedisConnectionErrors
+          expr: rate(cooker_redis_connection_errors_total[5m]) > 0
+          for: 5m
+          labels:
+            severity: page
+          annotations:
+            summary: "Cooker Redis backend (rate limit / WS ticket / WS hub) is erroring"
+            description: "cooker_redis_connection_errors_total is incrementing — a Redis-backed adapter is failing."
+        - alert: CookerJWKSFetchFailures
+          expr: rate(cooker_jwks_fetch_failures_total[5m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cooker cannot reach the OIDC IdP for JWKS"
+            description: "cooker_jwks_fetch_failures_total is incrementing — OIDC discovery / JWKS fetch is failing; logins may break."
+            runbook_url: "https://github.com/santapong/Cooker/blob/main/docs/guides/RUNBOOK.md#oidc-issuer-is-unreachable"
+        - alert: CookerOrphanedRunsHigh
+          expr: increase(cooker_pipeline_runs_orphaned_total[1h]) > 5
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cooker swept >5 orphaned runs in the last hour"
+            description: "cooker_pipeline_runs_orphaned_total rose by more than 5 in 1h — pods are likely crash-looping mid-run."
+            runbook_url: "https://github.com/santapong/Cooker/blob/main/docs/guides/RUNBOOK.md#recovery-after-restart"
+    - name: cooker-http
+      rules:
+        - alert: CookerHTTP5xxRate
+          expr: |
+            sum(rate(cooker_http_requests_total{status=~"5.."}[5m]))
+              / clamp_min(sum(rate(cooker_http_requests_total[5m])), 1) > 0.05
+          for: 10m
+          labels:
+            severity: page
+          annotations:
+            summary: "Cooker HTTP 5xx ratio above 5%"
+            description: "More than 5% of API requests are returning 5xx over the last 5m."
+        # PREREQUISITE: this alert depends on kube-state-metrics (KSM) exporting
+        # the kube_pod_status_ready series. Without KSM scraped into the same
+        # Prometheus this alert never fires (no data, not "OK").
+        - alert: CookerReadinessFailing
+          expr: |
+            max by (namespace, pod) (
+              kube_pod_status_ready{condition="true", pod=~"cooker.*"}
+            ) == 0
+          for: 5m
+          labels:
+            severity: page
+          annotations:
+            summary: "Cooker pod failing readiness"
+            description: "At least one Cooker pod has been NotReady for 5m — readiness probe (/health/ready) is failing."
+            runbook_url: "https://github.com/santapong/Cooker/blob/main/docs/guides/RUNBOOK.md#probe-semantics-live-vs-ready"

@@ -99,6 +99,12 @@ func NewStore(ctx context.Context, databaseURL string) (*store.Store, error) {
 		return nil, fmt.Errorf("postgres: open: %w", err)
 	}
 	db.SetConnMaxLifetime(envDuration("COOKER_DB_CONN_MAX_LIFETIME", defaultConnMaxLifetime))
+	// SetConnMaxIdleTime caps how long an idle connection may sit in the
+	// pool before being closed. Cloud load-balancers (GCP, AWS NLB) kill
+	// idle TCP connections after ~5 min; without this the pool can return
+	// a half-closed connection and the first query gets a TCP-reset 500.
+	// Operators may tune via COOKER_DB_CONN_MAX_IDLE_TIME (e.g. "4m30s").
+	db.SetConnMaxIdleTime(envDuration("COOKER_DB_CONN_MAX_IDLE_TIME", 5*time.Minute))
 	db.SetMaxOpenConns(envInt("COOKER_DB_MAX_OPEN_CONNS", defaultMaxOpenConns))
 	db.SetMaxIdleConns(envInt("COOKER_DB_MAX_IDLE_CONNS", defaultMaxIdleConns))
 
@@ -127,6 +133,7 @@ func NewStore(ctx context.Context, databaseURL string) (*store.Store, error) {
 		NewClusterConfigStore(db),
 		NewUserStore(db),
 		NewAPITokenStore(db),
+		NewLicenseStore(db),
 		db.Close,
 		db.PingContext,
 	), nil

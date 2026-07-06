@@ -7,7 +7,7 @@
 *Drag stages onto a canvas. Wire them into a DAG. Ship to production.*
 
 [![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?logo=go&logoColor=white)](https://golang.org/dl/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/santapong/Cooker/actions/workflows/ci.yml/badge.svg)](https://github.com/santapong/Cooker/actions/workflows/ci.yml)
 [![OCI Conformance](https://github.com/santapong/Cooker/actions/workflows/oci-conformance.yml/badge.svg)](https://github.com/santapong/Cooker/actions/workflows/oci-conformance.yml)
 [![GHCR](https://img.shields.io/badge/container-ghcr.io%2Fsantapong%2Fcooker-2496ED?logo=docker&logoColor=white)](https://github.com/santapong/Cooker/pkgs/container/cooker)
@@ -50,6 +50,7 @@
 - [Troubleshooting](#-troubleshooting)
 - [FAQ](#-faq)
 - [Contributing](#-contributing)
+- [What's not done yet](#-whats-not-done-yet)
 - [Roadmap](#-roadmap)
 - [License](#-license)
 
@@ -62,6 +63,8 @@
 **Cooker** is a single-binary CI/CD platform that lets teams design pipelines visually and run them against real container infrastructure. Drag stages onto a canvas, wire them into a DAG, and Cooker handles building OCI-compliant images, pushing them to registries, and rolling them out across Dev, Staging, and Production environments.
 
 Whether you're a solo developer deploying a side project to Fly.io or a platform team running multi-tenant Kubernetes clusters, Cooker scales with you — from a one-shot Docker Compose stack on your laptop to a HA Redis-backed multi-replica deployment in production.
+
+> **Cooker is an open-source, self-hosted CI/CD tool with a drag-drop graph editor for building OCI images (Kaniko, BuildKit, Buildah) and deploying to Kubernetes, ECS, Cloud Run, Fly.io, and Render — single Go binary, Apache-2.0-licensed, no SaaS, no agents.**
 
 > **Status:** production-ready on single-replica and multi-replica (Redis-backed) deployments. `Config.Validate` refuses unsafe boots in production. See the [rollout playbook](docs/guides/ROLLOUT.md) for the UAT → production cutover.
 
@@ -92,6 +95,8 @@ Whether you're a solo developer deploying a side project to Fly.io or a platform
 | **OIDC + PKCE** | ✅ (built-in) | ⚠️ (plugin) | ✅ | ⚠️ |
 | **Real-time WebSocket logs** | ✅ | ⚠️ (polling) | ⚠️ | ✅ |
 | **Cloud Run / ECS / Fly / Render targets** | ✅ | ⚠️ (plugins) | ❌ (K8s only) | ❌ |
+
+> 📊 **In-depth, honest comparisons** (we list where they win, too): [vs GitHub Actions](docs/compare/cooker-vs-github-actions.md) · [vs Coolify](docs/compare/cooker-vs-coolify.md) · [vs Drone](docs/compare/cooker-vs-drone.md) · [vs Woodpecker](docs/compare/cooker-vs-woodpecker.md) · [vs Argo Workflows](docs/compare/cooker-vs-argo-workflows.md)
 
 ## ✨ Features
 
@@ -1123,7 +1128,7 @@ A **Pipeline** is a user-authored DAG of stages. An **App** is a higher-level sh
 
 ## 🤝 Contributing
 
-Contributions are welcome — bug reports, feature requests, documentation improvements, and pull requests.
+Contributions are welcome — bug reports, feature requests, documentation improvements, and pull requests. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full guide (dev setup, layering rules, PR process, and the contributor licence agreement).
 
 ### Quick start for contributors
 
@@ -1149,6 +1154,18 @@ git push -u origin feature/my-feature
 ### Reporting security issues
 
 Found a security issue? Please follow the [responsible disclosure policy](SECURITY.md) rather than filing a public issue.
+
+## 🚧 What's not done yet
+
+Honest up front, so you can decide (this is a young project with a bus factor of one):
+
+- **Single-tenant.** Every authenticated user can see every pipeline, app, and environment. Multi-tenancy is on the roadmap; we don't pretend it ships today.
+- **No in-product audit-log viewer** yet — the audit middleware writes structured JSON; query it from your log stack.
+- **No first-class PR-preview environments** — assemble them manually in the pipeline editor for now.
+- **Builder choice matters:** the `docker` builder mounts the host socket and is **dev-only**. Kaniko (default), BuildKit, or Buildah are the production options.
+- **OIDC, not SAML.** Linux/macOS server (Docker Desktop works on Mac); not Windows-native.
+
+If any of these is a blocker for you, wait. If not, `docker compose up` takes about 30 seconds.
 
 ## 🗺️ Roadmap
 
@@ -1209,13 +1226,13 @@ Built on the shoulders of:
 
 ## 📄 License
 
-Released under the [MIT License](LICENSE).
+Released under the [Apache License 2.0](LICENSE). See [`NOTICE`](NOTICE) for attribution.
 
 ---
 
 <div align="center">
 
-**⭐ If Cooker helps you, please star the repo. ⭐**
+**CI/CD you can see.**
 
 *Built with Go and TypeScript.*
 

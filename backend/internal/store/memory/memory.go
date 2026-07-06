@@ -32,6 +32,7 @@ func New() *store.Store {
 		&clusterConfigs{m: map[string]*model.ClusterConfig{}},
 		&users{byID: map[string]*model.User{}, byEmail: map[string]string{}},
 		&apiTokens{m: map[string]*model.APIToken{}},
+		&licenses{},
 		nil,
 		nil,
 	)
@@ -148,7 +149,13 @@ func (s *runs) Get(_ context.Context, id string) (*model.PipelineRun, error) {
 	if !ok {
 		return nil, fmt.Errorf("run %s: %w", id, store.ErrNotFound)
 	}
-	return r, nil
+	// Return a shallow copy so the caller cannot race the heartbeat ticker
+	// or the executor, both of which mutate the stored pointer concurrently
+	// (DA-H1). The executor replaces StageRuns, EnvironmentStatuses, and
+	// Variables slices wholesale, so a shallow copy of those slice headers
+	// is sufficient — concurrent writes land on a different slice.
+	cp := *r
+	return &cp, nil
 }
 
 func (s *runs) Create(_ context.Context, r *model.PipelineRun) error {
@@ -168,6 +175,21 @@ func (s *runs) Update(_ context.Context, r *model.PipelineRun) error {
 		return fmt.Errorf("run %s: %w", r.ID, store.ErrNotFound)
 	}
 	s.m[r.ID] = r
+	return nil
+}
+
+func (s *runs) UpdateStatus(_ context.Context, id string, status model.RunStatus, finishedAt *time.Time, errMsg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.m[id]
+	if !ok {
+		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+	}
+	// Mutate only the lifecycle fields in place (mirrors UpdateHeartbeat's
+	// targeted style); leaves StageRuns / HeartbeatAt untouched.
+	r.Status = status
+	r.FinishedAt = finishedAt
+	r.Error = errMsg
 	return nil
 }
 
@@ -870,7 +892,10 @@ func (s *auditEvents) Query(_ context.Context, q store.AuditQuery) ([]*model.Aud
 func (s *auditEvents) DeleteOlderThan(_ context.Context, cutoff time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	kept := s.events[:0]
+	// Collect kept events into a fresh backing array so the old array
+	// (up to ~5 MB at auditRingMax) can be GC'd instead of being pinned
+	// by the reslice-to-zero trick (DA-M / memory.go:783 fix).
+	kept := make([]*model.AuditEvent, 0, len(s.events))
 	deleted := 0
 	for _, e := range s.events {
 		if e.Time.Before(cutoff) {

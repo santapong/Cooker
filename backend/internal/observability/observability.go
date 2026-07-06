@@ -6,6 +6,7 @@ package observability
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -185,10 +186,19 @@ func IncNotifierSent(channel string, ok bool) {
 	notifierSent.WithLabelValues(channel, outcome).Inc()
 }
 
-// MetricsHandler returns the Prometheus /metrics handler.
+// MetricsHandler returns the Prometheus /metrics handler as a Gin handler,
+// for mounting on the main app router (single-port mode).
 func MetricsHandler() gin.HandlerFunc {
 	h := promhttp.Handler()
 	return func(c *gin.Context) { h.ServeHTTP(c.Writer, c.Request) }
+}
+
+// MetricsHTTPHandler returns the Prometheus /metrics handler as a plain
+// http.Handler, for mounting on a dedicated http.ServeMux that listens on
+// a separate metrics port (keeps /metrics off the public app ingress —
+// audit finding M0-1).
+func MetricsHTTPHandler() http.Handler {
+	return promhttp.Handler()
 }
 
 // MetricsMiddleware records request count + duration. Routes are

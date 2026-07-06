@@ -16,6 +16,18 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    # Dedicated internal metrics port (chart equivalent: metrics.port > 0).
+    # If you serve /metrics on a separate internal port instead of 8080
+    # (see the commented "metrics" containerPort + COOKER_METRICS_PORT in
+    # deploy/kubernetes/deployment.yaml), you MUST also allow scrape traffic
+    # to that port here, or this NetworkPolicy silently blocks the Prometheus
+    # scrape (deny-all applies once policyTypes includes Ingress). Mirror the
+    # 8080 rule above with your chosen port (here 9090):
+    # - from:
+    #     - podSelector: {}
+    #   ports:
+    #     - protocol: TCP
+    #       port: 9090
   egress:
     # DNS
     - to:
@@ -36,11 +48,16 @@ spec:
           port: 5432
         - protocol: TCP
           port: 6379
-    # Kubernetes API
+    # Kubernetes API server (in-cluster client-go).
+    # The API server endpoint is NOT always in the "default" namespace
+    # across all CNI/cloud providers — it may live on a host-network
+    # address or in a dedicated control-plane namespace. Using an empty
+    # namespaceSelector ({}) allows TCP 443 egress to all namespaces so
+    # in-cluster client-go is never blocked. If your CNI does not enforce
+    # this rule strictly (e.g. Calico host-endpoint policies are needed
+    # for host-network targets), also add an ipBlock for the API VIP.
     - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: default
+        - namespaceSelector: {}  # all namespaces — needed for control-plane reachability
       ports:
         - protocol: TCP
           port: 443

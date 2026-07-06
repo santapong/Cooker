@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -32,6 +33,8 @@ type rateLimiter struct {
 	buckets  map[string]*rate.Limiter
 	lastMu   sync.Mutex
 	lastSeen map[string]time.Time
+	// done is closed by Close() to stop the gc goroutine (BC-H1).
+	done chan struct{}
 }
 
 // newRateLimiter constructs a limiter at perMinute requests per
@@ -47,6 +50,7 @@ func newRateLimiter(perMinute int, burst int) *rateLimiter {
 		burst:    burst,
 		buckets:  make(map[string]*rate.Limiter),
 		lastSeen: make(map[string]time.Time),
+		done:     make(chan struct{}),
 	}
 	if perMinute > 0 {
 		// Sweep idle buckets every 10 minutes so a long-running
@@ -54,6 +58,17 @@ func newRateLimiter(perMinute int, burst int) *rateLimiter {
 		go rl.gc(10 * time.Minute)
 	}
 	return rl
+}
+
+// Close signals the gc goroutine to exit. Safe to call on a
+// disabled limiter (perMinute<=0 — gc was never started, close is a no-op).
+func (rl *rateLimiter) Close() {
+	select {
+	case <-rl.done:
+		// already closed
+	default:
+		close(rl.done)
+	}
 }
 
 func (rl *rateLimiter) limiterFor(key string) *rate.Limiter {
@@ -88,7 +103,13 @@ func (rl *rateLimiter) limiterFor(key string) *rate.Limiter {
 func (rl *rateLimiter) gc(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-rl.done:
+			slog.Debug("ratelimiter: gc stopped")
+			return
+		case <-ticker.C:
+		}
 		cutoff := time.Now().Add(-interval)
 		// Collect stale keys under lastMu, then delete from buckets
 		// under the write-lock. This keeps the two locks non-nested
@@ -140,4 +161,68 @@ func rateLimitKey(c *gin.Context) string {
 		return "user:" + claims.Subject
 	}
 	return "ip:" + c.ClientIP()
+}
+
+// localAuthRateLimit* is the fixed, tight per-source-IP budget for the
+// unauthenticated local-auth credential endpoints (signup/signin). It is
+// deliberately small to bound brute-force / credential-stuffing (CWE-307);
+// legitimate humans sign in far below 5 attempts/minute.
+const (
+	localAuthRateLimitPerMinute = 5
+	localAuthRateLimitBurst     = 5
+)
+
+// localAuthMiddleware returns a Gin handler for the unauthenticated local-auth
+// credential endpoints (POST /api/v1/auth/local/{signup,signin}). Like
+// webhookMiddleware it ALWAYS keys on the source IP — there is no authenticated
+// principal on these routes yet — so a single host can't brute-force passwords
+// or spam signups. These routes sit OUTSIDE the /api/v1 per-user limiter, so
+// without this guard they had no app-layer throttle at all.
+//
+// In-memory / per-process; multi-replica deployments must also throttle these
+// credential endpoints at the edge (see SECURITY.md).
+func (rl *rateLimiter) localAuthMiddleware() gin.HandlerFunc {
+	if rl.rps == 0 {
+		return func(c *gin.Context) { c.Next() }
+	}
+	return func(c *gin.Context) {
+		key := "localauth-ip:" + c.ClientIP()
+		if !rl.limiterFor(key).Allow() {
+			c.Header("Retry-After", "60")
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": "rate limit exceeded; try again in a moment",
+			})
+			return
+		}
+		c.Next()
+	}
+}
+
+// webhookMiddleware returns a Gin handler for the unauthenticated
+// /webhooks/* receivers. Unlike middleware(), it ALWAYS keys on the source
+// IP (there is no authenticated principal on these routes) so a single
+// hostile sender can't amplify the pre-verification DB lookup + secret
+// decryption each provider webhook performs before its HMAC/token check.
+//
+// The limiter runs BEFORE any handler work, so a throttled request never
+// reaches the store or the crypto codec. On throttle it returns 429 with a
+// Retry-After hint, matching the per-user limiter's response shape.
+//
+// Like the per-user limiter it is in-memory / per-process; multi-replica
+// deployments should also rate-limit at the edge (see SECURITY.md).
+func (rl *rateLimiter) webhookMiddleware() gin.HandlerFunc {
+	if rl.rps == 0 {
+		return func(c *gin.Context) { c.Next() }
+	}
+	return func(c *gin.Context) {
+		key := "webhook-ip:" + c.ClientIP()
+		if !rl.limiterFor(key).Allow() {
+			c.Header("Retry-After", "60")
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": "rate limit exceeded; try again in a moment",
+			})
+			return
+		}
+		c.Next()
+	}
 }

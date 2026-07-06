@@ -39,6 +39,14 @@ type RunStore interface {
 	Get(ctx context.Context, id string) (*model.PipelineRun, error)
 	Create(ctx context.Context, run *model.PipelineRun) error
 	Update(ctx context.Context, run *model.PipelineRun) error
+	// UpdateStatus writes only the lifecycle columns (status, finished_at,
+	// error). It must not re-marshal the JSONB blobs (stage_runs / env /
+	// variables) or touch heartbeat_at. Used by status-only transitions
+	// (e.g. cancel) so they avoid a full-row rewrite (F18) and never clobber
+	// the coordinator's heartbeat — the prerequisite for safely wiring
+	// mid-run progress persistence (F2). See
+	// docs/proposals/run-state-concurrency-2026.md.
+	UpdateStatus(ctx context.Context, id string, status model.RunStatus, finishedAt *time.Time, errMsg string) error
 	// UpdateHeartbeat is a cheap UPDATE-one-column write used by the
 	// run coordinator's ticker. Implementations should not re-marshal
 	// the JSONB columns.
@@ -137,7 +145,7 @@ type AppDeployStore interface {
 
 // AppCanaryStore persists the live state of canary rollouts (OR-1).
 // At most one progressing canary exists per app at a time; the service
-// guards this and a partial unique index (migration 024) enforces it at
+// guards this and a partial unique index (migration 025) enforces it at
 // the DB level. Rows are created when a canary deploy starts, updated as
 // the rollout progresses, and stamped terminal on promote / abort /
 // failure. Unlike CanaryConfig (intent on the App), AppCanary is observed
@@ -257,6 +265,39 @@ type APITokenStore interface {
 	TouchLastUsed(ctx context.Context, id string, ts time.Time) error
 }
 
+// LicenseStore persists the single installed self-hosted license (M2
+// self-hosted licensing — docs/launch/01-billing-monetization.md §4).
+// There is at most one active license per Cooker instance: Set replaces
+// whatever is installed, GetActive returns it (or ErrNotFound when none
+// is installed), and Delete clears it. The store keeps only the decoded
+// claims plus the signed RawToken; signature verification is the
+// licensing service's job (M2-T2), not the store's.
+//
+// Single-active-row sentinel-id contract: there is exactly one row, keyed
+// on the fixed sentinel id "active". Every implementation MUST normalise
+// the stored license's ID to "active" on Set — overwriting whatever the
+// caller passed (e.g. a UUID from service.Install) and mutating the
+// caller's pointer so the in-memory and Postgres backends are
+// indistinguishable for the same input. GetActive therefore always
+// returns a License whose ID is "active". Postgres enforces this in the
+// schema via the licenses_one_row CHECK (migration 024); the memory impl
+// mirrors it in code.
+type LicenseStore interface {
+	// GetActive returns the currently installed license. ErrNotFound if
+	// no license has been installed. The returned license's ID is always
+	// the "active" sentinel.
+	GetActive(ctx context.Context) (*model.License, error)
+	// Set installs l as the active license, replacing any existing one
+	// (upsert: single-row semantics). Stamps InstalledAt when zero and
+	// normalises l.ID to the "active" sentinel (mutating l) so both
+	// backends yield an identical record for the same input.
+	Set(ctx context.Context, l *model.License) error
+	// Delete removes the installed license, returning the instance to the
+	// unlicensed (free/explorer) baseline. Deleting when none is
+	// installed is a no-op (no error), matching "clear license" intent.
+	Delete(ctx context.Context) error
+}
+
 // Store aggregates all data-access interfaces and a cleanup hook.
 // Construct with New and pass to the server and handler layers.
 type Store struct {
@@ -274,6 +315,7 @@ type Store struct {
 	Clusters       ClusterConfigStore
 	Users          UserStore
 	APITokens      APITokenStore
+	Licenses       LicenseStore
 	close          func() error
 	ping           func(context.Context) error
 }
@@ -281,7 +323,7 @@ type Store struct {
 // New builds a Store. closeFn may be nil when no cleanup is required
 // (e.g., in-memory stores). pingFn may be nil for backends without a
 // liveness probe; Ping then reports healthy unconditionally.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa StageApprovalStore, a AppStore, ad AppDeployStore, ac AppCanaryStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, at APITokenStore, closeFn func() error, pingFn func(context.Context) error) *Store {
+func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa StageApprovalStore, a AppStore, ad AppDeployStore, ac AppCanaryStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, at APITokenStore, lic LicenseStore, closeFn func() error, pingFn func(context.Context) error) *Store {
 	return &Store{
 		Pipelines:      p,
 		Runs:           r,
@@ -297,6 +339,7 @@ func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa 
 		Clusters:       cc,
 		Users:          u,
 		APITokens:      at,
+		Licenses:       lic,
 		close:          closeFn,
 		ping:           pingFn,
 	}

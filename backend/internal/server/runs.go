@@ -144,6 +144,14 @@ func (rc *RunCoordinator) heartbeatBestEffort(ctx context.Context, runID string,
 
 // Wait blocks until all spawned goroutines exit or the supplied ctx is
 // cancelled, whichever comes first.
+//
+// On a drain timeout the inner wg.Wait goroutine continues running until
+// the in-flight runs complete naturally — it holds only a pointer to rc
+// and terminates without any external intervention once the WaitGroup
+// counter reaches zero. This is intentional: the goroutine is
+// self-cleaning and bounded in lifetime, so the "leak" is acceptable
+// (M / M-Wait-leak). A future refactor could return a <-chan struct{}
+// if callers need to observe completion after the timeout.
 func (rc *RunCoordinator) Wait(ctx context.Context) {
 	done := make(chan struct{})
 	go func() {

@@ -43,9 +43,74 @@ secrets:
       existingSecret: ""    # name of a pre-created Secret
       existingSecretKey: "api-key"
 
+# License configuration. Cooker runs as Free (unlicensed) when nothing
+# below is set — all keys are optional and empty by default. A license
+# unlocks paid tiers via a signed token verified against one or more
+# Ed25519 public keys.
+#
+#   publicKey   — a single license verification public key, plain text
+#                 (PUBLIC, not sensitive). Rendered as
+#                 COOKER_LICENSE_PUBLIC_KEY.
+#   publicKeys  — a list of additional verification public keys (e.g. for
+#                 key rotation). Joined with "," and rendered as
+#                 COOKER_LICENSE_PUBLIC_KEYS.
+#   tokenSecret — existingSecret reference for the license TOKEN itself,
+#                 which IS sensitive (it identifies the customer / tier).
+#                 Mirrors the oidc.clientSecretRef / secrets.keepsave.apiKey
+#                 pattern: the token comes from a pre-created Kubernetes
+#                 Secret via secretKeyRef, never a values literal. When
+#                 tokenSecret.name is set the chart renders COOKER_LICENSE_KEY
+#                 from secretKeyRef; otherwise it is omitted (= Free tier).
+license:
+  publicKey: ""
+  publicKeys: []
+  tokenSecret:
+    name: ""            # name of a pre-created Secret holding the license token
+    key: "license-key"
+
+# Cloud inventory & cost panel (OR-2). Read-only: Cooker lists compute
+# instances, managed Kubernetes clusters, and container registries, plus
+# month-to-date spend, across the enabled providers. Each provider is
+# enabled independently and off by default.
+#
+# Credentials: prefer the platform identity (IRSA on EKS / Workload
+# Identity on GKE) wired through serviceAccount.annotations — then NO key
+# needs to live in a Secret. Static keys are supported as a fallback and
+# are pulled via secretKeyRef from a pre-created Secret (operator-managed;
+# the chart does not create it). Grant a read-only IAM policy
+# (ec2/eks/ecr/ce:Describe*+List* on AWS; compute/container/
+# artifactregistry viewer on GCP) — see SECURITY.md.
+cloudInventory:
+  # How long the server caches a fan-out before re-querying the cloud
+  # APIs. AWS Cost Explorer is billed per request, so keep this coarse.
+  # Empty uses the backend default (5m).
+  cacheTTL: ""
+  aws:
+    enabled: false
+    region: ""            # required when enabled (e.g. ap-southeast-1)
+    # Optional static access key id (prefer IRSA — leave empty).
+    accessKeyId: ""
+    # Optional static secret access key, via a pre-created Secret.
+    secretAccessKey:
+      existingSecret: ""   # name of a pre-created Secret
+      existingSecretKey: "secret-access-key"
+  gcp:
+    enabled: false
+    projectId: ""          # required when enabled
+    # Optional service-account key JSON, via a pre-created Secret
+    # (prefer Workload Identity — leave empty).
+    credentialsJson:
+      existingSecret: ""   # name of a pre-created Secret
+      existingSecretKey: "credentials.json"
+
 image:
   repository: ghcr.io/santapong/cooker
-  tag: latest
+  # IN-H4: do NOT leave this as "latest" in production. Pin to a specific
+  # release tag (e.g. "v0.1.0") or a full digest
+  # (e.g. "sha256:<64-hex-chars>"). The CI workflow tags images with the
+  # git semver tag; GoReleaser sets appVersion in Chart.yaml on release.
+  # Empty string ("") causes the chart to fall back to .Chart.AppVersion.
+  tag: ""
   pullPolicy: IfNotPresent
 
 service:
@@ -69,7 +134,16 @@ ingress:
   #         - cooker.example.com
   # See README §Deployment → TLS at ingress.
   tls: []
-  annotations: {}
+  # Empty by default. NOTE: this is intentionally `annotations:` (null), NOT
+  # `annotations: {}` — so you can uncomment the snippet below directly without
+  # first deleting a `{}` (a `{}` followed by indented keys is invalid YAML).
+  annotations:
+    # SECURITY: /metrics is unauthenticated (see the metrics: block). When the
+    # Ingress is enabled with the default "/" prefix it is publicly routable.
+    # Uncomment the snippet below (nginx ingress controller) to deny /metrics
+    # externally while leaving the cluster-internal ServiceMonitor scrape intact:
+    #   nginx.ingress.kubernetes.io/configuration-snippet: |
+    #     location = /metrics { deny all; }
 
 # Builder selection.
 #   docker  — shells out to the local Docker daemon via the bind-
@@ -99,9 +173,12 @@ builder:
   # Config.Validate refuses production boot with kind=docker.
   kind: kaniko
   kaniko:
-    # Kaniko executor image. Pin to a known version for reproducible
-    # builds; "latest" is documented but not recommended in production.
-    image: gcr.io/kaniko-project/executor:latest
+    # IN-H6: pin to a specific Kaniko release tag for reproducible builds.
+    # "latest" is NOT recommended in production — a new Kaniko release
+    # could change build behaviour or introduce regressions between deploys.
+    # Check https://github.com/GoogleContainerTools/kaniko/releases for
+    # the current stable tag.
+    image: gcr.io/kaniko-project/executor:v1.23.2
     # Namespace the Job is created in. Cooker's ServiceAccount must
     # have Job + Pod RBAC here. Defaults to the release namespace.
     namespace: ""
@@ -115,9 +192,11 @@ builder:
     # source — only useful for chart smoke tests.
     contextPVC: ""
   buildah:
-    # Buildah image. Pin to a known version in production. Quay's
-    # `stable` tag is the project's tested release line.
-    image: quay.io/buildah/stable:latest
+    # IN-H6: pin to a specific Buildah release tag for reproducible builds.
+    # "stable" and "latest" float and can silently change between deploys.
+    # Check https://quay.io/repository/buildah/buildah?tab=tags for the
+    # current stable release tag.
+    image: quay.io/buildah/buildah:v1.38.0
     # Namespace the Job is created in. Defaults to the release
     # namespace. Must be PSA "baseline" (or a custom profile that
     # permits CAP_SETUID + CAP_SETGID); "restricted" drops both and
@@ -321,12 +400,20 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-# Liveness and readiness probe tuning. Defaults are deliberately
+# Liveness, readiness, and startup probe tuning. Defaults are deliberately
 # generous — Cooker performs an OIDC discovery + Postgres ping +
 # embedded migration on first boot and can take several seconds to
 # answer /health/ready under cold-cache conditions. Tighten these
 # in production once you've measured your own boot time.
+#
+# startupProbe: gives the binary up to (failureThreshold × periodSeconds)
+# = 300s to pass its first liveness check before Kubernetes applies the
+# liveness failureThreshold. This covers cold-boot without requiring an
+# inflated initialDelaySeconds on the liveness probe.
 probes:
+  startup:
+    failureThreshold: 30
+    periodSeconds: 10
   liveness:
     initialDelaySeconds: 60
     periodSeconds: 30
@@ -344,6 +431,11 @@ probes:
 # traffic shape. Anything that uses memory in-process state (the
 # in-memory rate limiter / WS ticket store) needs the redis
 # backends configured before HPA makes sense.
+#
+# M (HPA/PDB coupling): ALWAYS enable pdb.enabled=true alongside
+# hpa.enabled=true. Without a PodDisruptionBudget, a node drain
+# can evict every replica simultaneously while HPA is scaling —
+# leaving zero available pods and taking down the service.
 hpa:
   enabled: false
   minReplicas: 2
@@ -353,6 +445,7 @@ hpa:
 # Pod Disruption Budget. Recommended whenever replicaCount > 1 so
 # kubectl drain / node maintenance can't evict every replica at
 # once. minAvailable is the floor the cluster must keep up.
+# NOTE: enable this whenever hpa.enabled=true (see HPA note above).
 pdb:
   enabled: false
   minAvailable: 1
@@ -400,6 +493,60 @@ retention:
     limits:
       cpu: 200m
       memory: 256Mi
+
+# Prometheus metrics. The /metrics endpoint is served on the HTTP port
+# (service.port) when COOKER_METRICS_ENABLED=true. The chart sets that env
+# var from metrics.enabled below.
+#
+# metrics.enabled defaults to TRUE so a default install always exposes
+# /metrics (closes the "deployed but no metrics" footgun; the Go binary's
+# own default is false). The two CRD sub-toggles default to FALSE so a
+# default install never references the Prometheus-Operator CRDs
+# (monitoring.coreos.com/v1), which are absent on a fresh cluster. Flip
+# them on once the Operator is installed.
+# SECURITY: /metrics is served UNAUTHENTICATED on the public app port
+# (8080) — see backend/internal/server/server.go. With the default install
+# (ingress.enabled=false → ClusterIP only) this is safe: the endpoint is
+# reachable only inside the cluster. The secure scrape path is the
+# cluster-internal Service via the Prometheus Operator ServiceMonitor
+# (serviceMonitor.enabled=true), which never leaves the cluster network.
+#
+# WARNING: if you enable the Ingress (ingress.enabled=true with the default
+# "/" prefix), /metrics becomes PUBLICLY ROUTABLE with no authentication.
+# Block it at the ingress — see the configuration-snippet example in the
+# `ingress.annotations` block below. The permanent fix is metrics.port below.
+metrics:
+  enabled: true
+  # Dedicated internal metrics port (RECOMMENDED for ingress-exposed installs).
+  #
+  #   0 (default) — back-compat: /metrics is served on the main app port
+  #                 (service.port / 8080) alongside the API and UI. With
+  #                 ingress.enabled=false this is cluster-internal and safe;
+  #                 with the Ingress on the default "/" prefix it is publicly
+  #                 routable (see the WARNING above).
+  #   >0          — the backend serves /metrics ONLY on this separate internal
+  #                 container port (COOKER_METRICS_PORT) and NOT on the main
+  #                 app port. The chart exposes a named "metrics" containerPort
+  #                 + Service port for it, and the ServiceMonitor scrapes that
+  #                 port. The port is cluster-internal only — it is never wired
+  #                 into the Ingress, so /metrics stays off the public "/" path
+  #                 without needing an ingress deny-rule. Pick any free port,
+  #                 e.g. 9090.
+  port: 0
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    # Extra labels (e.g. the Operator's release selector). Example:
+    #   labels:
+    #     release: kube-prometheus-stack
+    labels: {}
+  prometheusRule:
+    enabled: false
+    # Extra labels to match your Prometheus' ruleSelector. Example:
+    #   labels:
+    #     role: alert-rules
+    labels: {}
 
 # NetworkPolicy that restricts ingress to port 8080 from any pod in
 # the same namespace and (optionally) ingress controllers, plus egress

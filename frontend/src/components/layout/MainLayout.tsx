@@ -4,6 +4,7 @@ import TopBar from './TopBar';
 import { useTheme } from '../../theme/ThemeProvider';
 import { hexA } from '../../theme/tokens';
 import { Starfield } from '../ui/Starfield';
+import { FeedbackButton } from '../FeedbackButton';
 
 interface Props {
   children: ReactNode;
@@ -54,6 +55,9 @@ export default function MainLayout({ children, fullBleed = false }: Props) {
           </div>
         </main>
       </div>
+      {/* Floating feedback launcher (bottom-left). Renders nothing when
+          the server capability says feedback is off. */}
+      <FeedbackButton />
     </div>
   );
 }

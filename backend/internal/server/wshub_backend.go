@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	mrand "math/rand"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -68,8 +69,11 @@ type HubBackend interface {
 
 // memoryHubBackend is the default in-process channel-based backend.
 // Behaviour matches the historical Hub.broadcast usage.
+// Close() closes b.ch exactly once (via sync.Once) so Run() exits on
+// shutdown even if Close is called from multiple paths (BC-L1).
 type memoryHubBackend struct {
-	ch chan BroadcastMessage
+	ch   chan BroadcastMessage
+	once sync.Once
 }
 
 func newMemoryHubBackend() *memoryHubBackend {
@@ -77,13 +81,20 @@ func newMemoryHubBackend() *memoryHubBackend {
 }
 
 func (b *memoryHubBackend) Publish(msg BroadcastMessage) error {
-	b.ch <- msg
+	select {
+	case b.ch <- msg:
+	default:
+		slog.Warn("ws memory backend: channel full; dropping broadcast", "channel", msg.Channel)
+	}
 	return nil
 }
 
 func (b *memoryHubBackend) Subscribe() <-chan BroadcastMessage { return b.ch }
 
-func (b *memoryHubBackend) Close() error { return nil }
+func (b *memoryHubBackend) Close() error {
+	b.once.Do(func() { close(b.ch) })
+	return nil
+}
 
 // redisHubBackend uses Redis pub/sub. Each replica's hub publishes
 // every Broadcast through Redis and subscribes to the shared topic so

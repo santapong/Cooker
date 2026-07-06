@@ -1,0 +1,22 @@
+# IN-H3: PodDisruptionBudget — apply this when replicaCount > 1 so that
+# node drains and voluntary disruptions can never evict all replicas
+# simultaneously. minAvailable:1 keeps at least one Cooker pod serving
+# traffic during a rolling node maintenance window.
+#
+# NOTE: if you are also applying hpa.yaml, apply this PDB first (or in
+# the same kubectl apply run). Running HPA without a PDB leaves the
+# service vulnerable to a full outage during node drain.
+#
+# This manifest is commented-out by default because it only makes sense
+# with replicaCount > 1. Uncomment and apply when scaling above 1 replica.
+#
+# apiVersion: policy/v1
+# kind: PodDisruptionBudget
+# metadata:
+#   name: cooker
+#   namespace: cooker
+# spec:
+#   minAvailable: 1
+#   selector:
+#     matchLabels:
+#       app.kubernetes.io/name: cooker

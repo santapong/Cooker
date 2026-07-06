@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -45,13 +46,7 @@ func (h *Handler) CreateEnvironment(c *gin.Context) {
 	env.Secrets = nil
 	env.ID = uuid.New().String()
 	env.CreatedAt = time.Now()
-	if env.PlainVars == nil {
-		env.PlainVars = env.Variables
-	}
-	if env.PlainVars == nil {
-		env.PlainVars = make(map[string]string)
-	}
-	env.Variables = nil
+	env.NormalisePlainVars()
 
 	if err := h.Store.Environments.Create(c.Request.Context(), &env); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -75,10 +70,7 @@ func (h *Handler) UpdateEnvironment(c *gin.Context) {
 	env.ID = id
 	env.CreatedAt = existing.CreatedAt
 	env.Secrets = existing.Secrets
-	if env.PlainVars == nil {
-		env.PlainVars = env.Variables
-	}
-	env.Variables = nil
+	env.NormalisePlainVars()
 
 	if err := h.Store.Environments.Update(c.Request.Context(), &env); err != nil {
 		if abortStoreErr(c, err, "environment not found") {
@@ -134,7 +126,10 @@ func (h *Handler) PutSecret(c *gin.Context) {
 		return
 	}
 	if err := h.Secrets.Put(c.Request.Context(), c.Param("id"), c.Param("key"), []byte(req.Value)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// BC-H4: don't leak backend URLs/ARNs/paths via the error message;
+		// log server-side and return a generic message (mirrors RevealSecret).
+		slog.Warn("handler: PutSecret: backend error", "env", c.Param("id"), "key", c.Param("key"), "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "secret backend error"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "status": "stored"})
@@ -251,7 +246,10 @@ func (h *Handler) DeleteSecret(c *gin.Context) {
 		return
 	}
 	if err := h.Secrets.Delete(c.Request.Context(), c.Param("id"), c.Param("key")); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// BC-H4: don't leak backend URLs/ARNs/paths via the error message;
+		// log server-side and return a generic message (mirrors RevealSecret).
+		slog.Warn("handler: DeleteSecret: backend error", "env", c.Param("id"), "key", c.Param("key"), "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "secret backend error"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "status": "deleted"})

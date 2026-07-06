@@ -25,6 +25,24 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.service.port }}
+    {{- if and .Values.metrics.enabled (gt (.Values.metrics.port | default 0 | int) 0) }}
+    # Allow Prometheus scrape of the dedicated internal metrics port. Same
+    # scoping as the HTTP rule above (same-namespace pods, plus the labeled
+    # ingress/monitoring namespace if set). Without this an enabled
+    # NetworkPolicy silently blocks the ServiceMonitor scrape of the
+    # dedicated port (metrics.port > 0), since the default policy is
+    # deny-all once policyTypes includes Ingress.
+    - from:
+        - podSelector: {}
+        {{- if .Values.networkPolicy.ingressNamespaceLabel }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespaceLabel | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.metrics.port }}
+    {{- end }}
   egress:
     # DNS — required for everything else to resolve.
     - to:
@@ -46,10 +64,15 @@ spec:
         - protocol: TCP
           port: {{ .Values.networkPolicy.redisPort }}
     # Kubernetes API server (in-cluster client-go).
+    # The API server endpoint is NOT always in the "default" namespace
+    # across all CNI/cloud providers — it may live on a host-network
+    # address or in a dedicated control-plane namespace. Using an empty
+    # namespaceSelector ({}) allows TCP 443 egress to all namespaces so
+    # in-cluster client-go is never blocked. If your CNI does not enforce
+    # this rule strictly (e.g. Calico host-endpoint policies are needed
+    # for host-network targets), also add an ipBlock for the API VIP.
     - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: default
+        - namespaceSelector: {}  # all namespaces — needed for control-plane reachability
       ports:
         - protocol: TCP
           port: 443

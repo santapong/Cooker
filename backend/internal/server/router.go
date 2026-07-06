@@ -12,8 +12,17 @@ import (
 
 func (s *Server) registerRoutes() {
 	if s.localAuth != nil {
-		s.router.POST("/api/v1/auth/local/signup", s.localAuth.Signup)
-		s.router.POST("/api/v1/auth/local/signin", s.localAuth.Signin)
+		// CWE-307: signup/signin are unauthenticated credential endpoints
+		// registered on s.router OUTSIDE the /api/v1 per-user limiter, so a
+		// dedicated per-source-IP limiter with a tight fixed budget runs
+		// first to bound brute-force / credential-stuffing (mirroring the
+		// webhook-limiter precedent below). Held on the Server so Close()
+		// can stop its gc goroutine.
+		lal := newRateLimiter(localAuthRateLimitPerMinute, localAuthRateLimitBurst)
+		s.localAuthRateLimiter = lal
+		localAuthLimit := lal.localAuthMiddleware()
+		s.router.POST("/api/v1/auth/local/signup", localAuthLimit, s.localAuth.Signup)
+		s.router.POST("/api/v1/auth/local/signin", localAuthLimit, s.localAuth.Signin)
 	}
 	s.router.GET("/api/v1/auth/methods", s.authMethods)
 
@@ -36,7 +45,10 @@ func (s *Server) registerRoutes() {
 	case s.config.RateLimit.Backend == "redis" && s.redisClient != nil:
 		expensive = newRedisRateLimiter(s.redisClient, s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
 	default:
-		expensive = newRateLimiter(s.config.RateLimit.PerMinute, s.config.RateLimit.Burst).middleware()
+		// BC-H1: store a reference so Server.Close() can stop the gc goroutine.
+		rl := newRateLimiter(s.config.RateLimit.PerMinute, s.config.RateLimit.Burst)
+		s.rateLimiter = rl
+		expensive = rl.middleware()
 	}
 
 	pipelines := api.Group("/pipelines")
@@ -174,6 +186,20 @@ func (s *Server) registerRoutes() {
 		kubernetes.DELETE("/:ns/:kind/:name", adminRole, handler.DeleteResource)
 	}
 
+	// Read-only cloud inventory & cost panel (OR-2). The GET endpoints
+	// are read-level (any authenticated user) — they expose only resource
+	// metadata and aggregate cost, never credentials. POST /cloud/refresh
+	// busts the server-side TTL cache and triggers a synchronous fan-out
+	// to the cloud APIs (one of which, AWS Cost Explorer, is billed per
+	// request), so it carries the writeRole gate AND the per-user rate
+	// limiter like the other expensive POST actions.
+	cloud := api.Group("/cloud")
+	{
+		cloud.GET("/inventory", h.GetCloudInventory)
+		cloud.GET("/costs", h.GetCloudCosts)
+		cloud.POST("/refresh", writeRole, expensive, h.RefreshCloud)
+	}
+
 	environments := api.Group("/environments")
 	{
 		environments.GET("", h.ListEnvironments)
@@ -260,11 +286,22 @@ func (s *Server) registerRoutes() {
 	}
 
 	// Git provider webhook receivers (unauthenticated — each provider's
-	// signature / token header is the authentication).
-	s.router.POST("/webhooks/github", idempotencyMiddleware(s.idempotency), h.GitHubWebhook)
-	s.router.POST("/webhooks/gitlab", idempotencyMiddleware(s.idempotency), h.GitLabWebhook)
-	s.router.POST("/webhooks/bitbucket", idempotencyMiddleware(s.idempotency), h.BitbucketWebhook)
-	s.router.POST("/webhooks/gitea", idempotencyMiddleware(s.idempotency), h.GiteaWebhook)
+	// signature / token header is the authentication). These routes are NOT
+	// under the /api/v1 per-user limiter, and each request costs a DB lookup
+	// + a secret decryption BEFORE the signature check — so a dedicated
+	// per-source-IP limiter runs first to bound unauthenticated amplification
+	// (C-webhook-logs). It sits ahead of idempotency so a throttled request
+	// never touches the store or the crypto codec.
+	var webhookLimit gin.HandlerFunc = func(c *gin.Context) { c.Next() }
+	if s.config.RateLimit.Webhook.Enabled {
+		wl := newRateLimiter(s.config.RateLimit.Webhook.PerMinute, s.config.RateLimit.Webhook.Burst)
+		s.webhookRateLimiter = wl
+		webhookLimit = wl.webhookMiddleware()
+	}
+	s.router.POST("/webhooks/github", webhookLimit, idempotencyMiddleware(s.idempotency), h.GitHubWebhook)
+	s.router.POST("/webhooks/gitlab", webhookLimit, idempotencyMiddleware(s.idempotency), h.GitLabWebhook)
+	s.router.POST("/webhooks/bitbucket", webhookLimit, idempotencyMiddleware(s.idempotency), h.BitbucketWebhook)
+	s.router.POST("/webhooks/gitea", webhookLimit, idempotencyMiddleware(s.idempotency), h.GiteaWebhook)
 
 	if s.localAuth != nil {
 		api.GET("/auth/local/me", s.localAuth.Me)
@@ -286,6 +323,19 @@ func (s *Server) registerRoutes() {
 		tokens.DELETE("/:id", h.DeleteAPIToken)
 	}
 
+	// Self-hosted licensing (M2 — docs/launch/01-billing-monetization.md
+	// §4). GET is readable by any authenticated user (the UI shows/hides
+	// paid features from the status + entitlements); install/remove are
+	// admin-only operator actions. No entitlement gate is applied to any
+	// EXISTING route (open-core split is a pending product decision — see
+	// server.entitlementGate).
+	license := api.Group("/license")
+	{
+		license.GET("", h.GetLicense)
+		license.POST("", adminRole, h.InstallLicense)
+		license.DELETE("", adminRole, h.DeleteLicense)
+	}
+
 	settings := api.Group("/settings")
 	{
 		settings.GET("/registries", h.ListRegistryConfigs)
@@ -300,22 +350,13 @@ func (s *Server) registerRoutes() {
 		settings.POST("/secrets/test", adminRole, mfa, h.TestSecretsBackend)
 	}
 
-	api.POST("/ws-tickets", func(c *gin.Context) {
-		claims := auth.GetUser(c)
-		if claims == nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
-			return
-		}
-		tok, exp, err := s.wsTickets.Issue(claims.Subject)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "ticket issuance failed"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"ticket":     tok,
-			"expires_at": exp.UTC().Format("2006-01-02T15:04:05Z"),
-		})
-	})
+	// In-app feedback → GitHub issue relay. Any authenticated user
+	// (viewers included) may submit — no writeRole gate — but the
+	// outbound GitHub call carries the per-user rate limiter like the
+	// other expensive POST actions.
+	api.POST("/feedback", expensive, h.SubmitFeedback)
+
+	api.POST("/ws-tickets", s.issueWSTicket)
 
 	ws := s.router.Group("/ws", s.wsTicketGate())
 	{
@@ -347,6 +388,7 @@ func (s *Server) registerRoutes() {
 	}
 
 	s.router.NoRoute(spaIndexHandler("/usr/share/cooker/static/index.html"))
+	s.router.GET("/.well-known/security.txt", securityTxtHandler())
 	s.router.GET("/assets/*filepath", assetsHandler("/usr/share/cooker/static/assets"))
 	s.router.HEAD("/assets/*filepath", assetsHandler("/usr/share/cooker/static/assets"))
 }

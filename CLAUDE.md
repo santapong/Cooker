@@ -39,6 +39,8 @@ deploy/
 |---|---|
 | [`docs/reference/architecture.md`](docs/reference/architecture.md) | You need the system map (what calls what) |
 | [`docs/reference/design.md`](docs/reference/design.md) | You're adding a new feature — patterns, conventions, "Adding a new feature" checklist at §11 |
+| [`docs/engineering/ADLC.md`](docs/engineering/ADLC.md) | You want the end-to-end development lifecycle and which agent/skill/workflow drives each phase |
+| [`docs/engineering/harness-engineering.md`](docs/engineering/harness-engineering.md) | You're adding or changing an agent, skill, or workflow under `.claude/` |
 | [`docs/guides/UAT.md`](docs/guides/UAT.md) | You're touching anything that affects `make uat-up` |
 | [`docs/system-design/`](docs/system-design/README.md) | You want the consolidated 17-chapter system design (overview → C4) |
 | [`SECURITY.md`](SECURITY.md) | You're touching auth, CORS, secrets, or the Dockerfile |
@@ -100,7 +102,8 @@ The honest production-readiness verdict and the open work are in `backlog.md`'s 
 - Don't put `COOKER_OIDC_ENABLED=true` in UAT compose — UAT is auth-off by design; toggling it requires `.env.uat` config (Google or KeepSave preset).
 - Don't change `COOKER_ENV` defaults globally; production-mode strictness is gated by it on purpose.
 - Don't add new fields to `internal/handler/*.go` requests without a corresponding store migration in `internal/store/postgres/migrations/`.
-- Don't bump Go past 1.22 without bumping `golang.org/x/time` in lockstep — currently pinned at v0.5.0 because v0.15+ requires Go 1.25.
+- Don't change the Go version pin unilaterally. The repo is on Go 1.25 (`backend/go.mod` + `.github/workflows/ci.yml`) with `golang.org/x/time` at v0.15.0; keep `go.mod` and the CI `go-version` in lockstep if either ever moves.
+- **Never run `go mod tidy` in `backend/`.** Tidy evaluates imports as if all build tags are enabled, so it pulls `tailscale.com` in via the opt-in `tsnet` tag (`internal/transport/tsnet/real.go`) — that module requires Go ≥ 1.26 and breaks the docker CI job on `golang:1.25-alpine` (`GOTOOLCHAIN=local`). Add dependencies with targeted `go get <module>@<version>` instead.
 
 ## Open backlog highlights
 

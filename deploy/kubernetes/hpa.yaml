@@ -1,0 +1,32 @@
+# IN-H3: HorizontalPodAutoscaler — apply this only when:
+#   1. replicaCount > 1 (update deployment.yaml replicas first).
+#   2. wsHub.backend, wsTicket.backend, and rateLimit.backend are all
+#      set to "redis" in deployment.yaml (memory backends are per-process
+#      and will cause split-brain under multiple replicas).
+#   3. pdb.yaml is ALSO applied so node drains can't evict every replica.
+#
+# IMPORTANT (M HPA/PDB coupling): never enable HPA without the PDB.
+# A node drain while HPA is scaling can leave zero available pods.
+#
+# This manifest is commented-out by default. Uncomment and apply
+# only after satisfying the conditions above.
+#
+# apiVersion: autoscaling/v2
+# kind: HorizontalPodAutoscaler
+# metadata:
+#   name: cooker
+#   namespace: cooker
+# spec:
+#   scaleTargetRef:
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     name: cooker
+#   minReplicas: 2
+#   maxReplicas: 6
+#   metrics:
+#     - type: Resource
+#       resource:
+#         name: cpu
+#         target:
+#           type: Utilization
+#           averageUtilization: 70

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,9 @@ import (
 	"github.com/santapong/cooker/internal/auth"
 	"github.com/santapong/cooker/internal/auth/local"
 	"github.com/santapong/cooker/internal/builder"
+	"github.com/santapong/cooker/internal/cloudinventory"
+	cloudaws "github.com/santapong/cooker/internal/cloudinventory/aws"
+	cloudgcp "github.com/santapong/cooker/internal/cloudinventory/gcp"
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/crypto"
 	"github.com/santapong/cooker/internal/deployer"
@@ -21,6 +25,7 @@ import (
 	"github.com/santapong/cooker/internal/handler"
 	"github.com/santapong/cooker/internal/idempotency"
 	"github.com/santapong/cooker/internal/kube"
+	"github.com/santapong/cooker/internal/license"
 	"github.com/santapong/cooker/internal/logstore"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/observability"
@@ -65,6 +70,30 @@ type Server struct {
 	healthDone       chan struct{}
 	auditSweepCancel context.CancelFunc
 	auditSweepDone   chan struct{}
+	// rateLimiter is the in-memory per-user limiter created by
+	// registerRoutes; held here so Close() can stop its gc goroutine
+	// (BC-H1). nil when the redis backend or disabled limiter is used.
+	rateLimiter *rateLimiter
+	// webhookRateLimiter is the dedicated in-memory per-IP limiter for the
+	// unauthenticated /webhooks/* receivers (C-webhook-logs). Held here so
+	// Close() can stop its gc goroutine. nil when disabled.
+	webhookRateLimiter *rateLimiter
+	// localAuthRateLimiter is the dedicated in-memory per-IP limiter for the
+	// unauthenticated local-auth signup/signin endpoints (CWE-307). Held here
+	// so Close() can stop its gc goroutine. nil when local auth is disabled.
+	localAuthRateLimiter *rateLimiter
+}
+
+// registerMetricsRoute mounts /metrics on the main app router ONLY when no
+// dedicated metrics port is configured (metricsPort == 0). With a dedicated
+// port (> 0) the scrape endpoint lives on its own listener (see RunContext)
+// and must NOT be reachable via the public app ingress (audit finding
+// M0-1). Extracted so tests can assert the gating without booting a full
+// Server.
+func registerMetricsRoute(router *gin.Engine, metricsPort int) {
+	if metricsPort == 0 {
+		router.GET("/metrics", observability.MetricsHandler())
+	}
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -113,6 +142,12 @@ func New(cfg *config.Config) (*Server, error) {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := gin.New()
+	// Do not trust any proxy headers (X-Forwarded-For) by default.
+	// This prevents a remote client from spoofing its IP for rate-limit
+	// bypass (M-2). Operators who run behind a trusted proxy can set
+	// COOKER_TRUSTED_PROXIES (comma-separated CIDRs) — not yet exposed
+	// in config, so we unconditionally disable XFF trust here.
+	_ = router.SetTrustedProxies(nil)
 	router.Use(gin.Recovery())
 
 	var cleanups []func()
@@ -217,6 +252,22 @@ func New(cfg *config.Config) (*Server, error) {
 			"caller_auth", cfg.Governance.CallerToken != "",
 			"delegation", govClient.DelegationEnabled())
 	}
+	// X-partial-rollout: make it loud when governance is wired in a way
+	// that silently degrades the deploy gate to ALLOW. `configured`
+	// signals operator intent (a URL or a token is present) so a
+	// completely-unconfigured dev boot stays quiet; the classification
+	// itself lives in governance.Client.InertReason so it's unit-tested.
+	govConfigured := cfg.Governance.URL != "" ||
+		cfg.Governance.CallerToken != "" ||
+		cfg.Governance.DelegateToken != ""
+	if reason, inert := govClient.InertReason(govConfigured, cfg.Env.IsProduction()); inert {
+		slog.Warn("governance deploy gate is INERT — deploys are NOT being governed",
+			"reason", reason,
+			"url_set", cfg.Governance.URL != "",
+			"caller_token_set", cfg.Governance.CallerToken != "",
+			"delegate_token_set", cfg.Governance.DelegateToken != "",
+			"env", cfg.Env)
+	}
 	govDeployHook := governance.PipelineDeployHook(govClient, st, func(ctx context.Context, pipelineID string) (string, error) {
 		p, err := st.Pipelines.Get(ctx, pipelineID)
 		if err != nil || p == nil {
@@ -302,11 +353,89 @@ func New(cfg *config.Config) (*Server, error) {
 	// method (OIDC / local / dev) is configured, so scripts and CI can
 	// authenticate even when no IdP is present.
 	oidcMW.EnableAPITokens(auth.NewAPITokenAuthenticator(st.APITokens))
+	// Self-hosted licensing (M2 — docs/launch/01-billing-monetization.md
+	// §4). The license service verifies pasted tokens against the vendor's
+	// Ed25519 public key (COOKER_LICENSE_PUBLIC_KEY) and resolves the
+	// current entitlements; with no public key configured it refuses
+	// installs but still serves Free entitlements. Config.Validate() has
+	// already rejected the "key set, public key empty" combination, so a
+	// non-empty COOKER_LICENSE_KEY here implies a public key is present.
+	// Decode each configured public key (COOKER_LICENSE_PUBLIC_KEYS plus the
+	// back-compat singular COOKER_LICENSE_PUBLIC_KEY, already unioned in
+	// config) into the verifier set. Multiple keys support rotation: a token
+	// signed by any of them verifies. Invalid keys are logged and skipped
+	// rather than failing boot — licensing must never take down the instance.
+	var licensePubKeys []ed25519.PublicKey
+	for _, raw := range cfg.License.PublicKeys {
+		pk, err := license.DecodePublicKey(raw)
+		if err != nil {
+			slog.Error("invalid license public key; skipping it", "error", err)
+			continue
+		}
+		licensePubKeys = append(licensePubKeys, pk)
+	}
+	if len(licensePubKeys) == 0 && len(cfg.License.PublicKeys) > 0 {
+		slog.Error("no valid license public keys configured; licensing disabled (Free tier)")
+	}
+	h.License = service.NewLicenseService(st.Licenses, licensePubKeys)
+	// Boot-time license install: an operator may set a signed token via
+	// COOKER_LICENSE_KEY. COOKER_LICENSE_KEY is declarative — env wins when
+	// the token changes — but the install must be IDEMPOTENT on token
+	// identity (M2-01): re-installing the same token on every boot would
+	// churn the row (fresh UUID + InstalledAt) and clobber a license an
+	// admin installed via the UI (overwriting installed_by with
+	// system:boot). So before installing, read the active license; if one
+	// already exists whose RawToken equals the configured key, skip. Only
+	// install when there is no active license OR the stored token differs.
+	// On ANY failure log and degrade to Free — never panic (an
+	// expired/invalid env-set license must not block boot).
+	//
+	// W1-09 (doc only): this boot-install is RACY under multi-replica. The
+	// read-then-install is not atomic and the store keeps a single 'active'
+	// license (last-write-wins via the active upsert), so N replicas booting
+	// the same COOKER_LICENSE_KEY may each install once. The result converges
+	// to the same token (idempotent on token identity), so the race is
+	// benign in practice — but if strict single-install semantics are ever
+	// required, gate this to a leader (or move it out of the per-replica boot
+	// path).
+	if envKey := strings.TrimSpace(cfg.License.Key); envKey != "" {
+		// Read the active license first. A load error here must not block
+		// boot: log and fall through to the install attempt, which carries
+		// its own degrade-to-Free-on-error handling below.
+		current, _, curErr := h.License.Current(ctx)
+		switch {
+		case curErr != nil:
+			slog.Warn("could not read active license before boot install; attempting install", "error", curErr)
+		case current != nil && current.RawToken == envKey:
+			// Identical token already installed — do nothing. This is the
+			// steady-state path on every boot after the first.
+			slog.Info("license already installed from COOKER_LICENSE_KEY; skipping boot install",
+				"plan", current.Plan, "customer", current.Customer, "expiresAt", current.ExpiresAt)
+		}
+		// Install only when there is no active license, the stored token
+		// differs from the env token, or the pre-read failed.
+		if curErr != nil || current == nil || current.RawToken != envKey {
+			if lic, err := h.License.Install(ctx, envKey, "system:boot", ""); err != nil {
+				slog.Warn("COOKER_LICENSE_KEY could not be installed; running on Free tier", "error", err)
+			} else {
+				slog.Info("self-hosted license installed from COOKER_LICENSE_KEY",
+					"plan", lic.Plan, "customer", lic.Customer, "expiresAt", lic.ExpiresAt)
+			}
+		}
+	}
 	// AI triage (M4): Validate() already guaranteed the key when
 	// enabled; nil keeps the route 503 and the frontend button hidden.
 	if cfg.Triage.Enabled {
 		h.Triage = triage.New(cfg.Triage.APIKey, cfg.Triage.Model)
 		slog.Info("ai triage enabled", "model", h.Triage.(*triage.Client).Model)
+	}
+	// In-app feedback → GitHub issue relay. Token empty = feature off;
+	// nil keeps the route 503 and the frontend button hidden.
+	if cfg.Feedback.Token != "" {
+		h.Feedback = service.NewFeedbackService(cfg.Feedback.Repo, cfg.Feedback.Token)
+		slog.Info("feedback enabled", "repo", cfg.Feedback.Repo)
+	} else {
+		slog.Info("feedback disabled (set COOKER_FEEDBACK_GITHUB_TOKEN to enable)")
 	}
 	h.AppDetector = service.NewAppDetector()
 	h.WSBroadcast = wsHub.Broadcast
@@ -322,6 +451,17 @@ func New(cfg *config.Config) (*Server, error) {
 	// exactly the cluster the pipeline deploys to. Lazy: a server with no
 	// cluster configured still boots and the read endpoints return 503.
 	h.Kube = kube.New(cfg.Kubernetes.Kubeconfig)
+	// Read-only cloud inventory & cost panel (OR-2). Constructs a
+	// provider per enabled cloud; with none enabled the service reports
+	// Enabled()=false and the endpoints return an empty payload. Boot
+	// fails if an enabled provider's SDK client can't be built (fail-fast,
+	// like the secrets/deploy adapters).
+	cloudInv, err := newCloudInventory(ctx, cfg.CloudInventory)
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
+	h.CloudInventory = cloudInv
 	// HostService coordinates the PEM-bytes-to-secrets-manager
 	// translation for SSH hosts. nil-safe handler-side: when secMgr
 	// is nil (dev without a secrets backend), SSH host create/update
@@ -520,8 +660,10 @@ func New(cfg *config.Config) (*Server, error) {
 	router.Use(securityHeadersMiddleware())
 	router.Use(corsMiddleware(cfg.AllowedOrigins))
 	if cfg.Observability.MetricsEnabled {
+		// MetricsMiddleware always runs on the main router — it records
+		// app traffic regardless of where /metrics is exposed.
 		router.Use(observability.MetricsMiddleware())
-		router.GET("/metrics", observability.MetricsHandler())
+		registerMetricsRoute(router, cfg.Observability.MetricsPort)
 	}
 	if cfg.Observability.TracingEnabled {
 		router.Use(observability.TracingMiddleware(cfg.Observability.ServiceName))
@@ -573,13 +715,58 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 		}
 		errCh <- err
 	}()
+
+	// Dedicated metrics listener (M0-1): when a metrics port is set, serve
+	// /metrics on its own http.ServeMux so the scrape endpoint is NOT
+	// reachable via the public app ingress. The main router omits /metrics
+	// in this mode (see New). When MetricsPort == 0, this block is skipped
+	// and behaviour is unchanged (single-port; /metrics on the app router).
+	var metricsSrv *http.Server
+	if s.config != nil && s.config.Observability.MetricsEnabled && s.config.Observability.MetricsPort > 0 {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", observability.MetricsHTTPHandler())
+		// Bind host for the dedicated metrics listener (W1-02). Default "" =
+		// all interfaces (back-compat; also required so an in-cluster
+		// ServiceMonitor can scrape the pod IP). Operators relying on this
+		// dedicated port MUST protect it via NetworkPolicy or bind it to a
+		// private interface (COOKER_METRICS_HOST) — it is not behind the app's
+		// auth middleware. The chart side is handled separately.
+		metricsHost := s.config.Observability.MetricsHost
+		metricsSrv = &http.Server{
+			Addr:    fmt.Sprintf("%s:%d", metricsHost, s.config.Observability.MetricsPort),
+			Handler: mux,
+		}
+		go func() {
+			// A failure here (e.g. port already bound) must not take down
+			// the primary app server — but it must not be swallowed either.
+			// Log it; the absence of /metrics will surface in monitoring.
+			if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("metrics server failed", "addr", metricsSrv.Addr, "error", err)
+			}
+		}()
+		slog.Info("metrics server listening on dedicated port", "addr", metricsSrv.Addr)
+	}
+
 	select {
 	case err := <-errCh:
+		// The primary app server exited (typically a bind/serve failure).
+		// Tear down the dedicated metrics listener too so it does not leak
+		// for the lifetime of the process (W1-01). The ctx.Done() path below
+		// drains it gracefully; here the app is already gone, so a hard Close
+		// is correct.
+		if metricsSrv != nil {
+			_ = metricsSrv.Close()
+		}
 		return err
 	case <-ctx.Done():
 		slog.Info("shutdown: draining HTTP server", "timeout", shutdownTimeout.String())
 		drainCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
+		if metricsSrv != nil {
+			if err := metricsSrv.Shutdown(drainCtx); err != nil {
+				slog.Warn("shutdown: metrics server drain failed", "error", err)
+			}
+		}
 		if err := httpSrv.Shutdown(drainCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}
@@ -637,6 +824,25 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 func (s *Server) Close() error {
 	if s == nil {
 		return nil
+	}
+	// BC-L2: cancel background goroutines that RunContext also cancels on
+	// graceful shutdown but that Close() previously missed — so that callers
+	// who invoke Close() directly (tests, deferred cleanup) don't leak them.
+	if s.healthCancel != nil {
+		s.healthCancel()
+	}
+	if s.auditSweepCancel != nil {
+		s.auditSweepCancel()
+	}
+	// BC-H1: stop the rate-limiter gc goroutine.
+	if s.rateLimiter != nil {
+		s.rateLimiter.Close()
+	}
+	if s.webhookRateLimiter != nil {
+		s.webhookRateLimiter.Close()
+	}
+	if s.localAuthRateLimiter != nil {
+		s.localAuthRateLimiter.Close()
 	}
 	if s.traceShutdown != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -909,6 +1115,46 @@ func selectSecretsManager(cfg *config.Config, st *store.Store, codec *crypto.Cod
 	default:
 		return nil, fmt.Errorf("unknown secrets backend %q", cfg.SecretsBackend)
 	}
+}
+
+// newCloudInventory builds the read-only cloud inventory service from
+// COOKER_CLOUD_* config (OR-2). It constructs a provider for each
+// enabled cloud (AWS / GCP) and returns a Service that fans out to them
+// with a TTL cache. When no provider is enabled it returns a Service
+// with zero providers — Enabled() is false and the handlers return an
+// empty, enabled=false payload.
+//
+// A provider whose SDK client fails to construct (bad region, malformed
+// credentials JSON) fails the boot, matching the fail-fast posture of
+// the other adapters — a misconfigured cloud should surface at startup,
+// not on the first panel load. The construction touches no cloud API.
+func newCloudInventory(ctx context.Context, cfg config.CloudInventoryConfig) (*cloudinventory.Service, error) {
+	var providers []cloudinventory.Provider
+	if cfg.AWS.Enabled {
+		p, err := cloudaws.New(ctx, cloudaws.Config{
+			Region:          cfg.AWS.Region,
+			AccessKeyID:     cfg.AWS.AccessKeyID,
+			SecretAccessKey: cfg.AWS.SecretAccessKey,
+			SessionToken:    cfg.AWS.SessionToken,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("cloud inventory: aws: %w", err)
+		}
+		providers = append(providers, p)
+		slog.Info("cloud inventory provider enabled", "provider", "aws", "region", cfg.AWS.Region)
+	}
+	if cfg.GCP.Enabled {
+		p, err := cloudgcp.New(ctx, cloudgcp.Config{
+			ProjectID:       cfg.GCP.ProjectID,
+			CredentialsJSON: cfg.GCP.CredentialsJSON,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("cloud inventory: gcp: %w", err)
+		}
+		providers = append(providers, p)
+		slog.Info("cloud inventory provider enabled", "provider", "gcp", "project", cfg.GCP.ProjectID)
+	}
+	return cloudinventory.New(providers, cloudinventory.WithTTL(cfg.CacheTTL)), nil
 }
 
 func originSet(allowed []string) (bool, map[string]bool) {

@@ -62,13 +62,28 @@ type sshSession interface {
 	Close() error
 }
 
-// realDial wraps gossh.Dial in the sshClient interface.
+// realDial wraps gossh.Dial in the sshClient interface. TCP keepalive
+// is enabled via the net.Dialer so that dead connections surface as
+// errors rather than hanging in the cache indefinitely (AD-H5).
 func realDial(network, addr string, cfg *gossh.ClientConfig) (sshClient, error) {
-	c, err := gossh.Dial(network, addr, cfg)
+	// AD-H5: use net.Dialer with TCP keepalive so that idle connections
+	// that have gone dead surface as errors rather than hanging forever.
+	// We take the handshake timeout from ClientConfig.Timeout.
+	nd := &net.Dialer{
+		KeepAlive: 15 * time.Second,
+	}
+	// Perform the raw TCP dial without the SSH handshake timeout built
+	// in so we can apply it at the SSH-handshake level separately.
+	rawConn, err := nd.Dial(network, addr)
 	if err != nil {
 		return nil, err
 	}
-	return &realClient{c: c}, nil
+	c, chans, reqs, err := gossh.NewClientConn(rawConn, addr, cfg)
+	if err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	return &realClient{c: gossh.NewClient(c, chans, reqs)}, nil
 }
 
 type realClient struct{ c *gossh.Client }
@@ -123,6 +138,15 @@ type Target struct {
 
 	// ConnectTimeout bounds the initial TCP+SSH handshake. Default 15s.
 	ConnectTimeout time.Duration
+
+	// PullTimeout caps `docker pull` per deploy. Zero defaults to 10 min.
+	// A slow image pull must not block the executor for the entire run
+	// deadline (M ssh/ssh.go:373).
+	PullTimeout time.Duration
+
+	// CmdTimeout caps short commands (docker stop/rm/run/inspect).
+	// Zero defaults to 30s.
+	CmdTimeout time.Duration
 
 	// dial is the SSH dialer; production = realDial. Tests override.
 	dial dialFunc
@@ -297,6 +321,79 @@ func (t *Target) connectTimeout() time.Duration {
 	return 15 * time.Second
 }
 
+func (t *Target) pullTimeout() time.Duration {
+	if t.PullTimeout > 0 {
+		return t.PullTimeout
+	}
+	return 10 * time.Minute
+}
+
+func (t *Target) cmdTimeout() time.Duration {
+	if t.CmdTimeout > 0 {
+		return t.CmdTimeout
+	}
+	return 30 * time.Second
+}
+
+// runCmdCtx is runCmd with a per-command deadline. The session is
+// closed when the deadline fires, which causes Run() to return an
+// error; the context error is returned in that case (M ssh.go:373).
+func runCmdCtx(ctx context.Context, timeout time.Duration, client sshClient, cmd string, lw io.Writer) error {
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	type result struct {
+		err error
+	}
+	done := make(chan result, 1)
+	s, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("session: %w", err)
+	}
+	stdout := writerFanout(lw, nil)
+	s.SetStdout(stdout)
+	s.SetStderr(stdout)
+	go func() {
+		done <- result{s.Run(cmd)}
+	}()
+	select {
+	case <-cmdCtx.Done():
+		s.Close() // unblock Run
+		return fmt.Errorf("ssh: command timed out after %s: %w", timeout, cmdCtx.Err())
+	case r := <-done:
+		s.Close()
+		return r.err
+	}
+}
+
+// runCmdQuietCtx is runCmdQuiet with a per-command deadline.
+func runCmdQuietCtx(ctx context.Context, timeout time.Duration, client sshClient, cmd string) (string, error) {
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	type result struct {
+		out []byte
+		err error
+	}
+	done := make(chan result, 1)
+	s, err := client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("session: %w", err)
+	}
+	go func() {
+		out, err := s.CombinedOutput(cmd)
+		done <- result{out, err}
+	}()
+	select {
+	case <-cmdCtx.Done():
+		s.Close()
+		return "", fmt.Errorf("ssh: command timed out after %s: %w", timeout, cmdCtx.Err())
+	case r := <-done:
+		s.Close()
+		return string(r.out), r.err
+	}
+}
+
 // logf writes a formatted line to w; nil w silently discards. Used
 // for in-band TOFU / step-progress log lines.
 func logf(w io.Writer, format string, args ...any) {
@@ -306,20 +403,12 @@ func logf(w io.Writer, format string, args ...any) {
 	fmt.Fprintf(w, format, args...)
 }
 
-// runCmd opens a fresh session and runs cmd; stdout/stderr stream
-// into lw (the per-call log sink) so the operator tails docker
-// output in real time. The session is closed after Run.
-func runCmd(client sshClient, cmd string, lw io.Writer) error {
-	s, err := client.NewSession()
-	if err != nil {
-		return fmt.Errorf("session: %w", err)
-	}
-	defer s.Close()
-
-	stdout := writerFanout(lw, nil)
-	s.SetStdout(stdout)
-	s.SetStderr(stdout)
-	return s.Run(cmd)
+// dialHostFresh evicts the cached client for h and dials a fresh
+// connection. Used by the evict-and-retry path when a cached client
+// turns out to be dead (AD-H5).
+func (t *Target) dialHostFresh(ctx context.Context, h *model.Host, lw io.Writer) (sshClient, error) {
+	t.Evict(h.ID) // drop the dead entry
+	return t.dialHost(ctx, h, lw)
 }
 
 // runCmdQuiet runs cmd and returns the combined output as a string
@@ -369,15 +458,36 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 		return fmt.Errorf("ssh: rejected image ref %q", image)
 	}
 
-	// 1. pull
+	// 1. pull — the first real command on the cached client. If the
+	// session open fails (dead cached connection), evict the client and
+	// re-dial once before surfacing the error (AD-H5). TCP keepalive in
+	// realDial surfaces dead connections faster, but the evict-and-retry
+	// is the fallback for connections that went idle between keepalives.
+	// Per-command timeout (M ssh.go:373): docker pull can block forever
+	// on a slow registry; cap it at PullTimeout (default 10 min).
 	logf(lw, "[ssh] docker pull %s\n", image)
-	if err := runCmd(client, fmt.Sprintf("docker pull %s", shQuote(image)), lw); err != nil {
-		return fmt.Errorf("ssh: docker pull: %w", err)
+	pullCmd := fmt.Sprintf("docker pull %s", shQuote(image))
+	if err := runCmdCtx(ctx, t.pullTimeout(), client, pullCmd, lw); err != nil {
+		// If the error is a session-open failure (wrapped "session: ...")
+		// try once more with a fresh connection.
+		if strings.Contains(err.Error(), "session:") {
+			logf(lw, "[ssh] session error (%v); evicting cached client and re-dialling\n", err)
+			var dialErr error
+			client, dialErr = t.dialHostFresh(ctx, host, lw)
+			if dialErr != nil {
+				return dialErr
+			}
+			if err2 := runCmdCtx(ctx, t.pullTimeout(), client, pullCmd, lw); err2 != nil {
+				return fmt.Errorf("ssh: docker pull: %w", err2)
+			}
+		} else {
+			return fmt.Errorf("ssh: docker pull: %w", err)
+		}
 	}
 
-	// 2. stop (best-effort)
+	// 2. stop (best-effort) — short timeout: stop should be near-instant
 	logf(lw, "[ssh] docker stop %s (best-effort)\n", containerName)
-	if out, err := runCmdQuiet(client, fmt.Sprintf("docker stop %s", shQuote(containerName))); err != nil {
+	if out, err := runCmdQuietCtx(ctx, t.cmdTimeout(), client, fmt.Sprintf("docker stop %s", shQuote(containerName))); err != nil {
 		// Tolerate "no such container" but log everything else.
 		if !strings.Contains(out, "No such container") {
 			logf(lw, "[ssh] stop: %v (output: %s)\n", err, strings.TrimSpace(out))
@@ -386,7 +496,7 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 
 	// 3. rm (best-effort)
 	logf(lw, "[ssh] docker rm %s (best-effort)\n", containerName)
-	if out, err := runCmdQuiet(client, fmt.Sprintf("docker rm %s", shQuote(containerName))); err != nil {
+	if out, err := runCmdQuietCtx(ctx, t.cmdTimeout(), client, fmt.Sprintf("docker rm %s", shQuote(containerName))); err != nil {
 		if !strings.Contains(out, "No such container") {
 			logf(lw, "[ssh] rm: %v (output: %s)\n", err, strings.TrimSpace(out))
 		}
@@ -395,7 +505,7 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 	// 4. run
 	dockerRun := composeRunCommand(containerName, image, spec.Env, spec.Ports)
 	logf(lw, "[ssh] %s\n", dockerRun)
-	if err := runCmd(client, dockerRun, lw); err != nil {
+	if err := runCmdCtx(ctx, t.cmdTimeout(), client, dockerRun, lw); err != nil {
 		return fmt.Errorf("ssh: docker run: %w", err)
 	}
 	return nil

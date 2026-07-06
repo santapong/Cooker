@@ -112,6 +112,14 @@ Configuration errors and unreachable dependencies are surfaced at boot, not on t
 
 **Why:** one Go binary contains everything needed to run the app. Deployment is `docker run cooker:latest` — no separate frontend deploy, no migration runner.
 
+### 2.8 Read-only provider aggregation — cloud inventory
+
+`internal/cloudinventory` (OR-2) is a second strategy-style extension point, distinct from the deploy/build adapters in §2.1 because it is **strictly read-only** and **cache-fronted** rather than action-oriented. A narrow `Provider` interface (`Name() / ListResources(ctx) / CostSummary(ctx)`) has `aws/` and `gcp/` implementations; a `Service` fans out to the enabled providers concurrently, aggregates into `model.CloudInventory`, and caches the result in memory with a TTL. Per-provider failures are isolated — one cloud being unreachable yields partial results with a per-provider `Error` rather than failing the whole request.
+
+It mirrors `internal/kube`'s posture (lazy construction, nil-safe at the handler boundary, no mutation surface) and wires the same way the secrets/deploy adapters do: `newCloudInventory` in `server.go` constructs a provider per enabled cloud from `COOKER_CLOUD_*` config, and `h.CloudInventory` is the injected `CloudInventoryService` the three `GET/POST /cloud/*` handlers consume.
+
+**Adding a cloud provider:** implement `cloudinventory.Provider` in a new `internal/cloudinventory/<cloud>/` package (list/describe/cost APIs only — never a mutation), add an `if cfg.<Cloud>.Enabled` branch to `newCloudInventory` in `server.go`, extend `config.CloudInventoryConfig` + `Validate()`, and render the env vars (credentials via `secretKeyRef`) in the Helm chart and raw manifests. Cover the adapter with tests against fake SDK clients / an httptest endpoint — no real cloud calls in CI.
+
 ---
 
 ## 3. Frontend design patterns

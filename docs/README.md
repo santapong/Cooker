@@ -5,6 +5,7 @@ Start here. The docs are organized by purpose:
 | Folder | What's inside |
 |---|---|
 | **[system-design/](system-design/README.md)** | The consolidated, top-to-bottom system design — 17 chapters (overview → C4 model), with diagrams. **Read this to understand how Cooker works.** |
+| **[engineering/](engineering/README.md)** | How Cooker is *built* — the ADLC (Application Development Life Cycle) and the Claude Code harness (agents + skills + workflows) that drives it. |
 | **[guides/](#guides)** | Operator & how-to guides — UAT, multi-replica, rollout, runbook, releasing. |
 | **[reference/](#reference)** | Canonical references — architecture, design conventions, protocols, the Go style guide. |
 | **[adr/](adr/README.md)** | Architecture Decision Records (strategy pattern, secrets, JSONB, multi-tenancy). |

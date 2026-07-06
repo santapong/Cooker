@@ -69,7 +69,9 @@ func (t *Target) do(ctx context.Context, method, path string, body any) ([]byte,
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
+	// AD-H3: cap response reads at 4 MiB so a pathological API
+	// response can't exhaust the process heap (mirrors clientgo.go:160).
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	return data, resp.StatusCode, nil
 }
 

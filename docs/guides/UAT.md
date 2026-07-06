@@ -377,6 +377,68 @@ no configuration is required.
   at the end. Set `COOKER_EDGE_CONDITIONS_ENABLED=false` to restore
   the legacy abort-on-first-failure behaviour.
 
+## Self-hosted licensing (M2)
+
+Cooker verifies a self-hosted license **offline** with an Ed25519
+signature — no licensing server, no phone-home. **With no license
+configured, Cooker runs on the permissive Free tier**, which is how UAT
+runs by default (UAT is auth-off / unlicensed by design — do not enable
+licensing in the UAT defaults). The gate **fails open**: a missing or
+invalid license never locks the API, it only degrades to Free.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `COOKER_LICENSE_PUBLIC_KEY` | — | Base64 Ed25519 **public** key the operator sets to enable verification. Distributed by the vendor; the private signing key is held out-of-repo and never shipped. |
+| `COOKER_LICENSE_PUBLIC_KEYS` | — | Comma-separated list of base64 Ed25519 **public** keys, **any** of which may verify a token. Supports key rotation (see below). Unioned with the singular `COOKER_LICENSE_PUBLIC_KEY` for back-compat — set either, both, or neither. |
+| `COOKER_LICENSE_KEY` | — | A signed license token. Set it to install a license at **boot**; verified against any configured public key. Equivalent to installing one in the admin UI. |
+
+**Key rotation (zero downtime)** — to rotate the vendor signing key
+without an outage:
+
+1. Generate a new keypair (`cooker-license keygen`).
+2. During the overlap window, set **both** the old and new public keys
+   in `COOKER_LICENSE_PUBLIC_KEYS` (comma-separated). Existing licenses
+   signed with the old key keep verifying because verification succeeds
+   if **any** configured key validates the token.
+3. Re-issue licenses to customers, signed with the **new** private key.
+4. Once every active license is on the new key, drop the old key from
+   `COOKER_LICENSE_PUBLIC_KEYS`. This retires trust in the old key.
+
+**Installing a license** — either set `COOKER_LICENSE_KEY` at boot, or
+paste the token into **Settings → License** in the admin UI
+(`POST /api/v1/license`, admin only). `GET /api/v1/license` (any
+authenticated user) returns the **decoded claims** — plan, customer,
+seats, features, expiry — but **never** the raw token.
+`DELETE /api/v1/license` (admin only) removes an installed license,
+reverting to Free.
+
+**Generating + signing a license (vendor side)** — the signing CLI is
+`backend/cmd/cooker-license` (keygen / sign / verify). The private key
+is the root of trust and is held out-of-repo:
+
+```bash
+# 1. One-time: generate the keypair. Distribute only the .pub.
+go run ./backend/cmd/cooker-license keygen -out cooker-license
+#   → cooker-license.key (private, 0600 — keep secret, never commit)
+#   → cooker-license.pub (public — give to operators as
+#     COOKER_LICENSE_PUBLIC_KEY, or list it in
+#     COOKER_LICENSE_PUBLIC_KEYS alongside the outgoing key when rotating)
+
+# 2. Sign a license token for a customer.
+go run ./backend/cmd/cooker-license sign \
+  -key cooker-license.key \
+  -plan crew -customer "Acme Inc" -seats 5 -expires 8760h
+#   → prints the signed token; set it as COOKER_LICENSE_KEY (or paste
+#     it into Settings → License).
+
+# 3. Optional: verify a token against the public key.
+go run ./backend/cmd/cooker-license verify \
+  -pub cooker-license.pub -token @license.tok
+```
+
+`-expires` accepts a Go duration (`8760h`), an RFC3339 timestamp, or
+`0` for perpetual; `-seats 0` means unlimited.
+
 ## AI failure triage + analytics (M4)
 
 - **AI triage** is off by default. `COOKER_AI_TRIAGE_ENABLED=true` +
@@ -418,6 +480,40 @@ no configuration is required.
   configured secrets backend with one authenticated `List` call and
   reports reachability + latency. Key names/values are never returned.
   In default UAT (database backend) expect `ok` with ~0 ms latency.
+
+## Cloud inventory & cost panel (OR-2)
+
+- **Off by default.** With no provider enabled, the **Cloud** page
+  (sidebar, pro mode) shows a friendly "No cloud accounts configured"
+  empty state and `GET /api/v1/cloud/inventory` returns
+  `200 {"enabled":false}`. Nothing is queried and no SDK client is
+  built — UAT smoke tests pass without any cloud credentials.
+- **Read-only.** When enabled, Cooker lists compute instances, managed
+  Kubernetes clusters, and container registries, plus month-to-date
+  spend grouped by service. It only ever calls list/describe/cost APIs;
+  there is no mutation path.
+
+  | Env var | Default | Meaning |
+  |---|---|---|
+  | `COOKER_CLOUD_AWS_ENABLED` | `false` | Enable the AWS provider. |
+  | `COOKER_CLOUD_AWS_REGION` | — | Required when AWS enabled (e.g. `ap-southeast-1`). |
+  | `COOKER_CLOUD_AWS_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` | — | Optional static creds; omit to use the AWS chain (IRSA / instance profile / env / shared config). |
+  | `COOKER_CLOUD_GCP_ENABLED` | `false` | Enable the GCP provider. |
+  | `COOKER_CLOUD_GCP_PROJECT_ID` | — | Required when GCP enabled. |
+  | `COOKER_CLOUD_GCP_CREDENTIALS_JSON` | — | Optional SA-key JSON; omit to use ADC / Workload Identity (`GOOGLE_APPLICATION_CREDENTIALS`). |
+  | `COOKER_CLOUD_CACHE_TTL` | `5m` | How often the cloud APIs are re-queried. AWS Cost Explorer bills per request. |
+
+- **Partial failure is isolated.** If one provider's credentials are
+  wrong, its tile shows a per-provider error banner and the other
+  provider still renders — the request does not 500.
+- **Refresh** (button, or `POST /api/v1/cloud/refresh`, operator role +
+  rate-limited) busts the server cache and re-fetches.
+- **GCP cost shows 0.00.** GCP month-to-date spend lives in the BigQuery
+  billing export, not the Cloud Billing v1 API, so the GCP cost figure
+  is a labelled zero until that export is wired — **this is expected**,
+  don't file a bug. GCP *resources* are real.
+- **Least privilege** — grant a read-only IAM identity. See
+  [SECURITY.md → Cloud inventory credentials](../../SECURITY.md#cloud-inventory-credentials-read-only-opt-in).
 
 ## What's scaffolded (don't file bugs about these)
 
@@ -601,6 +697,13 @@ Or `rm .env.uat && make uat-up` for a clean slate.
 ---
 
 ## Alternative: run from source for development
+
+> **Note on `make dev`**: `docker-compose.yml` (used by `make dev`) was
+> previously broken — it referenced non-existent
+> `deploy/docker/Dockerfile.frontend` and `deploy/docker/Dockerfile.backend`.
+> It now uses the single multi-stage `deploy/docker/Dockerfile`. For hot
+> frontend reload, running the backend and Vite dev server directly (below)
+> is still the better experience.
 
 If you're hacking on Cooker and want reload-on-save, skip
 `make uat-up` and run the backend + Vite dev server directly.
