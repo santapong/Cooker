@@ -50,6 +50,12 @@ const DefaultTTL = 5 * time.Minute
 // is generous because Cost Explorer in particular can be slow.
 const fetchTimeout = 30 * time.Second
 
+// negativeTTL is the short cache lifetime given to a totally-failed or
+// cancelled fetch (PM26-07-12): an all-providers-errored snapshot must
+// not be served for the full DefaultTTL as if it were good — it retries
+// on the next read after this brief window instead.
+const negativeTTL = 30 * time.Second
+
 // Service aggregates one or more providers behind a TTL cache. Construct
 // with New. A Service with zero providers is valid and reports
 // Enabled=false from Inventory — the dev/unconfigured path.
@@ -62,6 +68,22 @@ type Service struct {
 	mu     sync.Mutex
 	cache  *model.CloudInventory
 	expiry time.Time
+	// gen increments on every Refresh (explicit cache-bust). A fetch
+	// captures gen at its start and only writes the cache if gen is
+	// still current at completion — so a slow in-flight fetch can't
+	// clobber a newer Refresh snapshot (PM26-07-09).
+	gen uint64
+	// inflight is the single in-progress Inventory fetch, if any.
+	// Concurrent cache-miss reads join it instead of each firing their
+	// own (billed) fan-out — a manual singleflight (PM26-07-08).
+	inflight *fetchCall
+}
+
+// fetchCall is one shared in-flight Inventory fetch. Waiters block on
+// done, then read inv.
+type fetchCall struct {
+	done chan struct{}
+	inv  model.CloudInventory
 }
 
 // Option configures a Service.
@@ -140,26 +162,78 @@ func (s *Service) Inventory(ctx context.Context) model.CloudInventory {
 		s.mu.Unlock()
 		return cached
 	}
+	// Cache miss. If a fetch is already running, join it rather than
+	// firing another billed fan-out (singleflight, PM26-07-08).
+	if s.inflight != nil {
+		call := s.inflight
+		s.mu.Unlock()
+		<-call.done
+		return call.inv
+	}
+	// Become the leader for this fetch.
+	call := &fetchCall{done: make(chan struct{})}
+	s.inflight = call
+	gen := s.gen
 	s.mu.Unlock()
 
-	inv := s.fetch(ctx)
+	inv := s.loadAndStore(ctx, gen)
 
 	s.mu.Lock()
-	s.cache = &inv
-	s.expiry = s.now().Add(s.ttl)
+	s.inflight = nil
+	call.inv = inv
+	close(call.done)
 	s.mu.Unlock()
-
 	return inv
 }
 
 // Refresh busts the cache and re-fetches synchronously, returning the
-// fresh snapshot. Backs POST /cloud/refresh.
+// fresh snapshot. Backs POST /cloud/refresh. It bumps the generation and
+// fetches DIRECTLY (bypassing the singleflight join) so an explicit
+// refresh always returns fresh data, never a stale in-flight result.
 func (s *Service) Refresh(ctx context.Context) model.CloudInventory {
 	s.mu.Lock()
 	s.cache = nil
 	s.expiry = time.Time{}
+	s.gen++
+	gen := s.gen
 	s.mu.Unlock()
-	return s.Inventory(ctx)
+	return s.loadAndStore(ctx, gen)
+}
+
+// loadAndStore runs the fan-out and writes the result to the cache iff
+// the generation is still current — a Refresh that raced this fetch
+// (bumping gen) wins, so a slow fetch never clobbers a newer snapshot
+// (PM26-07-09). A totally-failed/cancelled fetch is cached only briefly
+// (negativeTTL) so it retries soon (PM26-07-12).
+func (s *Service) loadAndStore(ctx context.Context, gen uint64) model.CloudInventory {
+	inv := s.fetch(ctx)
+	s.mu.Lock()
+	if s.gen == gen {
+		s.cache = &inv
+		if allProvidersFailed(inv) {
+			s.expiry = s.now().Add(negativeTTL)
+		} else {
+			s.expiry = s.now().Add(s.ttl)
+		}
+	}
+	s.mu.Unlock()
+	return inv
+}
+
+// allProvidersFailed reports whether every provider in the snapshot
+// errored (a total failure or a cancelled fetch — each provider records
+// the context error). A partial failure (some providers OK) is a valid
+// snapshot and is cached for the full TTL.
+func allProvidersFailed(inv model.CloudInventory) bool {
+	if len(inv.Results) == 0 {
+		return false
+	}
+	for _, r := range inv.Results {
+		if r.Error == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // fetch fans out to every provider concurrently and aggregates. Each

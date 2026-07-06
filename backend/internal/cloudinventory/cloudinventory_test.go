@@ -3,6 +3,7 @@ package cloudinventory
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -247,3 +248,109 @@ type fakeClock struct {
 
 func (c *fakeClock) Now() time.Time          { return c.t }
 func (c *fakeClock) Advance(d time.Duration) { c.t = c.t.Add(d) }
+
+// PM26-07-08: concurrent cache-miss reads share ONE fan-out (singleflight),
+// not N billed calls to Cost Explorer.
+func TestService_ConcurrentMissesSingleFlight(t *testing.T) {
+	p := &fakeProvider{
+		name:      model.CloudProviderAWS,
+		resources: []model.CloudResource{{ID: "i-1"}},
+		callDelay: 50 * time.Millisecond, // hold the fan-out open so readers pile up
+	}
+	s := New([]Provider{p})
+
+	const readers = 8
+	var wg sync.WaitGroup
+	wg.Add(readers)
+	for i := 0; i < readers; i++ {
+		go func() { defer wg.Done(); _ = s.Inventory(context.Background()) }()
+	}
+	wg.Wait()
+
+	if got := p.listCalls.Load(); got != 1 {
+		t.Errorf("expected 1 shared fan-out for %d concurrent cache-miss reads, got %d billed calls", readers, got)
+	}
+}
+
+// gatedProvider blocks in ListResources until release is closed, so a
+// test can hold a fetch in-flight while another completes.
+type gatedProvider struct {
+	name    model.CloudProvider
+	id      string
+	started chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (g *gatedProvider) Name() model.CloudProvider { return g.name }
+func (g *gatedProvider) ListResources(ctx context.Context) ([]model.CloudResource, error) {
+	g.calls.Add(1)
+	if g.started != nil {
+		close(g.started)
+	}
+	if g.release != nil {
+		<-g.release
+	}
+	return []model.CloudResource{{ID: g.id}}, nil
+}
+func (g *gatedProvider) CostSummary(context.Context) (model.CostSummary, error) {
+	return model.CostSummary{}, nil
+}
+
+// PM26-07-09: a slow in-flight fetch must not overwrite a newer Refresh
+// snapshot when it finally completes.
+func TestService_StaleFetchDoesNotClobberRefresh(t *testing.T) {
+	slow := &gatedProvider{name: model.CloudProviderAWS, id: "stale", started: make(chan struct{}), release: make(chan struct{})}
+	s := New([]Provider{slow})
+
+	// Leader fetch starts and blocks inside the provider.
+	done := make(chan model.CloudInventory, 1)
+	go func() { done <- s.Inventory(context.Background()) }()
+	<-slow.started
+
+	// While it's blocked, swap in a fast provider and Refresh — this bumps
+	// the generation and writes the fresh snapshot.
+	fresh := &fakeProvider{name: model.CloudProviderAWS, resources: []model.CloudResource{{ID: "fresh"}}}
+	s.mu.Lock()
+	s.providers = []Provider{fresh}
+	s.mu.Unlock()
+	refreshed := s.Refresh(context.Background())
+	if len(refreshed.Results[0].Resources) == 0 || refreshed.Results[0].Resources[0].ID != "fresh" {
+		t.Fatalf("refresh should return fresh data, got %+v", refreshed.Results)
+	}
+
+	// Now let the stale leader finish. Its (stale) result must NOT become
+	// the cache.
+	close(slow.release)
+	<-done
+
+	cached := s.Inventory(context.Background()) // served from cache (fresh)
+	if cached.Results[0].Resources[0].ID != "fresh" {
+		t.Errorf("stale in-flight fetch clobbered the newer refresh snapshot: %+v", cached.Results)
+	}
+}
+
+// PM26-07-12: a totally-failed fetch is cached only briefly (negativeTTL),
+// not for the full TTL, so it retries soon.
+func TestService_FailedFetchNegativeTTL(t *testing.T) {
+	clock := &fakeClock{t: time.Now()}
+	p := &fakeProvider{name: model.CloudProviderAWS, listErr: errors.New("aws: throttled")}
+	s := New([]Provider{p}, WithTTL(time.Hour), withClock(clock.Now))
+
+	s.Inventory(context.Background()) // all-failed → cached with negativeTTL
+	if got := p.listCalls.Load(); got != 1 {
+		t.Fatalf("precondition: 1 call, got %d", got)
+	}
+	// Within the negative TTL: still cached, no re-fetch.
+	clock.Advance(20 * time.Second)
+	s.Inventory(context.Background())
+	if got := p.listCalls.Load(); got != 1 {
+		t.Errorf("within negativeTTL the failed snapshot should be cached, got %d calls", got)
+	}
+	// Past the negative TTL (but well within the full 1h TTL): re-fetch.
+	clock.Advance(15 * time.Second)
+	s.Inventory(context.Background())
+	if got := p.listCalls.Load(); got != 2 {
+		t.Errorf("past negativeTTL a failed snapshot must re-fetch, got %d calls (a good snapshot would still be cached for 1h)", got)
+	}
+}
