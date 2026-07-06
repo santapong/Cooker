@@ -94,7 +94,7 @@ The CMO orchestrates; the monetization-lead runs the 10-analyst draft→critique
 
 ### Vendored: TheLoopSkill (12 `loop-*` skills)
 
-Copied from [santapong/TheLoopSkill](https://github.com/santapong/TheLoopSkill) per its INSTALL.md. These are the **generic engineering routines**: `loop-engine` (author/run multi-agent workflows — replaced the retired repo-authored `workflow` skill; run with `--framework Cooker-AIDLC` for this repo's gated lifecycle), `loop-review`, `loop-debug`, `loop-test`, `loop-design`, `loop-docs`, `loop-audit`, `loop-research`, `loop-scout`, `loop-orchestrate`, `loop-harness`, `loop-autopilot`.
+Copied from [santapong/TheLoopSkill](https://github.com/santapong/TheLoopSkill) per its INSTALL.md — pin, re-sync procedure, and the keep-verbatim rule live in [`.claude/skills/README.md`](../../.claude/skills/README.md). These are the **generic engineering routines**: `loop-engine` (author/run multi-agent workflows — replaced the retired repo-authored `workflow` skill; run with `--framework Cooker-AIDLC` for this repo's gated lifecycle), `loop-review`, `loop-debug`, `loop-test`, `loop-design`, `loop-docs`, `loop-audit`, `loop-research`, `loop-scout`, `loop-orchestrate`, `loop-harness`, `loop-autopilot`.
 
 **Division of labour:** a `loop-*` skill carries the methodology; the matching `cooker-*` skill carries the project protocol on top of it (audit-corpus routing, chain-ledger bookkeeping, path heat-maps, the Monday cron contract). For generic work — or work in another repo — use the `loop-*` skill directly; for Cooker-specific routines the `cooker-*` skill remains the entry point and defers methodology to its counterpart.
 
@@ -196,6 +196,7 @@ The harness embeds facts about the codebase (file paths, version pins, extension
 - **Path maps.** `cooker-find/where-is.sh` and `cooker-audit`'s heat-map hard-code file paths. When a file moves, update the map — a stale map sends the next agent to the wrong file.
 - **Extension points.** The `selectXxx` switch list in agents must track the real switches in `server.go`.
 - **Skill rosters.** A skill's "which skill when" table must list every sibling that shares a trigger — when the vendored `loop-*` pack landed, the `cooker-*` routing tables gained rows deferring the generic version of each job to its `loop-*` counterpart. Keep those rows accurate as either side evolves.
+- **Vendored packs.** The `loop-*` and `ponytail-*` skills are verbatim copies pinned to an upstream commit ([`.claude/skills/README.md`](../../.claude/skills/README.md)). Never patch them in place — a local edit is silently lost on the next re-sync. Re-sync deliberately, bump the pin, and re-check the `cooker-*` routing notes that name `loop-*` skills.
 
 **Governance note.** Changing an agent's *Hard rules* is security-sensitive — it can silently widen what an automated agent is allowed to do. Surface such edits explicitly in review rather than bundling them into an unrelated change.
 

@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refuses (aggressive deletion hunts). Each kept skill now routes the generic
   half of its job to its `loop-*` counterpart; the skill roster and division
   of labour are documented in `docs/engineering/harness-engineering.md`.
+- Hardening follow-ups from the change audit: `.claude/skills/README.md` pins
+  the vendored packs (TheLoopSkill 0.4.0 @ `9f03ad1`) with a re-sync procedure
+  and a keep-verbatim rule; `scripts/check-doc-links.sh` + a `docs` CI job
+  guard relative markdown links (offline, no network); CLAUDE.md gained a
+  skills-routing bullet so `/loop-engine --framework Cooker-AIDLC` and the
+  saved workflows stay discoverable in every session.
 
 ### Added — AWS/Vercel hosting design (IaC + overlays + guide)
 

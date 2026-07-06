@@ -138,6 +138,17 @@ jobs:
         working-directory: frontend
         run: npm test -- --passWithNoTests
 
+  docs:
+    # Offline relative-link check over tracked markdown — catches the
+    # "file moved/deleted but a doc still points at it" class of rot
+    # (harness/docs restructures like the TheLoopSkill install). External
+    # URLs are out of scope; the script needs no network access.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Check relative markdown links
+        run: scripts/check-doc-links.sh
+
   helm:
     runs-on: ubuntu-latest
     steps:
