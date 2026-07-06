@@ -59,7 +59,7 @@ UAT Scenario 1b (canary end-to-end) and the `025_canary` live down/up drill clos
 
 ### Notifications — wave 2 (planned; wave 1 shipped)
 
-Wave 1 (email + generic webhook always-on, creds encrypted, fatigue-safe default, deploy/canary events) shipped on `claude/notifications-rollout`. Remaining, evidence-ranked from the 2026-07 feature research (`docs/proposals/` synthesis):
+Wave 1 (email + generic webhook always-on, creds encrypted, fatigue-safe default, deploy/canary events) shipped in PR #126. Remaining, evidence-ranked from the 2026-07 feature research (`docs/proposals/` synthesis):
 
 - **N2.1 — Commit-status reporting back to Git providers.** Map run/deploy outcomes to a commit status (green check / red X) on GitHub/GitLab/Bitbucket/Gitea via `internal/source/*`. The single highest-upvoted item in the competitor research (Coolify: 46). Needs per-provider status APIs + a commit SHA on the run.
 - **N2.2 — Telegram channel.** New adapter (`internal/notifier/telegram.go`) + a migration extending the `notification_targets.kind` CHECK in `011_notification_targets.up.sql`.
