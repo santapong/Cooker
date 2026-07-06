@@ -97,12 +97,10 @@ Items deferred from the W2–W5 cycle. Sequenced for the next session.
 
 #### W6.4 — Branch cleanup (operator step)
 
-- [ ] ~80 stale branches on origin from merged PRs. Sandbox proxy refuses `git push --delete`. Run locally:
-  ```bash
-  gh pr list --state merged --limit 200 --json headRefName -q '.[].headRefName' \
-    | xargs -I{} git push origin --delete {}
-  ```
-- [ ] Or enable Settings → General → Pull Requests → "Automatically delete head branches" for future PRs.
+~123 stale branches on origin (squash-merge never deletes the head branch). The sandbox proxy refuses `git push --delete`, so both steps are operator-run. Tooling shipped: `scripts/cleanup-merged-branches.sh` classifies every remote branch as safe-to-delete (merged-PR head, or ancestor of main) vs. needs-manual-review (no PR — may carry unmerged work), dry-run by default.
+
+- [ ] Enable Settings → General → Pull Requests → "Automatically delete head branches" so future merges self-clean.
+- [ ] Locally (needs an authenticated `gh`): run `scripts/cleanup-merged-branches.sh`, review the dry-run lists, then re-run with `--delete`. Use `--keep '<glob>'` for anything to preserve.
 
 ---
 
