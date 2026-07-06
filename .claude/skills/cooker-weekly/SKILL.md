@@ -7,6 +7,8 @@ description: Cooker's weekly bug-hunt + remediation routine. Reads open GitHub i
 
 Goal: each week, advance the open-finding count downward by exactly one PR's worth of work.
 
+> The generic autonomous-loop methodology (feedback intake, propose-only draft PRs, never merge) is `/loop-autopilot`. This skill is Cooker's Monday protocol bound to `.github/workflows/cooker-weekly.yml`: the `T-weekly-*` tag lookback, the chain-recheck priority queue, and the audit-ledger bookkeeping. For setting up an autonomous loop elsewhere, start from `/loop-autopilot`.
+
 ## Inputs
 
 - **GitHub issues** opened or updated since the last weekly run. Look back **8 days** to overlap with the previous window so nothing falls through the cracks.

@@ -1,6 +1,6 @@
 # Cooker — saved workflows
 
-Deterministic multi-agent orchestration scripts, invokable via the `Workflow` tool by name. **Opt-in only** — see [`../skills/workflow/SKILL.md`](../skills/workflow/SKILL.md) for the rules, patterns, and how to author a new one (`../skills/workflow/new-workflow.sh <slug>`).
+Deterministic multi-agent orchestration scripts, invokable via the `Workflow` tool by name. **Opt-in only** — see [`../skills/loop-engine/SKILL.md`](../skills/loop-engine/SKILL.md) (the `/loop-engine` skill) for the rules, patterns, and script templates (`../skills/loop-engine/templates/`); run it with `--framework Cooker-AIDLC` for Cooker's gated lifecycle. Model-selection and live-narration guidance for authoring scripts lives in [`ORCHESTRATION.md`](ORCHESTRATION.md).
 
 | Workflow | Pattern | Pairs with | Run |
 |---|---|---|---|

@@ -29,7 +29,7 @@ If you find prior art:
 - A built-in adapter that does the same job → "this already exists at `<path>`; do you want to extend it or are you asking for a parallel implementation?"
 - A roadmap entry in `launch-readiness.md` → "this is R<n> on the post-launch roadmap; do you want to promote it now?"
 
-Don't proceed with the build until you've confirmed no existing thing serves the request.
+Don't proceed with the build until you've confirmed no existing thing serves the request. For *external* prior art — "should we build this at all, or adopt a library/service?" — run `/loop-scout`; for architecture-level design decisions that deserve an ADR, use `/loop-design`.
 
 ### 2. Read the design checklist
 

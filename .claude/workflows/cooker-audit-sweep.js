@@ -5,7 +5,7 @@
 // Run:  Workflow({ name: "cooker-audit-sweep" })
 // Pairs with ADLC Phase 10 (Improve). EXPENSIVE — only on an explicit
 // "comprehensive/thorough audit" ask. Mirrors the cooker-audit skill's
-// anti-patterns. See .claude/skills/workflow/SKILL.md.
+// anti-patterns. See .claude/skills/loop-engine/SKILL.md.
 //
 // Pattern: loop-until-dry + multi-modal sweep + adversarial verify.
 // Dedup is against `seen` (NOT `confirmed`) so judge-rejected findings

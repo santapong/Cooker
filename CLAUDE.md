@@ -94,6 +94,7 @@ The honest production-readiness verdict and the open work are in `backlog.md`'s 
 4. **For changes to auth, secrets, or the Dockerfile**, also update `SECURITY.md` so the threat model stays accurate.
 5. **For changes to UAT behaviour**, update `docs/guides/UAT.md` in the same PR.
 6. **When a `backlog.md` item lands on `main`**: in the same PR, move the item from its priority section into the "Closed" log at the bottom and reference the merged PR number.
+7. **Skills**: generic routines come from the vendored `loop-*` pack (TheLoopSkill); `cooker-*` skills add this repo's protocol on top — never edit `loop-*`/`ponytail-*` files in place (pins + re-sync: `.claude/skills/README.md`). Multi-agent workflows are opt-in via `/loop-engine` (`--framework Cooker-AIDLC`); the saved runs `cooker-review`, `cooker-audit-sweep`, and `cooker-health-sweep` execute by name through the Workflow tool (`.claude/workflows/README.md`).
 
 ## What NOT to do without asking
 
