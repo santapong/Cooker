@@ -1,6 +1,6 @@
 -- 025_canary.down.sql
 --
--- Reverse 024: drop the canary state table (its indexes go with it)
+-- Reverse 025: drop the canary state table (its indexes go with it)
 -- and remove the apps.canary_config column.
 
 DROP TABLE IF EXISTS app_canaries;

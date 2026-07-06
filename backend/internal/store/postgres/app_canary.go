@@ -73,6 +73,18 @@ func (s *AppCanaryStore) GetActive(ctx context.Context, appID string) (*model.Ap
 	return c, err
 }
 
+func (s *AppCanaryStore) LatestPromoted(ctx context.Context, appID string) (*model.AppCanary, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+appCanaryColumns+`
+		   FROM app_canaries WHERE app_id = $1 AND status = 'promoted'
+		  ORDER BY resolved_at DESC NULLS LAST LIMIT 1`, appID)
+	c, err := scanAppCanary(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("app %s: no promoted canary: %w", appID, store.ErrNotFound)
+	}
+	return c, err
+}
+
 func (s *AppCanaryStore) Update(ctx context.Context, c *model.AppCanary) error {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE app_canaries

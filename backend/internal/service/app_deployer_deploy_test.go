@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/santapong/cooker/internal/model"
@@ -182,5 +183,21 @@ func TestAppDeployer_Deploy_EmptyGitHubRepo(t *testing.T) {
 	}
 	if calls() != 0 {
 		t.Errorf("expected clone to never be attempted, called %d times", calls())
+	}
+}
+
+// PM26-07-03 pin (service side): the selector this manifest creates is
+// immutable for the lifetime of the Deployment object, and the canary
+// path re-applies the same-named Deployment — deployer's
+// TestCanaryManifest_StableSelectorMatchesNormalDeploy pins the other
+// side. If this selector ever changes shape, change both together.
+func TestDefaultKubernetesManifest_SelectorIsAppOnly(t *testing.T) {
+	app := &model.App{Name: "Shop App"}
+	m := defaultKubernetesManifest(app, "reg/shop:v1")
+	if want := "matchLabels: {app: shop-app}\n"; !strings.Contains(m, want) {
+		t.Errorf("normal-deploy selector must be exactly %q\n---\n%s", want, m)
+	}
+	if strings.Contains(m, "track") {
+		t.Errorf("normal-deploy manifest must not reference track labels\n---\n%s", m)
 	}
 }

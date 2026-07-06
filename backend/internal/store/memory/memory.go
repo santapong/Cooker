@@ -798,6 +798,25 @@ func (s *appCanaries) GetActive(_ context.Context, appID string) (*model.AppCana
 	return nil, fmt.Errorf("app %s: no active canary: %w", appID, store.ErrNotFound)
 }
 
+func (s *appCanaries) LatestPromoted(_ context.Context, appID string) (*model.AppCanary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var latest *model.AppCanary
+	for _, c := range s.m {
+		if c.AppID != appID || c.Status != model.CanaryPromoted || c.ResolvedAt == nil {
+			continue
+		}
+		if latest == nil || c.ResolvedAt.After(*latest.ResolvedAt) {
+			latest = c
+		}
+	}
+	if latest == nil {
+		return nil, fmt.Errorf("app %s: no promoted canary: %w", appID, store.ErrNotFound)
+	}
+	cp := *latest
+	return &cp, nil
+}
+
 func (s *appCanaries) Update(_ context.Context, c *model.AppCanary) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

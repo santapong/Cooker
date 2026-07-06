@@ -49,9 +49,18 @@ func canaryManifest(name, stableImage, canaryImage string, canaryReplicas, stabl
 	stable := app
 	canary := app + "-canary"
 	var b strings.Builder
-	writeDeployment(&b, stable, app, "stable", stableImage, stableReplicas)
+	// The stable Deployment reuses the object the normal deploy created
+	// (same name), and Deployment spec.selector is immutable — so its
+	// selector must stay exactly {app: <name>}, matching
+	// defaultKubernetesManifest in service/app_deployer.go. Putting track
+	// in the selector here made every Start fail on a previously-deployed
+	// app with "field is immutable" (PM26-07-03). track rides on the pod
+	// template + metadata labels only.
+	writeDeployment(&b, stable, app, "stable", stableImage, stableReplicas, false)
 	b.WriteString("---\n")
-	writeDeployment(&b, canary, app, "canary", canaryImage, canaryReplicas)
+	// The canary Deployment is a new object, so its selector can carry
+	// track — keeping its ReplicaSet scoped to canary pods.
+	writeDeployment(&b, canary, app, "canary", canaryImage, canaryReplicas, true)
 	b.WriteString("---\n")
 	// A single Service selecting only the app label so it fans traffic
 	// across both tracks in proportion to their ready pod counts.
@@ -66,11 +75,19 @@ spec:
 	return b.String()
 }
 
-// writeDeployment appends one Deployment doc to b. selector is the app
-// label shared by both tracks (so the Service load-balances across
-// them); track distinguishes the pods for humans / kubectl. The pod
-// template carries both labels.
-func writeDeployment(b *strings.Builder, depName, app, track, image string, replicas int) {
+// writeDeployment appends one Deployment doc to b. The pod template
+// always carries both the app label (so the shared Service selects the
+// pods) and track (so humans / kubectl can tell the sides apart).
+// trackInSelector controls whether track also appears in the immutable
+// spec.selector: false for the stable side (must stay byte-compatible
+// with the normal deploy's selector), true for the canary side (a new
+// object, and the narrower selector keeps its ReplicaSet off stable
+// pods).
+func writeDeployment(b *strings.Builder, depName, app, track, image string, replicas int, trackInSelector bool) {
+	selector := fmt.Sprintf("{app: %s}", app)
+	if trackInSelector {
+		selector = fmt.Sprintf("{app: %s, track: %s}", app, track)
+	}
 	fmt.Fprintf(b, `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -79,7 +96,7 @@ metadata:
 spec:
   replicas: %[5]d
   selector:
-    matchLabels: {app: %[2]s, track: %[3]s}
+    matchLabels: %[6]s
   template:
     metadata:
       labels: {app: %[2]s, track: %[3]s}
@@ -88,7 +105,7 @@ spec:
         - name: %[2]s
           image: %[4]s
           ports: [{containerPort: 80}]
-`, depName, app, track, image, replicas)
+`, depName, app, track, image, replicas, selector)
 }
 
 // sanitizeName returns a DNS-1123-safe slug. Mirrors service.sanitize

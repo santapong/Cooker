@@ -321,7 +321,7 @@ func New(cfg *config.Config) (*Server, error) {
 	if wd, ok := deploy.(deployer.WeightedDeployer); ok {
 		canaryWeighted = wd
 	}
-	canarySvc := service.NewCanaryService(st.Apps, st.AppCanaries, appDeployer, canaryWeighted)
+	canarySvc := service.NewCanaryService(st.Apps, st.AppCanaries, st.AppDeploys, appDeployer, canaryWeighted)
 
 	runs := NewRunCoordinator(st)
 

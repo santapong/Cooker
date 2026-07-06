@@ -69,6 +69,38 @@ func TestCanaryManifest_RendersBothTracksAndService(t *testing.T) {
 	}
 }
 
+// PM26-07-03: the stable Deployment reuses the object the normal deploy
+// created, and Deployment spec.selector is immutable — so the rendered
+// stable selector must stay exactly {app: <name>}, byte-identical to
+// what service.defaultKubernetesManifest emits (pinned by
+// TestDefaultKubernetesManifest_SelectorIsAppOnly on the service side).
+// The canary Deployment is a new object and keeps track in its selector.
+func TestCanaryManifest_StableSelectorMatchesNormalDeploy(t *testing.T) {
+	m := canaryManifest("Shop App", "reg/shop:v1", "reg/shop:v2", 1, 3)
+	docs := strings.Split(m, "---\n")
+	if len(docs) < 3 {
+		t.Fatalf("want 3 docs (stable, canary, service), got %d", len(docs))
+	}
+	stable, canary := docs[0], docs[1]
+
+	if want := "matchLabels: {app: shop-app}\n"; !strings.Contains(stable, want) {
+		t.Errorf("stable Deployment selector must be exactly %q (immutable, set by the normal deploy)\n---\n%s", want, stable)
+	}
+	if strings.Contains(stable[strings.Index(stable, "selector"):strings.Index(stable, "template")], "track") {
+		t.Errorf("stable Deployment selector must not contain track — spec.selector is immutable and the normal deploy created it without track\n---\n%s", stable)
+	}
+	if want := "matchLabels: {app: shop-app, track: canary}\n"; !strings.Contains(canary, want) {
+		t.Errorf("canary Deployment selector should scope to its own track\n---\n%s", canary)
+	}
+	// Both pod templates still carry track so operators can tell the
+	// sides apart and the Service (selector {app}) spans both.
+	for name, doc := range map[string]string{"stable": stable, "canary": canary} {
+		if !strings.Contains(doc, "track: "+name) {
+			t.Errorf("%s pod template should carry its track label\n---\n%s", name, doc)
+		}
+	}
+}
+
 func TestWeightedDeployerInterface(t *testing.T) {
 	// The K8s deployers advertise the weighted capability...
 	if _, ok := any(NewClientGo("")).(WeightedDeployer); !ok {

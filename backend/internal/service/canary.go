@@ -42,6 +42,13 @@ type canaryImageBuilder interface {
 	BuildAndPushImage(ctx context.Context, app *model.App, runID string, logW io.Writer) (string, *model.Pipeline, *model.PipelineRun, error)
 }
 
+// canaryDeployHistory is the narrow AppDeploy-store slice used to
+// resolve the image an app is currently serving (the canary's rollback
+// target). store.AppDeployStore satisfies it. nil disables the source.
+type canaryDeployHistory interface {
+	ListByApp(ctx context.Context, appID string, limit int) ([]*model.AppDeploy, error)
+}
+
 // CanaryService orchestrates canary deployments (OR-1). It builds the
 // new image, establishes a weighted traffic split via a WeightedDeployer,
 // records the live AppCanary state, and either auto-promotes after the
@@ -50,6 +57,7 @@ type canaryImageBuilder interface {
 type CanaryService struct {
 	apps     canaryAppStore
 	canaries store.AppCanaryStore
+	deploys  canaryDeployHistory
 	builder  canaryImageBuilder
 	// weighted is the traffic-splitting deployer. nil when the configured
 	// deployer can't split traffic (e.g. Noop) — Start then returns
@@ -82,11 +90,13 @@ func WithCanaryClock(now func() time.Time) CanaryOption {
 
 // NewCanaryService wires the service. weighted may be nil when the
 // configured deployer cannot split traffic; Start then surfaces
-// ErrCanaryUnsupported.
-func NewCanaryService(apps canaryAppStore, canaries store.AppCanaryStore, builder canaryImageBuilder, weighted deployer.WeightedDeployer, opts ...CanaryOption) *CanaryService {
+// ErrCanaryUnsupported. deploys may be nil, disabling deploy-history
+// stable-image resolution (the promoted-canary source still applies).
+func NewCanaryService(apps canaryAppStore, canaries store.AppCanaryStore, deploys canaryDeployHistory, builder canaryImageBuilder, weighted deployer.WeightedDeployer, opts ...CanaryOption) *CanaryService {
 	s := &CanaryService{
 		apps:     apps,
 		canaries: canaries,
+		deploys:  deploys,
 		builder:  builder,
 		weighted: weighted,
 		clock:    time.Now,
@@ -135,6 +145,12 @@ func (s *CanaryService) Start(ctx context.Context, app *model.App, runID string,
 	canaryImage, _, _, err := s.builder.BuildAndPushImage(ctx, app, runID, logW)
 	if err != nil {
 		return nil, fmt.Errorf("canary: build image: %w", err)
+	}
+	if stableImage == "" {
+		// No deploy or promote history: split the new image against itself.
+		// Harmless (both tracks serve the same version) and keeps the
+		// rendered Deployment's image field non-empty (PM26-07-01).
+		stableImage = canaryImage
 	}
 
 	if _, err := s.weighted.DeployWeighted(ctx, deployer.WeightedRequest{
@@ -380,16 +396,43 @@ func (s *CanaryService) loadActive(ctx context.Context, appID string) (*model.Ap
 }
 
 // stableImageFor returns the image currently serving the app, used as
-// the canary's rollback target. v1 best-effort: the canary record from
-// the most recent rollout, else the app's deployed image is unknown and
-// we fall back to the canary image (a same-image split, harmless). A
-// richer impl would read the live Deployment; that's a follow-up.
+// the canary's rollback target (PM26-07-01). Two sources, newest wins:
+// the most recently promoted canary's image (a promote means that image
+// took 100% of traffic) and the most recent successful deploy's
+// ImageRef (a plain deploy after a promote supersedes it). Returns ""
+// when the app has no history — Start then splits the new image
+// against itself. A richer impl would read the live Deployment; that
+// remains a follow-up.
 func (s *CanaryService) stableImageFor(ctx context.Context, app *model.App) string {
-	prev, err := s.canaries.GetActive(ctx, app.ID)
-	if err == nil && prev.CanaryImage != "" {
-		return prev.CanaryImage
+	var img string
+	var at time.Time
+	if prev, err := s.canaries.LatestPromoted(ctx, app.ID); err == nil && prev.CanaryImage != "" {
+		img = prev.CanaryImage
+		if prev.ResolvedAt != nil {
+			at = *prev.ResolvedAt
+		}
 	}
-	return ""
+	if s.deploys == nil {
+		return img
+	}
+	// Newest-first; the first successful single-image row is what a plain
+	// deploy last shipped. Compose deploys have an empty ImageRef and are
+	// skipped (not rollback-eligible in v1).
+	rows, err := s.deploys.ListByApp(ctx, app.ID, 10)
+	if err != nil {
+		s.logger.Warn("canary: stable-image deploy-history lookup failed", "app", app.ID, "err", err)
+		return img
+	}
+	for _, d := range rows {
+		if d.Status != model.RunStatusSuccess || d.ImageRef == "" {
+			continue
+		}
+		if d.CreatedAt.After(at) {
+			img = d.ImageRef
+		}
+		break
+	}
+	return img
 }
 
 // recordFailed persists a terminal failed canary when the split could
