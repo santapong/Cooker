@@ -46,7 +46,7 @@ func canaryRouter(h *Handler) *gin.Engine {
 
 // wireCanary attaches a CanaryService to h. weighted nil => unsupported.
 func wireCanary(h *Handler, weighted deployer.WeightedDeployer) {
-	h.Canary = service.NewCanaryService(h.Store.Apps, h.Store.AppCanaries, canaryBuilderStub{}, weighted)
+	h.Canary = service.NewCanaryService(h.Store.Apps, h.Store.AppCanaries, h.Store.AppDeploys, canaryBuilderStub{}, weighted)
 }
 
 func seedCanaryApp(t *testing.T, h *Handler) *model.App {

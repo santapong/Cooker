@@ -167,6 +167,11 @@ type AppCanaryStore interface {
 	// ListProgressing returns every canary still in the progressing state
 	// across all apps, oldest-first. Backs the auto-promote sweep.
 	ListProgressing(ctx context.Context) ([]*model.AppCanary, error)
+	// LatestPromoted returns the app's most recently promoted canary
+	// (by resolved_at), or ErrNotFound when the app has never promoted
+	// one. Backs stable-image resolution: after a promote, the promoted
+	// canary image is what the app is serving (PM26-07-01).
+	LatestPromoted(ctx context.Context, appID string) (*model.AppCanary, error)
 }
 
 // AuditQuery filters an audit-trail read (roadmap M5). Zero values

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/store"
@@ -144,5 +145,37 @@ func TestAppStore_CanaryConfigRoundTrip(t *testing.T) {
 	}
 	if gotPlain.Canary.Strategy != model.DeployStrategyRolling {
 		t.Errorf("empty canary config should normalize to rolling, got %q", gotPlain.Canary.Strategy)
+	}
+}
+
+func TestAppCanaryStore_LatestPromoted(t *testing.T) {
+	st := New()
+	ctx := context.Background()
+
+	// No promoted history → ErrNotFound.
+	if _, err := st.AppCanaries.LatestPromoted(ctx, "a1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("empty store: want ErrNotFound, got %v", err)
+	}
+
+	older, newer := time.Now().Add(-2*time.Hour), time.Now().Add(-time.Hour)
+	for _, c := range []*model.AppCanary{
+		{ID: "c1", AppID: "a1", CanaryImage: "reg/app:v1", Status: model.CanaryPromoted, ResolvedAt: &older},
+		{ID: "c2", AppID: "a1", CanaryImage: "reg/app:v2", Status: model.CanaryPromoted, ResolvedAt: &newer},
+		// Aborted and failed rollouts never became the serving image.
+		{ID: "c3", AppID: "a1", CanaryImage: "reg/app:bad", Status: model.CanaryAborted, ResolvedAt: &newer},
+		// Another app's promote must not bleed into a1's resolution.
+		{ID: "c4", AppID: "a2", CanaryImage: "reg/other:v9", Status: model.CanaryPromoted, ResolvedAt: &newer},
+	} {
+		if err := st.AppCanaries.Create(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := st.AppCanaries.LatestPromoted(ctx, "a1")
+	if err != nil {
+		t.Fatalf("latest promoted: %v", err)
+	}
+	if got.ID != "c2" || got.CanaryImage != "reg/app:v2" {
+		t.Errorf("want newest promoted c2 (reg/app:v2), got %s (%s)", got.ID, got.CanaryImage)
 	}
 }

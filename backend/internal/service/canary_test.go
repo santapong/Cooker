@@ -70,7 +70,7 @@ func newCanaryFixture(t *testing.T, app *model.App, weighted deployer.WeightedDe
 		t.Fatal(err)
 	}
 	b := &fakeBuilder{image: "reg/shop:new"}
-	svc := NewCanaryService(st.Apps, st.AppCanaries, b, weighted, opts...)
+	svc := NewCanaryService(st.Apps, st.AppCanaries, st.AppDeploys, b, weighted, opts...)
 	return svc, st
 }
 
@@ -120,7 +120,7 @@ func TestCanary_StartNilWeightedDeployerUnsupported(t *testing.T) {
 	app := canaryApp()
 	st := memory.New()
 	_ = st.Apps.Create(context.Background(), app)
-	svc := NewCanaryService(st.Apps, st.AppCanaries, &fakeBuilder{image: "reg/shop:new"}, nil)
+	svc := NewCanaryService(st.Apps, st.AppCanaries, st.AppDeploys, &fakeBuilder{image: "reg/shop:new"}, nil)
 	_, err := svc.Start(context.Background(), app, "run1", io.Discard)
 	if !errors.Is(err, ErrCanaryUnsupported) {
 		t.Fatalf("nil weighted deployer must yield ErrCanaryUnsupported, got %v", err)
@@ -271,5 +271,82 @@ func TestCanary_StartFailedSplitRecordsFailedState(t *testing.T) {
 	// A failed-state row is recorded for the UI; it is terminal (not active).
 	if _, err := st.AppCanaries.GetActive(context.Background(), "app1"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("failed canary must be terminal, got active: %v", err)
+	}
+}
+
+// PM26-07-01 pins: stableImageFor must resolve a real serving image —
+// the original implementation queried GetActive (guaranteed empty at
+// that point in Start) and returned "", rendering the stable Deployment
+// with a blank image and leaving Abort with no rollback target.
+
+func TestCanary_StartWithNoHistorySplitsCanaryImageAgainstItself(t *testing.T) {
+	app := canaryApp()
+	fw := &fakeWeighted{}
+	svc, _ := newCanaryFixture(t, app, fw)
+
+	c, err := svc.Start(context.Background(), app, "run1", io.Discard)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if len(fw.calls) == 0 {
+		t.Fatal("weighted deploy never called")
+	}
+	if got := fw.calls[0].StableImage; got == "" {
+		t.Fatal("stable image must never be empty — an empty image is rejected by the API server")
+	} else if got != "reg/shop:new" {
+		t.Errorf("no history: stable should fall back to the canary image, got %q", got)
+	}
+	if c.StableImage != "reg/shop:new" {
+		t.Errorf("persisted StableImage = %q, want canary-image fallback", c.StableImage)
+	}
+}
+
+func TestCanary_StartUsesLatestPromotedImageAsStable(t *testing.T) {
+	app := canaryApp()
+	fw := &fakeWeighted{}
+	svc, st := newCanaryFixture(t, app, fw)
+
+	// A previous rollout was promoted: its canary image is what serves.
+	old := time.Now().Add(-time.Hour)
+	if err := st.AppCanaries.Create(context.Background(), &model.AppCanary{
+		ID: "prev", AppID: app.ID, CanaryImage: "reg/shop:v1", StableImage: "reg/shop:v0",
+		Status: model.CanaryPromoted, ResolvedAt: &old,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Start(context.Background(), app, "run2", io.Discard); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if got := fw.calls[0].StableImage; got != "reg/shop:v1" {
+		t.Errorf("stable image = %q, want the promoted image reg/shop:v1", got)
+	}
+}
+
+func TestCanary_StartPrefersNewerDeployOverOlderPromote(t *testing.T) {
+	app := canaryApp()
+	fw := &fakeWeighted{}
+	svc, st := newCanaryFixture(t, app, fw)
+
+	promoted := time.Now().Add(-2 * time.Hour)
+	if err := st.AppCanaries.Create(context.Background(), &model.AppCanary{
+		ID: "prev", AppID: app.ID, CanaryImage: "reg/shop:v1",
+		Status: model.CanaryPromoted, ResolvedAt: &promoted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A plain deploy shipped after that promote — it supersedes it.
+	if err := st.AppDeploys.Create(context.Background(), &model.AppDeploy{
+		ID: "d1", AppID: app.ID, ImageRef: "reg/shop:v2",
+		Status: model.RunStatusSuccess, CreatedAt: time.Now().Add(-time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Start(context.Background(), app, "run3", io.Discard); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if got := fw.calls[0].StableImage; got != "reg/shop:v2" {
+		t.Errorf("stable image = %q, want the newer deploy's reg/shop:v2", got)
 	}
 }
