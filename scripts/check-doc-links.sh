@@ -22,10 +22,12 @@ set -euo pipefail
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
+# Untracked-but-not-ignored files are included so a pre-`git add` run
+# can't silently skip a brand-new doc.
 if [ $# -gt 0 ]; then
-  mapfile -t files < <(git ls-files -- "$@" | grep -E '\.md$' || true)
+  mapfile -t files < <({ git ls-files -- "$@"; git ls-files --others --exclude-standard -- "$@"; } | grep -E '\.md$' | sort -u || true)
 else
-  mapfile -t files < <(git ls-files -- '*.md')
+  mapfile -t files < <({ git ls-files -- '*.md'; git ls-files --others --exclude-standard -- '*.md'; } | sort -u)
 fi
 
 broken=0
