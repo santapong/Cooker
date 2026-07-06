@@ -50,7 +50,7 @@ What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-
 Twelve adversarially-verified findings from [`docs/audits/2026-07-post-merge-audit.md`](docs/audits/2026-07-post-merge-audit.md) (IDs `PM26-07-01..12`), in recommended fix order:
 
 1. ✅ **Canary start/rollback batch** — `PM26-07-01` + `PM26-07-03` closed by 3b06563 (PR #125): real stable-image resolution (LatestPromoted + deploy history, canary-image fallback) and selector parity with the normal deploy, pinned by two-sided manifest tests. The envtest integration test remains open (no control-plane binaries in the fix sandbox) — tracked with UAT Scenario 1b below.
-2. **Canary sweeper/concurrency batch (M)** — `PM26-07-02` (per-replica sweeper, no CAS on terminal transition), `PM26-07-05` (unbounded per-tick context), `PM26-07-06` (Start mutates cluster before claiming the unique index).
+2. ✅ **Canary sweeper/concurrency batch** — `PM26-07-02` (CAS `ClaimTerminal` on the terminal transition, claimed before the K8s call), `PM26-07-05` (per-tick `context.WithTimeout` in the sweep), `PM26-07-06` (Start reserves a `pending` row before build/deploy; migration 026 widens the unique index) — closed by PR-2.
 3. **Canary lifecycle batch (S)** — `PM26-07-04` (health gate probes app, not canary workload), `PM26-07-07` (app delete mid-canary orphans the split), `PM26-07-11` (promote/abort missing the governance admission gate).
 4. **Cloud-inventory cache batch (S)** — `PM26-07-08` (billed-API stampede, needs singleflight), `PM26-07-09` (stale fetch overwrites newer refresh), `PM26-07-12` (error cached as good snapshot for full TTL).
 5. **Feedback sanitization (S)** — `PM26-07-10` (markdown/@-mention injection via OIDC claims into the GitHub issue body).

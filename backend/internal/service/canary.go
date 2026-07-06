@@ -142,18 +142,38 @@ func (s *CanaryService) Start(ctx context.Context, app *model.App, runID string,
 		return nil, ErrCanaryUnsupported
 	}
 
-	// Reject early if a canary is already progressing (the store's unique
-	// index is the backstop, but a clear 409 before building is friendlier).
-	if _, err := s.canaries.GetActive(ctx, app.ID); err == nil {
-		return nil, ErrCanaryInFlight
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return nil, fmt.Errorf("canary: check active: %w", err)
+	// Reserve the one-canary-per-app slot FIRST with a pending row, before
+	// building or touching the cluster (PM26-07-06). The partial unique
+	// index (migration 026, covering pending+progressing) serializes
+	// concurrent Starts: the loser's Create hits ErrConflict → 409 and
+	// never mutates the cluster. This replaces the old check-then-act
+	// (GetActive pre-check + a Create after the deploy) that let two
+	// Starts both deploy before one 409'd.
+	now := s.clock()
+	c := &model.AppCanary{
+		ID:                  uuid.NewString(),
+		AppID:               app.ID,
+		RunID:               runID,
+		Weight:              cfg.Weight,
+		Status:              model.CanaryPending,
+		AutoPromote:         cfg.AutoPromote,
+		HealthWindowSeconds: cfg.HealthWindowSeconds,
+		Healthy:             true,
+		Message:             "starting canary",
+		StartedAt:           now,
+	}
+	if err := s.canaries.Create(ctx, c); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return nil, ErrCanaryInFlight
+		}
+		return nil, fmt.Errorf("canary: reserve slot: %w", err)
 	}
 
 	stableImage := s.stableImageFor(ctx, app)
 
 	canaryImage, _, _, err := s.builder.BuildAndPushImage(ctx, app, runID, logW)
 	if err != nil {
+		s.failPending(ctx, app, c, "build image: "+err.Error())
 		return nil, fmt.Errorf("canary: build image: %w", err)
 	}
 	if stableImage == "" {
@@ -171,38 +191,24 @@ func (s *CanaryService) Start(ctx context.Context, app *model.App, runID string,
 		Weight:      cfg.Weight,
 		LogWriter:   logW,
 	}); err != nil {
-		// The split couldn't be established — record a failed canary so the
-		// UI shows why rather than leaving no trace.
-		s.recordFailed(ctx, app, runID, stableImage, canaryImage, cfg, err)
+		s.failPending(ctx, app, c, "establish split: "+err.Error())
 		if errors.Is(err, deployer.ErrCanaryUnsupported) {
 			return nil, ErrCanaryUnsupported
 		}
 		return nil, fmt.Errorf("canary: establish split: %w", err)
 	}
 
-	now := s.clock()
-	c := &model.AppCanary{
-		ID:                  uuid.NewString(),
-		AppID:               app.ID,
-		RunID:               runID,
-		StableImage:         stableImage,
-		CanaryImage:         canaryImage,
-		Weight:              cfg.Weight,
-		Status:              model.CanaryProgressing,
-		AutoPromote:         cfg.AutoPromote,
-		HealthWindowSeconds: cfg.HealthWindowSeconds,
-		Healthy:             true,
-		Message:             fmt.Sprintf("canary at %d%%", cfg.Weight),
-		StartedAt:           now,
-	}
+	// Split is live — promote the reserved row to progressing with the
+	// resolved images and the auto-promote deadline.
+	c.StableImage = stableImage
+	c.CanaryImage = canaryImage
+	c.Status = model.CanaryProgressing
+	c.Message = fmt.Sprintf("canary at %d%%", cfg.Weight)
 	if cfg.AutoPromote {
 		t := now.Add(time.Duration(cfg.HealthWindowSeconds) * time.Second)
 		c.PromoteAfter = &t
 	}
-	if err := s.canaries.Create(ctx, c); err != nil {
-		if errors.Is(err, store.ErrConflict) {
-			return nil, ErrCanaryInFlight
-		}
+	if err := s.canaries.Update(ctx, c); err != nil {
 		return nil, fmt.Errorf("canary: persist state: %w", err)
 	}
 	s.logger.Info("canary started", "app", app.ID, "weight", cfg.Weight,
@@ -218,6 +224,17 @@ func (s *CanaryService) Promote(ctx context.Context, appID string) (*model.AppCa
 	app, c, err := s.loadActive(ctx, appID)
 	if err != nil {
 		return nil, err
+	}
+	// Claim the transition BEFORE mutating the cluster (PM26-07-02). If a
+	// concurrent sweeper (another replica) or operator already resolved
+	// this canary, we lose the CAS and must not issue a second, possibly
+	// contradictory, DeployWeighted — return the resolved row as a no-op.
+	won, err := s.canaries.ClaimTerminal(ctx, c.ID, model.CanaryPromoted)
+	if err != nil {
+		return nil, fmt.Errorf("canary: claim promote: %w", err)
+	}
+	if !won {
+		return s.canaries.Get(ctx, c.ID)
 	}
 	if _, err := s.weighted.DeployWeighted(ctx, deployer.WeightedRequest{
 		Namespace:   app.DeployTarget.Namespace,
@@ -251,6 +268,15 @@ func (s *CanaryService) Abort(ctx context.Context, appID, reason string) (*model
 	app, c, err := s.loadActive(ctx, appID)
 	if err != nil {
 		return nil, err
+	}
+	// Same CAS guard as Promote (PM26-07-02): claim the transition before
+	// scaling the split down, and no-op if another actor already resolved.
+	won, err := s.canaries.ClaimTerminal(ctx, c.ID, model.CanaryAborted)
+	if err != nil {
+		return nil, fmt.Errorf("canary: claim abort: %w", err)
+	}
+	if !won {
+		return s.canaries.Get(ctx, c.ID)
 	}
 	if _, err := s.weighted.DeployWeighted(ctx, deployer.WeightedRequest{
 		Namespace:   app.DeployTarget.Namespace,
@@ -312,9 +338,20 @@ func (s *CanaryService) SweepAutoPromote(ctx context.Context) {
 		if !c.AutoPromote || c.PromoteAfter == nil || now.Before(*c.PromoteAfter) {
 			continue
 		}
-		s.evaluate(ctx, c)
+		// Bound each per-canary evaluation so a hung K8s Patch or wedged
+		// kubectl child can't stall the whole sweep loop (and every other
+		// progressing canary) indefinitely (PM26-07-05). Mirrors the
+		// audit-retention sweep's per-pass timeout.
+		evalCtx, cancel := context.WithTimeout(ctx, canaryEvalTimeout)
+		s.evaluate(evalCtx, c)
+		cancel()
 	}
 }
+
+// canaryEvalTimeout bounds a single canary's probe + promote/abort in
+// the sweep. Generous enough for a real K8s apply, short enough that
+// one stuck canary doesn't hold the loop past the next tick.
+const canaryEvalTimeout = 30 * time.Second
 
 // defaultCanarySweepInterval is how often the auto-promote loop runs.
 // Short enough that an auto-promote fires within a tick of its window
@@ -447,28 +484,22 @@ func (s *CanaryService) stableImageFor(ctx context.Context, app *model.App) stri
 	return img
 }
 
-// recordFailed persists a terminal failed canary when the split could
-// not be established. Best-effort: a write failure is logged, not
-// surfaced (the caller already has the real establish error).
-func (s *CanaryService) recordFailed(ctx context.Context, app *model.App, runID, stableImage, canaryImage string, cfg model.CanaryConfig, cause error) {
+// failPending flips the reserved (pending) row to a terminal failed
+// state when the build or split could not be established. Updating the
+// same row — rather than creating a second one — means a failed Start
+// never orphans the one-per-app slot (the widened unique index would
+// otherwise block the next Start). Best-effort: a write failure is
+// logged, not surfaced (the caller already has the real error).
+func (s *CanaryService) failPending(ctx context.Context, app *model.App, c *model.AppCanary, reason string) {
 	now := s.clock()
-	c := &model.AppCanary{
-		ID:                  uuid.NewString(),
-		AppID:               app.ID,
-		RunID:               runID,
-		StableImage:         stableImage,
-		CanaryImage:         canaryImage,
-		Weight:              0,
-		Status:              model.CanaryFailed,
-		AutoPromote:         cfg.AutoPromote,
-		HealthWindowSeconds: cfg.HealthWindowSeconds,
-		Healthy:             false,
-		Message:             "failed to establish canary: " + cause.Error(),
-		StartedAt:           now,
-		ResolvedAt:          &now,
-	}
-	if err := s.canaries.Create(ctx, c); err != nil {
+	c.Status = model.CanaryFailed
+	c.Weight = 0
+	c.Healthy = false
+	c.Message = "failed to establish canary: " + reason
+	c.PromoteAfter = nil
+	c.ResolvedAt = &now
+	if err := s.canaries.Update(ctx, c); err != nil {
 		s.logger.Warn("canary: record failed state", "app", app.ID, "err", err)
 	}
-	NotifyCanary(s.notifier, app, c, notifier.EventCanaryFailed, cause.Error())
+	NotifyCanary(s.notifier, app, c, notifier.EventCanaryFailed, reason)
 }

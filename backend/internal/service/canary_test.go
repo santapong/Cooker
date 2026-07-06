@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,7 +15,10 @@ import (
 )
 
 // fakeWeighted records DeployWeighted calls and can be told to fail.
+// Guarded by a mutex so the concurrency tests (PM26-07-02) can assert
+// the call count without racing the recorder.
 type fakeWeighted struct {
+	mu      sync.Mutex
 	calls   []deployer.WeightedRequest
 	failNow bool
 }
@@ -24,14 +28,25 @@ func (f *fakeWeighted) Deploy(_ context.Context, _ deployer.Request) (deployer.R
 }
 
 func (f *fakeWeighted) DeployWeighted(_ context.Context, req deployer.WeightedRequest) (deployer.WeightedResult, error) {
+	f.mu.Lock()
 	f.calls = append(f.calls, req)
-	if f.failNow {
+	fail := f.failNow
+	f.mu.Unlock()
+	if fail {
 		return deployer.WeightedResult{}, errors.New("apply boom")
 	}
 	return deployer.WeightedResult{CanaryReplicas: 1, StableReplicas: 3}, nil
 }
 
+func (f *fakeWeighted) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
 func (f *fakeWeighted) lastWeight() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if len(f.calls) == 0 {
 		return -1
 	}
@@ -348,5 +363,91 @@ func TestCanary_StartPrefersNewerDeployOverOlderPromote(t *testing.T) {
 	}
 	if got := fw.calls[0].StableImage; got != "reg/shop:v2" {
 		t.Errorf("stable image = %q, want the newer deploy's reg/shop:v2", got)
+	}
+}
+
+// PM26-07-02: concurrent terminal transitions must resolve exactly once.
+// Two goroutines race Promote vs Abort on the same progressing canary;
+// the store CAS (ClaimTerminal) must let exactly one win, so exactly
+// one extra DeployWeighted lands beyond the one Start issued.
+func TestCanary_ConcurrentPromoteAbortResolvesOnce(t *testing.T) {
+	app := canaryApp()
+	app.Canary.AutoPromote = false // manual: no sweeper interference
+	fw := &fakeWeighted{}
+	svc, st := newCanaryFixture(t, app, fw)
+	started, err := svc.Start(context.Background(), app, "run1", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fw.count() != 1 {
+		t.Fatalf("Start should issue exactly 1 weighted deploy, got %d", fw.count())
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); _, _ = svc.Promote(context.Background(), "app1") }()
+	go func() { defer wg.Done(); _, _ = svc.Abort(context.Background(), "app1", "operator") }()
+	wg.Wait()
+
+	// Exactly one of promote/abort performed a cluster change.
+	if got := fw.count(); got != 2 {
+		t.Errorf("expected exactly 1 terminal DeployWeighted (total 2), got total %d", got)
+	}
+	// The single row is terminal.
+	c, err := st.AppCanaries.Get(context.Background(), started.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Status.IsTerminal() {
+		t.Errorf("canary must be terminal after the race, got %s", c.Status)
+	}
+	if _, err := st.AppCanaries.GetActive(context.Background(), "app1"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("no canary should remain active, got %v", err)
+	}
+}
+
+// PM26-07-06: Start reserves the slot with a pending row before building.
+// A build failure flips that row to failed (not a second row) and frees
+// the one-per-app slot so the next Start succeeds.
+func TestCanary_StartBuildFailureFreesSlot(t *testing.T) {
+	app := canaryApp()
+	st := memory.New()
+	if err := st.Apps.Create(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	failing := &fakeBuilder{err: errors.New("clone exploded")}
+	svc := NewCanaryService(st.Apps, st.AppCanaries, st.AppDeploys, failing, &fakeWeighted{})
+
+	if _, err := svc.Start(context.Background(), app, "run1", io.Discard); err == nil {
+		t.Fatal("expected Start to fail when the build fails")
+	}
+	// No active canary, and the slot is free for a retry.
+	if _, err := st.AppCanaries.GetActive(context.Background(), "app1"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("failed Start must leave no active canary, got %v", err)
+	}
+	// A subsequent Start with a working builder must NOT hit ErrCanaryInFlight.
+	svcOK := NewCanaryService(st.Apps, st.AppCanaries, st.AppDeploys,
+		&fakeBuilder{image: "reg/shop:new"}, &fakeWeighted{})
+	if _, err := svcOK.Start(context.Background(), app, "run2", io.Discard); err != nil {
+		t.Fatalf("retry after a failed Start must succeed, got %v", err)
+	}
+}
+
+// PM26-07-06: the pending row is created before the split, so a second
+// concurrent Start (pending vs pending) is rejected by the unique slot.
+func TestCanary_StartPendingRowSerializes(t *testing.T) {
+	app := canaryApp()
+	fw := &fakeWeighted{}
+	svc, st := newCanaryFixture(t, app, fw)
+	if _, err := svc.Start(context.Background(), app, "run1", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	// The row progressed past pending to progressing after a successful split.
+	c, err := st.AppCanaries.GetActive(context.Background(), "app1")
+	if err != nil {
+		t.Fatalf("expected an active (progressing) canary, got %v", err)
+	}
+	if c.Status != model.CanaryProgressing {
+		t.Errorf("after a successful Start the row should be progressing, got %s", c.Status)
 	}
 }

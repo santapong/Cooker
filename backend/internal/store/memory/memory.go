@@ -756,12 +756,19 @@ type appCanaries struct {
 	m  map[string]*model.AppCanary
 }
 
+// canaryActive reports whether a status occupies the one-per-app slot
+// guarded by the partial unique index (migration 026): pending or
+// progressing. Terminal rows don't count.
+func canaryActive(st model.CanaryStatus) bool {
+	return st == model.CanaryPending || st == model.CanaryProgressing
+}
+
 func (s *appCanaries) Create(_ context.Context, c *model.AppCanary) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if c.Status == model.CanaryProgressing {
+	if canaryActive(c.Status) {
 		for _, existing := range s.m {
-			if existing.AppID == c.AppID && existing.Status == model.CanaryProgressing {
+			if existing.AppID == c.AppID && canaryActive(existing.Status) {
 				return fmt.Errorf("app %s: canary in flight: %w", c.AppID, store.ErrConflict)
 			}
 		}
@@ -796,6 +803,21 @@ func (s *appCanaries) GetActive(_ context.Context, appID string) (*model.AppCana
 		}
 	}
 	return nil, fmt.Errorf("app %s: no active canary: %w", appID, store.ErrNotFound)
+}
+
+func (s *appCanaries) ClaimTerminal(_ context.Context, id string, to model.CanaryStatus) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.m[id]
+	if !ok {
+		return false, fmt.Errorf("app canary %s: %w", id, store.ErrNotFound)
+	}
+	if c.Status != model.CanaryProgressing {
+		return false, nil // already resolved by a concurrent actor
+	}
+	c.Status = to
+	c.UpdatedAt = time.Now()
+	return true, nil
 }
 
 func (s *appCanaries) LatestPromoted(_ context.Context, appID string) (*model.AppCanary, error) {

@@ -164,6 +164,13 @@ type AppCanaryStore interface {
 	// promote_after, resolved_at) of an existing canary. ErrNotFound if
 	// the row is gone.
 	Update(ctx context.Context, c *model.AppCanary) error
+	// ClaimTerminal atomically transitions a progressing canary to a
+	// terminal status, returning true iff THIS caller won the transition.
+	// A false return means the row was already resolved by a concurrent
+	// actor (a sweeper on another replica, or an operator) — the caller
+	// must NOT perform the traffic change. Guards the promote/abort race
+	// (PM26-07-02). ErrNotFound if the row does not exist at all.
+	ClaimTerminal(ctx context.Context, id string, to model.CanaryStatus) (bool, error)
 	// ListProgressing returns every canary still in the progressing state
 	// across all apps, oldest-first. Backs the auto-promote sweep.
 	ListProgressing(ctx context.Context) ([]*model.AppCanary, error)

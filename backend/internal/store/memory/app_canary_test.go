@@ -179,3 +179,31 @@ func TestAppCanaryStore_LatestPromoted(t *testing.T) {
 		t.Errorf("want newest promoted c2 (reg/app:v2), got %s (%s)", got.ID, got.CanaryImage)
 	}
 }
+
+func TestAppCanaryStore_ClaimTerminal(t *testing.T) {
+	st := New()
+	ctx := context.Background()
+	c := newProgressingCanary("c1", "a1")
+	if err := st.AppCanaries.Create(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+
+	// First claim wins.
+	won, err := st.AppCanaries.ClaimTerminal(ctx, "c1", model.CanaryPromoted)
+	if err != nil || !won {
+		t.Fatalf("first claim should win: won=%v err=%v", won, err)
+	}
+	// Second claim loses (already terminal).
+	won, err = st.AppCanaries.ClaimTerminal(ctx, "c1", model.CanaryAborted)
+	if err != nil || won {
+		t.Fatalf("second claim must lose: won=%v err=%v", won, err)
+	}
+	got, _ := st.AppCanaries.Get(ctx, "c1")
+	if got.Status != model.CanaryPromoted {
+		t.Errorf("status should stay promoted (first winner), got %s", got.Status)
+	}
+	// Missing id → ErrNotFound.
+	if _, err := st.AppCanaries.ClaimTerminal(ctx, "nope", model.CanaryAborted); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("claim on missing id should be ErrNotFound, got %v", err)
+	}
+}

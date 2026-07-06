@@ -115,6 +115,13 @@ func (e *CanaryConfigError) Error() string { return e.Field + ": " + e.Msg }
 type CanaryStatus string
 
 const (
+	// CanaryPending: the row is claimed but the weighted split is not yet
+	// established — the brief window inside Start between reserving the
+	// one-canary-per-app slot and building/deploying. Created first so the
+	// partial unique index serializes concurrent Starts before either
+	// mutates the cluster (PM26-07-06). Transitions to progressing on a
+	// successful split, or failed if the build/deploy errors.
+	CanaryPending CanaryStatus = "pending"
 	// CanaryProgressing: the new version is live at the configured weight
 	// and being evaluated. This is the state during the health window and
 	// while a manual canary waits for an operator decision.

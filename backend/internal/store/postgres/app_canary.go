@@ -73,6 +73,32 @@ func (s *AppCanaryStore) GetActive(ctx context.Context, appID string) (*model.Ap
 	return c, err
 }
 
+func (s *AppCanaryStore) ClaimTerminal(ctx context.Context, id string, to model.CanaryStatus) (bool, error) {
+	// The status='progressing' predicate is the compare in the
+	// compare-and-swap: only one concurrent UPDATE can move the row off
+	// 'progressing', so exactly one caller sees RowsAffected==1.
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE app_canaries SET status=$2, updated_at=NOW()
+		  WHERE id=$1 AND status='progressing'`, id, string(to))
+	if err != nil {
+		return false, fmt.Errorf("claiming canary terminal: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return true, nil
+	}
+	// 0 rows: either already terminal (lost the race) or the id is gone.
+	// Distinguish so a genuinely-missing row surfaces ErrNotFound.
+	var exists bool
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM app_canaries WHERE id=$1)`, id).Scan(&exists); err != nil {
+		return false, fmt.Errorf("claiming canary terminal (exists check): %w", err)
+	}
+	if !exists {
+		return false, fmt.Errorf("app canary %s: %w", id, store.ErrNotFound)
+	}
+	return false, nil
+}
+
 func (s *AppCanaryStore) LatestPromoted(ctx context.Context, appID string) (*model.AppCanary, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT `+appCanaryColumns+`
