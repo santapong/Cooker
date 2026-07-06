@@ -45,6 +45,18 @@ The chart can't make these decisions for you:
 
 What's left, organised by priority. All "blocked-on-bigger-PR" items have a one-line rationale for why they didn't ship in PR #17 and what unblocks them.
 
+### Post-merge audit 2026-07-06 — highest priority (canary is not usable until the first batch lands)
+
+Twelve adversarially-verified findings from [`docs/audits/2026-07-post-merge-audit.md`](docs/audits/2026-07-post-merge-audit.md) (IDs `PM26-07-01..12`), in recommended fix order:
+
+1. **Canary start/rollback batch (S/M)** — `PM26-07-01` (stable image always empty → every `Start` fails, no rollback target) + `PM26-07-03` (immutable `spec.selector` mutation → fails on previously-deployed apps). One PR, plus an envtest/fake-API-server integration test so a mocked deployer can't hide this class again.
+2. **Canary sweeper/concurrency batch (M)** — `PM26-07-02` (per-replica sweeper, no CAS on terminal transition), `PM26-07-05` (unbounded per-tick context), `PM26-07-06` (Start mutates cluster before claiming the unique index).
+3. **Canary lifecycle batch (S)** — `PM26-07-04` (health gate probes app, not canary workload), `PM26-07-07` (app delete mid-canary orphans the split), `PM26-07-11` (promote/abort missing the governance admission gate).
+4. **Cloud-inventory cache batch (S)** — `PM26-07-08` (billed-API stampede, needs singleflight), `PM26-07-09` (stale fetch overwrites newer refresh), `PM26-07-12` (error cached as good snapshot for full TTL).
+5. **Feedback sanitization (S)** — `PM26-07-10` (markdown/@-mention injection via OIDC claims into the GitHub issue body).
+
+UAT Scenario 1b (canary end-to-end) and the `025_canary` live down/up drill close out the batch — neither ran in the audit sandbox (no Docker daemon).
+
 ### Owner-requested (2026-06-11)
 
 #### OR-1 — Pre-release / canary deploy mode (M, needs mini-ADR)
