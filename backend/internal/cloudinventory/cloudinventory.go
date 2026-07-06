@@ -50,6 +50,12 @@ const DefaultTTL = 5 * time.Minute
 // is generous because Cost Explorer in particular can be slow.
 const fetchTimeout = 30 * time.Second
 
+// negativeTTL is the short cache lifetime given to a totally-failed or
+// cancelled fetch (PM26-07-12): an all-providers-errored snapshot must
+// not be served for the full DefaultTTL as if it were good — it retries
+// on the next read after this brief window instead.
+const negativeTTL = 30 * time.Second
+
 // Service aggregates one or more providers behind a TTL cache. Construct
 // with New. A Service with zero providers is valid and reports
 // Enabled=false from Inventory — the dev/unconfigured path.
@@ -62,6 +68,22 @@ type Service struct {
 	mu     sync.Mutex
 	cache  *model.CloudInventory
 	expiry time.Time
+	// gen increments on every Refresh (explicit cache-bust). A fetch
+	// captures gen at its start and only writes the cache if gen is
+	// still current at completion — so a slow in-flight fetch can't
+	// clobber a newer Refresh snapshot (PM26-07-09).
+	gen uint64
+	// inflight is the single in-progress Inventory fetch, if any.
+	// Concurrent cache-miss reads join it instead of each firing their
+	// own (billed) fan-out — a manual singleflight (PM26-07-08).
+	inflight *fetchCall
+}
+
+// fetchCall is one shared in-flight Inventory fetch. Waiters block on
+// done, then read inv.
+type fetchCall struct {
+	done chan struct{}
+	inv  model.CloudInventory
 }
 
 // Option configures a Service.
@@ -140,26 +162,121 @@ func (s *Service) Inventory(ctx context.Context) model.CloudInventory {
 		s.mu.Unlock()
 		return cached
 	}
+	// Cache miss. If a fetch is already running, join it rather than
+	// firing another billed fan-out (singleflight, PM26-07-08).
+	if s.inflight != nil {
+		call := s.inflight
+		s.mu.Unlock()
+		// Wait for the shared fetch, but honour THIS caller's context: a
+		// joiner whose client disconnected shouldn't stay parked for the
+		// leader's full fetch window. On cancellation return the best
+		// snapshot we have rather than blocking.
+		select {
+		case <-call.done:
+			return call.inv
+		case <-ctx.Done():
+			return s.snapshot()
+		}
+	}
+	// Become the leader for this fetch.
+	call := &fetchCall{done: make(chan struct{})}
+	s.inflight = call
+	gen := s.gen
 	s.mu.Unlock()
 
-	inv := s.fetch(ctx)
+	// Clear the in-flight slot and wake joiners even if loadAndStore
+	// panics — otherwise a panic would leave s.inflight non-nil and every
+	// future reader would join a call whose done channel never closes.
+	var inv model.CloudInventory
+	defer func() {
+		s.mu.Lock()
+		s.inflight = nil
+		call.inv = inv
+		close(call.done)
+		s.mu.Unlock()
+	}()
 
-	s.mu.Lock()
-	s.cache = &inv
-	s.expiry = s.now().Add(s.ttl)
-	s.mu.Unlock()
-
+	// The shared fan-out must NOT ride the leader's request context: if the
+	// leader's client disconnects, cancelling its ctx would fail the fetch
+	// for every joiner and poison the cache with an all-errored snapshot.
+	// Detach cancellation (values, e.g. tracing, are preserved); fetch
+	// applies its own fetchTimeout bound.
+	inv = s.loadAndStore(context.WithoutCancel(ctx), gen)
 	return inv
 }
 
+// snapshot returns the current cached inventory if present (even if
+// expired), else a minimal enabled snapshot. Used as the non-blocking
+// fallback when a joining reader's own context is cancelled.
+func (s *Service) snapshot() model.CloudInventory {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cache != nil {
+		return *s.cache
+	}
+	return model.CloudInventory{
+		Enabled:   true,
+		Providers: s.providerNames(),
+		Results:   []model.ProviderInventory{},
+		FetchedAt: s.now().UTC().Format(time.RFC3339),
+	}
+}
+
 // Refresh busts the cache and re-fetches synchronously, returning the
-// fresh snapshot. Backs POST /cloud/refresh.
+// fresh snapshot. Backs POST /cloud/refresh. It bumps the generation and
+// fetches DIRECTLY (bypassing the singleflight join) so an explicit
+// refresh always returns fresh data, never a stale in-flight result.
 func (s *Service) Refresh(ctx context.Context) model.CloudInventory {
 	s.mu.Lock()
 	s.cache = nil
 	s.expiry = time.Time{}
+	s.gen++
+	gen := s.gen
 	s.mu.Unlock()
-	return s.Inventory(ctx)
+	return s.loadAndStore(ctx, gen)
+}
+
+// loadAndStore runs the fan-out and writes the result to the cache iff
+// the generation is still current — a Refresh that raced this fetch
+// (bumping gen) wins, so a slow fetch never clobbers a newer snapshot
+// (PM26-07-09). A totally-failed/cancelled fetch is cached only briefly
+// (negativeTTL) so it retries soon (PM26-07-12).
+func (s *Service) loadAndStore(ctx context.Context, gen uint64) model.CloudInventory {
+	inv := s.fetch(ctx)
+	s.mu.Lock()
+	if s.gen == gen {
+		s.cache = &inv
+		if allProvidersFailed(inv) {
+			// Clamp to the configured TTL: a failed snapshot must never be
+			// cached LONGER than a good one (an operator can set a TTL
+			// below negativeTTL).
+			neg := negativeTTL
+			if s.ttl < neg {
+				neg = s.ttl
+			}
+			s.expiry = s.now().Add(neg)
+		} else {
+			s.expiry = s.now().Add(s.ttl)
+		}
+	}
+	s.mu.Unlock()
+	return inv
+}
+
+// allProvidersFailed reports whether every provider in the snapshot
+// errored (a total failure or a cancelled fetch — each provider records
+// the context error). A partial failure (some providers OK) is a valid
+// snapshot and is cached for the full TTL.
+func allProvidersFailed(inv model.CloudInventory) bool {
+	if len(inv.Results) == 0 {
+		return false
+	}
+	for _, r := range inv.Results {
+		if r.Error == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // fetch fans out to every provider concurrently and aggregates. Each
@@ -170,9 +287,18 @@ func (s *Service) fetch(ctx context.Context) model.CloudInventory {
 	fctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 
-	results := make([]model.ProviderInventory, len(s.providers))
+	// Snapshot the provider set under the lock so the fan-out reads a
+	// stable slice consistent with every other mutex-guarded field
+	// (providers is set once in New in production; tests may swap it).
+	s.mu.Lock()
+	providers := s.providers
+	s.mu.Unlock()
+
+	results := make([]model.ProviderInventory, len(providers))
+	names := make([]model.CloudProvider, len(providers))
 	var wg sync.WaitGroup
-	for i, p := range s.providers {
+	for i, p := range providers {
+		names[i] = p.Name()
 		wg.Add(1)
 		go func(i int, p Provider) {
 			defer wg.Done()
@@ -183,7 +309,7 @@ func (s *Service) fetch(ctx context.Context) model.CloudInventory {
 
 	return model.CloudInventory{
 		Enabled:   true,
-		Providers: s.providerNames(),
+		Providers: names,
 		Results:   results,
 		FetchedAt: s.now().UTC().Format(time.RFC3339),
 	}

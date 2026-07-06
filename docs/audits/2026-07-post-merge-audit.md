@@ -90,7 +90,7 @@ remains a follow-up alongside UAT Scenario 1b.
 - **Failure scenario:** At TTL expiry (or first load), N concurrent GET /api/v1/cloud/inventory or /cloud/costs requests all see an expired cache, all release the mutex, and all call fetch() independently — N full fan-outs including N billed CostExplorer:GetCostAndUsage calls ($0.01 each) plus N EC2/EKS/ECR sweeps. GET routes carry no rate limiter (router.go:198-199), and the POST /refresh limiter is per-user, so several distinct users pressing refresh simultaneously each trigger a separate billed fan-out. The cache exists specifically to protect the paid API (comment at line 42-46) but does not serialize misses.
 - **Suggested fix:** Add singleflight around fetch: while a fetch is in flight, later callers wait on it (e.g. golang.org/x/sync/singleflight or a per-Service in-flight channel guarded by mu) instead of launching their own.
 - **Adversarial verification:** CONFIRMED — Confirmed by direct read of backend/internal/cloudinventory/cloudinventory.go. Inventory() checks the TTL cache under s.mu, but on miss/expiry unlocks at line 143 and calls s.fetch(ctx) at line 145 with no singleflight, no in-flight marker, and no double-checked re-read after reacquiring the lock — so N concurrent goroutines that all observe an expired cache each perform a full provider fan-out. T
-- **Status:** Open
+- **Status:** Closed by PR-4 (cloud-cache-batch4)
 
 ### [PM26-07-09] MEDIUM — Slow in-flight fetch can overwrite a newer Refresh snapshot (stale data re-stamped as fresh)
 
@@ -98,7 +98,7 @@ remains a follow-up alongside UAT Scenario 1b.
 - **Failure scenario:** T0: GET /inventory misses cache and starts fetch A (Cost Explorer is slow; fetchTimeout allows up to 30s). T0+2s: user changes something in AWS and POSTs /cloud/refresh; Refresh busts the cache, runs fetch B, caches the fresh snapshot. T0+20s: fetch A finally completes and unconditionally writes its older snapshot over B with a brand-new 5-minute expiry. The UI that just confirmed a refresh now serves pre-refresh data whose FetchedAt/expiry claim it is the freshest view — the exact 'stale presented as fresh' shape. There is no generation/epoch check on the cache write.
 - **Suggested fix:** Guard the write with a generation counter: record gen under mu before fetching; on completion only install the result if s.gen is unchanged (Refresh increments gen). Falls out naturally if singleflight from finding 1 is added and Refresh joins/invalidate-then-joins the flight.
 - **Adversarial verification:** CONFIRMED — Confirmed by reading /home/user/Cooker/backend/internal/cloudinventory/cloudinventory.go. Inventory() does the cache-miss check and the cache write in two separate mutex sections with s.fetch(ctx) running unlocked in between (lines 137-150), and the write is unconditional — no generation/epoch counter, no singleflight, no expiry comparison. Refresh() (lines 157-163) merely nils the cache and re-en
-- **Status:** Open
+- **Status:** Closed by PR-4 (cloud-cache-batch4)
 
 ### [PM26-07-10] MEDIUM — Markdown/@-mention injection via OIDC identity claims in feedback issue body
 
@@ -122,7 +122,7 @@ remains a follow-up alongside UAT Scenario 1b.
 - **Failure scenario:** fetch() runs under the HTTP request's context (handler passes c.Request.Context(), cloud.go:44). If the browser navigates away or the connection drops mid-fetch, every provider returns 'context canceled'; fetchOne records that as ProviderInventory.Error and Inventory() caches the all-errors snapshot with a fresh 5-minute expiry. Every user then sees 'aws: ... context canceled' error banners (with a current FetchedAt, so it looks authoritative) for up to 5 minutes, until TTL expiry or a write-role user hits POST /refresh. Same applies to any transient throttle/timeout: errors get the identical TTL as successes.
 - **Suggested fix:** Detach the fan-out from the request context (context.Background()+fetchTimeout, since the result is cached for all users anyway), and/or skip caching — or use a short negative-TTL — when every provider (or any provider) errored.
 - **Adversarial verification:** CONFIRMED — The defect is real; I could not refute it. Verified against the source: `handler/cloud.go:44` passes `c.Request.Context()` into `Service.Inventory()`, and Go's http.Server cancels that context when the client disconnects mid-request. In `cloudinventory.go`, `fetch()` (line 170) derives its 30s timeout context from the caller's context, so a client disconnect propagates `context.Canceled` into ever
-- **Status:** Open
+- **Status:** Closed by PR-4 (cloud-cache-batch4)
 
 
 ## Low-severity leads (not adversarially verified)
