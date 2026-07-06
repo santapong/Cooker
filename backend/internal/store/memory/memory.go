@@ -25,6 +25,7 @@ func New() *store.Store {
 		&stageApprovals{m: map[string]*model.StageApproval{}, votes: map[string][]model.StageApprovalVote{}},
 		&apps{m: map[string]*model.App{}},
 		&appDeploys{m: map[string]*model.AppDeploy{}},
+		&appCanaries{m: map[string]*model.AppCanary{}},
 		&auditEvents{},
 		&hosts{m: map[string]*model.Host{}},
 		&registryConfigs{m: map[string]*model.RegistryConfig{}},
@@ -400,7 +401,7 @@ func (s *apps) List(_ context.Context) ([]*model.App, error) {
 	defer s.mu.RUnlock()
 	out := make([]*model.App, 0, len(s.m))
 	for _, a := range s.m {
-		out = append(out, a)
+		out = append(out, normalizeAppCanary(a))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
 	return out, nil
@@ -413,7 +414,7 @@ func (s *apps) Get(_ context.Context, id string) (*model.App, error) {
 	if !ok {
 		return nil, fmt.Errorf("app %s: %w", id, store.ErrNotFound)
 	}
-	return a, nil
+	return normalizeAppCanary(a), nil
 }
 
 func (s *apps) GetByRepo(_ context.Context, repo, branch string) (*model.App, error) {
@@ -421,10 +422,20 @@ func (s *apps) GetByRepo(_ context.Context, repo, branch string) (*model.App, er
 	defer s.mu.RUnlock()
 	for _, a := range s.m {
 		if a.GitHubRepo == repo && a.Branch == branch {
-			return a, nil
+			return normalizeAppCanary(a), nil
 		}
 	}
 	return nil, fmt.Errorf("app %s@%s: %w", repo, branch, store.ErrNotFound)
+}
+
+// normalizeAppCanary returns a (shallow-copied) App with its canary
+// config normalised, so a stored-empty config reads back as an explicit
+// rolling default — matching the Postgres scanApp path. The copy keeps
+// the caller from mutating the stored pointer's CanaryConfig.
+func normalizeAppCanary(a *model.App) *model.App {
+	cp := *a
+	cp.Canary = a.Canary.Normalize()
+	return &cp
 }
 
 func (s *apps) Create(_ context.Context, a *model.App) error {
@@ -735,6 +746,82 @@ func (s *appDeploys) Get(_ context.Context, id string) (*model.AppDeploy, error)
 		return nil, fmt.Errorf("app deploy %s: %w", id, store.ErrNotFound)
 	}
 	return d, nil
+}
+
+// appCanaries is the in-memory canary-state store (OR-1). Mirrors the
+// Postgres impl: at most one progressing canary per app (Create rejects
+// a second with ErrConflict), newest-first history.
+type appCanaries struct {
+	mu sync.RWMutex
+	m  map[string]*model.AppCanary
+}
+
+func (s *appCanaries) Create(_ context.Context, c *model.AppCanary) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c.Status == model.CanaryProgressing {
+		for _, existing := range s.m {
+			if existing.AppID == c.AppID && existing.Status == model.CanaryProgressing {
+				return fmt.Errorf("app %s: canary in flight: %w", c.AppID, store.ErrConflict)
+			}
+		}
+	}
+	if c.StartedAt.IsZero() {
+		c.StartedAt = time.Now()
+	}
+	c.UpdatedAt = c.StartedAt
+	cp := *c
+	s.m[c.ID] = &cp
+	return nil
+}
+
+func (s *appCanaries) Get(_ context.Context, id string) (*model.AppCanary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	c, ok := s.m[id]
+	if !ok {
+		return nil, fmt.Errorf("app canary %s: %w", id, store.ErrNotFound)
+	}
+	cp := *c
+	return &cp, nil
+}
+
+func (s *appCanaries) GetActive(_ context.Context, appID string) (*model.AppCanary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, c := range s.m {
+		if c.AppID == appID && c.Status == model.CanaryProgressing {
+			cp := *c
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("app %s: no active canary: %w", appID, store.ErrNotFound)
+}
+
+func (s *appCanaries) Update(_ context.Context, c *model.AppCanary) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.m[c.ID]; !ok {
+		return fmt.Errorf("app canary %s: %w", c.ID, store.ErrNotFound)
+	}
+	c.UpdatedAt = time.Now()
+	cp := *c
+	s.m[c.ID] = &cp
+	return nil
+}
+
+func (s *appCanaries) ListProgressing(_ context.Context) ([]*model.AppCanary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]*model.AppCanary, 0)
+	for _, c := range s.m {
+		if c.Status == model.CanaryProgressing {
+			cp := *c
+			out = append(out, &cp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.Before(out[j].StartedAt) })
+	return out, nil
 }
 
 // auditEvents is the in-memory audit trail: a bounded ring (~10k)

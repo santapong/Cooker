@@ -16,7 +16,7 @@ import (
 // List / Get / GetByRepo / scanApp stay in lock-step when a column
 // is added (e.g., the health_* trio added in Week 1; deployed_url in W11).
 const appColumns = `id, name, description, github_repo, branch, build_plan, deploy_target,
-	registry_ref, environment_id, webhook_secret, auto_deploy,
+	registry_ref, environment_id, webhook_secret, auto_deploy, canary_config,
 	created_at, updated_at, version,
 	health_status, health_checked_at, health_message, deployed_url`
 
@@ -72,18 +72,18 @@ func (s *AppStore) GetByRepo(ctx context.Context, repo, branch string) (*model.A
 }
 
 func (s *AppStore) Create(ctx context.Context, a *model.App) error {
-	bp, dt, err := marshalAppJSON(a)
+	bp, dt, cc, err := marshalAppJSON(a)
 	if err != nil {
 		return err
 	}
 	secret := base64StdEncode(a.WebhookSecret)
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO apps (id, name, description, github_repo, branch, build_plan, deploy_target,
-		                  registry_ref, environment_id, webhook_secret, auto_deploy,
+		                  registry_ref, environment_id, webhook_secret, auto_deploy, canary_config,
 		                  created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 		a.ID, a.Name, a.Description, a.GitHubRepo, a.Branch, bp, dt,
-		a.RegistryRef, a.EnvironmentID, secret, a.AutoDeploy,
+		a.RegistryRef, a.EnvironmentID, secret, a.AutoDeploy, cc,
 		a.CreatedAt, a.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("creating app: %w", err)
@@ -92,7 +92,7 @@ func (s *AppStore) Create(ctx context.Context, a *model.App) error {
 }
 
 func (s *AppStore) Update(ctx context.Context, a *model.App) error {
-	bp, dt, err := marshalAppJSON(a)
+	bp, dt, cc, err := marshalAppJSON(a)
 	if err != nil {
 		return err
 	}
@@ -101,10 +101,10 @@ func (s *AppStore) Update(ctx context.Context, a *model.App) error {
 		UPDATE apps SET name=$2, description=$3, github_repo=$4, branch=$5,
 		                build_plan=$6, deploy_target=$7, registry_ref=$8,
 		                environment_id=$9, webhook_secret=$10, auto_deploy=$11,
-		                updated_at=$12, version=version+1
-		WHERE id=$1 AND version=$13`,
+		                canary_config=$12, updated_at=$13, version=version+1
+		WHERE id=$1 AND version=$14`,
 		a.ID, a.Name, a.Description, a.GitHubRepo, a.Branch, bp, dt,
-		a.RegistryRef, a.EnvironmentID, secret, a.AutoDeploy, a.UpdatedAt, a.Version)
+		a.RegistryRef, a.EnvironmentID, secret, a.AutoDeploy, cc, a.UpdatedAt, a.Version)
 	if err != nil {
 		return fmt.Errorf("updating app: %w", err)
 	}
@@ -153,21 +153,27 @@ func (s *AppStore) UpdateHealth(ctx context.Context, id string, status model.App
 	return nil
 }
 
-func marshalAppJSON(a *model.App) (bp, dt []byte, err error) {
+func marshalAppJSON(a *model.App) (bp, dt, cc []byte, err error) {
 	bp, err = json.Marshal(a.BuildPlan)
 	if err != nil {
-		return nil, nil, fmt.Errorf("marshal build_plan: %w", err)
+		return nil, nil, nil, fmt.Errorf("marshal build_plan: %w", err)
 	}
 	dt, err = json.Marshal(a.DeployTarget)
 	if err != nil {
-		return nil, nil, fmt.Errorf("marshal deploy_target: %w", err)
+		return nil, nil, nil, fmt.Errorf("marshal deploy_target: %w", err)
 	}
-	return bp, dt, nil
+	// Persist the normalised config so a stored row is always canonical
+	// (rolling apps carry no stale weight/window).
+	cc, err = json.Marshal(a.Canary.Normalize())
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("marshal canary_config: %w", err)
+	}
+	return bp, dt, cc, nil
 }
 
 func scanApp(row scannable) (*model.App, error) {
 	a := &model.App{}
-	var bp, dt []byte
+	var bp, dt, cc []byte
 	var secretB64 string
 	var healthStatus string
 	var healthCheckedAt sql.NullTime
@@ -175,12 +181,18 @@ func scanApp(row scannable) (*model.App, error) {
 	var deployedURL string
 	if err := row.Scan(
 		&a.ID, &a.Name, &a.Description, &a.GitHubRepo, &a.Branch,
-		&bp, &dt, &a.RegistryRef, &a.EnvironmentID, &secretB64, &a.AutoDeploy,
+		&bp, &dt, &a.RegistryRef, &a.EnvironmentID, &secretB64, &a.AutoDeploy, &cc,
 		&a.CreatedAt, &a.UpdatedAt, &a.Version,
 		&healthStatus, &healthCheckedAt, &healthMessage, &deployedURL,
 	); err != nil {
 		return nil, err
 	}
+	if len(cc) > 0 && string(cc) != "null" {
+		if err := json.Unmarshal(cc, &a.Canary); err != nil {
+			return nil, fmt.Errorf("unmarshal canary_config: %w", err)
+		}
+	}
+	a.Canary = a.Canary.Normalize()
 	a.HealthStatus = model.AppHealth(healthStatus)
 	if healthCheckedAt.Valid {
 		t := healthCheckedAt.Time

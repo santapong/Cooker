@@ -273,6 +273,106 @@ func (d *AppDeployer) DeployImage(ctx context.Context, app *model.App, imageRef,
 	return p, run, nil
 }
 
+// BuildAndPushImage runs Clone → Build → Push for app (no deploy stage)
+// and returns the fully-qualified image ref that was pushed. It backs
+// the canary path (OR-1): the CanaryService needs the new image built
+// and in the registry before it can establish a weighted split, but the
+// deploy itself is done by the weighted deployer, not a deploy stage.
+//
+// Only the single-image (non-compose) build plan is supported — canary
+// traffic-splitting is per-workload and a compose multi-service deploy
+// has no single image to weight. Compose apps return an error so the
+// handler can fall back to (or reject in favour of) a rolling deploy.
+//
+// runID aligns the synthesized run with the caller's stub row and the
+// app-run:<runID> WS channel, exactly like Deploy.
+func (d *AppDeployer) BuildAndPushImage(ctx context.Context, app *model.App, runID string, logW io.Writer) (imageRef string, p *model.Pipeline, run *model.PipelineRun, err error) {
+	if app.GitHubRepo == "" {
+		return "", nil, nil, fmt.Errorf("app %s: GitHubRepo is empty", app.ID)
+	}
+	logW = fanOut(logW, d.LogSink)
+
+	fmt.Fprintf(logW, "[clone] github.com/%s @ %s\n", app.GitHubRepo, app.Branch)
+	workdir, cloneErr := github.Clone(ctx, github.CloneOptions{
+		Repo:      app.GitHubRepo,
+		Branch:    app.Branch,
+		Depth:     1,
+		LogWriter: logW,
+	})
+	if cloneErr != nil {
+		return "", nil, nil, fmt.Errorf("clone: %w", cloneErr)
+	}
+	defer func() {
+		if rmErr := os.RemoveAll(workdir); rmErr != nil {
+			slog.Warn("app-deploy: rm workdir failed", "workdir", workdir, "err", rmErr)
+		}
+	}()
+
+	plan := app.BuildPlan
+	if plan == nil {
+		plan = buildplan.Detect(workdir)
+		fmt.Fprintf(logW, "[plan] detected kind=%s path=%s\n", plan.Kind, plan.Path)
+	}
+	if plan.Kind == model.BuildPlanCompose {
+		return "", nil, nil, fmt.Errorf("canary build: compose apps are not supported (single-image only)")
+	}
+
+	registry := app.RegistryRef
+	if registry == "" {
+		registry = d.Registry
+	}
+	ts := time.Now().Unix()
+	tag := fmt.Sprintf("%s/%s:%d", registry, app.Name, ts)
+
+	// Build the Clone→Build→Push DAG and drop the deploy stage: the
+	// weighted deployer owns the deploy for a canary.
+	p, run = synthesizePipeline(app, plan, workdir, tag, d.cacheSpec())
+	p, run = stripDeployStage(p, run)
+	if runID != "" {
+		run.ID = runID
+	}
+
+	if _, execErr := d.Executor.Execute(ctx, p, run); execErr != nil {
+		return "", p, run, fmt.Errorf("execute build/push: %w", execErr)
+	}
+	fmt.Fprintf(logW, "[built] image=%s run=%s status=%s\n", tag, run.ID, run.Status)
+	return tag, p, run, nil
+}
+
+// stripDeployStage returns the pipeline/run with any deploy stage (and
+// edges referencing it) removed, so BuildAndPushImage runs build+push
+// only. synthesizePipeline appends the deploy stage last for K8s
+// targets; for canary we deploy via the weighted deployer instead.
+func stripDeployStage(p *model.Pipeline, run *model.PipelineRun) (*model.Pipeline, *model.PipelineRun) {
+	keptStages := make([]model.Stage, 0, len(p.Stages))
+	dropped := make(map[string]bool)
+	for _, s := range p.Stages {
+		if s.Type == model.StageTypeDeploy {
+			dropped[s.ID] = true
+			continue
+		}
+		keptStages = append(keptStages, s)
+	}
+	keptEdges := make([]model.Edge, 0, len(p.Edges))
+	for _, e := range p.Edges {
+		if dropped[e.Source] || dropped[e.Target] {
+			continue
+		}
+		keptEdges = append(keptEdges, e)
+	}
+	p.Stages, p.Edges = keptStages, keptEdges
+
+	keptRuns := make([]model.StageRun, 0, len(run.StageRuns))
+	for _, sr := range run.StageRuns {
+		if dropped[sr.StageID] {
+			continue
+		}
+		keptRuns = append(keptRuns, sr)
+	}
+	run.StageRuns = keptRuns
+	return p, run
+}
+
 // synthesizePipeline builds the four-stage Clone→Build→Push→Deploy
 // DAG for an App deploy. Clone already ran by the time we call this,
 // so Stage 1 ("Checkout") is marked succeeded and left as a record.

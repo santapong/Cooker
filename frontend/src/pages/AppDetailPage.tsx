@@ -1,10 +1,28 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { appsApi } from '../api/apps';
-import type { AppModel, AppDeployResponse, AppDeployRecord, AppDriftReport } from '../types/app';
+import type {
+  AppModel,
+  AppDeployResponse,
+  AppDeployRecord,
+  AppDriftReport,
+  CanaryConfig,
+} from '../types/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { hexA } from '../theme/tokens';
-import { Btn, Card, Field, Input, Label, PageHeader, Pill, SectionLabel, statusTone } from '../components/ui/atoms';
+import {
+  Btn,
+  Card,
+  Field,
+  Input,
+  Label,
+  PageHeader,
+  Pill,
+  SectionLabel,
+  Select,
+  statusTone,
+  Toggle,
+} from '../components/ui/atoms';
 import { useToastStore } from '../stores/toastStore';
 import { useWebSocket } from '../hooks/useWebSocket';
 
@@ -34,6 +52,13 @@ export default function AppDetailPage() {
   const [newSecret, setNewSecret] = useState('');
   const [rotating, setRotating] = useState(false);
 
+  // Canary config form + live rollout state (OR-1). The form draft is
+  // seeded from the app once it loads and saved via appsApi.update.
+  const [canaryDraft, setCanaryDraft] = useState<CanaryConfig | null>(null);
+  const [savingCanary, setSavingCanary] = useState(false);
+  const [canaryBusy, setCanaryBusy] = useState(false);
+  const activeCanary = app?.activeCanary ?? null;
+
   // Webhook URL (Indie step 5, PR #50 finding W11-A1).
   // Derived from window.location.origin — no new API field needed.
   const webhookUrl = `${window.location.origin}/api/v1/webhooks/github`;
@@ -45,7 +70,11 @@ export default function AppDetailPage() {
       appsApi
         .get(id)
         .then((next) => {
-          if (!cancelled) setApp(next);
+          if (cancelled) return;
+          setApp(next);
+          // Seed the canary form once; later polls must not clobber an
+          // in-progress edit, so only fill it when still empty.
+          setCanaryDraft((d) => d ?? next.canary ?? { strategy: 'rolling' });
         })
         .catch((e) => {
           if (!cancelled) setError((e as Error).message);
@@ -143,6 +172,71 @@ export default function AppDetailPage() {
   useEffect(() => {
     refreshHistory();
   }, [refreshHistory]);
+
+  // While a canary is progressing, poll the app faster (5s) so the panel
+  // reflects auto-promote / rollback / weight changes promptly. The 30s
+  // refetch above still runs; this just tightens the loop when it matters.
+  const refetchApp = useCallback(() => {
+    if (!id) return;
+    appsApi
+      .get(id)
+      .then(setApp)
+      .catch(() => {
+        /* additive refresh; stay quiet */
+      });
+  }, [id]);
+
+  useEffect(() => {
+    if (activeCanary?.status !== 'progressing') return;
+    const tick = window.setInterval(refetchApp, 5_000);
+    return () => window.clearInterval(tick);
+  }, [activeCanary?.status, refetchApp]);
+
+  const saveCanary = async () => {
+    if (!id || !app || !canaryDraft) return;
+    setSavingCanary(true);
+    try {
+      // Send the full app with the edited canary config. The backend
+      // normalises + validates (weight 1-99); a 4xx surfaces as a toast.
+      await appsApi.update(id, { ...app, canary: canaryDraft });
+      pushToast({ kind: 'success', message: 'Deploy strategy saved.' });
+      refetchApp();
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setSavingCanary(false);
+    }
+  };
+
+  const promoteCanary = async () => {
+    if (!id) return;
+    if (!confirm('Promote the canary to 100% of traffic?')) return;
+    setCanaryBusy(true);
+    try {
+      await appsApi.promoteCanary(id);
+      pushToast({ kind: 'success', message: 'Canary promoted to 100%.' });
+      refetchApp();
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setCanaryBusy(false);
+    }
+  };
+
+  const abortCanary = async () => {
+    if (!id) return;
+    if (!confirm('Abort the canary and roll back to the stable version?')) return;
+    setCanaryBusy(true);
+    try {
+      await appsApi.abortCanary(id);
+      pushToast({ kind: 'success', message: 'Canary aborted; rolled back to stable.' });
+      refetchApp();
+    } catch (e) {
+      pushToast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setCanaryBusy(false);
+    }
+  };
 
   const rollback = async (deployId: string, imageRef: string) => {
     if (!id) return;
@@ -282,10 +376,71 @@ export default function AppDetailPage() {
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
               {app.hasWebhook && <Pill tone="cool">webhook</Pill>}
               {app.autoDeploy && <Pill tone="good">auto-deploy</Pill>}
+              {app.canary?.strategy === 'canary' && <Pill tone="ember">canary</Pill>}
               {drift?.status === 'in_sync' && <Pill tone="good">in sync</Pill>}
               {drift?.status === 'drift' && <Pill tone="warn">drift</Pill>}
             </div>
           </Card>
+
+          {/* Canary rollout status panel (OR-1). Shown only while a
+              canary is in flight; Promote / Abort drive the service. */}
+          {activeCanary && activeCanary.status === 'progressing' && (
+            <Card accent={t.ember} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <SectionLabel>Canary rollout</SectionLabel>
+                <div style={{ flex: 1 }} />
+                <Pill tone={activeCanary.healthy ? 'good' : 'bad'}>
+                  {activeCanary.healthy ? 'healthy' : 'unhealthy'}
+                </Pill>
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'max-content 1fr',
+                  gap: '6px 14px',
+                  fontSize: 12.5,
+                  alignItems: 'center',
+                }}
+              >
+                <span style={{ color: t.textMute }}>Traffic</span>
+                <span style={{ fontFamily: t.mono, color: t.text }}>{activeCanary.weight}% to canary</span>
+                <span style={{ color: t.textMute }}>New image</span>
+                <span
+                  style={{
+                    fontFamily: t.mono,
+                    fontSize: 11,
+                    color: t.textSoft,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={activeCanary.canaryImage}
+                >
+                  {activeCanary.canaryImage.split('/').pop()}
+                </span>
+                <span style={{ color: t.textMute }}>Mode</span>
+                <span style={{ color: t.textSoft }}>
+                  {activeCanary.autoPromote
+                    ? `auto-promote after ${activeCanary.healthWindowSeconds}s healthy`
+                    : 'manual (awaiting decision)'}
+                </span>
+              </div>
+              {activeCanary.message && (
+                <div style={{ fontSize: 11.5, color: t.textMute, fontStyle: 'italic' }}>
+                  {activeCanary.message}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                <Btn kind="danger" onClick={abortCanary} disabled={canaryBusy}>
+                  Abort
+                </Btn>
+                <div style={{ flex: 1 }} />
+                <Btn kind="primary" onClick={promoteCanary} disabled={canaryBusy}>
+                  {canaryBusy ? 'Working…' : 'Promote'}
+                </Btn>
+              </div>
+            </Card>
+          )}
 
           {/* Deploy history + one-click rollback (roadmap M3) */}
           {history.length > 0 && (
@@ -412,6 +567,89 @@ export default function AppDetailPage() {
               </div>
             )}
           </Card>
+
+          {/* Deploy strategy card (OR-1). Toggle rolling/canary and tune
+              the weight / auto-promote / window, saved via appsApi.update.
+              Canary requires a Kubernetes target; we surface a hint when
+              the app's target can't run one (the backend returns 422). */}
+          {canaryDraft && (
+            <Card style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <SectionLabel>Deploy strategy</SectionLabel>
+              <div>
+                <Label>Strategy</Label>
+                <Select
+                  value={canaryDraft.strategy}
+                  onChange={(e) =>
+                    setCanaryDraft({
+                      ...canaryDraft,
+                      strategy: e.target.value as CanaryConfig['strategy'],
+                    })
+                  }
+                  aria-label="Deploy strategy"
+                >
+                  <option value="rolling">Rolling (replace)</option>
+                  <option value="canary">Canary (weighted)</option>
+                </Select>
+              </div>
+
+              {canaryDraft.strategy === 'canary' && (
+                <>
+                  {app.deployTarget.kind !== 'kubernetes' && (
+                    <div style={{ fontSize: 11.5, color: t.warn, lineHeight: 1.5 }}>
+                      Canary needs a Kubernetes deploy target. This app targets{' '}
+                      <strong>{app.deployTarget.kind}</strong>; a canary deploy will be rejected.
+                    </div>
+                  )}
+                  <div>
+                    <Label>Canary weight (%)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={99}
+                      value={canaryDraft.weight ?? 10}
+                      onChange={(e) =>
+                        setCanaryDraft({ ...canaryDraft, weight: Number(e.target.value) })
+                      }
+                      aria-label="Canary weight percent"
+                    />
+                  </div>
+                  <Toggle
+                    on={!!canaryDraft.autoPromote}
+                    label="Auto-promote when healthy"
+                    onClick={() =>
+                      setCanaryDraft({ ...canaryDraft, autoPromote: !canaryDraft.autoPromote })
+                    }
+                  />
+                  {canaryDraft.autoPromote && (
+                    <div>
+                      <Label>Health window (seconds)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={canaryDraft.healthWindowSeconds ?? 300}
+                        onChange={(e) =>
+                          setCanaryDraft({
+                            ...canaryDraft,
+                            healthWindowSeconds: Number(e.target.value),
+                          })
+                        }
+                        aria-label="Health window seconds"
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+
+              <Btn
+                kind="primary"
+                onClick={saveCanary}
+                disabled={savingCanary}
+                style={{ justifyContent: 'center' }}
+              >
+                {savingCanary ? 'Saving…' : 'Save strategy'}
+              </Btn>
+            </Card>
+          )}
         </div>
 
         <Card pad={0}>

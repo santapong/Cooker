@@ -97,4 +97,30 @@ func parseAppliedResources(output string) []string {
 	return out
 }
 
-var _ Deployer = (*Kubectl)(nil)
+// DeployWeighted establishes (or re-balances) a replica-weighted canary
+// (OR-1) by piping the synthesised stable+canary Deployment pair through
+// `kubectl apply`. Idempotent: a re-apply with a new weight scales the
+// two Deployments to the new split.
+func (k *Kubectl) DeployWeighted(ctx context.Context, req WeightedRequest) (WeightedResult, error) {
+	manifest, canaryReplicas, stableReplicas := weightedManifestFor(req)
+	logf(req.LogWriter, "[canary] weight=%d%% canary=%d stable=%d replicas\n", req.Weight, canaryReplicas, stableReplicas)
+	res, err := k.Deploy(ctx, Request{
+		Kind:      KindManifest,
+		Namespace: req.Namespace,
+		Manifest:  []byte(manifest),
+		LogWriter: req.LogWriter,
+	})
+	if err != nil {
+		return WeightedResult{}, err
+	}
+	return WeightedResult{
+		CanaryReplicas:   canaryReplicas,
+		StableReplicas:   stableReplicas,
+		AppliedResources: res.AppliedResources,
+	}, nil
+}
+
+var (
+	_ Deployer         = (*Kubectl)(nil)
+	_ WeightedDeployer = (*Kubectl)(nil)
+)

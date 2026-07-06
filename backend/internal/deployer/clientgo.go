@@ -203,4 +203,30 @@ func splitManifest(b []byte) ([][]byte, error) {
 
 func boolPtr(b bool) *bool { return &b }
 
-var _ Deployer = (*ClientGo)(nil)
+// DeployWeighted establishes (or re-balances) a replica-weighted canary
+// (OR-1). It synthesises the stable+canary Deployment pair plus a shared
+// Service and applies them via the same server-side-apply path as
+// Deploy, so a re-apply with a new weight converges idempotently.
+func (c *ClientGo) DeployWeighted(ctx context.Context, req WeightedRequest) (WeightedResult, error) {
+	manifest, canaryReplicas, stableReplicas := weightedManifestFor(req)
+	logf(req.LogWriter, "[canary] weight=%d%% canary=%d stable=%d replicas\n", req.Weight, canaryReplicas, stableReplicas)
+	res, err := c.Deploy(ctx, Request{
+		Kind:      KindManifest,
+		Namespace: req.Namespace,
+		Manifest:  []byte(manifest),
+		LogWriter: req.LogWriter,
+	})
+	if err != nil {
+		return WeightedResult{}, err
+	}
+	return WeightedResult{
+		CanaryReplicas:   canaryReplicas,
+		StableReplicas:   stableReplicas,
+		AppliedResources: res.AppliedResources,
+	}, nil
+}
+
+var (
+	_ Deployer         = (*ClientGo)(nil)
+	_ WeightedDeployer = (*ClientGo)(nil)
+)

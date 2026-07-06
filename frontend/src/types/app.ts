@@ -15,6 +15,44 @@ export interface AppDeployTarget {
 
 export type AppHealthStatus = 'unknown' | 'healthy' | 'degraded' | 'failed';
 
+export type DeployStrategy = 'rolling' | 'canary';
+
+// CanaryConfig is the opt-in canary deployment policy carried on an App
+// (OR-1). The zero value (strategy "rolling") means in-place rolling
+// deploys — the pre-canary behaviour.
+export interface CanaryConfig {
+  strategy: DeployStrategy;
+  // Percent of traffic (1-99) sent to the new version while evaluating.
+  weight?: number;
+  // Shift to 100% automatically once the health window passes clean.
+  autoPromote?: boolean;
+  // Seconds the new version must stay healthy before an auto-promote.
+  healthWindowSeconds?: number;
+}
+
+export type CanaryRolloutStatus = 'progressing' | 'promoted' | 'aborted' | 'failed';
+
+// AppCanary is the live state of an in-flight canary rollout. Returned
+// under "activeCanary" on GetApp and from the canary endpoints. It is
+// observed progress, distinct from the CanaryConfig policy.
+export interface AppCanary {
+  id: string;
+  appId: string;
+  runId: string;
+  stableImage?: string;
+  canaryImage: string;
+  weight: number;
+  status: CanaryRolloutStatus;
+  autoPromote: boolean;
+  healthWindowSeconds: number;
+  healthy: boolean;
+  message?: string;
+  promoteAfter?: string;
+  startedAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+}
+
 export interface AppModel {
   id: string;
   name: string;
@@ -27,6 +65,13 @@ export interface AppModel {
   environmentId?: string;
   hasWebhook: boolean;
   autoDeploy: boolean;
+  // Canary deployment policy (OR-1). Always present in responses
+  // (normalised server-side); defaults to { strategy: 'rolling' }.
+  canary: CanaryConfig;
+  // activeCanary is the live rollout state, present only while a canary
+  // is in flight (embedded on GetApp so the detail page renders the
+  // panel on first load).
+  activeCanary?: AppCanary | null;
   createdAt: string;
   updatedAt: string;
   // Post-deploy readiness verdict from the backend AppHealthChecker.
@@ -46,6 +91,8 @@ export interface AppDeployResponse {
   runId: string;
   channel: string;
   status: string;
+  // strategy is "rolling" or "canary" — which deploy path the click took.
+  strategy?: DeployStrategy;
   stream: string;
   repo: string;
   branch: string;
