@@ -183,6 +183,10 @@ func (s *CanaryService) Start(ctx context.Context, app *model.App, runID string,
 		stableImage = canaryImage
 	}
 
+	// Record the resolved images on the row now so a failed split still
+	// carries image context into the failed-state row and the UI.
+	c.StableImage = stableImage
+	c.CanaryImage = canaryImage
 	if _, err := s.weighted.DeployWeighted(ctx, deployer.WeightedRequest{
 		Namespace:   app.DeployTarget.Namespace,
 		Name:        app.Name,
@@ -198,14 +202,14 @@ func (s *CanaryService) Start(ctx context.Context, app *model.App, runID string,
 		return nil, fmt.Errorf("canary: establish split: %w", err)
 	}
 
-	// Split is live — promote the reserved row to progressing with the
-	// resolved images and the auto-promote deadline.
-	c.StableImage = stableImage
-	c.CanaryImage = canaryImage
+	// Split is live — promote the reserved row to progressing. Anchor the
+	// auto-promote soak window to NOW (split-live), not to the pre-build
+	// timestamp: a slow clone+build must not silently consume the health
+	// window and trigger an immediate auto-promote on the next tick.
 	c.Status = model.CanaryProgressing
 	c.Message = fmt.Sprintf("canary at %d%%", cfg.Weight)
 	if cfg.AutoPromote {
-		t := now.Add(time.Duration(cfg.HealthWindowSeconds) * time.Second)
+		t := s.clock().Add(time.Duration(cfg.HealthWindowSeconds) * time.Second)
 		c.PromoteAfter = &t
 	}
 	if err := s.canaries.Update(ctx, c); err != nil {
@@ -244,6 +248,10 @@ func (s *CanaryService) Promote(ctx context.Context, appID string) (*model.AppCa
 		Weight:      100,
 		LogWriter:   io.Discard,
 	}); err != nil {
+		// We claimed the terminal state but the cluster change failed. Revert
+		// the row to progressing so the canary stays active and retryable
+		// rather than stranded terminal-in-DB / unchanged-in-cluster.
+		s.revertClaim(ctx, c)
 		return nil, fmt.Errorf("canary: promote split: %w", err)
 	}
 	now := s.clock()
@@ -286,6 +294,7 @@ func (s *CanaryService) Abort(ctx context.Context, appID, reason string) (*model
 		Weight:      0,
 		LogWriter:   io.Discard,
 	}); err != nil {
+		s.revertClaim(ctx, c)
 		return nil, fmt.Errorf("canary: abort split: %w", err)
 	}
 	now := s.clock()
@@ -328,6 +337,16 @@ func (s *CanaryService) SweepAutoPromote(ctx context.Context) {
 	if s.weighted == nil {
 		return
 	}
+	// Reap orphaned pending rows first: a Start that reserved the slot but
+	// never reached progressing/failed (crash, or a failed terminal write)
+	// would otherwise hold the one-per-app slot forever (PM26-07-06). The
+	// threshold is far beyond any real build+deploy, so a legitimately slow
+	// in-flight Start is never reaped.
+	if n, err := s.canaries.DeleteStalePending(ctx, s.clock().Add(-stalePendingThreshold)); err != nil {
+		s.logger.Warn("canary sweep: reap stale pending failed", "err", err)
+	} else if n > 0 {
+		s.logger.Info("canary sweep: reaped stale pending canaries", "count", n)
+	}
 	canaries, err := s.canaries.ListProgressing(ctx)
 	if err != nil {
 		s.logger.Warn("canary sweep: list failed", "err", err)
@@ -349,9 +368,15 @@ func (s *CanaryService) SweepAutoPromote(ctx context.Context) {
 }
 
 // canaryEvalTimeout bounds a single canary's probe + promote/abort in
-// the sweep. Generous enough for a real K8s apply, short enough that
-// one stuck canary doesn't hold the loop past the next tick.
-const canaryEvalTimeout = 30 * time.Second
+// the sweep. Generous enough for a real K8s apply (client-go patch or a
+// kubectl child process), short enough that one stuck canary doesn't
+// hold the loop indefinitely.
+const canaryEvalTimeout = 90 * time.Second
+
+// stalePendingThreshold is how old a pending canary row must be before
+// the sweep reaps it as orphaned. Far beyond any real build+deploy, so
+// an in-flight Start is never reaped mid-flight.
+const stalePendingThreshold = time.Hour
 
 // defaultCanarySweepInterval is how often the auto-promote loop runs.
 // Short enough that an auto-promote fires within a tick of its window
@@ -383,7 +408,15 @@ func (s *CanaryService) evaluate(ctx context.Context, c *model.AppCanary) {
 	app, err := s.apps.Get(ctx, c.AppID)
 	if err != nil {
 		// App deleted out from under an in-flight canary: mark the row
-		// aborted so the sweep stops re-evaluating it.
+		// aborted so the sweep stops re-evaluating it. Go through the CAS
+		// (ClaimTerminal) like every other terminal transition so a
+		// concurrent operator abort/promote can't be silently clobbered
+		// (PM26-07-02 consistency); if we lose the claim, another actor
+		// already resolved it.
+		won, cerr := s.canaries.ClaimTerminal(ctx, c.ID, model.CanaryAborted)
+		if cerr != nil || !won {
+			return
+		}
 		s.logger.Warn("canary sweep: app gone, aborting canary", "app", c.AppID, "err", err)
 		now := s.clock()
 		c.Status = model.CanaryAborted
@@ -482,6 +515,20 @@ func (s *CanaryService) stableImageFor(ctx context.Context, app *model.App) stri
 		break
 	}
 	return img
+}
+
+// revertClaim returns a canary we CAS-claimed for a terminal transition
+// back to progressing after the cluster mutation failed, so the rollout
+// stays active and an operator (or the next sweep) can retry instead of
+// finding it stranded terminal-in-DB with the cluster unchanged.
+// Best-effort: a write failure is logged, not surfaced (the caller
+// already has the real deploy error).
+func (s *CanaryService) revertClaim(ctx context.Context, c *model.AppCanary) {
+	c.Status = model.CanaryProgressing
+	c.ResolvedAt = nil
+	if err := s.canaries.Update(ctx, c); err != nil {
+		s.logger.Warn("canary: revert claim after failed split", "canary", c.ID, "err", err)
+	}
 }
 
 // failPending flips the reserved (pending) row to a terminal failed

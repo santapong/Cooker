@@ -21,6 +21,10 @@ type fakeWeighted struct {
 	mu      sync.Mutex
 	calls   []deployer.WeightedRequest
 	failNow bool
+	// failFrom makes DeployWeighted start failing from the Nth call
+	// (1-based). 0 disables. Lets a test succeed on Start's split but
+	// fail on the subsequent promote/abort.
+	failFrom int
 }
 
 func (f *fakeWeighted) Deploy(_ context.Context, _ deployer.Request) (deployer.Result, error) {
@@ -30,7 +34,8 @@ func (f *fakeWeighted) Deploy(_ context.Context, _ deployer.Request) (deployer.R
 func (f *fakeWeighted) DeployWeighted(_ context.Context, req deployer.WeightedRequest) (deployer.WeightedResult, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, req)
-	fail := f.failNow
+	n := len(f.calls)
+	fail := f.failNow || (f.failFrom > 0 && n >= f.failFrom)
 	f.mu.Unlock()
 	if fail {
 		return deployer.WeightedResult{}, errors.New("apply boom")
@@ -450,4 +455,115 @@ func TestCanary_StartPendingRowSerializes(t *testing.T) {
 	if c.Status != model.CanaryProgressing {
 		t.Errorf("after a successful Start the row should be progressing, got %s", c.Status)
 	}
+}
+
+// Regression (self-review #4/#5/#7): a DeployWeighted failure AFTER the
+// CAS claim must revert the row to progressing so the canary stays
+// active and retryable, not stranded terminal-in-DB / cluster-unchanged.
+func TestCanary_PromoteDeployFailureRevertsToProgressing(t *testing.T) {
+	app := canaryApp()
+	app.Canary.AutoPromote = false
+	fw := &fakeWeighted{failFrom: 2} // Start's split (call 1) ok; promote (call 2) fails
+	svc, st := newCanaryFixture(t, app, fw)
+	started, err := svc.Start(context.Background(), app, "run1", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Promote(context.Background(), "app1"); err == nil {
+		t.Fatal("expected promote to fail when the split apply fails")
+	}
+	// The canary must still be active (progressing), not stranded terminal.
+	got, err := st.AppCanaries.GetActive(context.Background(), "app1")
+	if err != nil {
+		t.Fatalf("canary must remain active after a failed promote, got %v", err)
+	}
+	if got.ID != started.ID || got.Status != model.CanaryProgressing {
+		t.Errorf("expected the same progressing canary, got %+v", got)
+	}
+}
+
+// Regression (self-review #1): the promoted image must round-trip through
+// the store Update (Start now sets images via Update, not Create). The
+// memory store swaps the whole struct, so this asserts the image survives
+// a fresh read — the behaviour the Postgres Update SET clause must match.
+func TestCanary_ImagesPersistedThroughUpdate(t *testing.T) {
+	app := canaryApp()
+	fw := &fakeWeighted{}
+	svc, st := newCanaryFixture(t, app, fw)
+	if _, err := svc.Start(context.Background(), app, "run1", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.AppCanaries.GetActive(context.Background(), "app1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CanaryImage != "reg/shop:new" || got.StableImage == "" {
+		t.Errorf("images must survive the pending->progressing Update, got stable=%q canary=%q",
+			got.StableImage, got.CanaryImage)
+	}
+}
+
+// Regression (self-review #2): the auto-promote window anchors to
+// split-live, not to Start-entry, so build time doesn't silently consume
+// it. A builder that advances the clock simulates a slow build.
+func TestCanary_PromoteAfterAnchoredPostBuild(t *testing.T) {
+	app := canaryApp() // AutoPromote=true, window 60s
+	base := time.Now()
+	cur := base
+	clock := func() time.Time { return cur }
+	// Builder that "takes" 10 minutes of wall time.
+	slow := builderFunc(func() { cur = cur.Add(10 * time.Minute) })
+	st := memory.New()
+	if err := st.Apps.Create(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewCanaryService(st.Apps, st.AppCanaries, st.AppDeploys, slow, &fakeWeighted{}, WithCanaryClock(clock))
+	c, err := svc.Start(context.Background(), app, "run1", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.PromoteAfter == nil {
+		t.Fatal("auto-promote canary should set PromoteAfter")
+	}
+	// PromoteAfter must be ~window after the POST-build time (base+10m),
+	// not after base — otherwise it's already in the past.
+	wantMin := base.Add(10 * time.Minute)
+	if c.PromoteAfter.Before(wantMin) {
+		t.Errorf("PromoteAfter %v must anchor to split-live (>= %v), not to Start-entry",
+			c.PromoteAfter, wantMin)
+	}
+}
+
+// Regression (self-review #3/#6/#9): an orphaned pending row is reaped by
+// the sweep, freeing the one-per-app slot.
+func TestCanary_SweepReapsStalePending(t *testing.T) {
+	app := canaryApp()
+	st := memory.New()
+	if err := st.Apps.Create(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	// A pending row left behind by a crashed Start, an hour+ old.
+	old := time.Now().Add(-2 * time.Hour)
+	if err := st.AppCanaries.Create(context.Background(), &model.AppCanary{
+		ID: "stuck", AppID: app.ID, Status: model.CanaryPending, StartedAt: old,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewCanaryService(st.Apps, st.AppCanaries, st.AppDeploys,
+		&fakeBuilder{image: "reg/shop:new"}, &fakeWeighted{})
+	svc.SweepAutoPromote(context.Background())
+
+	// Slot is free: a fresh Start must not hit ErrCanaryInFlight.
+	if _, err := svc.Start(context.Background(), app, "run2", io.Discard); err != nil {
+		t.Fatalf("after reaping the stale pending row, Start should succeed, got %v", err)
+	}
+}
+
+// builderFunc adapts a side-effect func to canaryImageBuilder, returning
+// a fixed image after running the effect (used to simulate build time).
+type builderFunc func()
+
+func (b builderFunc) BuildAndPushImage(_ context.Context, _ *model.App, _ string, _ io.Writer) (string, *model.Pipeline, *model.PipelineRun, error) {
+	b()
+	return "reg/shop:new", &model.Pipeline{ID: "p"}, &model.PipelineRun{ID: "r", Status: model.RunStatusSuccess}, nil
 }

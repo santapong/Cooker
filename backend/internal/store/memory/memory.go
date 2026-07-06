@@ -805,6 +805,19 @@ func (s *appCanaries) GetActive(_ context.Context, appID string) (*model.AppCana
 	return nil, fmt.Errorf("app %s: no active canary: %w", appID, store.ErrNotFound)
 }
 
+func (s *appCanaries) DeleteStalePending(_ context.Context, olderThan time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for id, c := range s.m {
+		if c.Status == model.CanaryPending && c.StartedAt.Before(olderThan) {
+			delete(s.m, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *appCanaries) ClaimTerminal(_ context.Context, id string, to model.CanaryStatus) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

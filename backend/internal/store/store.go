@@ -174,6 +174,13 @@ type AppCanaryStore interface {
 	// ListProgressing returns every canary still in the progressing state
 	// across all apps, oldest-first. Backs the auto-promote sweep.
 	ListProgressing(ctx context.Context) ([]*model.AppCanary, error)
+	// DeleteStalePending removes 'pending' canary rows whose StartedAt is
+	// before olderThan, returning the count. A pending row is a Start that
+	// reserved the one-per-app slot but never reached progressing/failed
+	// (process crash or a failed terminal write). Reaping frees the slot
+	// that the widened unique index would otherwise hold forever
+	// (PM26-07-06 recovery). Backs the auto-promote sweep.
+	DeleteStalePending(ctx context.Context, olderThan time.Time) (int, error)
 	// LatestPromoted returns the app's most recently promoted canary
 	// (by resolved_at), or ErrNotFound when the app has never promoted
 	// one. Backs stable-image resolution: after a promote, the promoted
