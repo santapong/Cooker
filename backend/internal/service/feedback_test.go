@@ -75,7 +75,7 @@ func TestFeedbackSubmit_HappyPath(t *testing.T) {
 	for _, want := range []string{
 		"- App: Cooker",
 		"- Category: bug",
-		"- User: user-123 (op@example.com)",
+		"- User: `user-123` (`op@example.com`)",
 		"- Page URL: `https://cooker.example/pipelines/p1`",
 		"- User-Agent: `test-agent/1.0`",
 	} {
@@ -113,6 +113,27 @@ func TestFeedbackBody_NeutralizesClientMarkdown(t *testing.T) {
 	// them so the value can't break out.
 	if !strings.Contains(body, "- User-Agent: ``evil`agent`/1.0``") {
 		t.Errorf("user-agent span did not outrun inner backticks:\n%s", body)
+	}
+}
+
+// PM26-07-10: user id/email come from OIDC identity claims, which are
+// attacker-influenceable (a display name or email local-part can carry
+// @-mentions or markdown links). They must be inline-code-wrapped like
+// the other client-controlled metadata, not left live on the bullet.
+func TestFeedbackBody_NeutralizesIdentityClaims(t *testing.T) {
+	body := feedbackBody(FeedbackInput{
+		Category:  "bug",
+		Message:   "hi",
+		UserID:    "@everyone",
+		UserEmail: "[click](https://evil.example)@corp.com",
+	})
+	// The @-mention and the markdown link must be inside code spans, never
+	// live on the "- User:" line.
+	if strings.Contains(body, "- User: @everyone") {
+		t.Errorf("user id @-mention left live:\n%s", body)
+	}
+	if !strings.Contains(body, "- User: `@everyone` (`[click](https://evil.example)@corp.com`)") {
+		t.Errorf("identity claims not both wrapped in inline code:\n%s", body)
 	}
 }
 

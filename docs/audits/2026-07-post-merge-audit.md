@@ -106,7 +106,7 @@ remains a follow-up alongside UAT Scenario 1b.
 - **Failure scenario:** Message, PageURL and User-Agent are properly neutralized (dynamic fence / inlineCode), but UserID and UserEmail are only whitespace-collapsed. These come from OIDC token claims (Subject, Email), and many IdPs let end users self-edit profile email/name or admins federate untrusted IdPs. A user whose email claim is e.g. "@org/security-team see [x](https://evil)" gets live markdown and a team @-mention rendered on the User bullet of every issue they file, pinging the team and injecting attacker links into the maintainers' repo. The handler comment says identity is "derived server-side" but server-side derivation does not make the claim values trusted text.
 - **Suggested fix:** Wrap UserID and UserEmail with the existing inlineCode(collapseSpace(...)) helper, same as PageURL and User-Agent.
 - **Adversarial verification:** CONFIRMED — Confirmed real defect. At service/feedback.go:132, UserID and UserEmail are passed only through collapseSpace(), while the sibling metadata fields PageURL (line 133) and UserAgent (line 134) are wrapped in inlineCode(). The function's own doc comment (lines 121-127) explicitly states that "collapseSpace alone would leave @-mentions, #-references and `[links](…)` live on the bullet line" — so the asy
-- **Status:** Open
+- **Status:** Closed by PR-5 (feedback-batch5)
 
 ### [PM26-07-11] MEDIUM — Canary promote/abort bypass the governance admission gate that deploy and rollback carry
 
