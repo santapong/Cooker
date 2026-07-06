@@ -50,7 +50,7 @@ remains a follow-up alongside UAT Scenario 1b.
 - **Failure scenario:** The normal deploy path (defaultKubernetesManifest) creates Deployment <app> with selector {app: <app>}. canaryManifest re-applies the same-named Deployment with selector {app, track: stable}. Deployment spec.selector is immutable, so the API server rejects the apply with 'field is immutable' regardless of SSA Force — both kubectl and client-go backends fail. Result: canary Start returns 500/failed for every app that has ever been deployed the normal way, which is the only realistic precondition for wanting a canary.
 - **Suggested fix:** Keep the stable Deployment's selector identical to the normal deploy ({app: name}) and put track only on pod labels, or delete+recreate, or name the stable track differently and drain the original Deployment.
 - **Adversarial verification:** CONFIRMED — Confirmed, not refuted. canaryManifest (weighted.go:49) names the stable Deployment identically to the normal deploy's Deployment (stable := app; sanitizeName mirrors service.sanitize, and canary.go:142 passes app.Name), but writeDeployment (weighted.go:82) emits selector.matchLabels {app, track: stable} whereas defaultKubernetesManifest (app_deployer.go:457-458) created it with {app} only. apps/v
-- **Status:** Open
+- **Status:** Closed by PR-2 (canary-batch2)
 
 ### [PM26-07-04] HIGH — Auto-promote health gate probes the app, not the canary workload — a crash-looping canary behind a healthy stable auto-promotes to 100%
 
@@ -66,7 +66,7 @@ remains a follow-up alongside UAT Scenario 1b.
 - **Failure scenario:** SweepAutoPromote → evaluate → Promote/Abort → DeployWeighted all inherit the server-lifetime canaryCtx. A hung API server connection (client-go Patch with no deadline, or a wedged kubectl child process) blocks the sweep loop indefinitely — every other progressing canary's auto-promote/rollback stalls past its health window, and at shutdown the 2s drain in server.go:583-586 gives up and leaks the goroutine mid-mutation. Violates the repo invariant that every external I/O call carries a bounded context; the adjacent audit sweep (server.go:605) wraps each pass in context.WithTimeout(…, time.Minute) — the canary sweep does not.
 - **Suggested fix:** Wrap each sweep pass (or each per-canary evaluate) in context.WithTimeout derived from canaryCtx, mirroring the audit retention sweep.
 - **Adversarial verification:** CONFIRMED — Confirmed by direct reading. (1) backend/internal/service/canary.go:301-313 — RunSweeper passes its ctx (the server-lifetime canaryCtx from server.go:575) straight into SweepAutoPromote on every tick; there is no context.WithTimeout anywhere in the canary sweep path (grep of internal/service shows WithTimeout only in app_detect, executor, jobqueue_runner, secrets_check). (2) The sweep is strictly 
-- **Status:** Open
+- **Status:** Closed by PR-2 (canary-batch2)
 
 ### [PM26-07-06] MEDIUM — Start TOCTOU: cluster is mutated (build + DeployWeighted) before the unique-index check, so the losing concurrent Start's image can be what actually runs
 
@@ -74,7 +74,7 @@ remains a follow-up alongside UAT Scenario 1b.
 - **Failure scenario:** Two concurrent Starts for the same app both pass the GetActive pre-check (line 127), both build distinct images and both apply a weighted split to the cluster; only then does Create hit uq_app_canaries_active — the loser correctly gets 23505 → ErrConflict → 409 (mapping verified in postgres/app_canary.go:47-48 and the memory store, so parity holds). But if the loser's DeployWeighted landed second, the cluster is serving the loser's canary image while the persisted AppCanary row records the winner's image — the sweeper then promotes/aborts based on a row that doesn't describe what's deployed.
 - **Suggested fix:** Create the progressing row (or a 'pending' row) BEFORE building/deploying so the unique index serializes Starts, then update it with the image after the split is established; delete/mark-failed on error.
 - **Adversarial verification:** CONFIRMED — Confirmed by reading the code. In /home/user/Cooker/backend/internal/service/canary.go Start(), the only pre-check is the advisory GetActive at line 127; BuildAndPushImage (line 135) and DeployWeighted (line 140) both mutate the world before the authoritative uniqueness check at s.canaries.Create (line 176), and a Create ErrConflict (lines 177-179) returns ErrCanaryInFlight without rolling back or
-- **Status:** Open
+- **Status:** Closed by PR-2 (canary-batch2)
 
 ### [PM26-07-07] MEDIUM — Deleting an app mid-canary orphans the live weighted split; sweeper marks the row aborted without tearing down traffic, and manual canaries are never reaped at all
 
