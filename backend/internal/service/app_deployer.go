@@ -17,6 +17,7 @@ import (
 
 	"github.com/santapong/cooker/internal/buildplan"
 	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/notifier"
 	"github.com/santapong/cooker/internal/source/github"
 	"github.com/santapong/cooker/internal/store"
 )
@@ -50,6 +51,10 @@ type AppDeployer struct {
 	// deploy/rollback (roadmap M3). Best-effort: a write failure is
 	// logged, never surfaced — history must not fail a deploy.
 	Deploys store.AppDeployStore
+	// Notifier, when non-nil, receives a deploy.succeeded /
+	// deploy.failed event per terminal deploy. Best-effort, same as
+	// Deploys — a channel failure never fails the deploy.
+	Notifier *notifier.Dispatcher
 }
 
 // cacheSpec returns the CacheSpec for synthesized build stages, or
@@ -215,9 +220,11 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 	}
 	if _, err := d.Executor.Execute(ctx, p, run); err != nil {
 		d.recordDeploy(ctx, deployRecordFromRun(app, p, run, historyRef, model.AppDeployKindDeploy))
+		NotifyDeployOutcome(d.Notifier, app, run.ID, err.Error(), false, false)
 		return p, run, fmt.Errorf("execute: %w", err)
 	}
 	d.recordDeploy(ctx, deployRecordFromRun(app, p, run, historyRef, model.AppDeployKindDeploy))
+	NotifyDeployOutcome(d.Notifier, app, run.ID, run.Error, run.Status == model.RunStatusSuccess, false)
 	fmt.Fprintf(logW, "[done] run=%s status=%s\n", run.ID, run.Status)
 	return p, run, nil
 }

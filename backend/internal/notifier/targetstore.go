@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+
+	"github.com/santapong/cooker/internal/crypto"
 )
 
 // ErrTargetNotFound is returned by Get when the ID is unknown.
@@ -113,12 +115,65 @@ func (m *MemoryTargetStore) Delete(_ context.Context, id string) error {
 // PostgresTargetStore is the production TargetStore backed by the
 // notification_targets table (migration 011).
 type PostgresTargetStore struct {
-	db *sql.DB
+	db    *sql.DB
+	codec *crypto.Codec
 }
 
 // NewPostgresTargetStore wraps an existing *sql.DB.
 func NewPostgresTargetStore(db *sql.DB) *PostgresTargetStore {
 	return &PostgresTargetStore{db: db}
+}
+
+// WithCodec enables at-rest encryption of the config column. Channel
+// configs carry credentials (SMTP passwords, webhook URLs — the URL
+// itself is the bearer secret for Slack/Discord), so they get the
+// same AES-GCM treatment as Cooker's other secrets. A nil / inactive
+// codec leaves configs plaintext (dev mode without COOKER_SECRET_KEY).
+func (p *PostgresTargetStore) WithCodec(c *crypto.Codec) *PostgresTargetStore {
+	p.codec = c
+	return p
+}
+
+// sealedConfig is the JSON envelope stored in the config JSONB
+// column when encryption is on. The column must stay valid JSON, so
+// the AES-GCM ciphertext is wrapped rather than stored raw. Legacy
+// plaintext rows (any other JSON shape) pass through unchanged.
+type sealedConfig struct {
+	Enc  string `json:"enc"`
+	Data []byte `json:"data"`
+}
+
+const sealedConfigV1 = "v1"
+
+// sealConfig encrypts cfg into the envelope when the codec is
+// active; otherwise returns cfg unchanged.
+func (p *PostgresTargetStore) sealConfig(cfg []byte) ([]byte, error) {
+	if p.codec == nil || !p.codec.Active() {
+		return cfg, nil
+	}
+	sealed, err := p.codec.Seal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("notifier: seal target config: %w", err)
+	}
+	return json.Marshal(sealedConfig{Enc: sealedConfigV1, Data: sealed})
+}
+
+// openConfig reverses sealConfig. Plaintext legacy rows (no envelope
+// shape) are returned as-is so pre-encryption targets keep working;
+// they are re-sealed on their next Update.
+func (p *PostgresTargetStore) openConfig(cfg []byte) ([]byte, error) {
+	var env sealedConfig
+	if err := json.Unmarshal(cfg, &env); err != nil || env.Enc != sealedConfigV1 {
+		return cfg, nil // legacy plaintext (or non-envelope JSON)
+	}
+	if p.codec == nil || !p.codec.Active() {
+		return nil, fmt.Errorf("notifier: target config is encrypted but no COOKER_SECRET_KEY is configured")
+	}
+	plain, err := p.codec.Open(env.Data)
+	if err != nil {
+		return nil, fmt.Errorf("notifier: open target config: %w", err)
+	}
+	return plain, nil
 }
 
 func (p *PostgresTargetStore) ListEnabled(ctx context.Context) ([]Target, error) {
@@ -143,6 +198,11 @@ func (p *PostgresTargetStore) query(ctx context.Context, suffix string) ([]Targe
 		if err != nil {
 			return nil, err
 		}
+		plain, err := p.openConfig([]byte(t.Config))
+		if err != nil {
+			return nil, err
+		}
+		t.Config = json.RawMessage(plain)
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -156,7 +216,15 @@ func (p *PostgresTargetStore) Get(ctx context.Context, id string) (Target, error
 	if errors.Is(err, sql.ErrNoRows) {
 		return Target{}, ErrTargetNotFound
 	}
-	return t, err
+	if err != nil {
+		return Target{}, err
+	}
+	plain, err := p.openConfig([]byte(t.Config))
+	if err != nil {
+		return Target{}, err
+	}
+	t.Config = json.RawMessage(plain)
+	return t, nil
 }
 
 func (p *PostgresTargetStore) Create(ctx context.Context, t Target) error {
@@ -169,8 +237,12 @@ func (p *PostgresTargetStore) Create(ctx context.Context, t Target) error {
 	if len(cfg) == 0 {
 		cfg = []byte("{}")
 	}
+	cfg, err := p.sealConfig(cfg)
+	if err != nil {
+		return err
+	}
 	eventTypes := eventTypeArray(t.EventTypes)
-	_, err := p.db.ExecContext(ctx, `
+	_, err = p.db.ExecContext(ctx, `
 		INSERT INTO notification_targets
 		  (id, name, kind, config, event_types, enabled, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
@@ -185,6 +257,10 @@ func (p *PostgresTargetStore) Update(ctx context.Context, t Target) error {
 	cfg := []byte(t.Config)
 	if len(cfg) == 0 {
 		cfg = []byte("{}")
+	}
+	cfg, err := p.sealConfig(cfg)
+	if err != nil {
+		return err
 	}
 	eventTypes := eventTypeArray(t.EventTypes)
 	res, err := p.db.ExecContext(ctx, `

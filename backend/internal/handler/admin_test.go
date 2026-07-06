@@ -190,6 +190,47 @@ func TestAdminNotificationTargets_RejectsUnknownKind(t *testing.T) {
 	}
 }
 
+func TestAdminNotificationTargets_OmittedEventTypesDefaultsToFailures(t *testing.T) {
+	h := newTestHandler(t)
+	h.NotificationTargets = notifier.NewMemoryTargetStore()
+
+	r := gin.New()
+	r.POST("/admin/notification-targets", h.CreateNotificationTarget)
+
+	// No eventTypes → must NOT become the wildcard (every event); it
+	// defaults to the failure/state-change set to avoid alert fatigue.
+	body := map[string]any{
+		"name":   "ops-webhook",
+		"kind":   "webhook",
+		"config": json.RawMessage(`{"url":"https://ops.test/hook"}`),
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, newRequest(http.MethodPost, "/admin/notification-targets", body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", w.Code, w.Body.String())
+	}
+	var created notifier.Target
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	if len(created.EventTypes) == 0 {
+		t.Fatal("omitted eventTypes must default to the failure set, not the wildcard")
+	}
+	got := map[notifier.EventType]bool{}
+	for _, e := range created.EventTypes {
+		got[e] = true
+	}
+	for _, want := range []notifier.EventType{
+		notifier.EventRunFailed, notifier.EventDeployFailed,
+		notifier.EventBuildFailed, notifier.EventCanaryFailed,
+	} {
+		if !got[want] {
+			t.Errorf("default filter missing %s", want)
+		}
+	}
+	if got[notifier.EventRunSucceeded] {
+		t.Error("default filter must not include success events")
+	}
+}
+
 func TestAdminNotificationTargets_CRUD(t *testing.T) {
 	h := newTestHandler(t)
 	h.NotificationTargets = notifier.NewMemoryTargetStore()

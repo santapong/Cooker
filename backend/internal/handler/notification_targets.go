@@ -25,6 +25,20 @@ type adminNotificationTargetRequest struct {
 	Enabled    *bool                `json:"enabled,omitempty"`
 }
 
+// defaultCreateEventTypes is the failure/state-change set a new
+// target subscribes to when the request omits eventTypes. Defaulting
+// to the wildcard (every event, including every green run) is the
+// alert-fatigue anti-pattern — operators mute a noisy channel and
+// then miss the failure it existed for. An operator who genuinely
+// wants everything can pass an explicit list including the success
+// events. Existing rows keep their stored semantics unchanged.
+var defaultCreateEventTypes = []notifier.EventType{
+	notifier.EventRunFailed,
+	notifier.EventDeployFailed,
+	notifier.EventBuildFailed,
+	notifier.EventCanaryFailed,
+}
+
 func validateTargetRequest(req *adminNotificationTargetRequest) error {
 	if err := validate.Name("name", req.Name); err != nil {
 		return err
@@ -97,12 +111,17 @@ func (h *Handler) CreateNotificationTarget(c *gin.Context) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	eventTypes := req.EventTypes
+	if len(eventTypes) == 0 {
+		// Omitted → failure/state-change set, not the wildcard.
+		eventTypes = defaultCreateEventTypes
+	}
 	t := notifier.Target{
 		ID:         uuid.New().String(),
 		Name:       req.Name,
 		Kind:       req.Kind,
 		Config:     req.Config,
-		EventTypes: req.EventTypes,
+		EventTypes: eventTypes,
 		Enabled:    enabled,
 	}
 	if err := h.NotificationTargets.Create(c.Request.Context(), t); err != nil {

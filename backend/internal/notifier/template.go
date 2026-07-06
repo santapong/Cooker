@@ -20,6 +20,9 @@ var titleTemplates = map[EventType]*template.Template{
 	EventDeploySucceeded: must("deploy-succ-t", `🚀 Deploy succeeded: {{.AppName}} → {{.Environment}}`),
 	EventDeployFailed:    must("deploy-fail-t", `🔥 Deploy failed: {{.AppName}} → {{.Environment}}`),
 	EventBuildFailed:     must("build-fail-t", `🔨 Build failed: {{.PipelineName}}`),
+	EventCanaryPromoted:  must("canary-prom-t", `📈 Canary promoted: {{.AppName}} → {{.Environment}}`),
+	EventCanaryAborted:   must("canary-abort-t", `↩️ Canary aborted: {{.AppName}} → {{.Environment}}`),
+	EventCanaryFailed:    must("canary-fail-t", `🔥 Canary failed: {{.AppName}} → {{.Environment}}`),
 }
 
 var bodyTemplates = map[EventType]*template.Template{
@@ -50,6 +53,24 @@ Error: {{.Error}}
 Details: {{.URL}}
 {{- end}}`),
 	EventBuildFailed: must("build-fail-b", `Build for {{.PipelineName}} (run {{.RunID}}) failed.
+{{- if .Error}}
+Error: {{.Error}}
+{{- end}}
+{{- if .URL}}
+Details: {{.URL}}
+{{- end}}`),
+	EventCanaryPromoted: must("canary-prom-b", `Canary for {{.AppName}} was promoted to 100% in {{.Environment}}.
+{{- if .URL}}
+Details: {{.URL}}
+{{- end}}`),
+	EventCanaryAborted: must("canary-abort-b", `Canary for {{.AppName}} in {{.Environment}} was rolled back.
+{{- if .Error}}
+Reason: {{.Error}}
+{{- end}}
+{{- if .URL}}
+Details: {{.URL}}
+{{- end}}`),
+	EventCanaryFailed: must("canary-fail-b", `Canary for {{.AppName}} in {{.Environment}} could not be established.
 {{- if .Error}}
 Error: {{.Error}}
 {{- end}}

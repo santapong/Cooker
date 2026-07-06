@@ -251,6 +251,25 @@ Residual risk: the inventory reflects whatever the granted identity can see. Sco
 - **Environment variables**: Sensitive configuration injected at runtime, never baked into images
 - **No secrets in pipelines**: Pipeline variable values are stored in the database; sensitive values should use secret references rather than plaintext
 
+#### Credential handling — notification-target configs
+
+Notification targets (`internal/notifier`, admin-only API) store
+channel configuration in the `notification_targets.config` JSONB
+column. That config carries bearer secrets — an SMTP password for
+email, and the webhook URL itself is the bearer credential for
+Slack/Discord/generic webhooks. When `COOKER_SECRET_KEY` is set the
+column is sealed at rest with the same AES-GCM codec
+(`internal/crypto`) as the database secrets backend: the stored value
+is a `{"enc":"v1","data":...}` envelope, and the plaintext config is
+never written to Postgres. Rows created before this change (raw
+channel JSON) are read back transparently and re-sealed on their next
+update, so no migration or operator action is required. In dev without
+a key, configs are stored plaintext and the server logs a warning at
+boot. The config is decrypted only in-process at send time; it is
+never returned to any client (the admin API echoes the target back
+with its config, so treat the admin role as credential-bearing — the
+same trust level as registry/cluster config).
+
 #### Credential handling — SSH remote hosts
 
 When an operator registers a host with `kind=ssh-docker` (the

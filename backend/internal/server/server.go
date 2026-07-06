@@ -158,6 +158,16 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	cleanups = append(cleanups, func() { st.Close() })
 
+	// Always-on notification plumbing (targets + dispatcher). Booted
+	// before the services so the run/deploy/canary paths can emit
+	// events regardless of whether the job queue is enabled.
+	notifDeps, err := bootNotifier(ctx, cfg, codec)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("notifier boot: %w", err)
+	}
+	cleanups = append(cleanups, notifDeps.closeAll)
+
 	var redisClient *redis.Client
 	if cfg.WSTicket.Backend == "redis" || cfg.RateLimit.Backend == "redis" || cfg.WSHub.Backend == "redis" {
 		opts, err := redis.ParseURL(cfg.RedisURL)
@@ -311,6 +321,7 @@ func New(cfg *config.Config) (*Server, error) {
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 	appDeployer.CacheRef = cfg.BuildCacheRepo
 	appDeployer.Deploys = st.AppDeploys
+	appDeployer.Notifier = notifDeps.Dispatcher
 
 	// Canary deployments (OR-1). The weighted split needs a deployer that
 	// can rebalance replicas — only the Kubernetes-backed deployers
@@ -321,7 +332,8 @@ func New(cfg *config.Config) (*Server, error) {
 	if wd, ok := deploy.(deployer.WeightedDeployer); ok {
 		canaryWeighted = wd
 	}
-	canarySvc := service.NewCanaryService(st.Apps, st.AppCanaries, st.AppDeploys, appDeployer, canaryWeighted)
+	canarySvc := service.NewCanaryService(st.Apps, st.AppCanaries, st.AppDeploys, appDeployer, canaryWeighted,
+		service.WithCanaryNotifier(notifDeps.Dispatcher))
 
 	runs := NewRunCoordinator(st)
 
@@ -490,7 +502,7 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, err
 	}
 
-	jobDeps, err := bootJobQueue(ctx, cfg, st, exec)
+	jobDeps, err := bootJobQueue(ctx, cfg, st, exec, notifDeps.Dispatcher)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("jobqueue boot: %w", err)
@@ -499,9 +511,10 @@ func New(cfg *config.Config) (*Server, error) {
 	if jobDeps.Enqueuer != nil {
 		h.Enqueuer = jobDeps.Enqueuer
 	}
-	if jobDeps.TargetStore != nil {
-		h.NotificationTargets = jobDeps.TargetStore
-	}
+	// Notification targets are always available (memory or Postgres),
+	// independent of the job queue.
+	h.NotificationTargets = notifDeps.TargetStore
+	h.Dispatcher = notifDeps.Dispatcher
 
 	schedDeps, err := bootScheduler(ctx, cfg, jobDeps)
 	if err != nil {

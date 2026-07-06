@@ -34,6 +34,13 @@ const (
 	EventDeploySucceeded EventType = "deploy.succeeded"
 	EventDeployFailed    EventType = "deploy.failed"
 	EventBuildFailed     EventType = "build.failed"
+	// Canary rollout transitions (OR-1). Promoted/aborted are state
+	// changes an operator acts on; failed is the couldn't-establish
+	// case. There is deliberately no canary.started — routine
+	// progress events would train operators to ignore the channel.
+	EventCanaryPromoted EventType = "canary.promoted"
+	EventCanaryAborted  EventType = "canary.aborted"
+	EventCanaryFailed   EventType = "canary.failed"
 )
 
 // Event is everything a channel needs to render a message. Fields

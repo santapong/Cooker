@@ -21,13 +21,11 @@ import (
 // the caller treats that as "no queue" and falls back to the inline
 // RunPipeline path.
 type jobQueueDeps struct {
-	Pool        *jobqueue.Pool
-	Store       jobqueue.Store
-	Listener    *jobqueue.PqListener
-	DB          *sql.DB
-	Dispatcher  *notifier.Dispatcher
-	TargetStore notifier.TargetStore
-	Enqueuer    *service.JobQueueEnqueuer
+	Pool     *jobqueue.Pool
+	Store    jobqueue.Store
+	Listener *jobqueue.PqListener
+	DB       *sql.DB
+	Enqueuer *service.JobQueueEnqueuer
 }
 
 // closeAll releases every resource held by the deps in reverse boot
@@ -50,7 +48,7 @@ func (d *jobQueueDeps) closeAll() {
 // rather than reaching into postgres.NewStore's internals — the
 // listener already needs a dedicated connection, and a second small
 // pool of 8 connections costs less than expanding the store API.
-func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec *service.Executor) (*jobQueueDeps, error) {
+func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec *service.Executor, dispatcher *notifier.Dispatcher) (*jobQueueDeps, error) {
 	if !cfg.JobQueue.Enabled {
 		slog.Info("jobqueue: disabled", "flag", "COOKER_JOBQUEUE_ENABLED=false")
 		return &jobQueueDeps{}, nil
@@ -74,13 +72,9 @@ func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec
 
 	pgStore := jobqueue.NewPostgres(db)
 
-	// Notifier dispatcher — shares the same DB connection pool as
-	// the queue so we don't open yet another. Always-on: an empty
-	// notification_targets table is a no-op, no operator config
-	// required to get a working baseline.
-	targetStore := notifier.NewPostgresTargetStore(db)
-	dispatcher := notifier.NewDispatcher(targetStore, defaultNotifierRegistry())
-
+	// The notifier dispatcher is booted once, unconditionally, in
+	// bootNotifier and shared here — the queue path and the inline
+	// path emit through the same dispatcher.
 	reg := jobqueue.NewRegistry()
 	runner := service.NewJobQueueRunner(st, exec, dispatcher)
 	reg.Register(service.JobKindPipelineRun, runner.Handle)
@@ -118,13 +112,11 @@ func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec
 		"listener", listener != nil)
 
 	return &jobQueueDeps{
-		Pool:        pool,
-		Store:       pgStore,
-		Listener:    listener,
-		DB:          db,
-		Dispatcher:  dispatcher,
-		TargetStore: targetStore,
-		Enqueuer:    enqueuer,
+		Pool:     pool,
+		Store:    pgStore,
+		Listener: listener,
+		DB:       db,
+		Enqueuer: enqueuer,
 	}, nil
 }
 

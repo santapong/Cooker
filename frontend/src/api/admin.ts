@@ -72,7 +72,10 @@ export type NotificationEventType =
   | 'run.cancelled'
   | 'deploy.succeeded'
   | 'deploy.failed'
-  | 'build.failed';
+  | 'build.failed'
+  | 'canary.promoted'
+  | 'canary.aborted'
+  | 'canary.failed';
 
 export interface NotificationTarget {
   id: string;
