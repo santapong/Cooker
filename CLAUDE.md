@@ -115,4 +115,4 @@ The full list is in `backlog.md`. The three highest-impact items I scoped in det
 2. **P1.2 — Audit logging middleware.** Per-route opt-in slog audit trail. ~2 hours.
 3. **P6.1 — `helm lint` + `helm template` + `kubeconform` in CI.** ~10 minutes; YAML is in the backlog ready to drop in.
 
-**KeepSave secrets manager (P2)** ships at HEAD — adapter at `backend/internal/secrets/keepsave/` (~457 LOC), Helm wiring renders `COOKER_SECRETS_KEEPSAVE_{URL,PROJECT_ID,API_KEY}` (API key via `secretKeyRef`), and `Config.Validate()` (`backend/internal/config/config.go:413-423`) enforces the required env vars before boot. Select it with `COOKER_SECRETS_BACKEND=keepsave` (chart: `secrets.backend=keepsave`).
+**KeepSave secrets manager (P2)** ships at HEAD — adapter at `backend/internal/secrets/keepsave/` (~457 LOC), Helm wiring renders `COOKER_SECRETS_KEEPSAVE_{URL,PROJECT_ID,API_KEY}` (API key via `secretKeyRef`), and `Config.Validate()` (`backend/internal/config/validate.go:79-89`) enforces the required env vars before boot. Select it with `COOKER_SECRETS_BACKEND=keepsave` (chart: `secrets.backend=keepsave`).
