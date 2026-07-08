@@ -4,9 +4,11 @@ import { dockerApi } from '../api/docker';
 import type { DockerNetwork, DockerVolume } from '../types/infra';
 import { useTheme } from '../theme/ThemeProvider';
 import { hexA } from '../theme/tokens';
-import { Btn, Card, EmptyState, Input, Label, PageHeader, Pill, Select, StatusDot } from '../components/ui/atoms';
+import { Btn, Card, Input, Label, PageHeader, Pill, Select } from '../components/ui/atoms';
 import { DataTable } from '../components/ui/DataTable';
 import { useToastStore } from '../stores/toastStore';
+import ImagesPanel from '../components/docker/ImagesPanel';
+import ContainersPanel from '../components/docker/ContainersPanel';
 
 type Tab = 'images' | 'containers' | 'networks' | 'volumes';
 
@@ -128,140 +130,9 @@ export default function DockerPage() {
         ))}
       </div>
 
-      {tab === 'images' && (
-        <Card pad={0}>
-          <SectionHeader title="Images" count={images.length} />
-          {/* Empty-state — W11 §Indie step 2 (PR #66). Transport not configured → [] from backend. */}
-          {!loading && images.length === 0 ? (
-            <EmptyState
-              title="No images available."
-              body="The Docker host transport is not configured (COOKER_DOCKER_HOST / P9.4). Images will appear here once the transport is wired up."
-              action={
-                <a
-                  href="https://github.com/santapong/Cooker/blob/main/docs/user-guide/operations/docker-builds.md"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '8px 16px',
-                    border: '1px solid currentColor',
-                    borderRadius: 7,
-                    fontSize: 13.5,
-                    color: 'inherit',
-                    textDecoration: 'none',
-                    opacity: 0.7,
-                  }}
-                >
-                  Docker builds guide ↗
-                </a>
-              }
-            />
-          ) : (
-          <DataTable
-            rows={images}
-            rowKey={(img) => img.id}
-            empty={loading ? 'Loading…' : 'No images cached locally yet.'}
-            columns={[
-              {
-                key: 'repo',
-                header: 'Repository',
-                render: (img) => (
-                  <span style={{ fontFamily: t.mono, fontSize: 12 }}>
-                    {img.repoTags?.[0]?.split(':')[0] || img.id.slice(0, 12)}
-                  </span>
-                ),
-              },
-              {
-                key: 'tag',
-                header: 'Tag',
-                width: '160px',
-                render: (img) => (
-                  <Pill tone="neutral">{img.repoTags?.[0]?.split(':')[1] || 'latest'}</Pill>
-                ),
-              },
-              {
-                key: 'size',
-                header: 'Size',
-                width: '120px',
-                align: 'right',
-                render: (img) => (
-                  <span style={{ fontFamily: t.mono, fontSize: 12 }}>
-                    {(img.size / 1024 / 1024).toFixed(1)} MB
-                  </span>
-                ),
-              },
-              {
-                key: 'created',
-                header: 'Created',
-                width: '160px',
-                render: (img) => (
-                  <span style={{ color: t.textMute, fontSize: 12 }}>
-                    {new Date(img.created).toLocaleDateString()}
-                  </span>
-                ),
-              },
-            ]}
-          />
-          )}
-        </Card>
-      )}
+      {tab === 'images' && <ImagesPanel images={images} loading={loading} />}
 
-      {tab === 'containers' && (
-        <Card pad={0}>
-          <SectionHeader title="Containers" count={containers.length} />
-          {!loading && containers.length === 0 ? (
-            <EmptyState
-              title="No containers available."
-              body="The Docker host transport is not configured (COOKER_DOCKER_HOST / P9.4). Container data will appear here once the transport is wired up."
-            />
-          ) : (
-          <DataTable
-            rows={containers}
-            rowKey={(c) => c.id}
-            empty={loading ? 'Loading…' : 'No containers running.'}
-            columns={[
-              {
-                key: 'name',
-                header: 'Name',
-                render: (c) => (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <StatusDot tone={c.state === 'running' ? 'good' : 'neutral'} />
-                    <span style={{ fontFamily: t.mono, fontSize: 12 }}>{c.name}</span>
-                  </div>
-                ),
-              },
-              {
-                key: 'image',
-                header: 'Image',
-                render: (c) => (
-                  <span style={{ fontFamily: t.mono, fontSize: 11.5, color: t.textSoft }}>
-                    {c.image}
-                  </span>
-                ),
-              },
-              {
-                key: 'state',
-                header: 'State',
-                width: '120px',
-                render: (c) => (
-                  <Pill tone={c.state === 'running' ? 'good' : 'neutral'}>{c.state}</Pill>
-                ),
-              },
-              {
-                key: 'status',
-                header: 'Status',
-                width: '200px',
-                render: (c) => (
-                  <span style={{ color: t.textSoft, fontSize: 12 }}>{c.status}</span>
-                ),
-              },
-            ]}
-          />
-          )}
-        </Card>
-      )}
+      {tab === 'containers' && <ContainersPanel containers={containers} loading={loading} />}
 
       {tab === 'networks' && <NetworksTab />}
       {tab === 'volumes' && <VolumesTab />}
