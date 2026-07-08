@@ -9,22 +9,14 @@ import type {
   CanaryConfig,
 } from '../types/app';
 import { useTheme } from '../theme/ThemeProvider';
-import { hexA } from '../theme/tokens';
-import {
-  Btn,
-  Card,
-  Field,
-  Input,
-  Label,
-  PageHeader,
-  Pill,
-  SectionLabel,
-  Select,
-  statusTone,
-  Toggle,
-} from '../components/ui/atoms';
+import { Btn, PageHeader } from '../components/ui/atoms';
 import { useToastStore } from '../stores/toastStore';
 import { useWebSocket } from '../hooks/useWebSocket';
+import HealthBadge from './appdetail/HealthBadge';
+import OverviewPanel from './appdetail/OverviewPanel';
+import DeploymentsPanel from './appdetail/DeploymentsPanel';
+import DeployLogPanel from './appdetail/DeployLogPanel';
+import ServicesPanel from './appdetail/ServicesPanel';
 
 export default function AppDetailPage() {
   const t = useTheme();
@@ -297,6 +289,12 @@ export default function AppDetailPage() {
     });
   };
 
+  const openWebhookForm = () => setShowWebhook(true);
+  const cancelWebhookForm = () => {
+    setShowWebhook(false);
+    setNewSecret('');
+  };
+
   if (loading) {
     return (
       <div
@@ -342,459 +340,47 @@ export default function AppDetailPage() {
         }
       />
 
+      {/* 320px sidebar (facts + deploy activity + service config) / 1fr log
+          viewer. OverviewPanel, DeploymentsPanel and ServicesPanel are called
+          in this order so the rendered card sequence matches the original
+          single-file layout exactly (see each panel's file comment for why
+          the canary-rollout card lives in DeploymentsPanel rather than
+          ServicesPanel). DeployLogPanel is a separate grid column, not a
+          sidebar card, so it has its own call site below. */}
       <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: 22 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Card style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <Field label="App ID" mono={app.id} />
-            <Field label="Repo" mono={`github.com/${app.githubRepo}`} />
-            <Field label="Branch" mono={app.branch} />
-            {app.registryRef && <Field label="Registry ref" mono={app.registryRef} />}
-            {app.environmentId && <Field label="Environment" mono={app.environmentId} />}
-            {/* Deployed URL surfaced from AppHealthChecker (Indie step 6, W11-A2) */}
-            {app.deployedURL && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, color: t.textMute, minWidth: 80 }}>Deployed URL</span>
-                <a
-                  href={app.deployedURL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    fontFamily: t.mono,
-                    fontSize: 11.5,
-                    color: t.accent,
-                    textDecoration: 'none',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                  aria-label={`Visit deployed app at ${app.deployedURL}`}
-                >
-                  {app.deployedURL}
-                </a>
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-              {app.hasWebhook && <Pill tone="cool">webhook</Pill>}
-              {app.autoDeploy && <Pill tone="good">auto-deploy</Pill>}
-              {app.canary?.strategy === 'canary' && <Pill tone="ember">canary</Pill>}
-              {drift?.status === 'in_sync' && <Pill tone="good">in sync</Pill>}
-              {drift?.status === 'drift' && <Pill tone="warn">drift</Pill>}
-            </div>
-          </Card>
+          <OverviewPanel app={app} drift={drift} />
 
-          {/* Canary rollout status panel (OR-1). Shown only while a
-              canary is in flight; Promote / Abort drive the service. */}
-          {activeCanary && activeCanary.status === 'progressing' && (
-            <Card accent={t.ember} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <SectionLabel>Canary rollout</SectionLabel>
-                <div style={{ flex: 1 }} />
-                <Pill tone={activeCanary.healthy ? 'good' : 'bad'}>
-                  {activeCanary.healthy ? 'healthy' : 'unhealthy'}
-                </Pill>
-              </div>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'max-content 1fr',
-                  gap: '6px 14px',
-                  fontSize: 12.5,
-                  alignItems: 'center',
-                }}
-              >
-                <span style={{ color: t.textMute }}>Traffic</span>
-                <span style={{ fontFamily: t.mono, color: t.text }}>{activeCanary.weight}% to canary</span>
-                <span style={{ color: t.textMute }}>New image</span>
-                <span
-                  style={{
-                    fontFamily: t.mono,
-                    fontSize: 11,
-                    color: t.textSoft,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                  title={activeCanary.canaryImage}
-                >
-                  {activeCanary.canaryImage.split('/').pop()}
-                </span>
-                <span style={{ color: t.textMute }}>Mode</span>
-                <span style={{ color: t.textSoft }}>
-                  {activeCanary.autoPromote
-                    ? `auto-promote after ${activeCanary.healthWindowSeconds}s healthy`
-                    : 'manual (awaiting decision)'}
-                </span>
-              </div>
-              {activeCanary.message && (
-                <div style={{ fontSize: 11.5, color: t.textMute, fontStyle: 'italic' }}>
-                  {activeCanary.message}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
-                <Btn kind="danger" onClick={abortCanary} disabled={canaryBusy}>
-                  Abort
-                </Btn>
-                <div style={{ flex: 1 }} />
-                <Btn kind="primary" onClick={promoteCanary} disabled={canaryBusy}>
-                  {canaryBusy ? 'Working…' : 'Promote'}
-                </Btn>
-              </div>
-            </Card>
-          )}
+          <DeploymentsPanel
+            activeCanary={activeCanary}
+            canaryBusy={canaryBusy}
+            onPromoteCanary={promoteCanary}
+            onAbortCanary={abortCanary}
+            history={history}
+            onRollback={rollback}
+          />
 
-          {/* Deploy history + one-click rollback (roadmap M3) */}
-          {history.length > 0 && (
-            <Card style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <SectionLabel>Deploy history</SectionLabel>
-              {history.map((d, i) => (
-                <div
-                  key={d.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    paddingBottom: 8,
-                    borderBottom: i < history.length - 1 ? `1px solid ${t.line}` : 'none',
-                  }}
-                >
-                  <Pill tone={statusTone(d.status)}>{d.status}</Pill>
-                  {d.kind === 'rollback' && <Pill tone="cool">rollback</Pill>}
-                  <span
-                    style={{
-                      fontFamily: t.mono,
-                      fontSize: 10.5,
-                      color: t.textSoft,
-                      flex: 1,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title={d.imageRef || d.runId}
-                  >
-                    {d.imageRef ? d.imageRef.split('/').pop() : `run ${d.runId.slice(0, 8)}`}
-                  </span>
-                  <span style={{ fontSize: 10, color: t.textMute, whiteSpace: 'nowrap' }}>
-                    {new Date(d.createdAt).toLocaleString()}
-                  </span>
-                  {i > 0 && d.status === 'success' && d.kind === 'deploy' && d.imageRef && (
-                    <Btn onClick={() => rollback(d.id, d.imageRef!)}>Roll back</Btn>
-                  )}
-                </div>
-              ))}
-            </Card>
-          )}
-
-          {/* GitHub webhook card — Indie step 5 (W11-A1, PR #50) */}
-          <Card style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <SectionLabel>GitHub webhook</SectionLabel>
-
-            {/* Webhook URL — always shown so operators can copy it before
-                setting the secret. The URL is deterministic from the origin
-                (backend/internal/server/router.go:191 — no new API field). */}
-            <div>
-              <Label>Webhook endpoint</Label>
-              <Input
-                type="text"
-                value={webhookUrl}
-                readOnly
-                aria-label="Webhook endpoint URL"
-                style={{ fontFamily: t.mono, fontSize: 11.5 }}
-              />
-              <Btn
-                kind="secondary"
-                onClick={copyWebhookUrl}
-                style={{ marginTop: 8, justifyContent: 'center', width: '100%' }}
-              >
-                Copy URL
-              </Btn>
-            </div>
-
-            <div
-              style={{
-                borderTop: `1px solid ${hexA(t.line, 0.6)}`,
-                paddingTop: 12,
-                fontSize: 12.5,
-                color: t.textSoft,
-                lineHeight: 1.5,
-              }}
-            >
-              {app.hasWebhook
-                ? 'A webhook secret is set. Rotating it will invalidate any cached secret on the GitHub side.'
-                : 'No webhook secret yet. Set one so push events from GitHub trigger deploys.'}
-            </div>
-            {!showWebhook ? (
-              <Btn
-                kind="secondary"
-                icon="cog"
-                onClick={() => setShowWebhook(true)}
-                style={{ justifyContent: 'center' }}
-              >
-                {app.hasWebhook ? 'Rotate webhook secret' : 'Set webhook secret'}
-              </Btn>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <Label>New secret</Label>
-                <Input
-                  type="text"
-                  value={newSecret}
-                  onChange={(e) => setNewSecret(e.target.value)}
-                  placeholder="paste or generate"
-                  style={{ fontFamily: t.mono, fontSize: 11.5 }}
-                />
-                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                  <Btn kind="ghost" onClick={generateSecret} disabled={rotating}>
-                    Generate
-                  </Btn>
-                  <div style={{ flex: 1 }} />
-                  <Btn
-                    kind="ghost"
-                    onClick={() => {
-                      setShowWebhook(false);
-                      setNewSecret('');
-                    }}
-                    disabled={rotating}
-                  >
-                    Cancel
-                  </Btn>
-                  <Btn
-                    kind="primary"
-                    onClick={rotateWebhook}
-                    disabled={rotating || newSecret.length < 8}
-                  >
-                    {rotating ? 'Rotating…' : 'Save secret'}
-                  </Btn>
-                </div>
-              </div>
-            )}
-          </Card>
-
-          {/* Deploy strategy card (OR-1). Toggle rolling/canary and tune
-              the weight / auto-promote / window, saved via appsApi.update.
-              Canary requires a Kubernetes target; we surface a hint when
-              the app's target can't run one (the backend returns 422). */}
-          {canaryDraft && (
-            <Card style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <SectionLabel>Deploy strategy</SectionLabel>
-              <div>
-                <Label>Strategy</Label>
-                <Select
-                  value={canaryDraft.strategy}
-                  onChange={(e) =>
-                    setCanaryDraft({
-                      ...canaryDraft,
-                      strategy: e.target.value as CanaryConfig['strategy'],
-                    })
-                  }
-                  aria-label="Deploy strategy"
-                >
-                  <option value="rolling">Rolling (replace)</option>
-                  <option value="canary">Canary (weighted)</option>
-                </Select>
-              </div>
-
-              {canaryDraft.strategy === 'canary' && (
-                <>
-                  {app.deployTarget.kind !== 'kubernetes' && (
-                    <div style={{ fontSize: 11.5, color: t.warn, lineHeight: 1.5 }}>
-                      Canary needs a Kubernetes deploy target. This app targets{' '}
-                      <strong>{app.deployTarget.kind}</strong>; a canary deploy will be rejected.
-                    </div>
-                  )}
-                  <div>
-                    <Label>Canary weight (%)</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={99}
-                      value={canaryDraft.weight ?? 10}
-                      onChange={(e) =>
-                        setCanaryDraft({ ...canaryDraft, weight: Number(e.target.value) })
-                      }
-                      aria-label="Canary weight percent"
-                    />
-                  </div>
-                  <Toggle
-                    on={!!canaryDraft.autoPromote}
-                    label="Auto-promote when healthy"
-                    onClick={() =>
-                      setCanaryDraft({ ...canaryDraft, autoPromote: !canaryDraft.autoPromote })
-                    }
-                  />
-                  {canaryDraft.autoPromote && (
-                    <div>
-                      <Label>Health window (seconds)</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        value={canaryDraft.healthWindowSeconds ?? 300}
-                        onChange={(e) =>
-                          setCanaryDraft({
-                            ...canaryDraft,
-                            healthWindowSeconds: Number(e.target.value),
-                          })
-                        }
-                        aria-label="Health window seconds"
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-
-              <Btn
-                kind="primary"
-                onClick={saveCanary}
-                disabled={savingCanary}
-                style={{ justifyContent: 'center' }}
-              >
-                {savingCanary ? 'Saving…' : 'Save strategy'}
-              </Btn>
-            </Card>
-          )}
+          <ServicesPanel
+            app={app}
+            webhookUrl={webhookUrl}
+            showWebhook={showWebhook}
+            newSecret={newSecret}
+            rotating={rotating}
+            onShowWebhook={openWebhookForm}
+            onCancelWebhook={cancelWebhookForm}
+            onChangeSecret={setNewSecret}
+            onGenerateSecret={generateSecret}
+            onCopyWebhookUrl={copyWebhookUrl}
+            onRotateWebhook={rotateWebhook}
+            canaryDraft={canaryDraft}
+            onChangeCanaryDraft={setCanaryDraft}
+            savingCanary={savingCanary}
+            onSaveCanary={saveCanary}
+          />
         </div>
 
-        <Card pad={0}>
-          <div
-            style={{
-              padding: '14px 18px',
-              borderBottom: `1px solid ${t.line}`,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-            }}
-          >
-            <span style={{ fontFamily: t.serif, fontSize: 18, fontWeight: 500, color: t.text }}>
-              Build & deploy logs
-            </span>
-            {lastDeploy && (
-              <Pill tone="cool">run {lastDeploy.runId.slice(0, 8)}</Pill>
-            )}
-            <div style={{ flex: 1 }} />
-            {deploying && <Pill tone="ember">streaming</Pill>}
-          </div>
-
-          {/* Last deploy summary — Indie step 6 (W11-A2, PR #50).
-              Visible once a deploy has been triggered this session.
-              url is optional (docker-host targets may not expose an ingress URL). */}
-          {lastDeploy && (
-            <div
-              style={{
-                padding: '12px 18px',
-                borderBottom: `1px solid ${hexA(t.line, 0.5)}`,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-              }}
-            >
-              <SectionLabel>Last deploy</SectionLabel>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'max-content 1fr',
-                  gap: '6px 14px',
-                  fontSize: 12.5,
-                  alignItems: 'center',
-                }}
-              >
-                <span style={{ color: t.textMute }}>Status</span>
-                <span>
-                  <Pill tone={statusTone(lastDeploy.status)}>{lastDeploy.status}</Pill>
-                </span>
-                <span style={{ color: t.textMute }}>Run</span>
-                <span style={{ fontFamily: t.mono, fontSize: 12, color: t.text }}>
-                  {lastDeploy.runId.slice(0, 8)}
-                </span>
-                {lastDeploy.url && (
-                  <>
-                    <span style={{ color: t.textMute }}>URL</span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span
-                        style={{
-                          fontFamily: t.mono,
-                          fontSize: 11.5,
-                          color: t.text,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          maxWidth: 300,
-                        }}
-                      >
-                        {lastDeploy.url}
-                      </span>
-                      <a
-                        href={lastDeploy.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          fontFamily: t.mono,
-                          fontSize: 11.5,
-                          color: t.accent,
-                          textDecoration: 'none',
-                          whiteSpace: 'nowrap',
-                          border: `1px solid ${hexA(t.accent, 0.4)}`,
-                          borderRadius: 5,
-                          padding: '2px 8px',
-                        }}
-                        aria-label={`Visit deployed app at ${lastDeploy.url}`}
-                      >
-                        Visit ↗
-                      </a>
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-
-          <pre
-            ref={logRef}
-            style={{
-              background: t.bg,
-              color: t.text,
-              fontFamily: t.mono,
-              fontSize: 12,
-              padding: 16,
-              margin: 0,
-              maxHeight: 480,
-              minHeight: 280,
-              overflow: 'auto',
-              whiteSpace: 'pre-wrap',
-              borderTop: `1px solid ${hexA(t.line, 0.4)}`,
-            }}
-          >
-            {logs || 'Click Deploy to start. Build logs stream here in real time.'}
-          </pre>
-        </Card>
+        <DeployLogPanel logs={logs} logRef={logRef} lastDeploy={lastDeploy} deploying={deploying} />
       </div>
     </div>
-  );
-}
-
-// HealthBadge renders the post-deploy readiness verdict written by
-// the backend AppHealthChecker. "unknown" is the default until the
-// first probe runs (or when the target kind has no probe wired) —
-// shown as a muted neutral pill so operators learn the page state
-// without being alarmed.
-function HealthBadge({ app }: { app: AppModel }) {
-  const status = app.healthStatus ?? 'unknown';
-  const tone: 'good' | 'bad' | 'warn' | 'neutral' =
-    status === 'healthy'
-      ? 'good'
-      : status === 'failed'
-        ? 'bad'
-        : status === 'degraded'
-          ? 'warn'
-          : 'neutral';
-  const label =
-    status === 'healthy'
-      ? 'healthy'
-      : status === 'failed'
-        ? 'unhealthy'
-        : status === 'degraded'
-          ? 'degraded'
-          : 'health unknown';
-  return (
-    <span style={{ marginLeft: 10, display: 'inline-flex', verticalAlign: 'middle' }} title={app.healthMessage ?? ''}>
-      <Pill tone={tone}>{label}</Pill>
-    </span>
   );
 }
