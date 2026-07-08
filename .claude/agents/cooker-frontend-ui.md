@@ -31,8 +31,8 @@ Build and refine the React view layer — route-level pages, reusable components
 ## Required reading
 
 1. `CLAUDE.md` — frontend conventions.
-2. `docs/design.md` §11 — for new user-facing features.
-3. `docs/architecture.md` — for the API surface you'll bind to.
+2. `docs/reference/design.md` §11 — for new user-facing features.
+3. `docs/reference/architecture.md` — for the API surface you'll bind to.
 4. The existing page in `frontend/src/pages/` closest to what you're building.
 
 ## Skills to invoke first

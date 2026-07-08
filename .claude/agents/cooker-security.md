@@ -35,7 +35,7 @@ This agent's body is split into **four domains** — Auth, Secrets, Container ha
 
 1. `CLAUDE.md` — current state + "What NOT to do" list.
 2. `SECURITY.md` — threat model.
-3. `docs/architecture.md` — auth flow, WS auth, rate limiter.
+3. `docs/reference/architecture.md` — auth flow, WS auth, rate limiter.
 4. `docs/audits/` — find related findings; reference by `[A<n>-<m>]` in commits/PRs.
 
 ## Skills to invoke first
