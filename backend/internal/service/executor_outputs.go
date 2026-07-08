@@ -254,4 +254,3 @@ func interpolateStageConfig(s *model.Stage, r buildplan.OutputResolver) (*model.
 	cp.Config = cfg
 	return &cp, nil
 }
-

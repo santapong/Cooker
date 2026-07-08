@@ -633,4 +633,3 @@ func (e *Executor) newStageLineWriter(runID string, stage *model.Stage) *lineWri
 	}
 	return newLineWriter(e.logBroadcast, e.logStore, runID, stage.ID)
 }
-
