@@ -65,7 +65,7 @@ The honest production-readiness verdict and the open work are in `backlog.md`'s 
 - **Layering**: handler → service → store/strategy. Handlers do HTTP parsing only. Services hold business logic. Adapters implement narrow interfaces.
 - **Errors**: wrap with package prefix — `fmt.Errorf("oidc: discover: %w", err)`. The store package exposes typed `ErrNotFound`; check via `errors.Is`.
 - **Tests**: every `internal/<pkg>/*.go` ships with a `*_test.go` for non-trivial logic. Race detector is on in CI: `go test ./... -race`. `go vet ./...` runs before tests.
-- **Adding a new pluggable backend** (e.g. a new builder): implement the interface, add a constructor case to `selectXxx` in `server.go`, document the env-var value in `.env.uat.example` and `docs/guides/UAT.md`.
+- **Adding a new pluggable backend** (e.g. a new builder): implement the interface, add a constructor case to `selectXxx` in `server/factories.go`, document the env-var value in `.env.uat.example` and `docs/guides/UAT.md`.
 - **No business logic in handlers. No HTTP types in services. No `panic` outside startup.**
 
 ### Frontend (TypeScript)

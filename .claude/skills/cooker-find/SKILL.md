@@ -35,13 +35,13 @@ Cooker is a Go-backend + React-frontend CI/CD platform. Single binary on port 80
 | File | When |
 |---|---|
 | `CLAUDE.md` | Always — orientation + conventions |
-| `docs/architecture.md` | Need the system map (what calls what) |
-| `docs/design.md` § 11 | Adding a new feature; checklist |
+| `docs/reference/architecture.md` | Need the system map (what calls what) |
+| `docs/reference/design.md` § 11 | Adding a new feature; checklist |
 | `docs/audits/remediation-plan.md` | Picking a known fix (themes T1–T24) |
 | `docs/audits/chain-recheck.md` | Current state of every chain failure (Open / Closed / Mitigated) |
 | `docs/audits/{dag-performance,spof-and-database,crash-and-service-quality,vulnerabilities-and-chains}.md` | Detailed findings for an area |
-| `docs/UAT.md` | Touching `make uat-up` |
-| `docs/RUNBOOK.md` | Runbook + alert reference |
+| `docs/guides/UAT.md` | Touching `make uat-up` |
+| `docs/guides/RUNBOOK.md` | Runbook + alert reference |
 | `SECURITY.md` | Auth, CORS, secrets, Dockerfile changes |
 | `backlog.md` | Why something isn't done yet |
 
