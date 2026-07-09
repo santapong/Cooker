@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 
@@ -392,8 +393,15 @@ func (s *Server) registerRoutes() {
 		})
 	}
 
-	s.router.NoRoute(spaIndexHandler("/usr/share/cooker/static/index.html"))
+	// Static-asset root is configurable (COOKER_STATIC_DIR) so the binary
+	// can serve the SPA from a non-default path when run outside the
+	// official image. Defaults to /usr/share/cooker/static.
+	staticDir := "/usr/share/cooker/static"
+	if s.config != nil && s.config.StaticDir != "" {
+		staticDir = s.config.StaticDir
+	}
+	s.router.NoRoute(spaIndexHandler(filepath.Join(staticDir, "index.html")))
 	s.router.GET("/.well-known/security.txt", securityTxtHandler())
-	s.router.GET("/assets/*filepath", assetsHandler("/usr/share/cooker/static/assets"))
-	s.router.HEAD("/assets/*filepath", assetsHandler("/usr/share/cooker/static/assets"))
+	s.router.GET("/assets/*filepath", assetsHandler(filepath.Join(staticDir, "assets")))
+	s.router.HEAD("/assets/*filepath", assetsHandler(filepath.Join(staticDir, "assets")))
 }
