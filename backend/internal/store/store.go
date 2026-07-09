@@ -339,28 +339,54 @@ type Store struct {
 	ping           func(context.Context) error
 }
 
-// New builds a Store. closeFn may be nil when no cleanup is required
-// (e.g., in-memory stores). pingFn may be nil for backends without a
-// liveness probe; Ping then reports healthy unconditionally.
-func New(p PipelineStore, r RunStore, e EnvironmentStore, pr PromotionStore, sa StageApprovalStore, a AppStore, ad AppDeployStore, ac AppCanaryStore, ae AuditEventStore, h HostStore, rc RegistryConfigStore, cc ClusterConfigStore, u UserStore, at APITokenStore, lic LicenseStore, closeFn func() error, pingFn func(context.Context) error) *Store {
+// Components carries the concrete store implementations plus optional
+// lifecycle hooks for New. Using a struct (rather than 17 positional
+// args) makes each backend's wiring self-documenting and lets callers
+// omit the nil Close/Ping without counting argument positions.
+type Components struct {
+	Pipelines      PipelineStore
+	Runs           RunStore
+	Environments   EnvironmentStore
+	Promotions     PromotionStore
+	StageApprovals StageApprovalStore
+	Apps           AppStore
+	AppDeploys     AppDeployStore
+	AppCanaries    AppCanaryStore
+	AuditEvents    AuditEventStore
+	Hosts          HostStore
+	Registries     RegistryConfigStore
+	Clusters       ClusterConfigStore
+	Users          UserStore
+	APITokens      APITokenStore
+	Licenses       LicenseStore
+	// Close releases driver resources; nil when no cleanup is required
+	// (e.g., in-memory stores).
+	Close func() error
+	// Ping probes liveness; nil for backends without one (Ping then
+	// reports healthy unconditionally).
+	Ping func(context.Context) error
+}
+
+// New builds a Store from its Components.
+func New(c Components) *Store {
 	return &Store{
-		Pipelines:      p,
-		Runs:           r,
-		Environments:   e,
-		Promotions:     pr,
-		StageApprovals: sa,
-		Apps:           a,
-		AppDeploys:     ad,
-		AppCanaries:    ac,
-		AuditEvents:    ae,
-		Hosts:          h,
-		Registries:     rc,
-		Clusters:       cc,
-		Users:          u,
-		APITokens:      at,
-		Licenses:       lic,
-		close:          closeFn,
-		ping:           pingFn,
+		Pipelines:      c.Pipelines,
+		Runs:           c.Runs,
+		Environments:   c.Environments,
+		Promotions:     c.Promotions,
+		StageApprovals: c.StageApprovals,
+		Apps:           c.Apps,
+		AppDeploys:     c.AppDeploys,
+		AppCanaries:    c.AppCanaries,
+		AuditEvents:    c.AuditEvents,
+		Hosts:          c.Hosts,
+		Registries:     c.Registries,
+		Clusters:       c.Clusters,
+		Users:          c.Users,
+		APITokens:      c.APITokens,
+		Licenses:       c.Licenses,
+		close:          c.Close,
+		ping:           c.Ping,
 	}
 }
 
