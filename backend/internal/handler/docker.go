@@ -13,23 +13,12 @@ import (
 	"github.com/santapong/cooker/internal/service"
 )
 
-// composeBaseDir is the only directory ParseComposeFile reads from.
-// Overridable at runtime (tests and future configurability) via
-// SetComposeBaseDir. An authenticated caller can name a file inside
-// this directory but can never escape it.
-var composeBaseDir = "."
-
-// SetComposeBaseDir sets the base directory the compose-parse
-// handler reads from. Intended for tests and for the server to
-// point at a dedicated config dir at boot.
-func SetComposeBaseDir(dir string) { composeBaseDir = dir }
-
 // resolveComposePath validates name and returns an absolute path
-// inside composeBaseDir. Rejects anything that looks like a path
-// (contains "/" or "\", starts with ".", is absolute, or resolves
-// outside the base after cleaning). Callers get a generic error so
-// the response never reveals the base directory.
-func resolveComposePath(name string) (string, error) {
+// inside the Handler's composeBaseDir. Rejects anything that looks
+// like a path (contains "/" or "\", starts with ".", is absolute, or
+// resolves outside the base after cleaning). Callers get a generic
+// error so the response never reveals the base directory.
+func (h *Handler) resolveComposePath(name string) (string, error) {
 	if name == "" {
 		name = "docker-compose.yml"
 	}
@@ -43,7 +32,7 @@ func resolveComposePath(name string) (string, error) {
 	if filepath.IsAbs(name) {
 		return "", errors.New("invalid filename")
 	}
-	baseAbs, err := filepath.Abs(composeBaseDir)
+	baseAbs, err := filepath.Abs(h.composeBaseDir)
 	if err != nil {
 		return "", errors.New("server misconfigured")
 	}
@@ -72,18 +61,18 @@ func resolveComposePath(name string) (string, error) {
 // (docs/audits/2026-05-half-shipped.md HS26-05-15). Returning 501 makes
 // the api client throw, so the UI shows an honest error instead.
 
-func ListDockerImages(c *gin.Context) {
+func (h *Handler) ListDockerImages(c *gin.Context) {
 	// No docker host transport wired (no docker.sock); reads are empty
 	// until P9.4. Empty 200 lets the UI render an empty state.
 	images := []model.ImageInfo{}
 	c.JSON(http.StatusOK, images)
 }
 
-func GetDockerImage(c *gin.Context) {
+func (h *Handler) GetDockerImage(c *gin.Context) {
 	notImplementedDockerHost(c, "image.inspect")
 }
 
-func BuildDockerImage(c *gin.Context) {
+func (h *Handler) BuildDockerImage(c *gin.Context) {
 	var req struct {
 		Dockerfile string            `json:"dockerfile"`
 		Context    string            `json:"context"`
@@ -102,18 +91,18 @@ func BuildDockerImage(c *gin.Context) {
 	notImplementedDockerHost(c, "image.build")
 }
 
-func DeleteDockerImage(c *gin.Context) {
+func (h *Handler) DeleteDockerImage(c *gin.Context) {
 	notImplementedDockerHost(c, "image.remove")
 }
 
-func ListContainers(c *gin.Context) {
+func (h *Handler) ListContainers(c *gin.Context) {
 	// No docker host transport wired (no docker.sock); reads are empty
 	// until P9.4. Empty 200 lets the UI render an empty state.
 	containers := []model.ContainerInfo{}
 	c.JSON(http.StatusOK, containers)
 }
 
-func CreateContainer(c *gin.Context) {
+func (h *Handler) CreateContainer(c *gin.Context) {
 	var req struct {
 		Image   string              `json:"image" binding:"required"`
 		Name    string              `json:"name"`
@@ -132,15 +121,15 @@ func CreateContainer(c *gin.Context) {
 	notImplementedDockerHost(c, "container.create")
 }
 
-func StopContainer(c *gin.Context) {
+func (h *Handler) StopContainer(c *gin.Context) {
 	notImplementedDockerHost(c, "container.stop")
 }
 
-func DeleteContainer(c *gin.Context) {
+func (h *Handler) DeleteContainer(c *gin.Context) {
 	notImplementedDockerHost(c, "container.remove")
 }
 
-func GetContainerLogs(c *gin.Context) {
+func (h *Handler) GetContainerLogs(c *gin.Context) {
 	notImplementedDockerHost(c, "container.logs")
 }
 
@@ -149,13 +138,13 @@ func GetContainerLogs(c *gin.Context) {
 // service.ParseComposeGraph. All graph-construction logic lives in the
 // service layer (see compose_graph.go); the handler owns disk + path
 // allowlist + HTTP framing only.
-func ParseComposeFile(c *gin.Context) {
+func (h *Handler) ParseComposeFile(c *gin.Context) {
 	var req struct {
 		ComposePath string `json:"composePath"`
 	}
 	_ = c.ShouldBindJSON(&req)
 
-	resolved, err := resolveComposePath(req.ComposePath)
+	resolved, err := h.resolveComposePath(req.ComposePath)
 	if err != nil {
 		// Intentionally generic: the concrete reason (absolute path,
 		// traversal, separator) doesn't help a legitimate caller and
@@ -166,7 +155,7 @@ func ParseComposeFile(c *gin.Context) {
 
 	data, err := os.ReadFile(resolved)
 	if err != nil {
-		// Don't echo the resolved path — it would leak composeBaseDir.
+		// Do not echo the resolved path — it would leak the compose base dir.
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot read compose file"})
 		return
 	}
@@ -180,7 +169,7 @@ func ParseComposeFile(c *gin.Context) {
 	c.JSON(http.StatusOK, graph)
 }
 
-func UpdateComposeService(c *gin.Context) {
+func (h *Handler) UpdateComposeService(c *gin.Context) {
 	name := c.Param("name")
 	var req struct {
 		Environment map[string]string `json:"environment"`

@@ -16,7 +16,7 @@ import (
 	"github.com/santapong/cooker/internal/validate"
 )
 
-func ListRepositories(c *gin.Context) {
+func (h *Handler) ListRepositories(c *gin.Context) {
 	// Placeholder: will use go-containerregistry to list repos
 	// Implements OCI distribution-spec: GET /v2/_catalog
 	c.JSON(http.StatusOK, gin.H{
@@ -25,7 +25,7 @@ func ListRepositories(c *gin.Context) {
 	})
 }
 
-func ListTags(c *gin.Context) {
+func (h *Handler) ListTags(c *gin.Context) {
 	name := c.Param("name")
 	// Implements OCI distribution-spec: GET /v2/<name>/tags/list
 	c.JSON(http.StatusOK, gin.H{
@@ -34,7 +34,7 @@ func ListTags(c *gin.Context) {
 	})
 }
 
-func GetManifest(c *gin.Context) {
+func (h *Handler) GetManifest(c *gin.Context) {
 	name := c.Param("name")
 	ref := c.Param("ref")
 	// Implements OCI distribution-spec: GET /v2/<name>/manifests/<reference>
@@ -47,7 +47,7 @@ func GetManifest(c *gin.Context) {
 	})
 }
 
-func PushImage(c *gin.Context) {
+func (h *Handler) PushImage(c *gin.Context) {
 	var req struct {
 		Image    string `json:"image" binding:"required"`
 		Registry string `json:"registry" binding:"required"`
@@ -69,7 +69,7 @@ func PushImage(c *gin.Context) {
 	})
 }
 
-func PullImage(c *gin.Context) {
+func (h *Handler) PullImage(c *gin.Context) {
 	var req struct {
 		Image    string `json:"image" binding:"required"`
 		Registry string `json:"registry"`
@@ -85,7 +85,7 @@ func PullImage(c *gin.Context) {
 	})
 }
 
-func GetReferrers(c *gin.Context) {
+func (h *Handler) GetReferrers(c *gin.Context) {
 	name := c.Param("name")
 	digest := c.Param("digest")
 	// Implements OCI distribution-spec v1.1 referrers API:

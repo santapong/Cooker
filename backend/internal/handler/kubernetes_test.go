@@ -149,6 +149,7 @@ func TestGetWorkload_UnknownKind400(t *testing.T) {
 // of the old fake 2xx (HS26-05-05 stub part). A valid body is sent where
 // one is required so the handler reaches the 501 rather than a bind 400.
 func TestKubeWriteEndpoints_NotImplemented(t *testing.T) {
+	h := &Handler{}
 	cases := []struct {
 		name   string
 		method string
@@ -158,10 +159,10 @@ func TestKubeWriteEndpoints_NotImplemented(t *testing.T) {
 		op     string
 		handle gin.HandlerFunc
 	}{
-		{"scale", http.MethodPost, "/workloads/:ns/:kind/:name/scale", "/workloads/default/deployment/web/scale", `{"replicas":3}`, "workload.scale", ScaleWorkload},
-		{"restart", http.MethodPost, "/workloads/:ns/:kind/:name/restart", "/workloads/default/deployment/web/restart", "", "workload.restart", RestartWorkload},
-		{"apply", http.MethodPost, "/manifests", "/manifests", `{"manifest":"apiVersion: v1\nkind: ConfigMap"}`, "manifest.apply", ApplyManifest},
-		{"delete resource", http.MethodDelete, "/resources/:ns/:kind/:name", "/resources/default/deployment/web", "", "resource.delete", DeleteResource},
+		{"scale", http.MethodPost, "/workloads/:ns/:kind/:name/scale", "/workloads/default/deployment/web/scale", `{"replicas":3}`, "workload.scale", h.ScaleWorkload},
+		{"restart", http.MethodPost, "/workloads/:ns/:kind/:name/restart", "/workloads/default/deployment/web/restart", "", "workload.restart", h.RestartWorkload},
+		{"apply", http.MethodPost, "/manifests", "/manifests", `{"manifest":"apiVersion: v1\nkind: ConfigMap"}`, "manifest.apply", h.ApplyManifest},
+		{"delete resource", http.MethodDelete, "/resources/:ns/:kind/:name", "/resources/default/deployment/web", "", "resource.delete", h.DeleteResource},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
