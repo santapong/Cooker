@@ -1,10 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
-import MainLayout from './components/layout/MainLayout'
 import ErrorBoundary from './components/ErrorBoundary'
 import { ToastViewport } from './components/Toast'
-import { ThemeProvider } from './theme/ThemeProvider'
-import { SkeletonStack } from './components/Skeleton'
 
 // Landing-page routes stay eager so first paint is fast.
 import AppsPage from './pages/AppsPage'
@@ -15,8 +12,6 @@ import ProtectedRoute from './auth/ProtectedRoute'
 
 // All other routes are lazy-loaded so their JS is only downloaded when
 // the user actually navigates to them.
-// AppDetailPage is lazy because it is never a first-paint route — it is
-// always reached by clicking a row in AppsPage (PR #50, W11 B3.1).
 const AppDetailPage = lazy(() => import('./pages/AppDetailPage'))
 const NewAppWizard = lazy(() => import('./pages/NewAppWizard'))
 const PipelinesPage = lazy(() => import('./pages/PipelinesPage'))
@@ -37,61 +32,55 @@ const TemplatesGalleryPage = lazy(() => import('./pages/TemplatesGalleryPage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 const AuditLogPage = lazy(() => import('./pages/AuditLogPage'))
 
-/**
- * Full-viewport skeleton shown while a lazy route chunk is being fetched.
- * Keeps the shell (sidebar, topbar) visible while the page content loads.
- */
+// Design reset (Phase 2): the cosmic layout/theme were removed for a full
+// redesign. The route table and auth gates stay wired so the redesign has
+// a working foundation; pages are placeholder stubs. Re-introduce a shared
+// layout wrapper here when the new design lands.
 function RouteLoadingFallback() {
-  return (
-    <div style={{ padding: '2rem' }}>
-      <SkeletonStack rows={6} height={24} gap={16} />
-    </div>
-  )
+  return <div style={{ padding: '2rem' }}>Loading…</div>
 }
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <ErrorBoundary>
-        <ToastViewport />
-        <Routes>
-          <Route path="/signin" element={<SignInPage />} />
-          <Route path="/signup" element={<SignUpPage />} />
-          <Route path="/callback" element={<Callback />} />
-          <Route
-            path="/*"
-            element={
-              <ProtectedRoute>
-                <Suspense fallback={<RouteLoadingFallback />}>
-                  <Routes>
-                    <Route path="/pipelines/:id/edit" element={<MainLayout fullBleed><PipelineEditorPage /></MainLayout>} />
-                    <Route path="/pipelines/:id/runs/:runId" element={<MainLayout fullBleed><RunPage /></MainLayout>} />
-                    <Route path="/apps/:appId/deployments/:pipelineId/:runId" element={<MainLayout fullBleed><DeploymentPage /></MainLayout>} />
-                    <Route path="/apps/new" element={<MainLayout><NewAppWizard /></MainLayout>} />
-                    <Route path="/" element={<MainLayout><AppsPage /></MainLayout>} />
-                    <Route path="/apps" element={<MainLayout><AppsPage /></MainLayout>} />
-                    <Route path="/apps/:id" element={<MainLayout><AppDetailPage /></MainLayout>} />
-                    <Route path="/pipelines" element={<MainLayout><PipelinesPage /></MainLayout>} />
-                    <Route path="/docker" element={<MainLayout><DockerPage /></MainLayout>} />
-                    <Route path="/docker/compose" element={<MainLayout fullBleed><ComposePage /></MainLayout>} />
-                    <Route path="/kubernetes" element={<MainLayout><KubernetesPage /></MainLayout>} />
-                    <Route path="/cloud" element={<MainLayout><CloudPage /></MainLayout>} />
-                    <Route path="/environments" element={<MainLayout><EnvironmentsPage /></MainLayout>} />
-                    <Route path="/hosts" element={<MainLayout><HostsPage /></MainLayout>} />
-                    <Route path="/settings" element={<MainLayout><SettingsPage /></MainLayout>} />
-                    <Route path="/registry" element={<MainLayout><RegistryPage /></MainLayout>} />
-                    <Route path="/admin/schedules" element={<MainLayout><SchedulesPage /></MainLayout>} />
-                    <Route path="/admin/notifications" element={<MainLayout><NotificationTargetsPage /></MainLayout>} />
-                    <Route path="/admin/templates" element={<MainLayout><TemplatesGalleryPage /></MainLayout>} />
-                    <Route path="/analytics" element={<MainLayout><AnalyticsPage /></MainLayout>} />
-                    <Route path="/admin/audit" element={<MainLayout><AuditLogPage /></MainLayout>} />
-                  </Routes>
-                </Suspense>
-              </ProtectedRoute>
-            }
-          />
-        </Routes>
-      </ErrorBoundary>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ToastViewport />
+      <Routes>
+        <Route path="/signin" element={<SignInPage />} />
+        <Route path="/signup" element={<SignUpPage />} />
+        <Route path="/callback" element={<Callback />} />
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute>
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <Routes>
+                  <Route path="/pipelines/:id/edit" element={<PipelineEditorPage />} />
+                  <Route path="/pipelines/:id/runs/:runId" element={<RunPage />} />
+                  <Route path="/apps/:appId/deployments/:pipelineId/:runId" element={<DeploymentPage />} />
+                  <Route path="/apps/new" element={<NewAppWizard />} />
+                  <Route path="/" element={<AppsPage />} />
+                  <Route path="/apps" element={<AppsPage />} />
+                  <Route path="/apps/:id" element={<AppDetailPage />} />
+                  <Route path="/pipelines" element={<PipelinesPage />} />
+                  <Route path="/docker" element={<DockerPage />} />
+                  <Route path="/docker/compose" element={<ComposePage />} />
+                  <Route path="/kubernetes" element={<KubernetesPage />} />
+                  <Route path="/cloud" element={<CloudPage />} />
+                  <Route path="/environments" element={<EnvironmentsPage />} />
+                  <Route path="/hosts" element={<HostsPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/registry" element={<RegistryPage />} />
+                  <Route path="/admin/schedules" element={<SchedulesPage />} />
+                  <Route path="/admin/notifications" element={<NotificationTargetsPage />} />
+                  <Route path="/admin/templates" element={<TemplatesGalleryPage />} />
+                  <Route path="/analytics" element={<AnalyticsPage />} />
+                  <Route path="/admin/audit" element={<AuditLogPage />} />
+                </Routes>
+              </Suspense>
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </ErrorBoundary>
   )
 }
