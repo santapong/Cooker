@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/santapong/cooker/internal/build/pusher"
 	"github.com/santapong/cooker/internal/deploy/deployer"
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/build/pusher"
 )
 
 // streamingPusher writes payload to req.LogWriter (when set) then
