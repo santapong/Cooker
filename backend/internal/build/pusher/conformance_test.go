@@ -24,7 +24,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/static"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 
-	"github.com/santapong/cooker/internal/oci"
+	"github.com/santapong/cooker/internal/build/oci"
 )
 
 func registryHost(t *testing.T) string {

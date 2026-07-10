@@ -15,7 +15,7 @@ Cooker today uses three transport idioms; for each, the question is whether a Co
 | Public API (CRUD on pipelines, runs, envs, secrets, apps) | HTTP/1.1 + JSON, OIDC bearer, OpenAPI 3 at `docs/openapi.yaml`. Handlers at `backend/internal/handler/*.go`. | **Keep.** Browsers, `curl`, Postman, Terraform providers, every CI tool, every SDK generator targets this. The cost of swapping is enormous; the benefit (per-request latency under a millisecond in the kernel-to-handler path) is unmeasurable to a user. See §8 for the explicit "won't do gRPC". |
 | Real-time browser updates (run status, build logs, K8s watch) | WebSocket, text frames, JSON-or-raw envelope. `backend/internal/server/websocket.go:153` → `Broadcast(channel, data []byte)`. Frontend `frontend/src/hooks/useWebSocket.ts`. | **Replace selectively.** This is where the audit findings live (`P26-05-02`, `P26-05-03`, `P26-05-16`, `P26-05-27`, `P26-05-30`). A binary, framed, resumable WS sub-protocol meaningfully wins. See §3 (CKR-LOG/1). |
 | Pipeline definition | JSON document in Postgres JSONB (`pipelines.stages`, `pipelines.edges`). Authored exclusively through the React Flow canvas. | **Supplement, don't replace.** A text DSL doesn't *remove* the canvas — it gives operators a GitOps-able source of truth and lets external tools generate pipelines. See §4 (CKR-DSL). |
-| Pipeline execution location | In-process inside the API binary. `internal/service/executor.go` runs the DAG; `internal/builder/*.go` calls Docker / Kaniko / etc. *inside the API pod*. | **New surface.** No remote runner protocol exists. Every competitor has one (GH Actions, GitLab, Drone, Buildkite, Woodpecker). Without one, customers in air-gapped or compliance-bound networks cannot use Cooker at all. See §5 (CKR-RUNNER/1). |
+| Pipeline execution location | In-process inside the API binary. `internal/service/executor.go` runs the DAG; `internal/build/builder/*.go` calls Docker / Kaniko / etc. *inside the API pod*. | **New surface.** No remote runner protocol exists. Every competitor has one (GH Actions, GitLab, Drone, Buildkite, Woodpecker). Without one, customers in air-gapped or compliance-bound networks cannot use Cooker at all. See §5 (CKR-RUNNER/1). |
 
 The rest of this doc designs the three new protocols and ranks them.
 
@@ -236,7 +236,7 @@ Every major CI tool ships its own format. We evaluated five:
 | **GitHub Actions YAML** | Familiar, well-known. | Built around the linear "jobs / steps" model. Translating the Cooker DAG (arbitrary stage graph with conditional edges and env swimlanes) needs heavy `needs:` lists and loses the visual structure. |
 | **Drone / Woodpecker YAML** | Tight, simple, container-first. | Step ordering is implicit by file order; we need explicit edges. Conditional logic via `when:` is per-step, not per-edge. |
 | **Concourse YAML** | Real resource/job/trigger model — closest in spirit to Cooker's DAG. | Steep learning curve; Concourse-style "inputs/outputs as resources" is a paradigm shift our users haven't asked for. |
-| **Tekton CRDs (YAML)** | K8s-native, very structured. | Forces a K8s control plane assumption. Cooker isn't K8s-only (`internal/deploytarget/` has Cloud Run, ECS, Fly.io). |
+| **Tekton CRDs (YAML)** | K8s-native, very structured. | Forces a K8s control plane assumption. Cooker isn't K8s-only (`internal/deploy/deploytarget/` has Cloud Run, ECS, Fly.io). |
 | **Dagger CUE / Earthly Earthfile / BuildKit LLB** | Programmable. | Each is its own runtime; we'd be embedding a second execution engine. Out of scope for "describe a Cooker pipeline." |
 
 ### 4.3 Format choice: **YAML**
@@ -584,7 +584,7 @@ The runner is the **outbound** half of the connection. The Cooker server has no 
 
 - The **in-process executor stays the default.** Cooker continues to ship as a single binary that can build and deploy locally. The remote runner is opt-in per stage (`runs_on: { kind: runner, labels: [...] }`).
 - No breaking changes to existing pipelines. Stages without `runs_on` run in-process as today.
-- The runner agent is a **separate binary** built from the same repo (`cmd/cooker-runner/`). Shares the strategy adapters (`internal/builder/`, `internal/deployer/`) but skips the HTTP server and DB layers.
+- The runner agent is a **separate binary** built from the same repo (`cmd/cooker-runner/`). Shares the strategy adapters (`internal/build/builder/`, `internal/deploy/deployer/`) but skips the HTTP server and DB layers.
 - Distribution: same GoReleaser pipeline (per `docs/shipping-go.md`), separate artifact, separate Docker image (`ghcr.io/santapong/cooker-runner`).
 
 ### 5.9 Success criteria
@@ -603,7 +603,7 @@ The runner is the **outbound** half of the connection. The Cooker server has no 
 **~6 engineering weeks** for the v1 of the protocol, the agent, and the server-side scheduler.
 
 - Weeks 1-2: protobuf surface, server-side gRPC service, enrolment / CA / mTLS issuance, runner registry.
-- Weeks 3-4: `cmd/cooker-runner` binary; reuse `internal/builder/*` and `internal/deployer/*`; local job execution.
+- Weeks 3-4: `cmd/cooker-runner` binary; reuse `internal/build/builder/*` and `internal/deploy/deployer/*`; local job execution.
 - Week 5: log streaming with `CKR-LOG/1`-compatible sequence semantics, lease / heartbeat / dead-detection scheduler.
 - Week 6: HTTPS fallback, Helm chart for runner, docs (`docs/runners.md`), end-to-end test suite (Cooker + 3 runners + a representative pipeline).
 

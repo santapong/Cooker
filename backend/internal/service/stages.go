@@ -8,13 +8,13 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/santapong/cooker/internal/builder"
-	"github.com/santapong/cooker/internal/deployer"
+	"github.com/santapong/cooker/internal/build/builder"
+	"github.com/santapong/cooker/internal/build/pusher"
+	"github.com/santapong/cooker/internal/build/stagerunner"
+	"github.com/santapong/cooker/internal/deploy/deployer"
 	"github.com/santapong/cooker/internal/gitops"
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/pusher"
 	"github.com/santapong/cooker/internal/retry"
-	"github.com/santapong/cooker/internal/stagerunner"
 )
 
 func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {

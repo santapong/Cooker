@@ -6,8 +6,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/santapong/cooker/internal/deploytarget"
-	"github.com/santapong/cooker/internal/deploytarget/cloudrun"
+	"github.com/santapong/cooker/internal/deploy/deploytarget"
+	"github.com/santapong/cooker/internal/deploy/deploytarget/cloudrun"
 	"github.com/santapong/cooker/internal/model"
 )
 

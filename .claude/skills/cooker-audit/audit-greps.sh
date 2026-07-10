@@ -82,8 +82,8 @@ run 8 "Delete handlers — check whether anything in flight is verified first" \
 
 # 9. Shell-string interpolation
 run 9 "fmt.Sprintf with embedded user values fed to /bin/sh -c" \
-  "rg -n 'fmt\\.Sprintf\\([^)]*-[a-z]' backend/internal/builder backend/internal/gitops backend/internal/source" \
-  "rg -n -B2 -A2 'Command:.*sh.*-c' backend/internal/builder backend/internal/handler"
+  "rg -n 'fmt\\.Sprintf\\([^)]*-[a-z]' backend/internal/build/builder backend/internal/gitops backend/internal/source" \
+  "rg -n -B2 -A2 'Command:.*sh.*-c' backend/internal/build/builder backend/internal/handler"
 
 # 10. Unbounded resource growth
 run 10 "Reads / appends without size caps" \

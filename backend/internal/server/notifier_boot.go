@@ -8,7 +8,7 @@ import (
 
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/crypto"
-	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/notify/notifier"
 )
 
 // notifierDeps bundles the always-on notification plumbing. Unlike

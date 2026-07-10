@@ -14,11 +14,11 @@ Own the strategy/adapter layer of the backend — every pluggable backend that i
 
 ## Allowed paths
 
-- `backend/internal/builder/**` — image builders (Buildah, Kaniko WIP, BuildKit, etc.).
-- `backend/internal/pusher/**` — registry push adapters.
-- `backend/internal/deployer/**` — deployers (kubectl, Helm, cloud).
-- `backend/internal/deploytarget/**` — target environments (Dev/Staging/Prod cluster definitions).
-- `backend/internal/buildplan/**` — pipeline graph compilation.
+- `backend/internal/build/builder/**` — image builders (Buildah, Kaniko WIP, BuildKit, etc.).
+- `backend/internal/build/pusher/**` — registry push adapters.
+- `backend/internal/deploy/deployer/**` — deployers (kubectl, Helm, cloud).
+- `backend/internal/deploy/deploytarget/**` — target environments (Dev/Staging/Prod cluster definitions).
+- `backend/internal/build/buildplan/**` — pipeline graph compilation.
 - `backend/internal/model/**` — stage-type definitions.
 - `backend/internal/source/**`, `backend/internal/gitops/**`, `backend/internal/transport/**` — adapter-shaped supporting packages.
 - `backend/internal/server/server.go` — **only** to add a `case` to a `selectXxx` constructor switch.
@@ -68,7 +68,7 @@ Own the strategy/adapter layer of the backend — every pluggable backend that i
 ```
 cd backend
 go vet ./...
-go test ./internal/builder/... ./internal/pusher/... ./internal/deployer/... ./internal/deploytarget/... -race
+go test ./internal/build/builder/... ./internal/build/pusher/... ./internal/deploy/deployer/... ./internal/deploy/deploytarget/... -race
 go test ./... -race                       # cross-package check
 go build ./cmd/cooker
 ```
@@ -98,6 +98,6 @@ This agent runs on `sonnet` because adapter work follows a tight pattern (`New<A
 
 ## Worked examples
 
-1. **"Add Buildah builder"** (P9.5) → `internal/builder/buildah.go` mirrors Kaniko's Job pattern, `selectBuilder` in `server.go` adds `case "buildah"`, `.env.uat.example` documents `COOKER_BUILDER=buildah` + `COOKER_BUILDAH_STORAGE_DRIVER`, unit tests assert Job spec + caps. Hand chart wiring to `cooker-infra-deploy`.
+1. **"Add Buildah builder"** (P9.5) → `internal/build/builder/buildah.go` mirrors Kaniko's Job pattern, `selectBuilder` in `server.go` adds `case "buildah"`, `.env.uat.example` documents `COOKER_BUILDER=buildah` + `COOKER_BUILDAH_STORAGE_DRIVER`, unit tests assert Job spec + caps. Hand chart wiring to `cooker-infra-deploy`.
 
-2. **"Add Render deploy target"** (P9.2) → `internal/deploytarget/render/` self-registers when its config block is non-empty, implements `DeployTarget` against `https://api.render.com/v1/`, unit tests use `httptest.Server` to assert the SDK calls fire correctly.
+2. **"Add Render deploy target"** (P9.2) → `internal/deploy/deploytarget/render/` self-registers when its config block is non-empty, implements `DeployTarget` against `https://api.render.com/v1/`, unit tests use `httptest.Server` to assert the SDK calls fire correctly.

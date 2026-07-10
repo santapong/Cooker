@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/santapong/cooker/internal/build/stagerunner"
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/stagerunner"
 	"github.com/santapong/cooker/internal/store/memory"
 )
 

@@ -54,9 +54,9 @@ For most feature shapes, Cooker already has one or two precedents:
 | New shape | Template |
 |---|---|
 | New stage type | `model.StageTypeGitOpsCommit` + `service/executor.go` switch arm + `validate/validate.go` enum |
-| New builder | `internal/builder/kaniko.go` (full impl), wired via `selectBuilder` in `server/server.go` |
-| New pusher | `internal/pusher/crane.go` |
-| New deployer | `internal/deployer/clientgo.go` (or, for cloud targets, `internal/deploytarget/render/render.go`) |
+| New builder | `internal/build/builder/kaniko.go` (full impl), wired via `selectBuilder` in `server/server.go` |
+| New pusher | `internal/build/pusher/crane.go` |
+| New deployer | `internal/deploy/deployer/clientgo.go` (or, for cloud targets, `internal/deploy/deploytarget/render/render.go`) |
 | New secrets backend | `internal/secrets/keepsave/` |
 | New cross-cutting helper (idempotent ops, rate ctrl) | `internal/{retry,validate,idempotency}/` |
 | New HTTP route | The handlers in `internal/handler/<domain>.go`, registered in `internal/server/router.go` |

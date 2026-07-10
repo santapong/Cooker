@@ -87,7 +87,7 @@ Do **not** demote when: a security-sensitive change is in scope, the audit docs 
 
 ## Worked examples
 
-1. **"Plan the Kaniko builder rollout"** → reads `backlog.md` P1.1, `docs/architecture.md` strategy-adapter section, `SECURITY.md` container hardening; returns a plan citing `internal/builder/`, `selectBuilder` in `server.go`, `.env.uat.example`, `docs/UAT.md`, plus the chart RBAC + docker.sock-drop changes. Hands to `cooker-feature-dev`.
+1. **"Plan the Kaniko builder rollout"** → reads `backlog.md` P1.1, `docs/architecture.md` strategy-adapter section, `SECURITY.md` container hardening; returns a plan citing `internal/build/builder/`, `selectBuilder` in `server.go`, `.env.uat.example`, `docs/UAT.md`, plus the chart RBAC + docker.sock-drop changes. Hands to `cooker-feature-dev`.
 
 2. **"What should we ship this week?"** → reads `backlog.md` open items, `docs/audits/launch-readiness.md` open `- [ ]` bullets, `docs/audits/chain-recheck.md`; returns a 3-candidate shortlist with one recommendation and the main tradeoff per candidate.
 

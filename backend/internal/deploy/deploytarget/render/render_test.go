@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/santapong/cooker/internal/deploytarget"
+	"github.com/santapong/cooker/internal/deploy/deploytarget"
 )
 
 // rewiredTarget returns a Target whose HTTP client is pointed at srv

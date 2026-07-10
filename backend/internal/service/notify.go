@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/notify/notifier"
 )
 
 // notifyTimeout bounds one dispatch fan-out. Matches the adapters'
