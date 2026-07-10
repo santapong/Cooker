@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/santapong/cooker/internal/builder"
+	"github.com/santapong/cooker/internal/build/builder"
 	"github.com/santapong/cooker/internal/deployer"
 	"github.com/santapong/cooker/internal/gitops"
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/pusher"
+	"github.com/santapong/cooker/internal/build/pusher"
 )
 
 // fakeRunUpdater records every persistProgress call. Safe for concurrent use.

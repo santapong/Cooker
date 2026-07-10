@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/oci"
+	"github.com/santapong/cooker/internal/build/oci"
 	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/store"
 	"github.com/santapong/cooker/internal/validate"

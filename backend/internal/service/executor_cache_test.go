@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/santapong/cooker/internal/builder"
+	"github.com/santapong/cooker/internal/build/builder"
 	"github.com/santapong/cooker/internal/model"
 )
 

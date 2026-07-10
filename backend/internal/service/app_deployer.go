@@ -15,7 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/santapong/cooker/internal/buildplan"
+	"github.com/santapong/cooker/internal/build/buildplan"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/notifier"
 	"github.com/santapong/cooker/internal/source/github"

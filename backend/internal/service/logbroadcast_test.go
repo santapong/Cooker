@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/santapong/cooker/internal/builder"
+	"github.com/santapong/cooker/internal/build/builder"
 	"github.com/santapong/cooker/internal/logstore"
 	"github.com/santapong/cooker/internal/model"
 )
