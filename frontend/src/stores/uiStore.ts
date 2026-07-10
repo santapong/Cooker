@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ThemeMode } from '../theme/tokens';
+
+// Design reset (Phase 2): ThemeMode was owned by the deleted theme/tokens.
+// Keep a local type so the store contract survives; the redesign re-owns
+// the theme system.
+export type ThemeMode = 'light' | 'dark';
 
 export type UIMode = 'simple' | 'pro';
 

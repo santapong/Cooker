@@ -1,0 +1,143 @@
+{{- /*
+  Bundled PostgreSQL — rendered only when postgresql.bundled=true.
+
+  Deploys a single-replica StatefulSet + headless Service + Secret so
+  `helm install` needs no external database. The Secret holds a generated
+  password (persisted across upgrades via lookup) and a self-signed TLS
+  cert/key (genSelfSignedCert), so the app can connect with sslmode=require
+  — which production validation mandates for a non-localhost DB host.
+
+  This is a convenience for quickstart / small installs. For production at
+  scale, run Postgres with an operator or managed service and set
+  postgresql.bundled=false + the database.* block instead.
+*/}}
+{{- if .Values.postgresql.bundled }}
+{{- $pgName := printf "%s-postgres" (include "cooker.fullname" .) }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $pgName }}
+{{- $password := "" }}
+{{- if and $existing $existing.data (index $existing.data "password") }}
+{{- $password = index $existing.data "password" | b64dec }}
+{{- else }}
+{{- $password = randAlphaNum 24 }}
+{{- end }}
+{{- $cert := genSelfSignedCert $pgName nil (list $pgName) 3650 }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $pgName }}
+  labels:
+    {{- include "cooker.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+type: Opaque
+stringData:
+  password: {{ $password | quote }}
+  server.crt: {{ $cert.Cert | quote }}
+  server.key: {{ $cert.Key | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $pgName }}
+  labels:
+    {{- include "cooker.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  clusterIP: None
+  selector:
+    {{- include "cooker.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $pgName }}
+  labels:
+    {{- include "cooker.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: {{ $pgName }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cooker.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "cooker.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+    spec:
+      # fsGroup 70 = the alpine postgres group, so the mounted TLS key
+      # (mode 0640, root-owned) is group-readable by the postgres process,
+      # which refuses keys with group/world access.
+      securityContext:
+        fsGroup: 70
+      containers:
+        - name: postgres
+          image: {{ .Values.postgresql.image | quote }}
+          args:
+            - -c
+            - ssl=on
+            - -c
+            - ssl_cert_file=/tls/server.crt
+            - -c
+            - ssl_key_file=/tls/server.key
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgresql.auth.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgresql.auth.username | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $pgName }}
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgresql.auth.username | quote }}]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgresql.auth.username | quote }}]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+      volumes:
+        - name: tls
+          secret:
+            secretName: {{ $pgName }}
+            defaultMode: 0640
+            items:
+              - key: server.crt
+                path: server.crt
+              - key: server.key
+                path: server.key
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.postgresql.storageClassName }}
+        storageClassName: {{ .Values.postgresql.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgresql.storage | quote }}
+{{- end }}

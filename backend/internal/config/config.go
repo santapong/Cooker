@@ -34,6 +34,12 @@ type Config struct {
 	AllowedOrigins []string
 	SecretKey      string
 	Registry       string
+	// StaticDir is the on-disk root the SPA is served from. The
+	// official Docker image copies the Vite build to the default path;
+	// override with COOKER_STATIC_DIR when running the binary from
+	// source or a non-standard image layout. index.html lives at
+	// <StaticDir>/index.html and hashed assets at <StaticDir>/assets.
+	StaticDir string
 	// BuildCacheRepo, when non-empty, stamps a registry layer-cache
 	// ref (CacheSpec{Mode:"registry"}) onto the build stages of
 	// app-deploy synthesized pipelines. Hand-built pipelines configure
@@ -376,6 +382,7 @@ func Load() *Config {
 		AllowedOrigins:  getEnvCSV("COOKER_ALLOWED_ORIGINS", originDefault),
 		SecretKey:       getEnv("COOKER_SECRET_KEY", ""),
 		Registry:        getEnv("COOKER_REGISTRY", "localhost:5000/cooker"),
+		StaticDir:       getEnv("COOKER_STATIC_DIR", "/usr/share/cooker/static"),
 		BuildCacheRepo:  getEnv("COOKER_BUILD_CACHE_REPO", ""),
 		BuilderBackend:  getEnv("COOKER_BUILDER", "noop"),
 		StageRunner:     getEnv("COOKER_STAGE_RUNNER", "noop"),

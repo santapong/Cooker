@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getUserManager } from './OIDCProvider';
-import { useTheme } from '../theme/ThemeProvider';
-import { Btn } from '../components/ui/atoms';
-import { CookerMark } from '../components/ui/Icon';
 
+// Design reset (Phase 2): the OIDC redirect-callback logic is plumbing and
+// stays intact; the UI is unstyled pending redesign.
 export default function Callback() {
-  const t = useTheme();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
 
@@ -25,62 +23,18 @@ export default function Callback() {
   }, [navigate]);
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        background: t.bg,
-        color: t.text,
-        display: 'grid',
-        placeItems: 'center',
-        padding: 40,
-      }}
-    >
-      <div
-        style={{
-          textAlign: 'center',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 18,
-        }}
-      >
-        <CookerMark color={t.accent} size={40} />
-        {error ? (
-          <>
-            <h2
-              style={{
-                fontFamily: t.serif,
-                fontSize: 28,
-                fontWeight: 500,
-                color: t.text,
-                margin: 0,
-                letterSpacing: -0.4,
-              }}
-            >
-              Sign-in failed.
-            </h2>
-            <p style={{ color: t.bad, fontFamily: t.mono, fontSize: 12.5, maxWidth: 480 }}>
-              {error}
-            </p>
-            <Btn kind="primary" onClick={() => navigate('/', { replace: true })}>
-              Back to sign in
-            </Btn>
-          </>
-        ) : (
-          <p
-            style={{
-              fontFamily: t.serif,
-              fontSize: 24,
-              fontWeight: 500,
-              color: t.textSoft,
-              margin: 0,
-              letterSpacing: -0.3,
-            }}
-          >
-            Completing sign-in…
-          </p>
-        )}
-      </div>
+    <div style={{ padding: 40 }}>
+      {error ? (
+        <>
+          <h2>Sign-in failed.</h2>
+          <p>{error}</p>
+          <button type="button" onClick={() => navigate('/', { replace: true })}>
+            Back to sign in
+          </button>
+        </>
+      ) : (
+        <p>Completing sign-in…</p>
+      )}
     </div>
   );
 }

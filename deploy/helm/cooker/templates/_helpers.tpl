@@ -30,7 +30,21 @@ interpolation resolves it. Shared by deployment.yaml and the retention
 CronJob so both go through the same secret reference and sslmode wiring.
 */}}
 {{- define "cooker.databaseUrlEnv" -}}
-{{- if .Values.database.host }}
+{{- if .Values.postgresql.bundled }}
+{{- /*
+  Bundled Postgres: point DATABASE_URL at the chart-managed
+  StatefulSet Service and pull DB_PASSWORD from the chart-managed
+  Secret. sslmode comes from postgresql.sslMode (require by default;
+  the bundled Postgres serves a self-signed cert).
+*/}}
+- name: DB_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "cooker.fullname" . }}-postgres
+      key: password
+- name: DATABASE_URL
+  value: "postgres://{{ .Values.postgresql.auth.username }}:$(DB_PASSWORD)@{{ include "cooker.fullname" . }}-postgres:5432/{{ .Values.postgresql.auth.database }}?sslmode={{ .Values.postgresql.sslMode }}"
+{{- else if .Values.database.host }}
 - name: DB_PASSWORD
   valueFrom:
     secretKeyRef:

@@ -25,6 +25,40 @@ re-applying those guards yourself.
 | Raw manifests (`deploy/kubernetes/`) | **Reference parity** (kept in sync; Helm is authoritative) | Learning, air-gapped GitOps that templates its own values, or environments that cannot run Helm. You are responsible for parity with the chart's safety defaults. |
 | Single binary / container (no orchestration) | Dev / evaluation only | Local trials, UAT (`make uat-up`). Not a production shape. |
 
+## Easy deploy (one command)
+
+Two zero-wiring paths generate their own secrets and bundle their own datastores, so you can
+stand Cooker up without pre-provisioning a database or crafting secrets. Both boot the strict
+**production** posture (`COOKER_ENV=production`) with local username/password auth enabled — sign
+up at `/signup` on first run.
+
+**Docker (single host)** — splits the service into `cooker` + `postgres` + `redis` containers via
+[`docker-compose.prod.yml`](../../docker-compose.prod.yml). First run writes `.env.prod` with fresh
+random secrets (DB password, AES-256 secret key, local-auth JWT signing key):
+
+```sh
+make deploy-docker            # -> http://localhost:8080  (sign up at /signup)
+make deploy-docker-logs
+make deploy-docker-down
+```
+
+Postgres runs with a self-signed cert so the app connects over `sslmode=require` (mandatory for a
+non-localhost DB host in production). Image builds are not wired by default (the docker-socket
+builder is forbidden in production); point Cooker at a cluster with `COOKER_BUILDER=kaniko` or use
+the UAT socket-proxy stack for non-production build testing.
+
+**Kubernetes (one command)** — the `values-quickstart.yaml` preset bundles a Postgres StatefulSet +
+Redis and autogenerates all secrets:
+
+```sh
+make deploy-k8s               # helm upgrade --install with the quickstart preset
+kubectl port-forward svc/cooker 8080:8080
+```
+
+Both are convenience paths for evaluation and small installs. For production at scale, provision
+Postgres/Redis externally, use a real IdP (OIDC), and manage secrets out-of-band via
+`existingSecret` references — see the authoritative Helm section below.
+
 ## Quick start (Helm)
 
 ```sh

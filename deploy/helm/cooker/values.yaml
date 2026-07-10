@@ -23,6 +23,11 @@ secretKey:
   existingSecret: ""    # name of a pre-created Secret
   existingSecretKey: "key"
   value: ""             # inline value (NOT recommended for production)
+  # autogenerate: when true and no value/existingSecret is given, the
+  # chart generates a 32-byte key once and persists it across upgrades
+  # via lookup. Convenient for quickstart; for production prefer a
+  # pre-created existingSecret so the key is managed out-of-band.
+  autogenerate: false
 
 # Secrets backend selection. "database" keeps the historical
 # AES-GCM + JSONB path; "keepsave" delegates storage to a
@@ -302,6 +307,27 @@ oidc:
   #   "mfa,urn:mace:incommon:iap:silver"
   mfaAcrValues: ""
 
+# Local username/password authentication.
+#
+# An alternative to OIDC for environments without an IdP. When enabled,
+# users sign up / sign in at /signup and /signin and the backend issues
+# its own JWTs signed with a ≥32-byte key. Production requires OIDC OR
+# local auth to be enabled (otherwise a dev-admin user is injected on
+# every request, which the backend refuses in production).
+#
+# jwtSigningKey: provide a base64 value inline, reference a pre-created
+# Secret, or leave both empty with autogenerate=true (the chart then
+# generates a key once and persists it in a chart-managed Secret across
+# upgrades via a lookup). The quickstart preset enables local auth with
+# autogenerate so `helm install` works with no IdP.
+localAuth:
+  enabled: false
+  autogenerate: true
+  jwtSigningKey: ""          # inline base64 value (NOT recommended for prod)
+  existingSecret: ""         # name of a pre-created Secret
+  existingSecretKey: "jwt-signing-key"
+  allowSignup: true
+
 # Database
 #
 # When database.host is set, the chart renders a DATABASE_URL env var
@@ -323,6 +349,23 @@ database:
 
 postgresql:
   enabled: true
+  # bundled: when true, the chart deploys a Postgres StatefulSet + Service
+  # + Secret (generated password, self-signed TLS) inside the release, so
+  # `helm install` needs NO external database. The app's DATABASE_URL is
+  # wired to it automatically (see cooker.databaseUrlEnv). Leave false to
+  # bring your own Postgres via the `database.*` block above. The
+  # quickstart preset (values-quickstart.yaml) sets this true.
+  bundled: false
+  # Settings used only when bundled=true.
+  image: postgres:16-alpine
+  storage: 8Gi
+  storageClassName: ""      # "" uses the cluster default StorageClass
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
   # NOTE: no default `auth.password` is shipped (S26-05-13). The
   # previous default was the literal string "cooker"; operators who
   # `helm install`d without an override inherited a publicly-documented

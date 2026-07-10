@@ -23,7 +23,7 @@
 
 ### 1.1 Reconciling with the shipped mockup
 
-The pricing mockup at [`design_handoff_cosmic_theme/design-references/cosmic-pricing.html`](../../design_handoff_cosmic_theme/design-references/cosmic-pricing.html) already commits to three named tiers and — critically — a **per-replica** metering axis, not per-seat:
+The pricing mockup from the original cosmic design handoff (since removed ahead of a UI redesign) already committed to three named tiers and — critically — a **per-replica** metering axis, not per-seat:
 
 | Mockup tier | Mockup price | Mockup positioning | FAQ commitment |
 |---|---|---|---|

@@ -238,6 +238,23 @@ spec:
                   {{- end }}
             {{- end }}
             {{- end }}
+            - name: COOKER_LOCAL_AUTH_ENABLED
+              value: {{ .Values.localAuth.enabled | quote }}
+            {{- if .Values.localAuth.enabled }}
+            - name: COOKER_LOCAL_AUTH_ALLOW_SIGNUP
+              value: {{ .Values.localAuth.allowSignup | quote }}
+            - name: COOKER_LOCAL_AUTH_JWT_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.localAuth.existingSecret }}
+                  name: {{ .Values.localAuth.existingSecret | quote }}
+                  key: {{ .Values.localAuth.existingSecretKey | quote }}
+                  {{- else }}
+                  name: {{ include "cooker.fullname" . }}-local-auth
+                  key: jwt-signing-key
+                  {{- end }}
+                  optional: false
+            {{- end }}
             {{- if .Values.extraEnv }}
             {{- toYaml .Values.extraEnv | nindent 12 }}
             {{- end }}
