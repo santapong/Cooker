@@ -16,7 +16,7 @@ import (
 	"github.com/santapong/cooker/internal/auth/local"
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/crypto"
-	"github.com/santapong/cooker/internal/deployer"
+	"github.com/santapong/cooker/internal/deploy/deployer"
 	"github.com/santapong/cooker/internal/governance"
 	"github.com/santapong/cooker/internal/handler"
 	"github.com/santapong/cooker/internal/idempotency"

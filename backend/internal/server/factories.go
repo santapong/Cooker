@@ -11,7 +11,7 @@ import (
 	cloudgcp "github.com/santapong/cooker/internal/cloud/cloudinventory/gcp"
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/crypto"
-	"github.com/santapong/cooker/internal/deployer"
+	"github.com/santapong/cooker/internal/deploy/deployer"
 	"github.com/santapong/cooker/internal/build/pusher"
 	"github.com/santapong/cooker/internal/secrets"
 	"github.com/santapong/cooker/internal/secrets/awsm"

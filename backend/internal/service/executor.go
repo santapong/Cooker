@@ -10,7 +10,7 @@ import (
 
 	"github.com/santapong/cooker/internal/build/builder"
 	"github.com/santapong/cooker/internal/build/buildplan"
-	"github.com/santapong/cooker/internal/deployer"
+	"github.com/santapong/cooker/internal/deploy/deployer"
 	"github.com/santapong/cooker/internal/gitops"
 	"github.com/santapong/cooker/internal/logstore"
 	"github.com/santapong/cooker/internal/model"

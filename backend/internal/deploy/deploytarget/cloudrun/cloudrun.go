@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/santapong/cooker/internal/deploytarget"
+	"github.com/santapong/cooker/internal/deploy/deploytarget"
 	"github.com/santapong/cooker/internal/model"
 )
 

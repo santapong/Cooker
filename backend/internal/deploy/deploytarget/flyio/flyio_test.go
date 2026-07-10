@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/santapong/cooker/internal/deploytarget"
+	"github.com/santapong/cooker/internal/deploy/deploytarget"
 )
 
 // newTestTarget builds a Target wired to the given httptest.Server.

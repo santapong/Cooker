@@ -34,7 +34,7 @@ import (
 
 	gossh "golang.org/x/crypto/ssh"
 
-	"github.com/santapong/cooker/internal/deploytarget"
+	"github.com/santapong/cooker/internal/deploy/deploytarget"
 	"github.com/santapong/cooker/internal/model"
 )
 
