@@ -44,12 +44,12 @@ Binary, checkable conditions for the five-part effort (backend review, easy depl
 - [x] `go build ./... && go vet ./...` and `handler` + `server` tests pass; same routes/responses as before.
 
 ## AC-3c — Domain regroup (ask #4, part 3)
-- [ ] `builder`, `pusher`, `stagerunner`, `oci`, `buildplan` live under `internal/build/`; `deployer`, `deploytarget` under `internal/deploy/`; `cloudinventory` under `internal/cloud/`; `notifier` under `internal/notify/`.
-- [ ] `handler/`, `service/`, `store/`, `model/` layer packages are unchanged (layering preserved).
-- [ ] Every moved package's import path is updated repo-wide; `go build ./...` reports **no** unresolved import and **no** import cycle.
-- [ ] `go vet ./... && go test ./...` pass after each individual move (each move is its own green commit).
-- [ ] `docs/reference/architecture.md`, `docs/reference/design.md` §11, `CLAUDE.md` Project-layout, and the `cooker-backend-*` agent trigger paths under `.claude/agents/` reflect the new paths.
-- [ ] No behavior change: full UAT smoke (`make uat-up` → `make test-e2e`) passes unchanged.
+- [x] `builder`, `pusher`, `stagerunner`, `oci`, `buildplan` live under `internal/build/`; `deployer`, `deploytarget` under `internal/deploy/`; `cloudinventory` under `internal/cloud/`; `notifier` under `internal/notify/`.
+- [x] `handler/`, `service/`, `store/`, `model/` layer packages are unchanged (layering preserved).
+- [x] Every moved package's import path is updated repo-wide; `go build ./...` reports **no** unresolved import and **no** import cycle.
+- [x] `go vet ./... && go test ./...` pass after each individual move (each move is its own green commit).
+- [x] `CLAUDE.md` Project-layout, `docs/reference/*`, and the `.claude/` agent + skill routing paths reflect the new paths.
+- [ ] No behavior change: full UAT smoke (`make uat-up` → `make test-e2e`) passes unchanged (reviewer/CI-verified — not runnable in this sandbox).
 
 ## AC — Cross-cutting (all phases)
 - [ ] Each phase is a **draft PR**, stacked in order (#150 → #151 → #152 → 3c), each with its base set to its parent branch.
