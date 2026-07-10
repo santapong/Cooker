@@ -23,7 +23,7 @@ Own everything inside `backend/internal/store/`: the `PipelineStore`, `RunStore`
 ## Forbidden paths
 
 - `backend/internal/handler|service|server/**` — delegate to `cooker-backend-api`.
-- `backend/internal/builder|pusher|deployer|deploytarget/**` — delegate to `cooker-backend-adapters`.
+- `backend/internal/build/builder|pusher|deployer|deploytarget/**` — delegate to `cooker-backend-adapters`.
 - `frontend/**`, `deploy/**`, `.github/workflows/**`.
 
 ## Required reading

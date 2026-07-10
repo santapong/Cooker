@@ -145,8 +145,8 @@ Confirmed: `handler/app.go:242` was unbounded `io.ReadAll` on the GitHub webhook
 | `backend/internal/server/runs.go` | Goroutine join races; documented-but-missing timeouts; orphan-sweep edge cases |
 | `backend/internal/server/websocket.go` | Channel close-twice; map mutation under RLock; missing read deadlines |
 | `backend/internal/service/executor.go` | Stub stages; nil-deref on stageMap mismatch; per-stage timeout enforcement |
-| `backend/internal/builder/buildah.go` | Shell-string composition; Args field with user input |
-| `backend/internal/builder/kaniko.go` | Job lifecycle (poll vs delete vs orphan); resource Requests-without-Limits |
+| `backend/internal/build/builder/buildah.go` | Shell-string composition; Args field with user input |
+| `backend/internal/build/builder/kaniko.go` | Job lifecycle (poll vs delete vs orphan); resource Requests-without-Limits |
 | `backend/internal/handler/*.go` | IDOR on path params; missing input validation; raw err.Error() in 5xx bodies |
 | `backend/internal/store/postgres/*.go` | Missing version checks; `LIKE`/`ORDER BY` injection candidates; UPDATE-without-WHERE-version |
 | `backend/internal/config/config.go` | Dev defaults reaching prod; Validate() coverage gaps |

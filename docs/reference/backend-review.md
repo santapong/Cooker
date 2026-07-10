@@ -45,7 +45,7 @@ Finding one feature end-to-end means opening `handler/X.go`, `service/X.go`, and
    - Docs claim the SPA is embedded via `//go:embed` (`docs/system-design/01-overview.md:14`, `docs/system-design/11-code-patterns-and-conventions.md:17`). It is **not** — the frontend is served from the hardcoded on-disk path `/usr/share/cooker/static` (`server/router.go` + `static.go`). Only the SQL migrations are embedded.
    - `make migrate-up` / `migrate-down` invoke `go run ./cmd/cooker migrate up`, but `cmd/cooker/main.go` has **no subcommand parsing** — it ignores the positional args and boots the server. Migrations actually run implicitly at startup.
 
-6. **`internal/deployer` mixes two runtimes.** Kubernetes backends (`clientgo`, `kubectl`, `weighted`) and Docker backends (`compose`, `dockerrun`) live in one package despite being very different targets.
+6. **`internal/deploy/deployer` mixes two runtimes.** Kubernetes backends (`clientgo`, `kubectl`, `weighted`) and Docker backends (`compose`, `dockerrun`) live in one package despite being very different targets.
 
 ## Where the improvements land
 

@@ -23,7 +23,7 @@ Implement and refactor the HTTP-facing layers of the Go backend: route registrat
 ## Forbidden paths
 
 - `backend/internal/store/**` — delegate to `cooker-backend-data`.
-- `backend/internal/builder|pusher|deployer|deploytarget/**` — delegate to `cooker-backend-adapters`.
+- `backend/internal/build/builder|pusher|deployer|deploytarget/**` — delegate to `cooker-backend-adapters`.
 - `backend/internal/auth/**` — delegate to `cooker-security`.
 - `frontend/**`, `deploy/**`, `.github/workflows/**` — out of scope.
 

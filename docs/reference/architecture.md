@@ -101,15 +101,15 @@ Cooker is a three-tier web application for CI/CD pipeline management with visual
 | **Handlers** | `internal/handler/` | Thin HTTP layer. Parses requests, calls services, returns JSON. One file per domain: pipeline, docker, kubernetes, registry, environment. |
 | **Services** | `internal/service/` | Business logic. Pipeline CRUD + DAG validation, executor (orchestrates pipeline runs), promoter (environment promotion logic). |
 | **Models** | `internal/model/` | Domain types: Pipeline, Stage, StageConfig, Edge, PipelineRun, StageRun, Artifact, Environment, EnvironmentTarget, PromotionPolicy, ContainerInfo, ImageInfo, KubeWorkload. |
-| **OCI Package** | `internal/oci/` | OCI image-spec types (Manifest, Index, Descriptor, Platform), media type constants, validation functions, digest computation. |
+| **OCI Package** | `internal/build/oci/` | OCI image-spec types (Manifest, Index, Descriptor, Platform), media type constants, validation functions, digest computation. |
 | **Auth** | `internal/auth/` | OIDC middleware (token extraction + validation), RBAC middleware (role checking), configurable group-to-role mapping (`COOKER_OIDC_GROUP_MAP`), and `RequireMFA` step-up gate (`COOKER_OIDC_MFA_ACR_VALUES`). |
 | **Store** | `internal/store/` | Data access interfaces (PipelineStore, RunStore, EnvironmentStore) with PostgreSQL implementation. |
 | **Secrets** | `internal/secrets/` | `secrets.Manager` interface + adapters: `database` (default, AES-GCM), `keepsave`, `vault` (KV v2), `awsm` (AWS Secrets Manager), `gcpsm` (GCP Secret Manager). Optional `secrets.Promoter` interface for backends that support cross-environment promotion. |
-| **Builders** | `internal/builder/` | `Builder` interface + adapters: `docker` (host-socket; dev only), `kaniko` (in-cluster Job), `buildah` (in-cluster Job, full Dockerfile parity), `buildkit` (gRPC against external buildkitd). |
-| **Pusher** | `internal/pusher/` | `Pusher` interface + adapters: `crane` (`go-containerregistry`), `docker` (CLI shell-out), `noop`. |
-| **Deployer** | `internal/deployer/` | `Deployer` interface + adapters: `kubectl` (CLI shell-out), `clientgo` (dynamic client + server-side apply), `noop`. |
-| **DeployTarget** | `internal/deploytarget/` | App-deploy adapters per cloud runtime: `kubernetes`, `cloudrun`, `ecs` (Fargate), `flyio`, `render`. Self-register on non-empty config. |
-| **DeployTarget / SSH** | `internal/deploytarget/ssh/` | Dokploy/Coolify-style remote: SSH into a registered host (kind `ssh-docker`), run `docker pull` + `docker run -d --restart=always`. Host-key TOFU pinning is mandatory; `Config.ValidateSSHHosts` refuses production boot if any host has `sshStrictHostKey=false`. |
+| **Builders** | `internal/build/builder/` | `Builder` interface + adapters: `docker` (host-socket; dev only), `kaniko` (in-cluster Job), `buildah` (in-cluster Job, full Dockerfile parity), `buildkit` (gRPC against external buildkitd). |
+| **Pusher** | `internal/build/pusher/` | `Pusher` interface + adapters: `crane` (`go-containerregistry`), `docker` (CLI shell-out), `noop`. |
+| **Deployer** | `internal/deploy/deployer/` | `Deployer` interface + adapters: `kubectl` (CLI shell-out), `clientgo` (dynamic client + server-side apply), `noop`. |
+| **DeployTarget** | `internal/deploy/deploytarget/` | App-deploy adapters per cloud runtime: `kubernetes`, `cloudrun`, `ecs` (Fargate), `flyio`, `render`. Self-register on non-empty config. |
+| **DeployTarget / SSH** | `internal/deploy/deploytarget/ssh/` | Dokploy/Coolify-style remote: SSH into a registered host (kind `ssh-docker`), run `docker pull` + `docker run -d --restart=always`. Host-key TOFU pinning is mandatory; `Config.ValidateSSHHosts` refuses production boot if any host has `sshStrictHostKey=false`. |
 | **GitOps** | `internal/gitops/` | `Writer` interface + `gogit` adapter (`go-git/v5`). Used by GitOpsCommit pipeline node. |
 | **Observability** | `internal/observability/` | Prometheus `/metrics` (Gin middleware) + OpenTelemetry tracing (otelgin + OTLP/gRPC exporter). Both opt-in. |
 | **DAG Runner** | `pkg/dagrunner/` | Reusable, standalone DAG execution engine. Topological sort into parallel levels, concurrent execution, status updates via channel. |
@@ -117,7 +117,7 @@ Cooker is a three-tier web application for CI/CD pipeline management with visual
 | **Config** | `internal/config/` | Environment-variable-based configuration loading with defaults. |
 | **Job queue** | `internal/jobqueue/` | Durable Postgres job queue: store, worker pool, `pq.NewListener`, exponential backoff. Phase 1 / A1 (`COOKER_JOBQUEUE_ENABLED`). |
 | **Run state machine** | `internal/runstate/` | Run + stage state machine (FSM with typed invalid-transition errors). Phase 1 / A2. |
-| **Notifier** | `internal/notifier/` | Multi-channel dispatcher: Slack / Discord / Email / Webhook adapters. Phase 2 / F1. |
+| **Notifier** | `internal/notify/notifier/` | Multi-channel dispatcher: Slack / Discord / Email / Webhook adapters. Phase 2 / F1. |
 | **Scheduler** | `internal/scheduler/` | Leader-elected cron-triggered runs (`pg_advisory_lock` + in-house POSIX cron parser). Phase 2 / F2 (`COOKER_SCHEDULER_ENABLED`). |
 | **Templates** | `internal/templates/` | Pipeline-template catalog + create-from-template flow. Phase 2 / F4. |
 | **Webhook parsers** | `internal/source/{gitlab,bitbucket,gitea}/` | Provider-specific push parsers + signature verifiers (`X-Gitlab-Token`, HMAC-SHA256, raw-hex HMAC-SHA256). Phase 2 / F3. |
@@ -159,11 +159,11 @@ Cooker is a three-tier web application for CI/CD pipeline management with visual
 
 | Concept | Where in Cooker | Implementation |
 |---------|-----------------|----------------|
-| **Image Manifest** | `internal/oci/manifest.go` | Go struct mirroring the OCI manifest schema. Used when inspecting built images. |
-| **Image Index** | `internal/oci/manifest.go` | Multi-platform manifest list. Created when BuildNode specifies multiple `platforms`. |
-| **Descriptor** | `internal/oci/manifest.go` | `{mediaType, digest, size}` triple. Pipeline artifacts are stored as descriptors. |
-| **Media Types** | `internal/oci/mediatype.go` | Constants for all OCI and Docker-compatible media types. |
-| **Content Addressing** | `internal/oci/layer.go` | SHA-256 digest computation. All image references use `sha256:` digests. |
+| **Image Manifest** | `internal/build/oci/manifest.go` | Go struct mirroring the OCI manifest schema. Used when inspecting built images. |
+| **Image Index** | `internal/build/oci/manifest.go` | Multi-platform manifest list. Created when BuildNode specifies multiple `platforms`. |
+| **Descriptor** | `internal/build/oci/manifest.go` | `{mediaType, digest, size}` triple. Pipeline artifacts are stored as descriptors. |
+| **Media Types** | `internal/build/oci/mediatype.go` | Constants for all OCI and Docker-compatible media types. |
+| **Content Addressing** | `internal/build/oci/layer.go` | SHA-256 digest computation. All image references use `sha256:` digests. |
 
 ### runtime-spec v1.2
 
@@ -237,9 +237,9 @@ Design decision: Stages and edges are stored as JSONB rather than normalized tab
 | `github.com/lib/pq` | PostgreSQL driver |
 | `github.com/coreos/go-oidc/v3` | OIDC token validation |
 | `github.com/docker/docker/client` | Docker Engine SDK (planned) |
-| `k8s.io/client-go` | Kubernetes dynamic client (server-side apply in `internal/deployer/clientgo.go`) |
-| `github.com/google/go-containerregistry` | OCI image push/pull (`internal/pusher/crane.go`) |
-| `github.com/moby/buildkit/client` | gRPC BuildKit driver (`internal/builder/buildkit.go`) |
+| `k8s.io/client-go` | Kubernetes dynamic client (server-side apply in `internal/deploy/deployer/clientgo.go`) |
+| `github.com/google/go-containerregistry` | OCI image push/pull (`internal/build/pusher/crane.go`) |
+| `github.com/moby/buildkit/client` | gRPC BuildKit driver (`internal/build/builder/buildkit.go`) |
 | `github.com/go-git/go-git/v5` | GitOps commits (`internal/gitops/gogit.go`) |
 | `github.com/redis/go-redis/v9` + `github.com/go-redis/redis_rate/v10` | Multi-replica rate limiter + WS ticket store |
 | `github.com/prometheus/client_golang` | `/metrics` endpoint |
@@ -311,7 +311,7 @@ identically until an operator flips the feature flag.
 | Durable job queue | `internal/jobqueue/` | `010_jobs` | `COOKER_JOBQUEUE_ENABLED` |
 | Run / stage FSM | `internal/runstate/` | — | (always loaded; only the executor migration is gated) |
 | Resource-action permissions | `internal/auth/permission.go` | — | (always loaded; routes adopt incrementally) |
-| Multi-channel notifier | `internal/notifier/` | `011_notification_targets` | (always loaded; off when no targets configured) |
+| Multi-channel notifier | `internal/notify/notifier/` | `011_notification_targets` | (always loaded; off when no targets configured) |
 | Cron scheduler | `internal/scheduler/` | `012_schedules` | `COOKER_SCHEDULER_ENABLED` |
 | Pipeline templates | `internal/templates/` | `013_pipeline_templates` | (always loaded; endpoints 503 when no DB) |
 

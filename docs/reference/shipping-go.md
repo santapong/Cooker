@@ -190,8 +190,8 @@ Three shapes exist; pick the simplest that ships:
 
 Cooker already has the right shape for compile-time modules but doesn't advertise it:
 
-- `internal/builder/` has `Builder` interface; `selectBuilder` in `server.go` picks `noop`, `docker`, `buildkit`, `kaniko`, `buildah` from `COOKER_BUILDER`.
-- Same shape for `internal/pusher/` (`noop`, `docker`, `crane`), `internal/deployer/` (`noop`, `kubectl`, `clientgo`), `internal/deploytarget/`.
+- `internal/build/builder/` has `Builder` interface; `selectBuilder` in `server.go` picks `noop`, `docker`, `buildkit`, `kaniko`, `buildah` from `COOKER_BUILDER`.
+- Same shape for `internal/build/pusher/` (`noop`, `docker`, `crane`), `internal/deploy/deployer/` (`noop`, `kubectl`, `clientgo`), `internal/deploy/deploytarget/`.
 - All adapters live in-tree.
 
 ### Recommended for Cooker
@@ -287,7 +287,7 @@ This is the single most expensive transition in an OSS Go tool's lifecycle. The 
 4. **Add fuzz targets for the obvious surfaces**:
    - `internal/config` env-var parser
    - `internal/auth` JWT / OIDC ID-token parsing
-   - `internal/pusher` OCI reference parser
+   - `internal/build/pusher` OCI reference parser
    - Any YAML/JSON consumed from user input (pipeline definitions)
    Run with `go test -fuzz=Fuzz -fuzztime=60s` in CI on a nightly cron, not per-PR — 60s is enough to catch new regressions without burning the PR queue.
 5. **Generate SBOM in the release pipeline** (not on every PR). Add `sboms:` block to `.goreleaser.yaml`; it'll use syft. Output `cooker_<ver>.sbom.cyclonedx.json` next to the binary on the GitHub Release.

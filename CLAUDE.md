@@ -13,8 +13,10 @@ backend/
 ├── cmd/cooker/main.go            entry point — Load + Validate + server.New + Run
 └── internal/
     ├── auth/                     OIDC middleware, RBAC group→role mapping
-    ├── builder/  pusher/  deployer/  deploytarget/   strategy adapters (Builder, Pusher, Deployer interfaces)
-    ├── config/                   env-var loading + production-mode Validate()
+    ├── build/                    builder/ pusher/ stagerunner/ oci/ buildplan/  (build+push adapters)
+    ├── deploy/                   deployer/ deploytarget/   (deploy adapters — Builder/Pusher/Deployer interfaces)
+    ├── cloud/                    cloudinventory/   ·   notify/  notifier/   (grouped by domain, Phase 3c)
+    ├── config/                   env-var loading + production-mode Validate() (+ validate.go, env.go)
     ├── handler/                  thin HTTP layer (one file per domain)
     ├── service/                  business logic (Executor, AppDeployer, Promoter)
     ├── server/                   Gin router, middleware, WebSocket hub, ticket store, rate limiter
