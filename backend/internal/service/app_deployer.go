@@ -17,7 +17,7 @@ import (
 
 	"github.com/santapong/cooker/internal/build/buildplan"
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/notify/notifier"
 	"github.com/santapong/cooker/internal/source/github"
 	"github.com/santapong/cooker/internal/store"
 )

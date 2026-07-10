@@ -14,7 +14,7 @@ import (
 	"github.com/santapong/cooker/internal/crypto"
 	"github.com/santapong/cooker/internal/kube"
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/notify/notifier"
 	"github.com/santapong/cooker/internal/scheduler"
 	"github.com/santapong/cooker/internal/secrets"
 	"github.com/santapong/cooker/internal/service"

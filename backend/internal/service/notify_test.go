@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/notify/notifier"
 )
 
 // captureNotifier records the events it is asked to send. Registered

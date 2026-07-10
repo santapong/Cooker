@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/notify/notifier"
 	"github.com/santapong/cooker/internal/validate"
 )
 

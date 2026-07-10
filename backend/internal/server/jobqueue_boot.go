@@ -10,7 +10,7 @@ import (
 
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/jobqueue"
-	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/notify/notifier"
 	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/store"
 )
