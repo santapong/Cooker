@@ -25,12 +25,13 @@ type dockerWriteCase struct {
 }
 
 func TestDockerWriteEndpoints_NotImplemented(t *testing.T) {
+	h := &Handler{}
 	cases := []dockerWriteCase{
-		{"build image", http.MethodPost, "/images/build", "/images/build", `{"dockerfile":"FROM scratch","tags":["a:b"]}`, "image.build", BuildDockerImage},
-		{"delete image", http.MethodDelete, "/images/:id", "/images/sha256-abc", "", "image.remove", DeleteDockerImage},
-		{"create container", http.MethodPost, "/containers", "/containers", `{"image":"nginx:1.25"}`, "container.create", CreateContainer},
-		{"stop container", http.MethodPost, "/containers/:id/stop", "/containers/abc/stop", "", "container.stop", StopContainer},
-		{"delete container", http.MethodDelete, "/containers/:id", "/containers/abc", "", "container.remove", DeleteContainer},
+		{"build image", http.MethodPost, "/images/build", "/images/build", `{"dockerfile":"FROM scratch","tags":["a:b"]}`, "image.build", h.BuildDockerImage},
+		{"delete image", http.MethodDelete, "/images/:id", "/images/sha256-abc", "", "image.remove", h.DeleteDockerImage},
+		{"create container", http.MethodPost, "/containers", "/containers", `{"image":"nginx:1.25"}`, "container.create", h.CreateContainer},
+		{"stop container", http.MethodPost, "/containers/:id/stop", "/containers/abc/stop", "", "container.stop", h.StopContainer},
+		{"delete container", http.MethodDelete, "/containers/:id", "/containers/abc", "", "container.remove", h.DeleteContainer},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -67,8 +68,9 @@ func TestDockerWriteEndpoints_NotImplemented(t *testing.T) {
 // 400s ahead of the 501 — malformed input is a client error, not a
 // feature gap.
 func TestBuildDockerImage_BadBodyStill400(t *testing.T) {
+	h := &Handler{}
 	r := gin.New()
-	r.POST("/images/build", BuildDockerImage)
+	r.POST("/images/build", h.BuildDockerImage)
 	req := httptest.NewRequest(http.MethodPost, "/images/build", strings.NewReader("{not json"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -81,9 +83,7 @@ func TestBuildDockerImage_BadBodyStill400(t *testing.T) {
 func TestResolveComposePath_Rejects(t *testing.T) {
 	// Fix base so the test's expectations about relative-vs-absolute
 	// stay stable across environments.
-	prev := composeBaseDir
-	t.Cleanup(func() { composeBaseDir = prev })
-	composeBaseDir = t.TempDir()
+	h := &Handler{composeBaseDir: t.TempDir()}
 
 	cases := []struct {
 		name  string
@@ -100,7 +100,7 @@ func TestResolveComposePath_Rejects(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := resolveComposePath(tc.input); err == nil {
+			if _, err := h.resolveComposePath(tc.input); err == nil {
 				t.Fatalf("expected error for %q, got nil", tc.input)
 			}
 		})
@@ -108,8 +108,9 @@ func TestResolveComposePath_Rejects(t *testing.T) {
 }
 
 func TestGetDockerImage_NotImplemented(t *testing.T) {
+	h := &Handler{}
 	r := gin.New()
-	r.GET("/images/:id", GetDockerImage)
+	r.GET("/images/:id", h.GetDockerImage)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/images/abc", nil))
 	if w.Code != http.StatusNotImplemented {
@@ -121,8 +122,9 @@ func TestGetDockerImage_NotImplemented(t *testing.T) {
 }
 
 func TestGetContainerLogs_NotImplemented(t *testing.T) {
+	h := &Handler{}
 	r := gin.New()
-	r.GET("/containers/:id/logs", GetContainerLogs)
+	r.GET("/containers/:id/logs", h.GetContainerLogs)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/containers/abc/logs", nil))
 	if w.Code != http.StatusNotImplemented {
@@ -134,8 +136,9 @@ func TestGetContainerLogs_NotImplemented(t *testing.T) {
 }
 
 func TestListDockerImages_EmptyOK(t *testing.T) {
+	h := &Handler{}
 	r := gin.New()
-	r.GET("/images", ListDockerImages)
+	r.GET("/images", h.ListDockerImages)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/images", nil))
 	if w.Code != http.StatusOK {
@@ -147,8 +150,9 @@ func TestListDockerImages_EmptyOK(t *testing.T) {
 }
 
 func TestListContainers_EmptyOK(t *testing.T) {
+	h := &Handler{}
 	r := gin.New()
-	r.GET("/containers", ListContainers)
+	r.GET("/containers", h.ListContainers)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/containers", nil))
 	if w.Code != http.StatusOK {
@@ -161,9 +165,7 @@ func TestListContainers_EmptyOK(t *testing.T) {
 
 func TestResolveComposePath_Accepts(t *testing.T) {
 	base := t.TempDir()
-	prev := composeBaseDir
-	t.Cleanup(func() { composeBaseDir = prev })
-	composeBaseDir = base
+	h := &Handler{composeBaseDir: base}
 
 	cases := []struct {
 		name  string
@@ -175,7 +177,7 @@ func TestResolveComposePath_Accepts(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := resolveComposePath(tc.input)
+			got, err := h.resolveComposePath(tc.input)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

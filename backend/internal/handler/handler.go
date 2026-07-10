@@ -155,13 +155,18 @@ type Handler struct {
 	// enabled=false rather than an error. Read-only — never mutates any
 	// cloud resource.
 	CloudInventory CloudInventoryService
+	// composeBaseDir is the only directory ParseComposeFile reads from.
+	// An authenticated caller can name a file inside it but never escape
+	// it. Defaults to "." (set by New); replaces the former package-level
+	// mutable global.
+	composeBaseDir string
 }
 
 // New constructs a Handler bound to the given store. secs may be nil
 // when no secrets backend is configured (dev mode with backend=database
 // and no COOKER_SECRET_KEY set); the secret endpoints will return 503.
 func New(s *store.Store, codec *crypto.Codec, secs secrets.Manager) *Handler {
-	return &Handler{Store: s, Codec: codec, Secrets: secs}
+	return &Handler{Store: s, Codec: codec, Secrets: secs, composeBaseDir: "."}
 }
 
 // loadRunForPipeline fetches a run by runId and verifies it belongs

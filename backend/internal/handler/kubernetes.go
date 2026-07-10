@@ -145,7 +145,7 @@ func notImplementedKubeWrite(c *gin.Context, op string) {
 	})
 }
 
-func ScaleWorkload(c *gin.Context) {
+func (h *Handler) ScaleWorkload(c *gin.Context) {
 	// Keep validating the body so a malformed request still 400s ahead of
 	// the not-implemented signal (matches the docker write handlers).
 	var req model.ScaleRequest
@@ -156,11 +156,11 @@ func ScaleWorkload(c *gin.Context) {
 	notImplementedKubeWrite(c, "workload.scale")
 }
 
-func RestartWorkload(c *gin.Context) {
+func (h *Handler) RestartWorkload(c *gin.Context) {
 	notImplementedKubeWrite(c, "workload.restart")
 }
 
-func ApplyManifest(c *gin.Context) {
+func (h *Handler) ApplyManifest(c *gin.Context) {
 	var req model.ApplyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -169,6 +169,6 @@ func ApplyManifest(c *gin.Context) {
 	notImplementedKubeWrite(c, "manifest.apply")
 }
 
-func DeleteResource(c *gin.Context) {
+func (h *Handler) DeleteResource(c *gin.Context) {
 	notImplementedKubeWrite(c, "resource.delete")
 }

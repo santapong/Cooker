@@ -8,7 +8,6 @@ import (
 
 	"github.com/santapong/cooker/internal/auth"
 	"github.com/santapong/cooker/internal/governance"
-	"github.com/santapong/cooker/internal/handler"
 )
 
 func (s *Server) registerRoutes() {
@@ -132,17 +131,17 @@ func (s *Server) registerRoutes() {
 
 	docker := api.Group("/docker")
 	{
-		docker.GET("/images", handler.ListDockerImages)
-		docker.GET("/images/:id", handler.GetDockerImage)
-		docker.POST("/images/build", writeRole, expensive, handler.BuildDockerImage)
-		docker.DELETE("/images/:id", adminRole, handler.DeleteDockerImage)
-		docker.GET("/containers", handler.ListContainers)
-		docker.POST("/containers", writeRole, handler.CreateContainer)
-		docker.POST("/containers/:id/stop", writeRole, handler.StopContainer)
-		docker.DELETE("/containers/:id", adminRole, handler.DeleteContainer)
-		docker.GET("/containers/:id/logs", handler.GetContainerLogs)
-		docker.POST("/compose/parse", handler.ParseComposeFile)
-		docker.PUT("/compose/services/:name", writeRole, handler.UpdateComposeService)
+		docker.GET("/images", h.ListDockerImages)
+		docker.GET("/images/:id", h.GetDockerImage)
+		docker.POST("/images/build", writeRole, expensive, h.BuildDockerImage)
+		docker.DELETE("/images/:id", adminRole, h.DeleteDockerImage)
+		docker.GET("/containers", h.ListContainers)
+		docker.POST("/containers", writeRole, h.CreateContainer)
+		docker.POST("/containers/:id/stop", writeRole, h.StopContainer)
+		docker.DELETE("/containers/:id", adminRole, h.DeleteContainer)
+		docker.GET("/containers/:id/logs", h.GetContainerLogs)
+		docker.POST("/compose/parse", h.ParseComposeFile)
+		docker.PUT("/compose/services/:name", writeRole, h.UpdateComposeService)
 		docker.GET("/networks", h.ListDockerNetworks)
 		docker.POST("/networks", writeRole, h.CreateDockerNetwork)
 		docker.GET("/networks/:id", h.GetDockerNetwork)
@@ -156,12 +155,12 @@ func (s *Server) registerRoutes() {
 
 	registry := api.Group("/registry")
 	{
-		registry.GET("/repositories", handler.ListRepositories)
-		registry.GET("/:name/tags", handler.ListTags)
-		registry.GET("/:name/manifests/:ref", handler.GetManifest)
-		registry.POST("/push", writeRole, handler.PushImage)
-		registry.POST("/pull", writeRole, handler.PullImage)
-		registry.GET("/:name/referrers/:digest", handler.GetReferrers)
+		registry.GET("/repositories", h.ListRepositories)
+		registry.GET("/:name/tags", h.ListTags)
+		registry.GET("/:name/manifests/:ref", h.GetManifest)
+		registry.POST("/push", writeRole, h.PushImage)
+		registry.POST("/pull", writeRole, h.PullImage)
+		registry.GET("/:name/referrers/:digest", h.GetReferrers)
 	}
 
 	kubernetes := api.Group("/kubernetes")
@@ -181,10 +180,10 @@ func (s *Server) registerRoutes() {
 		kubernetes.GET("/pods/:ns/:name/logs", writeRole, h.GetPodLogs)
 		// Write path: still package-level stubs (scale/restart/apply/
 		// delete) — separate work, does not use h.Kube.
-		kubernetes.POST("/workloads/:ns/:kind/:name/scale", writeRole, handler.ScaleWorkload)
-		kubernetes.POST("/workloads/:ns/:kind/:name/restart", writeRole, handler.RestartWorkload)
-		kubernetes.POST("/apply", writeRole, handler.ApplyManifest)
-		kubernetes.DELETE("/:ns/:kind/:name", adminRole, handler.DeleteResource)
+		kubernetes.POST("/workloads/:ns/:kind/:name/scale", writeRole, h.ScaleWorkload)
+		kubernetes.POST("/workloads/:ns/:kind/:name/restart", writeRole, h.RestartWorkload)
+		kubernetes.POST("/apply", writeRole, h.ApplyManifest)
+		kubernetes.DELETE("/:ns/:kind/:name", adminRole, h.DeleteResource)
 	}
 
 	// Read-only cloud inventory & cost panel (OR-2). The GET endpoints
