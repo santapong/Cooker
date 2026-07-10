@@ -6,9 +6,9 @@ import (
 	"log/slog"
 
 	"github.com/santapong/cooker/internal/builder"
-	"github.com/santapong/cooker/internal/cloudinventory"
-	cloudaws "github.com/santapong/cooker/internal/cloudinventory/aws"
-	cloudgcp "github.com/santapong/cooker/internal/cloudinventory/gcp"
+	"github.com/santapong/cooker/internal/cloud/cloudinventory"
+	cloudaws "github.com/santapong/cooker/internal/cloud/cloudinventory/aws"
+	cloudgcp "github.com/santapong/cooker/internal/cloud/cloudinventory/gcp"
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/crypto"
 	"github.com/santapong/cooker/internal/deployer"
