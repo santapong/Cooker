@@ -89,18 +89,6 @@ func (p ProxyConfig) hostFor(slug string) string {
 	return slug + "." + p.Domain
 }
 
-// urlFor returns the public URL for a slug, or "" when the proxy is off.
-func (p ProxyConfig) urlFor(slug string) string {
-	host := p.hostFor(slug)
-	if host == "" {
-		return ""
-	}
-	scheme := p.Scheme
-	if scheme == "" {
-		scheme = "http"
-	}
-	return scheme + "://" + host
-}
 
 // cacheSpec returns the CacheSpec for synthesized build stages, or
 // nil when no cache repo is configured.
