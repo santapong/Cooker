@@ -60,6 +60,33 @@ Note: license tiers (`free`/`crew`/`constellation` in the entitlements system) a
 separate, currently-inert billing concept — editions here are purely about which
 infrastructure/features run.
 
+## Deployed-app URLs, env injection & reverse proxy
+
+Two features that activate per-app once configured:
+
+**Environment injection.** Link an App to an Environment (`App.environmentId`) and every
+deploy injects the Environment's `plainVars` **and decrypted secrets** as container env —
+on docker-run, SSH, and Kubernetes paths. Precedence: stage/compose-literal env >
+Environment secrets > Environment plainVars. No link → no change.
+
+**Deployed URL + reverse proxy.** Set in `.env.prod` (compose) or `extraEnv` (Helm):
+
+```sh
+COOKER_PROXY_DOMAIN=apps.example.com   # or 127.0.0.1.sslip.io locally (no DNS needed)
+COOKER_PROXY_SCHEME=http               # https when TLS terminates at the proxy
+COOKER_PROXY_INGRESS_CLASS=            # k8s only; empty = cluster default
+```
+
+- **Docker single host:** add the Traefik overlay —
+  `docker compose -f docker-compose.prod.yml [-f docker-compose.full.yml] -f docker-compose.proxy.yml --env-file .env.prod up -d`.
+  Each deployed app becomes `http://<app-slug>.<domain>`.
+- **Kubernetes:** deploys synthesize an `Ingress` per workload at `<slug>.<domain>`.
+- After a successful deploy the app's `deployedURL` is stored and shown as an
+  **Open app ↗** link on the app page (also `GET /api/v1/apps/:id`). Without a proxy
+  domain, docker deploys with published ports fall back to `http://localhost:<port>`.
+
+See SECURITY.md "Deployed-App Reverse Proxy" for the exposure model before enabling.
+
 ## Easy deploy (one command)
 
 Two zero-wiring paths generate their own secrets and bundle their own datastores, so you can

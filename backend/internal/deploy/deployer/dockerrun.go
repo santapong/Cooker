@@ -67,7 +67,7 @@ func (d *DockerRun) Deploy(ctx context.Context, req Request) (Result, error) {
 		logf(out, "docker rm -f %s: %v (output: %s)\n", name, rmErr, strings.TrimSpace(string(rmOut)))
 	}
 
-	args := dockerRunArgs(name, req.Image, req.Env, req.Ports, req.Resources)
+	args := dockerRunArgs(name, req.Image, req.Env, req.Ports, req.Resources, req.Labels, req.Network)
 	logf(out, "Running: docker %s\n", strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout = out
@@ -80,12 +80,17 @@ func (d *DockerRun) Deploy(ctx context.Context, req Request) (Result, error) {
 }
 
 // dockerRunArgs builds the argv for `docker run -d --restart=always
-// --name N [--memory M] [--cpus C] -p P -e K=V ... IMAGE`. argv form
-// (not a shell string) means values are passed verbatim with no shell
-// interpretation — no quoting/injection concern. Ports and env are
-// emitted in stable sorted order for deterministic, testable output.
-func dockerRunArgs(name, image string, env map[string]string, ports []string, res *ResourceLimits) []string {
+// --name N [--memory M] [--cpus C] [--network N] -p P -e K=V
+// --label K=V ... IMAGE`. argv form (not a shell string) means values
+// are passed verbatim with no shell interpretation — no quoting/
+// injection concern. Ports, env, and labels are emitted in stable
+// sorted order for deterministic, testable output.
+func dockerRunArgs(name, image string, env map[string]string, ports []string, res *ResourceLimits, labels map[string]string, network string) []string {
 	args := []string{"run", "-d", "--restart=always", "--name", name}
+
+	if network != "" {
+		args = append(args, "--network", network)
+	}
 
 	if res != nil {
 		if res.Memory != "" {
@@ -116,6 +121,15 @@ func dockerRunArgs(name, image string, env map[string]string, ports []string, re
 	sort.Strings(keys)
 	for _, k := range keys {
 		args = append(args, "-e", k+"="+env[k])
+	}
+
+	labelKeys := make([]string, 0, len(labels))
+	for k := range labels {
+		labelKeys = append(labelKeys, k)
+	}
+	sort.Strings(labelKeys)
+	for _, k := range labelKeys {
+		args = append(args, "--label", k+"="+labels[k])
 	}
 
 	args = append(args, image)

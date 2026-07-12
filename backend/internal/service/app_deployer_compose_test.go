@@ -66,7 +66,7 @@ func TestSynthesizeFromCompose_PerServiceDAG(t *testing.T) {
 		},
 	}
 
-	p, run, err := synthesizePipelineFromCompose(k8sApp(), graph, "/work", "reg.example.com", 1700, "app-a1-1700", "run-1", nil)
+	p, run, err := synthesizePipelineFromCompose(k8sApp(), graph, "/work", "reg.example.com", 1700, "app-a1-1700", "run-1", nil, synthOpts{})
 	if err != nil {
 		t.Fatalf("synth error: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestSynthesizeFromCompose_UniqueEdgeIDs(t *testing.T) {
 			{Name: "b-c", Image: "w", DependsOn: []string{"a"}},
 		},
 	}
-	p, _, err := synthesizePipelineFromCompose(k8sApp(), graph, "/w", "reg", 1, "p", "", nil)
+	p, _, err := synthesizePipelineFromCompose(k8sApp(), graph, "/w", "reg", 1, "p", "", nil, synthOpts{})
 	if err != nil {
 		t.Fatalf("synth error: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestSynthesizeFromCompose_DockerCarriesPortsAndEnv(t *testing.T) {
 			},
 		},
 	}
-	p, _, err := synthesizePipelineFromCompose(app, graph, "/w", "reg", 1, "p", "", nil)
+	p, _, err := synthesizePipelineFromCompose(app, graph, "/w", "reg", 1, "p", "", nil, synthOpts{})
 	if err != nil {
 		t.Fatalf("synth error: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestSynthesizeFromCompose_CycleRejected(t *testing.T) {
 			{Name: "b", Image: "y", DependsOn: []string{"a"}},
 		},
 	}
-	_, _, err := synthesizePipelineFromCompose(k8sApp(), graph, "/work", "reg", 1, "p", "", nil)
+	_, _, err := synthesizePipelineFromCompose(k8sApp(), graph, "/work", "reg", 1, "p", "", nil, synthOpts{})
 	if err == nil {
 		t.Fatalf("expected cycle error, got nil")
 	}
@@ -248,7 +248,7 @@ func TestSynthesizeFromCompose_DockerRuntime(t *testing.T) {
 	graph := &model.ComposeGraph{
 		Services: []model.ComposeService{{Name: "svc", Image: "nginx"}},
 	}
-	p, _, err := synthesizePipelineFromCompose(app, graph, "/w", "reg", 1, "p", "", nil)
+	p, _, err := synthesizePipelineFromCompose(app, graph, "/w", "reg", 1, "p", "", nil, synthOpts{})
 	if err != nil {
 		t.Fatalf("synth error: %v", err)
 	}

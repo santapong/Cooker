@@ -65,6 +65,14 @@ type Request struct {
 	// Resources, when non-nil, applies CPU/memory limits (KindDockerRun
 	// → --memory/--cpus; other kinds may ignore it).
 	Resources *ResourceLimits
+	// Labels are container labels for KindDockerRun (docker run
+	// --label K=V). Used by the reverse-proxy integration to attach
+	// Traefik router rules; empty means no labels.
+	Labels map[string]string
+	// Network, when non-empty, attaches the KindDockerRun container to
+	// the named Docker network (docker run --network). The reverse
+	// proxy and the app must share a network for routing to work.
+	Network string
 	// ComposeFile is the path to the compose file for KindCompose.
 	ComposeFile string
 	// LogWriter, when non-nil, receives a stream of human-readable

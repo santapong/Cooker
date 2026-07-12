@@ -22,7 +22,7 @@ func TestSynthesizePipeline_StampsCacheOnBuildOnly(t *testing.T) {
 	app := &model.App{ID: "a1", Name: "shop"}
 	spec := &model.CacheSpec{Mode: "registry", Ref: "reg.example.com/cooker/cache"}
 
-	p, _ := synthesizePipeline(app, nil, "/work", "reg/shop:1", spec)
+	p, _ := synthesizePipeline(app, nil, "/work", "reg/shop:1", spec, synthOpts{})
 	for _, s := range p.Stages {
 		switch s.Type {
 		case model.StageTypeBuild:
@@ -36,7 +36,7 @@ func TestSynthesizePipeline_StampsCacheOnBuildOnly(t *testing.T) {
 		}
 	}
 
-	p, _ = synthesizePipeline(app, nil, "/work", "reg/shop:1", nil)
+	p, _ = synthesizePipeline(app, nil, "/work", "reg/shop:1", nil, synthOpts{})
 	for _, s := range p.Stages {
 		if s.Config.Cache != nil {
 			t.Errorf("nil spec must leave %s stage cache nil", s.Type)

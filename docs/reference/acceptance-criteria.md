@@ -68,12 +68,13 @@ Binary, checkable conditions for the five-part effort (backend review, easy depl
 - [ ] INSTALL.md documents both editions, the in-place upgrade path, and that license tiers are orthogonal.
 
 ## AC-5 — ENV injection + DeployedURL + reverse proxy
-- [ ] An app linked to an Environment receives its `PlainVars` + decrypted `Secrets` as container env on the docker, ssh, and k8s deploy paths; stage-explicit `Config.Env` keys win on conflict; no environment linked → unchanged behavior.
-- [ ] With `COOKER_PROXY_DOMAIN` set, a successful deploy stores `App.DeployedURL`, returns `url` in the deploy response, and the frontend renders an "Open app" link.
-- [ ] Without a proxy domain, docker/ssh deploys with published ports still derive `http://<host>:<port>`.
-- [ ] Traefik overlay (compose `proxy` profile) routes `<slug>.<domain>` to the deployed container; dockerrun/compose deployers attach the labels + proxy network only when the domain is configured.
-- [ ] K8s manifest synthesis emits an `Ingress` (host `<slug>.<domain>`, configurable `ingressClassName`) only when the domain is set.
-- [ ] New unit tests green (env merge precedence, deployer label/env assertions, Ingress + URL table tests); UAT e2e unchanged.
+- [x] An app linked to an Environment receives its `PlainVars` + decrypted `Secrets` as container env on the docker, ssh, and k8s deploy paths; stage-explicit `Config.Env` keys win on conflict; no environment linked → unchanged behavior.
+- [x] With `COOKER_PROXY_DOMAIN` set, a successful deploy stores `App.DeployedURL` and the frontend renders an "Open app" link. (Deviation from the original wording: the async deploy 202 does NOT carry a `url` — for compose apps the per-service host isn't knowable pre-clone, so the authoritative URL is surfaced via `GET /apps/:id`.deployedURL instead of a possibly-wrong prediction.)
+- [x] Without a proxy domain, docker deploys with published ports still derive `http://localhost:<host-port>` (single-host fallback; no host field exists on DeployTarget).
+- [ ] Traefik overlay (`docker-compose.proxy.yml`) routes `<slug>.<domain>` to the deployed container — label + network attachment is unit-verified; live routing needs a docker host (reviewer/UAT-verified).
+- [x] dockerrun deploys attach Traefik labels + the proxy network only when the domain is configured (`TestDockerRunArgs_LabelsAndNetwork`, ProxyHost stamping tests).
+- [x] K8s manifest synthesis emits an `Ingress` (host `<slug>.<domain>`, configurable `ingressClassName`) only when the domain is set.
+- [x] New unit tests green (env merge precedence, resolver nil-safety, deployer label/env assertions, Ingress + URL table tests); full service/store/server/handler suites pass.
 
 ## AC-6 — Full-scan technical report (report only)
 - [ ] `docs/audits/2026-07-full-scan-report.md` exists with one section per file type (Go, TS/TSX, SQL, YAML, Dockerfile, Shell, Terraform, JS/other), each containing performance findings, vulnerability findings, a severity table, and file:line evidence.

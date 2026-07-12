@@ -285,6 +285,15 @@ func New(cfg *config.Config) (*Server, error) {
 	// the canary service (weighted traffic split). Type-asserted below for
 	// the optional WeightedDeployer capability.
 	deploy := selectDeployer(cfg.DeployerBackend, cfg.Kubernetes.Kubeconfig)
+	// Deployed-app reverse proxy / URL surface (COOKER_PROXY_*). Passed
+	// to both the executor (docker-run Traefik labels) and the app
+	// deployer (ProxyHost stamping, Ingress synthesis, DeployedURL).
+	svcProxy := service.ProxyConfig{
+		Domain:       cfg.Proxy.Domain,
+		Scheme:       cfg.Proxy.Scheme,
+		IngressClass: cfg.Proxy.IngressClass,
+		Network:      cfg.Proxy.Network,
+	}
 	exec := service.NewExecutor(
 		service.WithBuilder(bld),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
@@ -302,11 +311,17 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithLogStore(logStore),
 		service.WithStatusBroadcaster(wsHub.Broadcast),
 		service.WithDeployGovernanceHook(govDeployHook),
+		service.WithProxyConfig(svcProxy),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 	appDeployer.CacheRef = cfg.BuildCacheRepo
 	appDeployer.Deploys = st.AppDeploys
 	appDeployer.Notifier = notifDeps.Dispatcher
+	// Environment (PlainVars + Secrets) injection into deployed
+	// workloads, and the deployed-app URL/proxy surface.
+	appDeployer.EnvResolver = &service.AppEnvResolver{Environments: st.Environments, Secrets: secMgr}
+	appDeployer.Proxy = svcProxy
+	appDeployer.Apps = st.Apps
 
 	// Canary deployments (OR-1). The weighted split needs a deployer that
 	// can rebalance replicas — only the Kubernetes-backed deployers

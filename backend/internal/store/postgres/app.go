@@ -153,6 +153,17 @@ func (s *AppStore) UpdateHealth(ctx context.Context, id string, status model.App
 	return nil
 }
 
+func (s *AppStore) UpdateDeployedURL(ctx context.Context, id, url string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE apps SET deployed_url=$2 WHERE id=$1`, id, url)
+	if err != nil {
+		return fmt.Errorf("updating app deployed url: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("app %s: %w", id, store.ErrNotFound)
+	}
+	return nil
+}
+
 func marshalAppJSON(a *model.App) (bp, dt, cc []byte, err error) {
 	bp, err = json.Marshal(a.BuildPlan)
 	if err != nil {
