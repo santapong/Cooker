@@ -317,7 +317,7 @@ kubectl create secret generic cooker-secret-key \
 
 ```bash
 helm install cooker oci://ghcr.io/santapong/charts/cooker \
-  --version 0.1.0 \
+  --version 0.2.0 \
   --namespace cooker --create-namespace \
   --set cookerEnv=production \
   --set oidc.enabled=true \

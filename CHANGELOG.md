@@ -7,6 +7,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.0] - 2026-07-13
+
+Everything merged since v0.1.0: the backend restructure + frontend reset series
+(#150–#153), deploy editions + env/proxy + full-scan round (#154–#157), the
+optimization round (#158), and the `develop` refactor-series integration (#149,
+resolved as superseded — see the note at the end of this section). The
+subsections below the horizontal rule accumulated under *Unreleased* before
+this release and ship in 0.2.0 as well.
+
+### Added — one-command deploy + LIGHT/FULL editions
+
+- **Easy deploy paths** (`make deploy-docker`, `make deploy-k8s`): docker-compose
+  production stack (`docker-compose.prod.yml` — cooker + TLS-enabled Postgres,
+  secrets auto-generated into a git-ignored `.env.prod`) and a Helm quickstart
+  preset (`values-quickstart.yaml`, bundled Postgres StatefulSet + Redis with
+  lookup-persisted secrets). Both boot the strict `COOKER_ENV=production` posture.
+- **Editions**: `make deploy-docker-light|full` and `make deploy-k8s-light|full`.
+  LIGHT = cooker + postgres, memory backends, features off. FULL adds Redis,
+  the durable job queue + cron scheduler, metrics/tracing, and DB audit with
+  retention. Presets live in `deploy/editions/*.env.example` and
+  `deploy/helm/cooker/values-{light,full}.yaml`; switching in place preserves
+  secrets and volumes (marker-delimited block in `.env.prod`).
+- **`cooker migrate up|down` subcommand** and configurable `COOKER_STATIC_DIR`.
+- **Resource requirements** documented in `docs/guides/INSTALL.md` (per-mode
+  sizing, per-container CPU/RAM, sizing rules).
+
+### Added — environment injection, deployed-app URLs, reverse proxy
+
+- Apps linked to an Environment now receive its `plainVars` **and decrypted
+  secrets** as container env on the docker-run, SSH, and Kubernetes deploy
+  paths (precedence: stage env > secrets > plain vars).
+- **Deployed URL + reverse proxy**: with `COOKER_PROXY_DOMAIN` set, docker
+  deploys get Traefik labels + the `cooker-proxy` network
+  (`docker-compose.proxy.yml` overlay) and k8s deploys synthesize an `Ingress`
+  at `<app-slug>.<domain>`; the resulting URL is persisted on the app
+  (`deployedURL`) and rendered as an "Open app ↗" link. Config:
+  `COOKER_PROXY_{DOMAIN,SCHEME,INGRESS_CLASS,NETWORK}`.
+
+### Added — performance & operability (optimization round)
+
+- **Run-concurrency cap**: `COOKER_MAX_CONCURRENT_RUNS` (default 8, `0` =
+  unlimited). Saturated pipeline-run/deploy/rollback spawns return **HTTP 429**
+  with `Retry-After` instead of overcommitting the host; rejections counted by
+  `cooker_run_capacity_rejected_total`.
+- **Run-JSONB efficiency**: the polled run endpoint serves a log-stripped
+  summary (`RunStore.GetSummary`, SQL-side strip) and mid-run progress persists
+  through a single-column, log-free `UpdateProgress` write — activating
+  previously-dormant progress persistence without the TOAST full-row rewrite.
+  Logs still land exactly once at terminal state and stay available via the
+  stage-logs endpoint.
+- **List pagination**: `GET /pipelines|/apps|/hosts|/environments` accept
+  `?limit=&offset=` (default 100, max 1000) with stable ordering; frontend API
+  helpers take optional `{limit, offset}`.
+- **Jobs-table retention**: terminal jobs are swept daily after
+  `COOKER_JOBQUEUE_RETENTION` (default 720h, `0` disables); pending/running
+  jobs are never touched.
+- Compose resource ceilings (`mem_limit`/`cpus`) on cooker/postgres/redis/
+  traefik; `COOKER_BUILD_CACHE_REPO` (kaniko layer cache) documented in the
+  FULL presets.
+
+### Changed — backend restructured by domain
+
+- Adapter packages regrouped under domain parents:
+  `internal/{build,deploy,cloud,notify}/` (builder, pusher, stagerunner, oci,
+  buildplan, deployer, deploytarget, cloudinventory, notifier). Layer packages
+  (`handler`, `service`, `store`, `model`) unchanged.
+- God-files split: `service/executor.go` −49%, `store/memory/memory.go` → 12
+  per-entity files (−97%), `server/server.go` −23%, `config/config.go` → load/
+  validate/env. `store.New` takes a single `Components` struct instead of 17
+  positional args; all package-level route handlers became methods.
+
+### Changed — frontend reset for redesign
+
+- The design surface (theme, `components/{ui,layout,pipeline}`, page bodies,
+  `design_handoff_cosmic_theme/`) was **removed** and routes reduced to stubs
+  (−73.9% frontend LOC) ahead of a ground-up redesign. Kept fully working:
+  OIDC auth flow, typed API client, WebSocket ticket flow, Zustand stores,
+  and route skeletons.
+
+### Fixed / hardened
+
+- Helm `lookup` secret-regeneration footgun documented loudly (chart template
+  warnings + INSTALL.md): `helm template`/`--dry-run` renders mint fresh
+  secrets — GitOps flows must set `existingSecret`.
+- Full technical scan report (`docs/audits/2026-07-full-scan-report.md`):
+  per-file-type performance + vulnerability findings with tool evidence
+  (golangci-lint, gosec triage, npm audit, secret grep); acceptance-criteria
+  catalog + validation report with quantitative deltas
+  (`docs/reference/acceptance-criteria.md`, `ac-validation-report.md`).
+
+### Merged — develop refactor series (#132–#148) as superseded
+
+- PR #149 integrated the `develop` branch's 19-commit file-split series. Every
+  conflict resolved in favor of `main`: the equivalent (deeper) splits had
+  already landed via #150–#153, and the frontend files that series refactored
+  were removed in the frontend reset. Recorded as a true merge so the
+  `v0.1.0` tag remains in main's ancestry.
+
+---
+
 ### Added — outbound notifications on by default (email + generic webhook)
 
 - Notifications now fire on a **default install**, not only when the job
