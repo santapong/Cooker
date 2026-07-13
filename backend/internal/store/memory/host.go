@@ -15,7 +15,7 @@ type hosts struct {
 	m  map[string]*model.Host
 }
 
-func (s *hosts) List(_ context.Context) ([]*model.Host, error) {
+func (s *hosts) List(_ context.Context, limit, offset int) ([]*model.Host, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*model.Host, 0, len(s.m))
@@ -23,7 +23,7 @@ func (s *hosts) List(_ context.Context) ([]*model.Host, error) {
 		out = append(out, h)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	return paginate(out, limit, offset), nil
 }
 
 func (s *hosts) Get(_ context.Context, id string) (*model.Host, error) {

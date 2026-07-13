@@ -91,6 +91,10 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    # Ceiling from docs/guides/INSTALL.md "Resource requirements";
+    # raise for big run histories or move to managed Postgres.
+    mem_limit: 512m
+    cpus: 1.0
 
   cooker:
     build:
@@ -148,6 +152,10 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    # Cooker itself idles ~100 MB; 1g covers in-process builds' burst
+    # (see INSTALL.md sizing rules — builds dominate, not the API).
+    mem_limit: 1g
+    cpus: 1.0
 
 volumes:
   pg-prod:

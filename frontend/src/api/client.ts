@@ -69,6 +69,23 @@ export function get<T>(path: string): Promise<T> {
   return request<T>(path);
 }
 
+/** Optional paging for list endpoints (?limit=&offset=). Backend
+ * defaults to 100 per page when omitted. */
+export interface PageParams {
+  limit?: number;
+  offset?: number;
+}
+
+/** pageQuery renders PageParams as a query string ('' when empty). */
+export function pageQuery(params?: PageParams): string {
+  if (!params) return '';
+  const qs = new URLSearchParams();
+  if (params.limit !== undefined) qs.set('limit', String(params.limit));
+  if (params.offset !== undefined) qs.set('offset', String(params.offset));
+  const s = qs.toString();
+  return s ? `?${s}` : '';
+}
+
 /**
  * requestText runs the same auth / 401 / 403 / error handling as
  * `request<T>` but speaks plain text instead of JSON. It is used by the

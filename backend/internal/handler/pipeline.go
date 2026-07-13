@@ -70,7 +70,9 @@ func validatePipelineInput(p *model.Pipeline) error {
 // @Security     BearerAuth
 // @Router       /pipelines [get]
 func (h *Handler) ListPipelines(c *gin.Context) {
-	pipelines, err := h.Store.Pipelines.List(c.Request.Context())
+	limit := intQuery(c, "limit", listDefaultLimit, 1, listMaxLimit)
+	offset := intQuery(c, "offset", 0, 0, 1<<30)
+	pipelines, err := h.Store.Pipelines.List(c.Request.Context(), limit, offset)
 	if abortStoreErr(c, err, "pipelines not found") {
 		return
 	}
@@ -385,7 +387,7 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 		snapshot := run.Clone()
 		// Per-pipeline RunDeadline override; 0 falls back to the
 		// cluster default inside the coordinator.
-		h.Runs.SpawnWithDeadline(context.Background(), run.ID, service.PipelineRunDeadline(p), func(ctx context.Context) error {
+		spawnErr := h.Runs.SpawnWithDeadline(context.Background(), run.ID, service.PipelineRunDeadline(p), func(ctx context.Context) error {
 			_, execErr := h.Executor.Execute(ctx, p, run)
 			if err := h.Store.Runs.Update(ctx, run); err != nil {
 				return err
@@ -396,6 +398,10 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 			service.NotifyRunOutcome(h.Dispatcher, p, run, execErr)
 			return execErr
 		})
+		if spawnErr != nil {
+			abortRunCapacity(c, spawnErr)
+			return
+		}
 		c.JSON(http.StatusAccepted, snapshot)
 		return
 	}
@@ -410,6 +416,13 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 const (
 	listRunsDefaultLimit = 50
 	listRunsMaxLimit     = 200
+	// listDefaultLimit / listMaxLimit page the entity list endpoints
+	// (pipelines, apps, hosts, environments) via ?limit=&offset=.
+	// Existing clients that never paged keep working: 100 covers any
+	// realistic single-screen listing, and pages are stable per the
+	// store ORDER BY contract.
+	listDefaultLimit = 100
+	listMaxLimit     = 1000
 )
 
 // intQuery parses an integer query param, falling back to def when the
@@ -445,7 +458,7 @@ func (h *Handler) ListPipelineRuns(c *gin.Context) {
 }
 
 func (h *Handler) GetPipelineRun(c *gin.Context) {
-	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
+	run, ok := h.loadRunSummaryForPipeline(c, c.Param("runId"), c.Param("id"))
 	if !ok {
 		return
 	}

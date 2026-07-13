@@ -83,3 +83,46 @@ Binary, checkable conditions for the five-part effort (backend review, easy depl
 - [x] Tool outputs captured: `golangci-lint` (32), `gosec` (57, triaged), `npm audit` (5), secret-grep (clean); `govulncheck` status embedded as **blocked** (proxy 403) with the CI recommendation.
 - [x] Zero source-code changes in the scan PR (report + AC checkbox edits only); doc-links check green.
 - [x] Findings cross-checked against `docs/audits/*` (closed items excluded, tracked-open labeled); report ends with a ranked remediation order.
+
+---
+
+# Round 3 — Optimization round (O0–O4)
+
+Scoped from the full-scan report's remediation order (items 1–4) plus the resource-recommendation
+deliverable; approaches search-validated (semaphore-vs-errgroup for continuous arrivals, Postgres
+TOAST write amplification, kaniko `--cache-repo`). One branch, one commit per item.
+
+## AC-7.0 — Resource requirements documented (O0)
+- [x] INSTALL.md carries a "Resource requirements" section: per-mode sizing table (LIGHT/FULL docker, proxy overlay, k8s presets, UAT), per-container CPU/RAM breakdown, and sizing rules of thumb. *(validated 2026-07-13)*
+
+## AC-7.1 — Run-concurrency cap (O1, scan item 1 — the only High)
+- [x] `COOKER_MAX_CONCURRENT_RUNS` (default 8, `0` = unlimited) bounds in-flight `RunCoordinator` spawns via `semaphore.Weighted.TryAcquire` — reject-when-full, never queue-and-block the handler.
+- [x] Saturated spawn returns HTTP **429** with `Retry-After: 30` on pipeline-run, app deploy/redeploy/rollback paths (`handler.ErrRunCapacity` mapping).
+- [x] The slot is released when the run goroutine finishes (defer), and rejections increment `cooker_run_capacity_rejected_total`.
+- [x] Tests: cap=1 saturation → `ErrRunCapacity`; release frees the slot; nil-semaphore = unlimited back-compat. Race-detector green.
+
+## AC-7.2 — Run-JSONB read/write bloat (O2, scan item 3)
+- [x] `RunStore.UpdateProgress(id, stageRuns)` writes ONLY the `stage_runs` column with per-stage logs stripped; wired as `service.WithRunUpdater` in `server.New` (activates the previously-dormant mid-run progress persistence). Logs land exactly once, in the terminal full `Update`.
+- [x] `RunStore.GetSummary` strips logs in SQL (`jsonb_agg(elem - 'logs')`, same projection as `List`); the polled `GET /pipelines/:id/runs/:runId` serves it.
+- [x] Log consumers unaffected: `GetStageLogs`, run diff, triage, and approval paths stay on full `Get` — pinned by the existing stage-logs test plus a new summary-has-no-logs handler test.
+- [x] Memory impls mirror the Postgres semantics (strip-on-read copy; strip-on-write replace); parity tests green.
+
+## AC-7.3 — List-endpoint pagination (O3, scan item 4b)
+- [x] `PipelineStore` / `AppStore` / `HostStore` / `EnvironmentStore` `.List` take `(limit, offset)` with the RunStore contract: `limit <= 0` = unbounded (internal callers pass `0,0`), negative offset = 0, stable per-store `ORDER BY`.
+- [x] Handlers accept `?limit=&offset=` (default **100**, max 1000) on GET `/pipelines`, `/apps`, `/hosts`, `/environments`; response shape unchanged.
+- [x] Postgres uses `LIMIT NULL` for unbounded via shared `limitArg`/`clampOffset` helpers; memory stores slice after sort via a shared `paginate` helper.
+- [x] Frontend `api/{pipelines,apps,hosts,environments}.list()` accept optional `{limit, offset}` (`pageQuery` in `client.ts`); `tsc`, build, and 80/80 vitest green.
+- [x] Tests: store paging contract (pages, past-end, negative offset) + handler default-100/offset test.
+
+## AC-7.4 — Retention + resource quick-wins (O4, scan items 2 & 4a + report item 7 sub-point)
+- [x] `jobqueue.Store.DeleteOlderThan(cutoff)` (postgres + memory) deletes **terminal** jobs only — pending/running are never swept; contract test covers all four states.
+- [x] Daily sweeper in `server.New` gated by `COOKER_JOBQUEUE_RETENTION` (default `720h`, `0` disables), boot-sweep first, same drain pattern as the audit sweeper.
+- [x] Compose resource ceilings: `mem_limit`/`cpus` on cooker (1g/1.0), postgres (512m/1.0), redis (128m/0.2), traefik (128m/0.5); all three compose files still `config`-render.
+- [x] FULL-edition build cache documented: `COOKER_BUILD_CACHE_REPO` example in `full.env.example` + commented `extraEnv` entry in `values-full.yaml`.
+- [x] Helm lookup footgun: WARNING blocks in `secret-key.yaml` / `postgres.yaml` + INSTALL.md callout (template/`--dry-run` renders mint fresh secrets → GitOps must use `existingSecret`).
+- [x] Scan-report remediation list updated with LANDED markers for items 1–4.
+
+## AC-7 — Cross-cutting
+- [x] Every item is its own commit on `claude/optimization-round-wwh912`; local gates (gofmt, build, vet, full `-race` suite, frontend tsc/build/test, compose render, doc-links) green before push.
+- [ ] Live-load verification (429 under a real run burst; TOAST WAL reduction measured; page-through on a >100-row install) — needs a live stack (reviewer/UAT).
+

@@ -1,4 +1,4 @@
-import { get, post, put, del, getText, postText } from './client';
+import { get, post, put, del, getText, postText, pageQuery, type PageParams } from './client';
 import type {
   Pipeline,
   PipelineRun,
@@ -9,7 +9,7 @@ import type {
 } from '../types/pipeline';
 
 export const pipelineApi = {
-  list: () => get<Pipeline[]>('/pipelines'),
+  list: (page?: PageParams) => get<Pipeline[]>(`/pipelines${pageQuery(page)}`),
   get: (id: string) => get<Pipeline>(`/pipelines/${id}`),
   create: (data: Partial<Pipeline>) => post<Pipeline>('/pipelines', data),
   update: (id: string, data: Pipeline) => put<Pipeline>(`/pipelines/${id}`, data),

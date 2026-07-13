@@ -89,6 +89,11 @@ var (
 		Help: "Number of run-coordinator heartbeat write failures.",
 	})
 
+	runCapacityRejected = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "cooker_run_capacity_rejected_total",
+		Help: "Runs rejected because COOKER_MAX_CONCURRENT_RUNS was saturated.",
+	})
+
 	// Phase 1 / A1 jobqueue series. Depth gauge is set on demand by
 	// callers that have a fresh Stats snapshot; attempts counter
 	// increments per Dispatch; duration histogram observes per Dispatch
@@ -127,6 +132,9 @@ func IncAuditDropped() { auditDropped.Inc() }
 
 // IncHeartbeatError records a heartbeat write failure (any cause).
 func IncHeartbeatError() { heartbeatErrors.Inc() }
+
+// IncRunCapacityRejected records a run rejected at the concurrency cap.
+func IncRunCapacityRejected() { runCapacityRejected.Inc() }
 
 // IncDBConnectionError records a database connection / ping error.
 // Called from postgres.NewStore's backoff loop and the readiness

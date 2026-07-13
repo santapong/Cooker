@@ -5,9 +5,13 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
+	"github.com/santapong/cooker/internal/handler"
 	"github.com/santapong/cooker/internal/observability"
 	"github.com/santapong/cooker/internal/store"
 )
@@ -58,22 +62,48 @@ var runDeadline = func() time.Duration {
 	return 30 * time.Minute
 }()
 
+// maxConcurrentRuns caps in-flight runs across the process
+// (COOKER_MAX_CONCURRENT_RUNS; default 8, 0 disables the cap). Each
+// run is heavy — clone + build + push + deploy — so an uncapped burst
+// of POST /runs or /deploy can exhaust FDs, registry rate limits, and
+// memory (full-scan report, High). Saturation returns
+// handler.ErrRunCapacity, which the HTTP layer maps to 429; when the
+// job queue is enabled the enqueue path is preferred and unaffected.
+// Follows this file's env-at-init idiom (runDeadline, orphanThreshold).
+var maxConcurrentRuns = func() int64 {
+	if v := os.Getenv("COOKER_MAX_CONCURRENT_RUNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return int64(n)
+		}
+	}
+	return 8
+}()
+
 // RunCoordinator tracks in-flight pipeline-run goroutines so they can
-// be heart-beaten and drained on shutdown.
+// be heart-beaten, capacity-capped, and drained on shutdown.
 type RunCoordinator struct {
 	wg    sync.WaitGroup
 	store *store.Store
+	// sem bounds concurrent runs; nil = unlimited (cap 0). A weighted
+	// semaphore with TryAcquire (not errgroup.SetLimit) because runs
+	// arrive continuously and saturation must REJECT (429) rather than
+	// block the HTTP handler goroutine.
+	sem *semaphore.Weighted
 }
 
 // NewRunCoordinator builds a coordinator wired against the given store.
 func NewRunCoordinator(st *store.Store) *RunCoordinator {
-	return &RunCoordinator{store: st}
+	rc := &RunCoordinator{store: st}
+	if maxConcurrentRuns > 0 {
+		rc.sem = semaphore.NewWeighted(maxConcurrentRuns)
+	}
+	return rc
 }
 
 // Spawn launches work with the cluster-default deadline
 // (COOKER_RUN_DEADLINE, 30 minutes when unset). See SpawnWithDeadline.
-func (rc *RunCoordinator) Spawn(ctx context.Context, runID string, work func(context.Context) error) {
-	rc.SpawnWithDeadline(ctx, runID, runDeadline, work)
+func (rc *RunCoordinator) Spawn(ctx context.Context, runID string, work func(context.Context) error) error {
+	return rc.SpawnWithDeadline(ctx, runID, runDeadline, work)
 }
 
 // SpawnWithDeadline launches work in a tracked goroutine with an
@@ -82,13 +112,22 @@ func (rc *RunCoordinator) Spawn(ctx context.Context, runID string, work func(con
 // both work and heartbeat writes. work is expected to mutate the run
 // state through the store; the coordinator only manages liveness,
 // not run semantics.
-func (rc *RunCoordinator) SpawnWithDeadline(ctx context.Context, runID string, deadline time.Duration, work func(context.Context) error) {
+func (rc *RunCoordinator) SpawnWithDeadline(ctx context.Context, runID string, deadline time.Duration, work func(context.Context) error) error {
 	if deadline <= 0 {
 		deadline = runDeadline
+	}
+	// Capacity gate: reject (don't block) when the global limit is
+	// reached, so API handlers stay responsive and clients back off.
+	if rc.sem != nil && !rc.sem.TryAcquire(1) {
+		observability.IncRunCapacityRejected()
+		return handler.ErrRunCapacity
 	}
 	rc.wg.Add(1)
 	go func() {
 		defer rc.wg.Done()
+		if rc.sem != nil {
+			defer rc.sem.Release(1)
+		}
 		// Apply the upper bound. Without this a stuck builder /
 		// kubectl / git push could hold the goroutine forever; the
 		// sweep wouldn't catch it because heartbeats keep firing.
@@ -128,6 +167,7 @@ func (rc *RunCoordinator) SpawnWithDeadline(ctx context.Context, runID string, d
 			slog.Warn("run coordinator: work returned error", "run", runID, "err", err)
 		}
 	}()
+	return nil
 }
 
 // heartbeatBestEffort writes the heartbeat and tolerates "row not yet

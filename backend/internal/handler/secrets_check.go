@@ -34,7 +34,7 @@ func (h *Handler) TestSecretsBackend(c *gin.Context) {
 	}
 	envID := req.EnvironmentID
 	if envID == "" {
-		envs, err := h.Store.Environments.List(c.Request.Context())
+		envs, err := h.Store.Environments.List(c.Request.Context(), 0, 0)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

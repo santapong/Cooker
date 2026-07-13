@@ -29,10 +29,11 @@ type AppStore struct {
 
 func NewAppStore(db *sql.DB) *AppStore { return &AppStore{db: db} }
 
-func (s *AppStore) List(ctx context.Context) ([]*model.App, error) {
+func (s *AppStore) List(ctx context.Context, limit, offset int) ([]*model.App, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+appColumns+`
-		FROM apps ORDER BY updated_at DESC`)
+		FROM apps ORDER BY updated_at DESC LIMIT $1 OFFSET $2`,
+		limitArg(limit), clampOffset(offset))
 	if err != nil {
 		return nil, fmt.Errorf("listing apps: %w", err)
 	}

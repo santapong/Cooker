@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -172,6 +174,102 @@ func TestValidateDAG_ParallelBranches(t *testing.T) {
 	errs := service.ValidatePipelineDAG(p)
 	if len(errs) != 0 {
 		t.Errorf("expected no errors for diamond DAG, got %v", errs)
+	}
+}
+
+// TestListPipelines_Paging pins the O3 list-pagination contract at the
+// HTTP layer: no params → the 100-row default page; ?limit=&offset=
+// page through the stable updated_at DESC order.
+func TestListPipelines_Paging(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := newTestHandler(t)
+	ctx := context.Background()
+
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 105; i++ {
+		if err := h.Store.Pipelines.Create(ctx, &model.Pipeline{
+			ID:        fmt.Sprintf("p%03d", i),
+			Name:      fmt.Sprintf("p%03d", i),
+			UpdatedAt: base.Add(time.Duration(i) * time.Minute),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r := gin.New()
+	r.GET("/pipelines", h.ListPipelines)
+
+	fetch := func(qs string) []*model.Pipeline {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/pipelines"+qs, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status for %q: got %d body=%s", qs, w.Code, w.Body.String())
+		}
+		var out []*model.Pipeline
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return out
+	}
+
+	if got := fetch(""); len(got) != 100 {
+		t.Errorf("default page: got %d rows, want 100", len(got))
+	}
+	page := fetch("?limit=3&offset=1")
+	if len(page) != 3 || page[0].ID != "p103" {
+		t.Errorf("limit=3 offset=1: got %d rows, first=%s; want 3 rows starting p103",
+			len(page), page[0].ID)
+	}
+	if got := fetch("?limit=3&offset=103"); len(got) != 2 {
+		t.Errorf("tail page: got %d rows, want 2", len(got))
+	}
+}
+
+// TestGetPipelineRun_SummaryStripsLogs pins the O2 read-path fix: the
+// polled run-status endpoint serves the GetSummary projection (stage
+// statuses, no logs) so a 2-second poll loop doesn't ship the full log
+// payload; logs stay reachable via the dedicated stage-logs endpoint
+// (covered by TestGetStageLogs below).
+func TestGetPipelineRun_SummaryStripsLogs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := newTestHandler(t)
+	ctx := context.Background()
+
+	if err := h.Store.Pipelines.Create(ctx, &model.Pipeline{ID: "pipe", Name: "pipe"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Store.Runs.Create(ctx, &model.PipelineRun{
+		ID:         "run-1",
+		PipelineID: "pipe",
+		Status:     model.RunStatusRunning,
+		StageRuns: []model.StageRun{
+			{StageID: "build", Status: model.RunStatusRunning, Logs: "very large log payload"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := gin.New()
+	r.GET("/pipelines/:id/runs/:runId", h.GetPipelineRun)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/pipelines/pipe/runs/run-1", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d body=%s", w.Code, w.Body.String())
+	}
+	var got model.PipelineRun
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v body=%s", err, w.Body.String())
+	}
+	if len(got.StageRuns) != 1 {
+		t.Fatalf("stage count: got %d, want 1", len(got.StageRuns))
+	}
+	if got.StageRuns[0].Logs != "" {
+		t.Errorf("polled run endpoint still ships logs: %q", got.StageRuns[0].Logs)
+	}
+	if got.StageRuns[0].Status != model.RunStatusRunning {
+		t.Errorf("summary lost stage status: %+v", got.StageRuns[0])
 	}
 }
 

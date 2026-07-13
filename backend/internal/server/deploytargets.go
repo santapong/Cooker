@@ -110,7 +110,7 @@ func (l sshHostLister) ListSSHHostsLaxStrictHostKey(ctx context.Context) ([]conf
 	if l.st == nil || l.st.Hosts == nil {
 		return nil, nil
 	}
-	all, err := l.st.Hosts.List(ctx)
+	all, err := l.st.Hosts.List(ctx, 0, 0)
 	if err != nil {
 		return nil, err
 	}

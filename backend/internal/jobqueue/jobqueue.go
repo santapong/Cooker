@@ -131,6 +131,13 @@ type Store interface {
 	// Stats returns counts per status. Cheap enough for the
 	// /metrics scraper to call on a 15s interval.
 	Stats(ctx context.Context) (map[Status]int, error)
+
+	// DeleteOlderThan removes TERMINAL jobs (succeeded / failed /
+	// cancelled) whose finish time is before cutoff, returning the
+	// count. Pending and running rows are never touched — retention
+	// must not eat queued or in-flight work. Backs the daily
+	// COOKER_JOBQUEUE_RETENTION sweep.
+	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int, error)
 }
 
 // newID returns a job ID. Format: "job_<unix-nano>_<rand>".

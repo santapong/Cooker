@@ -48,7 +48,9 @@ func validateAppInput(a *model.App) error {
 
 // ListApps returns all apps with webhook secrets redacted.
 func (h *Handler) ListApps(c *gin.Context) {
-	apps, err := h.Store.Apps.List(c.Request.Context())
+	limit := intQuery(c, "limit", listDefaultLimit, 1, listMaxLimit)
+	offset := intQuery(c, "offset", 0, 0, 1<<30)
+	apps, err := h.Store.Apps.List(c.Request.Context(), limit, offset)
 	if abortStoreErr(c, err, "apps not found") {
 		return
 	}
@@ -272,7 +274,10 @@ func (h *Handler) DeployApp(c *gin.Context) {
 		return nil
 	}
 	if h.Runs != nil {
-		h.Runs.Spawn(context.Background(), runID, work)
+		if err := h.Runs.Spawn(context.Background(), runID, work); err != nil {
+			abortRunCapacity(c, err)
+			return
+		}
 	} else if canary {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -517,10 +522,13 @@ func (h *Handler) triggerWebhookDeploy(c *gin.Context, app *model.App, source, b
 	}
 
 	if h.Runs != nil {
-		h.Runs.Spawn(context.Background(), runID, func(ctx context.Context) error {
+		if err := h.Runs.Spawn(context.Background(), runID, func(ctx context.Context) error {
 			h.runAppDeployCtx(ctx, app, runID, channel)
 			return nil
-		})
+		}); err != nil {
+			abortRunCapacity(c, err)
+			return
+		}
 	} else {
 		go h.runAppDeploy(app, runID, channel)
 	}
@@ -703,7 +711,10 @@ func (h *Handler) RollbackApp(c *gin.Context) {
 		return nil
 	}
 	if h.Runs != nil {
-		h.Runs.Spawn(context.Background(), runID, work)
+		if err := h.Runs.Spawn(context.Background(), runID, work); err != nil {
+			abortRunCapacity(c, err)
+			return
+		}
 	} else {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)

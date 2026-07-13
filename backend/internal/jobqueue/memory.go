@@ -202,6 +202,29 @@ func (m *Memory) Stats(_ context.Context) (map[Status]int, error) {
 	return out, nil
 }
 
+// DeleteOlderThan implements Store. Falls back to UpdatedAt when a
+// terminal row somehow lacks FinishedAt (parity with the Postgres
+// COALESCE).
+func (m *Memory) DeleteOlderThan(_ context.Context, cutoff time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for id, j := range m.jobs {
+		if !j.Status.IsTerminal() {
+			continue
+		}
+		finished := j.UpdatedAt
+		if j.FinishedAt != nil {
+			finished = *j.FinishedAt
+		}
+		if finished.Before(cutoff) {
+			delete(m.jobs, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
 func cloneJob(j *Job) *Job {
 	cp := *j
 	if j.LockedAt != nil {
