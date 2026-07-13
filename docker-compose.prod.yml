@@ -1,24 +1,34 @@
-# Production single-host stack — `make deploy-docker`.
+# Production single-host stack — `make deploy-docker` (LIGHT edition base).
 #
-# This is the "docker mode" easy deploy: it splits Cooker into three
-# separate services (app + postgres + redis) on one host, with a
-# production posture that passes Config.Validate():
+# This is the "docker mode" easy deploy: Cooker split into separate
+# services on one host, with a production posture that passes
+# Config.Validate():
 #
 #   - COOKER_ENV=production (strict validation on).
 #   - Bundled PostgreSQL with TLS (self-signed), so the app can reach it
 #     at host `postgres` over sslmode=require without you provisioning a
 #     database. Certs are generated once by the pg-cert-init one-shot.
-#   - Bundled Redis for the ws-hub / ws-ticket / rate-limit backends
-#     (required once you scale past one replica; on by default here so
-#     the posture matches the Helm/k8s path).
 #   - Local auth enabled with a generated JWT signing key, so first run
 #     has a real login (sign up at /signup) rather than the dev-admin
 #     injection that COOKER_ENV=production forbids.
-#   - Postgres/Redis are NOT published to the host — only the app's 8080.
+#   - Postgres is NOT published to the host — only the app's 8080.
+#
+# EDITIONS. This base file is the LIGHT edition: single replica,
+# in-memory ws-hub/ws-ticket/rate-limit backends (no Redis container),
+# jobqueue/scheduler/metrics/tracing off. The FULL edition layers
+# docker-compose.full.yml on top (adds Redis + switches the backends)
+# and flips the feature env vars via deploy/editions/full.env.example:
+#
+#   make deploy-docker-light   # this file only
+#   make deploy-docker-full    # + docker-compose.full.yml overlay
+#
+# Every edition knob below is ${VAR:-default} so the generated .env.prod
+# (see the deploy-docker* Makefile targets) controls the posture without
+# editing this file.
 #
 # Secrets (POSTGRES_PASSWORD, COOKER_SECRET_KEY,
-# COOKER_LOCAL_AUTH_JWT_SIGNING_KEY) are read from .env.prod, which
-# `make deploy-docker` generates with fresh random values on first run.
+# COOKER_LOCAL_AUTH_JWT_SIGNING_KEY) are read from .env.prod, which the
+# Makefile generates with fresh random values on first run.
 #
 # Image builds: COOKER_BUILDER defaults to noop because no in-container
 # build path is production-safe on a single host — production forbids the
@@ -82,18 +92,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - redis-prod:/data
-    # No host port: internal network only.
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-
   cooker:
     build:
       context: .
@@ -108,10 +106,12 @@ services:
       # internal network, and what production validation demands for a
       # non-localhost host.
       DATABASE_URL: postgres://cooker:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}@postgres:5432/cooker?sslmode=require
-      REDIS_URL: redis://redis:6379
-      COOKER_WS_HUB_BACKEND: redis
-      COOKER_WS_TICKET_BACKEND: redis
-      COOKER_RATE_LIMIT_BACKEND: redis
+      # LIGHT default: in-memory single-replica backends, no Redis.
+      # The full overlay (docker-compose.full.yml) switches these to
+      # redis and adds the Redis service.
+      COOKER_WS_HUB_BACKEND: ${COOKER_WS_HUB_BACKEND:-memory}
+      COOKER_WS_TICKET_BACKEND: ${COOKER_WS_TICKET_BACKEND:-memory}
+      COOKER_RATE_LIMIT_BACKEND: ${COOKER_RATE_LIMIT_BACKEND:-memory}
       COOKER_SECRET_KEY: ${COOKER_SECRET_KEY:?set COOKER_SECRET_KEY in .env.prod}
       # Served origin(s). Override in .env.prod when you front Cooker with
       # a domain / reverse proxy — production rejects "*" and empty.
@@ -127,14 +127,28 @@ services:
       COOKER_PUSHER: ${COOKER_PUSHER:-crane}
       COOKER_DEPLOYER: ${COOKER_DEPLOYER:-noop}
       COOKER_REGISTRY: ${COOKER_REGISTRY:-localhost:5000/cooker}
+      # ---- Edition feature knobs (all off in LIGHT; the full preset in
+      # deploy/editions/full.env.example flips them) --------------------
+      COOKER_JOBQUEUE_ENABLED: ${COOKER_JOBQUEUE_ENABLED:-false}
+      COOKER_JOBQUEUE_WORKERS: ${COOKER_JOBQUEUE_WORKERS:-4}
+      COOKER_SCHEDULER_ENABLED: ${COOKER_SCHEDULER_ENABLED:-false}
+      COOKER_METRICS_ENABLED: ${COOKER_METRICS_ENABLED:-false}
+      COOKER_TRACING_ENABLED: ${COOKER_TRACING_ENABLED:-false}
+      COOKER_AUDIT_DESTINATION: ${COOKER_AUDIT_DESTINATION:-stdout}
+      COOKER_AUDIT_DB_RETENTION: ${COOKER_AUDIT_DB_RETENTION:-2160h}
+      COOKER_APP_HEALTH_INTERVAL: ${COOKER_APP_HEALTH_INTERVAL:-30s}
+      COOKER_AI_TRIAGE_ENABLED: ${COOKER_AI_TRIAGE_ENABLED:-false}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      COOKER_FEEDBACK_GITHUB_TOKEN: ${COOKER_FEEDBACK_GITHUB_TOKEN:-}
+      COOKER_CLOUD_AWS_ENABLED: ${COOKER_CLOUD_AWS_ENABLED:-false}
+      COOKER_CLOUD_AWS_REGION: ${COOKER_CLOUD_AWS_REGION:-}
+      COOKER_CLOUD_GCP_ENABLED: ${COOKER_CLOUD_GCP_ENABLED:-false}
+      COOKER_CLOUD_GCP_PROJECT_ID: ${COOKER_CLOUD_GCP_PROJECT_ID:-}
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
   pg-prod:
-  redis-prod:
   pgcerts:

@@ -52,7 +52,31 @@ Binary, checkable conditions for the five-part effort (backend review, easy depl
 - [ ] No behavior change: full UAT smoke (`make uat-up` → `make test-e2e`) passes unchanged (reviewer/CI-verified — not runnable in this sandbox).
 
 ## AC — Cross-cutting (all phases)
-- [ ] Each phase is a **draft PR**, stacked in order (#150 → #151 → #152 → 3c), each with its base set to its parent branch.
-- [ ] CI is green on each PR (backend build/vet/`test -race`; frontend lint/build/test; docker build; helm-validate).
+- [x] Each phase lands as a **draft PR** with CI green before merge (round 1: #150 → #151 → #152 → #153, all merged).
 - [x] No secret, token, or model identifier is committed to any repo artifact.
 - [ ] `make test` and `make lint` run clean locally before each push.
+
+---
+
+# Round 2 — Deploy editions, ENV/proxy feature, full-scan report
+
+## AC-4 — Deploy editions LIGHT / FULL
+- [ ] `make deploy-docker-light` boots with **no** Redis container, memory ws/ticket/rate backends, and jobqueue/scheduler/metrics/tracing off; passes production `Validate()`.
+- [ ] `make deploy-docker-full` (base + `docker-compose.full.yml` overlay) boots Redis with redis backends, jobqueue + scheduler + metrics + tracing on, audit `stdout,db` + retention.
+- [ ] Switching editions in place replaces the marker-delimited preset block in `.env.prod` (no duplicate keys) and preserves secrets/volumes.
+- [ ] `values-light.yaml` / `values-full.yaml` render via the CI helm job; `make deploy-k8s-light|full` targets exist.
+- [ ] INSTALL.md documents both editions, the in-place upgrade path, and that license tiers are orthogonal.
+
+## AC-5 — ENV injection + DeployedURL + reverse proxy
+- [ ] An app linked to an Environment receives its `PlainVars` + decrypted `Secrets` as container env on the docker, ssh, and k8s deploy paths; stage-explicit `Config.Env` keys win on conflict; no environment linked → unchanged behavior.
+- [ ] With `COOKER_PROXY_DOMAIN` set, a successful deploy stores `App.DeployedURL`, returns `url` in the deploy response, and the frontend renders an "Open app" link.
+- [ ] Without a proxy domain, docker/ssh deploys with published ports still derive `http://<host>:<port>`.
+- [ ] Traefik overlay (compose `proxy` profile) routes `<slug>.<domain>` to the deployed container; dockerrun/compose deployers attach the labels + proxy network only when the domain is configured.
+- [ ] K8s manifest synthesis emits an `Ingress` (host `<slug>.<domain>`, configurable `ingressClassName`) only when the domain is set.
+- [ ] New unit tests green (env merge precedence, deployer label/env assertions, Ingress + URL table tests); UAT e2e unchanged.
+
+## AC-6 — Full-scan technical report (report only)
+- [ ] `docs/audits/2026-07-full-scan-report.md` exists with one section per file type (Go, TS/TSX, SQL, YAML, Dockerfile, Shell, Terraform, JS/other), each containing performance findings, vulnerability findings, a severity table, and file:line evidence.
+- [ ] Tool outputs captured: `golangci-lint`, `govulncheck`, `gosec`, `npm audit`, plus grep-based secret scan; each pass's status embedded.
+- [ ] Zero source-code changes in the scan PR (`git diff` = report + backlog/AC checkboxes only); doc-links check green.
+- [ ] Findings cross-checked against `docs/audits/*` so closed items aren't re-flagged; report ends with a ranked remediation order.

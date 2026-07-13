@@ -25,6 +25,41 @@ re-applying those guards yourself.
 | Raw manifests (`deploy/kubernetes/`) | **Reference parity** (kept in sync; Helm is authoritative) | Learning, air-gapped GitOps that templates its own values, or environments that cannot run Helm. You are responsible for parity with the chart's safety defaults. |
 | Single binary / container (no orchestration) | Dev / evaluation only | Local trials, UAT (`make uat-up`). Not a production shape. |
 
+## Editions: LIGHT vs FULL
+
+Two curated deploy postures, expressed purely as env/values presets (every Cooker
+feature is env-toggled; the core CI/CD loop — pipelines, runs, apps, environments,
+WebSockets — is always on and has no toggle):
+
+| | **LIGHT** (main features) | **FULL** (everything) |
+|---|---|---|
+| Containers (docker) | cooker + postgres | cooker + postgres + **redis** |
+| ws-hub / ws-ticket / rate-limit | memory (single replica) | redis (multi-replica-ready) |
+| Job queue + cron scheduler | off | **on** (`COOKER_JOBQUEUE_ENABLED`, `COOKER_SCHEDULER_ENABLED`) |
+| Metrics / tracing | off | **on** (`/metrics`, OTLP) |
+| Audit trail | stdout | **stdout + db** with 90-day retention sweep |
+| Build/push/deploy (k8s) | noop | **kaniko + crane + client-go** (canary-capable) |
+| AI triage / feedback / cloud inventory | off | on once keys provided (documented in the preset) |
+
+Commands:
+
+```sh
+make deploy-docker-light    # docker-compose.prod.yml only
+make deploy-docker-full     # + docker-compose.full.yml overlay (adds Redis)
+make deploy-k8s-light       # helm -f values-light.yaml
+make deploy-k8s-full        # helm -f values-full.yaml
+```
+
+Presets live in `deploy/editions/{light,full}.env.example` (compose) and
+`deploy/helm/cooker/values-{light,full}.yaml` (Helm). The compose targets keep the
+preset between marker lines in `.env.prod`, so **switching editions in place** is just
+running the other target — secrets and data volumes are preserved. On Helm,
+`helm upgrade` with the other values file does the same.
+
+Note: license tiers (`free`/`crew`/`constellation` in the entitlements system) are a
+separate, currently-inert billing concept — editions here are purely about which
+infrastructure/features run.
+
 ## Easy deploy (one command)
 
 Two zero-wiring paths generate their own secrets and bundle their own datastores, so you can

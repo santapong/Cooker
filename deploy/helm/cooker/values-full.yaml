@@ -1,0 +1,87 @@
+# FULL edition preset — every feature enabled.
+#
+#   helm upgrade --install cooker ./deploy/helm/cooker -f ./deploy/helm/cooker/values-full.yaml
+#   (or `make deploy-k8s-full`)
+#
+# Redis-backed ws-hub/ws-ticket/rate-limit, kaniko builds + crane push +
+# client-go deploys (canary-capable), durable job queue + cron scheduler,
+# Prometheus metrics on a dedicated port, OTLP tracing, audit trail in
+# Postgres with the retention CronJob. Key-gated integrations (AI triage,
+# feedback relay, cloud inventory) are listed commented — provide the
+# keys to switch them on.
+#
+# Bundled Postgres is used for a self-contained install; production at
+# scale should switch to postgresql.bundled=false + the database.* block.
+# ServiceMonitor/PrometheusRule stay off unless the monitoring CRDs are
+# installed — flip metrics.serviceMonitor/prometheusRule if you run the
+# prometheus-operator.
+
+cookerEnv: production
+replicaCount: 1   # raise freely: redis backends make replicas>1 valid
+
+postgresql:
+  enabled: true
+  bundled: true
+  sslMode: require
+
+redis:
+  enabled: true
+  url: "redis://cooker-redis:6379"
+wsHub:
+  backend: redis
+wsTicket:
+  backend: redis
+rateLimit:
+  backend: redis
+
+secretKey:
+  autogenerate: true
+
+localAuth:
+  enabled: true
+  autogenerate: true
+  allowSignup: true
+
+oidc:
+  allowedOrigins: ["http://localhost:8080"]
+
+# Real build/push/deploy pipeline: kaniko in-cluster Jobs, crane push,
+# client-go deploys (advertises WeightedDeployer -> canary enabled).
+builder:
+  kind: kaniko
+
+metrics:
+  enabled: true
+
+retention:
+  enabled: true
+
+# Everything the chart doesn't first-class — via extraEnv.
+extraEnv:
+  - name: COOKER_PUSHER
+    value: "crane"
+  - name: COOKER_DEPLOYER
+    value: "clientgo"
+  - name: COOKER_STAGE_RUNNER
+    value: "kube"
+  - name: COOKER_JOBQUEUE_ENABLED
+    value: "true"
+  - name: COOKER_JOBQUEUE_WORKERS
+    value: "4"
+  - name: COOKER_SCHEDULER_ENABLED
+    value: "true"
+  - name: COOKER_TRACING_ENABLED
+    value: "true"
+  - name: COOKER_AUDIT_DESTINATION
+    value: "stdout,db"
+  - name: COOKER_AUDIT_DB_RETENTION
+    value: "2160h"
+  # Key-gated integrations — uncomment and fill to enable:
+  # - name: COOKER_AI_TRIAGE_ENABLED
+  #   value: "true"
+  # - name: ANTHROPIC_API_KEY
+  #   valueFrom: { secretKeyRef: { name: cooker-anthropic, key: api-key } }
+  # - name: COOKER_CLOUD_AWS_ENABLED
+  #   value: "true"
+  # - name: COOKER_CLOUD_AWS_REGION
+  #   value: "us-east-1"
