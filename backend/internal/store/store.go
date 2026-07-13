@@ -20,8 +20,14 @@ var ErrNotFound = errors.New("store: not found")
 var ErrConflict = errors.New("store: version conflict")
 
 // PipelineStore manages pipeline persistence.
+//
+// List paging (also EnvironmentStore/AppStore/HostStore): limit <= 0
+// means "no limit" and a negative offset is treated as 0, so internal
+// callers that need everything pass (ctx, 0, 0). Each store's ordering
+// is stable (pipelines/apps: updated_at DESC; hosts: name ASC;
+// environments: sort order ASC) so offset paging is deterministic.
 type PipelineStore interface {
-	List(ctx context.Context) ([]*model.Pipeline, error)
+	List(ctx context.Context, limit, offset int) ([]*model.Pipeline, error)
 	Get(ctx context.Context, id string) (*model.Pipeline, error)
 	Create(ctx context.Context, p *model.Pipeline) error
 	Update(ctx context.Context, p *model.Pipeline) error
@@ -68,7 +74,8 @@ type RunStore interface {
 
 // EnvironmentStore manages environment persistence.
 type EnvironmentStore interface {
-	List(ctx context.Context) ([]*model.Environment, error)
+	// List pages per the PipelineStore.List contract (limit <= 0 = all).
+	List(ctx context.Context, limit, offset int) ([]*model.Environment, error)
 	Get(ctx context.Context, id string) (*model.Environment, error)
 	Create(ctx context.Context, env *model.Environment) error
 	Update(ctx context.Context, env *model.Environment) error
@@ -125,7 +132,8 @@ type StageApprovalStore interface {
 
 // AppStore manages App persistence (Phase 3).
 type AppStore interface {
-	List(ctx context.Context) ([]*model.App, error)
+	// List pages per the PipelineStore.List contract (limit <= 0 = all).
+	List(ctx context.Context, limit, offset int) ([]*model.App, error)
 	Get(ctx context.Context, id string) (*model.App, error)
 	GetByRepo(ctx context.Context, repo, branch string) (*model.App, error)
 	Create(ctx context.Context, a *model.App) error
@@ -225,7 +233,8 @@ type AuditEventStore interface {
 
 // HostStore manages managed-host persistence (Phase 4).
 type HostStore interface {
-	List(ctx context.Context) ([]*model.Host, error)
+	// List pages per the PipelineStore.List contract (limit <= 0 = all).
+	List(ctx context.Context, limit, offset int) ([]*model.Host, error)
 	Get(ctx context.Context, id string) (*model.Host, error)
 	Create(ctx context.Context, h *model.Host) error
 	Update(ctx context.Context, h *model.Host) error

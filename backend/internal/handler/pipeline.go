@@ -70,7 +70,9 @@ func validatePipelineInput(p *model.Pipeline) error {
 // @Security     BearerAuth
 // @Router       /pipelines [get]
 func (h *Handler) ListPipelines(c *gin.Context) {
-	pipelines, err := h.Store.Pipelines.List(c.Request.Context())
+	limit := intQuery(c, "limit", listDefaultLimit, 1, listMaxLimit)
+	offset := intQuery(c, "offset", 0, 0, 1<<30)
+	pipelines, err := h.Store.Pipelines.List(c.Request.Context(), limit, offset)
 	if abortStoreErr(c, err, "pipelines not found") {
 		return
 	}
@@ -414,6 +416,13 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 const (
 	listRunsDefaultLimit = 50
 	listRunsMaxLimit     = 200
+	// listDefaultLimit / listMaxLimit page the entity list endpoints
+	// (pipelines, apps, hosts, environments) via ?limit=&offset=.
+	// Existing clients that never paged keep working: 100 covers any
+	// realistic single-screen listing, and pages are stable per the
+	// store ORDER BY contract.
+	listDefaultLimit = 100
+	listMaxLimit     = 1000
 )
 
 // intQuery parses an integer query param, falling back to def when the

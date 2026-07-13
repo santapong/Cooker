@@ -48,7 +48,9 @@ func validateAppInput(a *model.App) error {
 
 // ListApps returns all apps with webhook secrets redacted.
 func (h *Handler) ListApps(c *gin.Context) {
-	apps, err := h.Store.Apps.List(c.Request.Context())
+	limit := intQuery(c, "limit", listDefaultLimit, 1, listMaxLimit)
+	offset := intQuery(c, "offset", 0, 0, 1<<30)
+	apps, err := h.Store.Apps.List(c.Request.Context(), limit, offset)
 	if abortStoreErr(c, err, "apps not found") {
 		return
 	}

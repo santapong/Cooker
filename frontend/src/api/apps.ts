@@ -1,4 +1,4 @@
-import { get, post, put, del } from './client';
+import { get, post, put, del, pageQuery, type PageParams } from './client';
 import type {
   AppModel,
   AppDeployResponse,
@@ -8,7 +8,7 @@ import type {
 } from '../types/app';
 
 export const appsApi = {
-  list: () => get<AppModel[]>('/apps'),
+  list: (page?: PageParams) => get<AppModel[]>(`/apps${pageQuery(page)}`),
   get: (id: string) => get<AppModel>(`/apps/${id}`),
   create: (data: Partial<AppModel>) => post<AppModel>('/apps', data),
   update: (id: string, data: AppModel) => put<AppModel>(`/apps/${id}`, data),

@@ -30,7 +30,7 @@ type healthWrite struct {
 	deployedURL string
 }
 
-func (f *fakeAppLister) List(_ context.Context) ([]*model.App, error) {
+func (f *fakeAppLister) List(_ context.Context, _, _ int) ([]*model.App, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.listErr != nil {

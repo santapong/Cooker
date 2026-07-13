@@ -20,7 +20,9 @@ const defaultAppHealthInterval = 30 * time.Second
 // Defining it locally lets tests inject a fake without touching the
 // full store.AppStore surface.
 type AppLister interface {
-	List(ctx context.Context) ([]*model.App, error)
+	// List pages per the store contract; the health checker passes
+	// (0, 0) to probe every app.
+	List(ctx context.Context, limit, offset int) ([]*model.App, error)
 	// UpdateHealth writes the latest probe verdict. deployedURL may be
 	// empty for targets that don't expose an ingress; an empty string
 	// leaves a previously-written URL intact in the store.
@@ -143,7 +145,7 @@ func (c *AppHealthChecker) proberFor(kind model.DeployTargetKind) Prober {
 // block the rest. Each per-app probe call is wrapped in a recover so
 // a panicking cloud-SDK implementation cannot kill the checker goroutine.
 func (c *AppHealthChecker) tick(ctx context.Context) {
-	apps, err := c.apps.List(ctx)
+	apps, err := c.apps.List(ctx, 0, 0)
 	if err != nil {
 		c.logger.Warn("app health: list apps failed", "err", err)
 		return

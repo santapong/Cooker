@@ -24,10 +24,11 @@ const hostColumns = `id, name, kind, reachability, docker_endpoint, kubeconfig_r
 		       ssh_known_host_key, ssh_strict_host_key,
 		       created_at, updated_at, version`
 
-func (s *HostStore) List(ctx context.Context) ([]*model.Host, error) {
+func (s *HostStore) List(ctx context.Context, limit, offset int) ([]*model.Host, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+hostColumns+`
-		FROM hosts ORDER BY name ASC`)
+		FROM hosts ORDER BY name ASC LIMIT $1 OFFSET $2`,
+		limitArg(limit), clampOffset(offset))
 	if err != nil {
 		return nil, fmt.Errorf("listing hosts: %w", err)
 	}

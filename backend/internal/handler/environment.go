@@ -26,7 +26,9 @@ import (
 // @Security     BearerAuth
 // @Router       /environments [get]
 func (h *Handler) ListEnvironments(c *gin.Context) {
-	envs, err := h.Store.Environments.List(c.Request.Context())
+	limit := intQuery(c, "limit", listDefaultLimit, 1, listMaxLimit)
+	offset := intQuery(c, "offset", 0, 0, 1<<30)
+	envs, err := h.Store.Environments.List(c.Request.Context(), limit, offset)
 	if abortStoreErr(c, err, "environments not found") {
 		return
 	}

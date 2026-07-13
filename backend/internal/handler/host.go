@@ -52,7 +52,9 @@ func validateHostInput(h *model.Host) error {
 }
 
 func (h *Handler) ListHosts(c *gin.Context) {
-	hosts, err := h.Store.Hosts.List(c.Request.Context())
+	limit := intQuery(c, "limit", listDefaultLimit, 1, listMaxLimit)
+	offset := intQuery(c, "offset", 0, 0, 1<<30)
+	hosts, err := h.Store.Hosts.List(c.Request.Context(), limit, offset)
 	if abortStoreErr(c, err, "hosts not found") {
 		return
 	}

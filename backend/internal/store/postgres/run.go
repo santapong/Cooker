@@ -35,13 +35,6 @@ func (s *RunStore) List(ctx context.Context, pipelineID string, limit, offset in
 	// guard maps non-arrays to '[]' because jsonb_array_elements raises
 	// "cannot extract elements from a scalar" and would 500 the whole
 	// list for one such row.
-	var limitArg interface{}
-	if limit > 0 {
-		limitArg = limit
-	}
-	if offset < 0 {
-		offset = 0
-	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, pipeline_id, status,
 		        COALESCE(
@@ -57,7 +50,7 @@ func (s *RunStore) List(ctx context.Context, pipelineID string, limit, offset in
 		   FROM pipeline_runs WHERE pipeline_id = $1
 		  ORDER BY created_at DESC
 		  LIMIT $2 OFFSET $3`,
-		pipelineID, limitArg, offset)
+		pipelineID, limitArg(limit), clampOffset(offset))
 	if err != nil {
 		return nil, fmt.Errorf("listing runs: %w", err)
 	}

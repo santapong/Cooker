@@ -21,9 +21,13 @@ func NewPipelineStore(db *sql.DB) *PipelineStore {
 	return &PipelineStore{db: db}
 }
 
-func (s *PipelineStore) List(ctx context.Context) ([]*model.Pipeline, error) {
+// List orders by updated_at DESC. LIMIT NULL = "no limit" (the
+// limit <= 0 contract shared with RunStore.List).
+func (s *PipelineStore) List(ctx context.Context, limit, offset int) ([]*model.Pipeline, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, description, stages, edges, variables, created_at, updated_at, version, run_deadline FROM pipelines ORDER BY updated_at DESC`)
+		`SELECT id, name, description, stages, edges, variables, created_at, updated_at, version, run_deadline
+		   FROM pipelines ORDER BY updated_at DESC LIMIT $1 OFFSET $2`,
+		limitArg(limit), clampOffset(offset))
 	if err != nil {
 		return nil, fmt.Errorf("listing pipelines: %w", err)
 	}

@@ -16,7 +16,7 @@ type apps struct {
 	m  map[string]*model.App
 }
 
-func (s *apps) List(_ context.Context) ([]*model.App, error) {
+func (s *apps) List(_ context.Context, limit, offset int) ([]*model.App, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*model.App, 0, len(s.m))
@@ -24,7 +24,7 @@ func (s *apps) List(_ context.Context) ([]*model.App, error) {
 		out = append(out, normalizeAppCanary(a))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
-	return out, nil
+	return paginate(out, limit, offset), nil
 }
 
 func (s *apps) Get(_ context.Context, id string) (*model.App, error) {

@@ -1,4 +1,4 @@
-import { get, post, put, del } from './client';
+import { get, post, put, del, pageQuery, type PageParams } from './client';
 import type { Environment } from '../types/environment';
 
 export interface SecretMeta {
@@ -7,7 +7,7 @@ export interface SecretMeta {
 }
 
 export const environmentsApi = {
-  list: () => get<Environment[]>('/environments'),
+  list: (page?: PageParams) => get<Environment[]>(`/environments${pageQuery(page)}`),
   create: (data: Partial<Environment>) => post<Environment>('/environments', data),
   update: (id: string, data: Partial<Environment>) =>
     put<Environment>(`/environments/${id}`, data),
