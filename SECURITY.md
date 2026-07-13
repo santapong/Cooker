@@ -233,6 +233,27 @@ GCP cost note: GCP exposes month-to-date spend only through the BigQuery billing
 
 Residual risk: the inventory reflects whatever the granted identity can see. Scope the IAM role to the accounts/projects you intend to surface; a broad `ReadOnlyAccess` role makes the panel enumerate everything in the account.
 
+## Deployed-App Reverse Proxy (COOKER_PROXY_DOMAIN)
+
+When `COOKER_PROXY_DOMAIN` is set, Cooker exposes **deployed apps** publicly:
+
+- **Docker deploys** get Traefik router labels and join the shared `cooker-proxy`
+  network (overlay `docker-compose.proxy.yml`). Traefik runs with
+  `exposedByDefault=false`, dashboard/API off, and a **read-only** docker-socket
+  mount — only containers Cooker explicitly labels are routed; Cooker itself,
+  Postgres, and Redis carry no labels and are never proxied.
+- **Kubernetes deploys** get a synthesized `Ingress` (`<slug>.<domain>`,
+  `ingressClassName` from `COOKER_PROXY_INGRESS_CLASS`).
+- The app's linked **Environment PlainVars + Secrets are injected as container
+  env** at deploy time. On the Kubernetes path (v1) they render as plain `env:`
+  values inside the synthesized manifest — anyone who can read the synthesized
+  pipeline definition or the target namespace's Deployments can read them.
+  Native K8s `Secret` objects are a planned follow-up; until then treat
+  manifest access as secret access.
+- Threat model: exposing an app through the proxy makes IT public — Cooker's own
+  auth/CORS posture is unchanged. Set `COOKER_PROXY_SCHEME=https` only when TLS
+  is actually terminated in front of the app hosts.
+
 ## Data Security
 
 - **Database**: Pipeline definitions, run history, and environment configs stored in PostgreSQL

@@ -130,6 +130,10 @@ type AppStore interface {
 	// deployedURL may be empty for targets that don't expose an ingress;
 	// an empty string leaves a previously-written URL intact in the store.
 	UpdateHealth(ctx context.Context, id string, status model.AppHealth, msg string, at time.Time, deployedURL string) error
+	// UpdateDeployedURL writes only the app's public URL (set by
+	// AppDeployer after a successful deploy when the reverse-proxy /
+	// port-derived URL is known). ErrNotFound if the App is gone.
+	UpdateDeployedURL(ctx context.Context, id, url string) error
 }
 
 // AppDeployStore manages per-app deploy history (roadmap M3). Rows

@@ -122,7 +122,11 @@ type Executor struct {
 	// unaffected.
 	dockerDeployer  deployer.Deployer
 	composeDeployer deployer.Deployer
-	gitops          gitops.Writer
+	// proxy configures the deployed-app reverse proxy: docker-run
+	// deploy stages carrying a ProxyHost get Traefik router labels +
+	// the shared proxy network. Zero value = off.
+	proxy  ProxyConfig
+	gitops gitops.Writer
 	// stageRunner runs Test/Custom stages in an isolated container
 	// (Kubernetes Job / docker run / noop). Defaults to Noop so Execute is
 	// safe to call in tests and dev without a container runtime.
@@ -287,6 +291,15 @@ func WithLogStore(s logstore.Store) Option {
 func WithDeployGovernanceHook(h DeployGovernanceHook) Option {
 	return func(e *Executor) {
 		e.govHook = h
+	}
+}
+
+// WithProxyConfig wires the deployed-app reverse-proxy settings so
+// docker-run deploy stages stamped with a ProxyHost are attached to the
+// proxy network with Traefik router labels.
+func WithProxyConfig(p ProxyConfig) Option {
+	return func(e *Executor) {
+		e.proxy = p
 	}
 }
 

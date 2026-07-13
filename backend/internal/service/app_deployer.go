@@ -55,7 +55,40 @@ type AppDeployer struct {
 	// deploy.failed event per terminal deploy. Best-effort, same as
 	// Deploys — a channel failure never fails the deploy.
 	Notifier *notifier.Dispatcher
+	// EnvResolver, when non-nil, resolves the App's linked
+	// Environment (PlainVars + decrypted Secrets) so those values are
+	// injected into deployed workloads. Nil (or an unlinked app)
+	// keeps the pre-injection behavior: only stage/compose-literal
+	// env reaches the workload.
+	EnvResolver *AppEnvResolver
+	// Proxy configures the deployed-app URL + reverse-proxy surface.
+	// Zero value = off (no ProxyHost stamping, no Ingress synthesis,
+	// no DeployedURL from a domain).
+	Proxy ProxyConfig
+	// Apps, when non-nil, persists the computed DeployedURL after a
+	// successful deploy (best-effort, like Deploys/Notifier).
+	Apps store.AppStore
 }
+
+// ProxyConfig mirrors config.ProxyConfig in a service-local form so the
+// service layer stays free of a config import (same idiom as
+// deployer.ResourceLimits). Domain empty = feature off.
+type ProxyConfig struct {
+	Domain       string
+	Scheme       string
+	IngressClass string
+	Network      string
+}
+
+// hostFor returns the proxy hostname for a slug, or "" when the proxy
+// is off. Slugs are already sanitize()d DNS-safe labels.
+func (p ProxyConfig) hostFor(slug string) string {
+	if p.Domain == "" || slug == "" {
+		return ""
+	}
+	return slug + "." + p.Domain
+}
+
 
 // cacheSpec returns the CacheSpec for synthesized build stages, or
 // nil when no cache repo is configured.
@@ -137,6 +170,19 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 	}
 	logW = fanOut(logW, d.LogSink)
 
+	// Resolve the App's linked Environment (PlainVars + Secrets) up
+	// front so a broken link fails the deploy loudly instead of
+	// shipping a workload with missing config. Values are never
+	// logged — only the key count.
+	appEnv, err := d.EnvResolver.Resolve(ctx, app)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(appEnv) > 0 {
+		fmt.Fprintf(logW, "[env] injecting %d var(s) from environment %s\n", len(appEnv), app.EnvironmentID)
+	}
+	opts := synthOpts{appEnv: appEnv, proxy: d.Proxy}
+
 	fmt.Fprintf(logW, "[clone] github.com/%s @ %s\n", app.GitHubRepo, app.Branch)
 	workdir, err := d.clone(ctx, github.CloneOptions{
 		Repo:      app.GitHubRepo,
@@ -193,12 +239,12 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 		// both). runID is unique per deploy; fall back to ts when absent.
 		pipelineID := ComposePipelineID(runID, app.ID, ts)
 		var synthErr error
-		p, run, synthErr = synthesizePipelineFromCompose(app, graph, workdir, registry, ts, pipelineID, runID, d.cacheSpec())
+		p, run, synthErr = synthesizePipelineFromCompose(app, graph, workdir, registry, ts, pipelineID, runID, d.cacheSpec(), opts)
 		if synthErr != nil {
 			return nil, nil, synthErr
 		}
 	} else {
-		p, run = synthesizePipeline(app, plan, workdir, tag, d.cacheSpec())
+		p, run = synthesizePipeline(app, plan, workdir, tag, d.cacheSpec(), opts)
 		if runID != "" {
 			run.ID = runID
 		}
@@ -225,8 +271,77 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 	}
 	d.recordDeploy(ctx, deployRecordFromRun(app, p, run, historyRef, model.AppDeployKindDeploy))
 	NotifyDeployOutcome(d.Notifier, app, run.ID, run.Error, run.Status == model.RunStatusSuccess, false)
+	if run.Status == model.RunStatusSuccess {
+		d.persistDeployedURL(ctx, app, p, logW)
+	}
 	fmt.Fprintf(logW, "[done] run=%s status=%s\n", run.ID, run.Status)
 	return p, run, nil
+}
+
+// persistDeployedURL computes and stores the app's public URL after a
+// successful deploy. Best-effort like recordDeploy — a store failure is
+// logged, never surfaced.
+func (d *AppDeployer) persistDeployedURL(ctx context.Context, app *model.App, p *model.Pipeline, logW io.Writer) {
+	url := deployedURLFor(p, d.Proxy)
+	if url == "" || d.Apps == nil {
+		return
+	}
+	if err := d.Apps.UpdateDeployedURL(ctx, app.ID, url); err != nil {
+		slog.Warn("app-deploy: persist deployed URL failed", "app", app.ID, "url", url, "err", err)
+		return
+	}
+	fmt.Fprintf(logW, "[url] %s\n", url)
+}
+
+// deployedURLFor derives the app's public URL from the synthesized
+// pipeline's deploy stages:
+//   - proxy configured → scheme://<first deploy stage's ProxyHost>
+//   - no proxy, docker runtime with published ports → the single-host
+//     fallback http://localhost:<first host port>
+//   - otherwise "" (unknown).
+func deployedURLFor(p *model.Pipeline, proxy ProxyConfig) string {
+	if p == nil {
+		return ""
+	}
+	scheme := proxy.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	for i := range p.Stages {
+		st := &p.Stages[i]
+		if st.Type != model.StageTypeDeploy {
+			continue
+		}
+		if st.Config.ProxyHost != "" {
+			return scheme + "://" + st.Config.ProxyHost
+		}
+		if st.Config.DeployRuntime == "docker" {
+			if hp := firstHostPort(st.Config.ComposePorts); hp != "" {
+				return "http://localhost:" + hp
+			}
+		}
+	}
+	return ""
+}
+
+// firstHostPort returns the host side of the first compose port
+// mapping ("8080:80" → "8080", bare "80" → "80"), or "".
+func firstHostPort(ports []string) string {
+	for _, p := range ports {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		host := p
+		if i := strings.Index(p, ":"); i >= 0 {
+			host = p[:i]
+		}
+		host = strings.SplitN(host, "/", 2)[0]
+		if host != "" {
+			return host
+		}
+	}
+	return ""
 }
 
 // DeployImage re-deploys a previously shipped image (rollback, M3):
@@ -244,6 +359,12 @@ func (d *AppDeployer) DeployImage(ctx context.Context, app *model.App, imageRef,
 	logW = fanOut(logW, d.LogSink)
 	fmt.Fprintf(logW, "[rollback] re-deploying %s\n", imageRef)
 
+	appEnv, err := d.EnvResolver.Resolve(ctx, app)
+	if err != nil {
+		return nil, nil, err
+	}
+	proxyHost := d.Proxy.hostFor(sanitize(app.Name))
+
 	now := time.Now()
 	p := &model.Pipeline{
 		ID:   "app-" + app.ID + "-rollback-" + runID,
@@ -252,7 +373,9 @@ func (d *AppDeployer) DeployImage(ctx context.Context, app *model.App, imageRef,
 			ID: "deploy", Name: "Deploy", Type: model.StageTypeDeploy,
 			Config: model.StageConfig{
 				Namespace:    app.DeployTarget.Namespace,
-				ManifestPath: defaultKubernetesManifest(app, imageRef),
+				ManifestPath: defaultKubernetesManifest(app, imageRef, appEnv, proxyHost, d.Proxy.IngressClass),
+				Env:          mergeEnv(appEnv, nil),
+				ProxyHost:    proxyHost,
 			},
 		}},
 		CreatedAt: now,
@@ -333,7 +456,7 @@ func (d *AppDeployer) BuildAndPushImage(ctx context.Context, app *model.App, run
 
 	// Build the Clone→Build→Push DAG and drop the deploy stage: the
 	// weighted deployer owns the deploy for a canary.
-	p, run = synthesizePipeline(app, plan, workdir, tag, d.cacheSpec())
+	p, run = synthesizePipeline(app, plan, workdir, tag, d.cacheSpec(), synthOpts{})
 	p, run = stripDeployStage(p, run)
 	if runID != "" {
 		run.ID = runID
@@ -383,7 +506,16 @@ func stripDeployStage(p *model.Pipeline, run *model.PipelineRun) (*model.Pipelin
 // synthesizePipeline builds the four-stage Clone→Build→Push→Deploy
 // DAG for an App deploy. Clone already ran by the time we call this,
 // so Stage 1 ("Checkout") is marked succeeded and left as a record.
-func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag string, cache *model.CacheSpec) (*model.Pipeline, *model.PipelineRun) {
+// synthOpts carries the cross-cutting inputs app-deploy synthesis
+// stamps onto deploy stages: the App's resolved Environment env
+// (PlainVars + decrypted Secrets) and the deployed-app proxy config.
+// The zero value keeps pre-injection behavior.
+type synthOpts struct {
+	appEnv map[string]string
+	proxy  ProxyConfig
+}
+
+func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag string, cache *model.CacheSpec, opts synthOpts) (*model.Pipeline, *model.PipelineRun) {
 	dockerfile := "Dockerfile"
 	if plan != nil && plan.Kind == model.BuildPlanDockerfile && plan.Path != "" {
 		// BuildPlan.Path is operator-supplied via App config; reject
@@ -417,12 +549,15 @@ func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag stri
 		{ID: "e1", Source: "build", Target: "push"},
 	}
 	if app.DeployTarget.Kind == model.DeployTargetKubernetes {
-		manifest := defaultKubernetesManifest(app, tag)
+		proxyHost := opts.proxy.hostFor(sanitize(app.Name))
+		manifest := defaultKubernetesManifest(app, tag, opts.appEnv, proxyHost, opts.proxy.IngressClass)
 		stages = append(stages, model.Stage{
 			ID: "deploy", Name: "Deploy", Type: model.StageTypeDeploy,
 			Config: model.StageConfig{
 				Namespace:    app.DeployTarget.Namespace,
 				ManifestPath: manifest,
+				Env:          mergeEnv(opts.appEnv, nil),
+				ProxyHost:    proxyHost,
 			},
 		})
 		edges = append(edges, model.Edge{ID: "e2", Source: "push", Target: "deploy"})
@@ -453,9 +588,9 @@ func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag stri
 // Service so UAT can click Deploy on an App pointed at a Kubernetes
 // target without first writing YAML. Real workloads override this
 // via App.BuildPlan / a custom pipeline.
-func defaultKubernetesManifest(app *model.App, image string) string {
+func defaultKubernetesManifest(app *model.App, image string, env map[string]string, proxyHost, ingressClass string) string {
 	name := sanitize(app.Name)
-	return fmt.Sprintf(`apiVersion: apps/v1
+	m := fmt.Sprintf(`apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: %[1]s
@@ -471,7 +606,7 @@ spec:
         - name: %[1]s
           image: %[2]s
           ports: [{containerPort: 80}]
----
+%[3]s---
 apiVersion: v1
 kind: Service
 metadata:
@@ -479,7 +614,11 @@ metadata:
 spec:
   selector: {app: %[1]s}
   ports: [{port: 80, targetPort: 80}]
-`, name, image)
+`, name, image, envYAMLBlock(env, "          "))
+	if proxyHost != "" {
+		m += "---\n" + ingressYAML(name, proxyHost, name, 80, ingressClass)
+	}
+	return m
 }
 
 // ComposePipelineID returns the deterministic pipeline ID for a
@@ -504,7 +643,7 @@ func ComposePipelineID(runID, appID string, ts int64) string {
 // pipelineID is supplied by the caller so the synthesized pipeline can
 // be persisted and fetched (see handler.runAppDeployCtx). Returns an
 // error if the depends_on graph contains a cycle.
-func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, workdir, registry string, ts int64, pipelineID, runID string, cache *model.CacheSpec) (*model.Pipeline, *model.PipelineRun, error) {
+func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, workdir, registry string, ts int64, pipelineID, runID string, cache *model.CacheSpec, opts synthOpts) (*model.Pipeline, *model.PipelineRun, error) {
 	runtime := deployRuntimeFor(app.DeployTarget.Kind)
 
 	// Assign each service a unique, sanitized slug for stage IDs,
@@ -589,19 +728,25 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 
 		deployID := "deploy-" + slug
 		deployStageID[svc.Name] = deployID
+		// Merged runtime env: the App's linked Environment (PlainVars +
+		// Secrets) under the compose-literal environment (compose wins).
+		svcEnv := mergeEnv(opts.appEnv, svc.Environment)
+		proxyHost := opts.proxy.hostFor(sanitize(app.Name) + "-" + slug)
 		deployCfg := model.StageConfig{
 			DeployRuntime:      string(runtime),
 			ComposeServiceName: svc.Name,
 			Resources:          svc.Resources,
 			Image:              deployImage,
-			// Carry the service's ports + env so a docker-run deploy can
-			// publish/inject them. K8s deploys read the manifest instead.
+			// Carry the service's ports + merged env so a docker-run
+			// deploy can publish/inject them. K8s deploys read the
+			// manifest instead.
 			ComposePorts: svc.Ports,
-			Env:          svc.Environment,
+			Env:          svcEnv,
+			ProxyHost:    proxyHost,
 		}
 		if runtime == deployRuntimeKubernetes {
 			deployCfg.Namespace = app.DeployTarget.Namespace
-			deployCfg.ManifestPath = composeServiceManifest(&svc, deployImage)
+			deployCfg.ManifestPath = composeServiceManifest(&svc, deployImage, svcEnv, proxyHost, opts.proxy.IngressClass)
 		}
 		stages = append(stages, model.Stage{
 			ID: deployID, Name: "Deploy " + svc.Name, Type: model.StageTypeDeploy, Group: svc.Group,
@@ -683,11 +828,11 @@ func deployRuntimeFor(kind model.DeployTargetKind) deployRuntime {
 // one compose service, parameterised by image, first published port,
 // and (optionally) resource limits. Mirrors defaultKubernetesManifest
 // but per-service and resource-aware.
-func composeServiceManifest(svc *model.ComposeService, image string) string {
+func composeServiceManifest(svc *model.ComposeService, image string, env map[string]string, proxyHost, ingressClass string) string {
 	name := sanitize(svc.Name)
 	port := firstContainerPort(svc.Ports)
 	resources := k8sResourceBlock(svc.Resources)
-	return fmt.Sprintf(`apiVersion: apps/v1
+	m := fmt.Sprintf(`apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: %[1]s
@@ -703,7 +848,7 @@ spec:
         - name: %[1]s
           image: %[2]s
           ports: [{containerPort: %[3]d}]%[4]s
----
+%[5]s---
 apiVersion: v1
 kind: Service
 metadata:
@@ -711,7 +856,11 @@ metadata:
 spec:
   selector: {app: %[1]s}
   ports: [{port: %[3]d, targetPort: %[3]d}]
-`, name, image, port, resources)
+`, name, image, port, resources, envYAMLBlock(env, "          "))
+	if proxyHost != "" {
+		m += "---\n" + ingressYAML(name, proxyHost, name, port, ingressClass)
+	}
+	return m
 }
 
 // k8sResourceBlock renders a resources.limits YAML fragment (indented

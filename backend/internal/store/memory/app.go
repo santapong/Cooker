@@ -111,3 +111,14 @@ func (s *apps) UpdateHealth(_ context.Context, id string, status model.AppHealth
 	}
 	return nil
 }
+
+func (s *apps) UpdateDeployedURL(_ context.Context, id, url string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.m[id]
+	if !ok {
+		return fmt.Errorf("app %s: %w", id, store.ErrNotFound)
+	}
+	cur.DeployedURL = url
+	return nil
+}

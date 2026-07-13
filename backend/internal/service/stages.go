@@ -342,6 +342,19 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 		if r := stage.Config.Resources; r != nil {
 			req.Resources = &deployer.ResourceLimits{Memory: r.Memory, CPUs: r.CPUs}
 		}
+		// Reverse proxy (COOKER_PROXY_DOMAIN): a synthesis-stamped
+		// ProxyHost becomes Traefik router labels + the shared proxy
+		// network, so the container is routable at http(s)://ProxyHost.
+		if host := stage.Config.ProxyHost; host != "" {
+			router := sanitize(stage.Config.ComposeServiceName)
+			if router == "" {
+				router = sanitize(stage.Name)
+			}
+			req.Labels = traefikLabels(router, host, firstContainerPort(stage.Config.ComposePorts))
+			if e.proxy.Network != "" {
+				req.Network = e.proxy.Network
+			}
+		}
 	case deployer.KindCompose:
 		req.Name = stage.Config.ComposeServiceName
 		req.ComposeFile = stage.Config.ManifestPath // reused field: compose-file path

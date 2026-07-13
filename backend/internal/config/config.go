@@ -88,6 +88,32 @@ type Config struct {
 	// the install runs on the Free (Explorer) tier with no license, which
 	// is the default and never an error.
 	License LicenseConfig
+	// Proxy configures reverse-proxying of DEPLOYED APPS (not Cooker
+	// itself): when Domain is set, app deploys get a routable
+	// <slug>.<Domain> hostname — Traefik router labels on docker-run
+	// deploys, a synthesized Ingress on Kubernetes deploys — and the
+	// app's DeployedURL is populated. Empty Domain disables all of it.
+	Proxy ProxyConfig
+}
+
+// ProxyConfig wires the deployed-app reverse proxy / URL surface.
+type ProxyConfig struct {
+	// Domain is the wildcard base domain apps are exposed under
+	// (e.g. "apps.example.com" → myapp.apps.example.com). Loaded from
+	// COOKER_PROXY_DOMAIN. Empty = feature off.
+	Domain string
+	// Scheme is the URL scheme reported for deployed apps: "http"
+	// (default) or "https" (set when the proxy terminates TLS).
+	// Loaded from COOKER_PROXY_SCHEME.
+	Scheme string
+	// IngressClass is the ingressClassName stamped on synthesized
+	// Ingress resources for Kubernetes deploys. Empty uses the
+	// cluster default. Loaded from COOKER_PROXY_INGRESS_CLASS.
+	IngressClass string
+	// Network is the Docker network shared by Traefik and docker-run
+	// deployed containers. Loaded from COOKER_PROXY_NETWORK; default
+	// "cooker-proxy" (matches docker-compose.proxy.yml).
+	Network string
 }
 
 // LicenseConfig holds the self-hosted licensing inputs. An operator may
@@ -522,6 +548,12 @@ func Load() *Config {
 			Token: getEnv("COOKER_FEEDBACK_GITHUB_TOKEN", ""),
 		},
 		License: licenseConfigFromEnv(),
+		Proxy: ProxyConfig{
+			Domain:       getEnv("COOKER_PROXY_DOMAIN", ""),
+			Scheme:       getEnv("COOKER_PROXY_SCHEME", "http"),
+			IngressClass: getEnv("COOKER_PROXY_INGRESS_CLASS", ""),
+			Network:      getEnv("COOKER_PROXY_NETWORK", "cooker-proxy"),
+		},
 	}
 }
 

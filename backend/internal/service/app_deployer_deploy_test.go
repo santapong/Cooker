@@ -193,7 +193,7 @@ func TestAppDeployer_Deploy_EmptyGitHubRepo(t *testing.T) {
 // side. If this selector ever changes shape, change both together.
 func TestDefaultKubernetesManifest_SelectorIsAppOnly(t *testing.T) {
 	app := &model.App{Name: "Shop App"}
-	m := defaultKubernetesManifest(app, "reg/shop:v1")
+	m := defaultKubernetesManifest(app, "reg/shop:v1", nil, "", "")
 	if want := "matchLabels: {app: shop-app}\n"; !strings.Contains(m, want) {
 		t.Errorf("normal-deploy selector must be exactly %q\n---\n%s", want, m)
 	}

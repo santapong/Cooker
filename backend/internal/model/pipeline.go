@@ -138,6 +138,12 @@ type StageConfig struct {
 	// over anything inherited from the Pipeline.Variables or the
 	// resolved Environment.PlainVars.
 	Env map[string]string `json:"env,omitempty"`
+	// ProxyHost, when non-empty, is the hostname the reverse proxy
+	// should route to this deployed workload (e.g. "myapp.apps.example.com").
+	// Stamped by app-deploy synthesis when COOKER_PROXY_DOMAIN is set:
+	// docker-run deploys translate it to Traefik router labels; K8s
+	// deploys carry it in the synthesized Ingress instead.
+	ProxyHost string `json:"proxyHost,omitempty"`
 	// SecretRefs names Environment.Secrets entries the executor must
 	// decrypt and inject into this stage's runtime. The stage never
 	// sees ciphertext; resolution happens just before execution.

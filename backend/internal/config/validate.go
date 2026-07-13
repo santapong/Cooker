@@ -42,6 +42,11 @@ func (c *Config) Validate() error {
 	if strings.Contains(c.Audit.Destination, "db") && c.Env.IsProduction() && c.DatabaseURL == "" {
 		return fmt.Errorf("config: COOKER_AUDIT_DESTINATION=db requires DATABASE_URL in production")
 	}
+	// Proxy hygiene, env-independent: a bad scheme would mint broken
+	// DeployedURLs for every app; fail at boot instead.
+	if c.Proxy.Scheme != "" && c.Proxy.Scheme != "http" && c.Proxy.Scheme != "https" {
+		return fmt.Errorf("config: COOKER_PROXY_SCHEME must be \"http\" or \"https\", got %q", c.Proxy.Scheme)
+	}
 	if !c.Env.IsProduction() {
 		return nil
 	}
