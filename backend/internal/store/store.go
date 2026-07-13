@@ -51,6 +51,15 @@ type RunStore interface {
 	// run coordinator's ticker. Implementations should not re-marshal
 	// the JSONB columns.
 	UpdateHeartbeat(ctx context.Context, id string, ts time.Time) error
+	// GetSummary is Get with per-stage Logs stripped — for polled
+	// reads (GetPipelineRun) where shipping megabytes of log text per
+	// poll is pure waste. Fetch logs via Get / the stage-logs endpoint.
+	GetSummary(ctx context.Context, id string) (*model.PipelineRun, error)
+	// UpdateProgress persists ONLY the stage_runs column (logs
+	// stripped) for mid-run progress flushes, avoiding the TOAST-tax
+	// full-row rewrite of all three JSONB blobs that Update performs.
+	// Logs land once, in the terminal Update.
+	UpdateProgress(ctx context.Context, id string, stageRuns []model.StageRun) error
 	// SweepOrphans marks runs that were status='running' at boot time
 	// without a recent heartbeat as failed (they were orphaned by a
 	// previous crash). Returns the number of rows updated.

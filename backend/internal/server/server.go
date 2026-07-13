@@ -23,6 +23,7 @@ import (
 	"github.com/santapong/cooker/internal/kube"
 	"github.com/santapong/cooker/internal/license"
 	"github.com/santapong/cooker/internal/logstore"
+	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/observability"
 	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/store"
@@ -312,6 +313,14 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithStatusBroadcaster(wsHub.Broadcast),
 		service.WithDeployGovernanceHook(govDeployHook),
 		service.WithProxyConfig(svcProxy),
+		// Mid-run progress persistence: the executor's batched drain
+		// flushes stage transitions through the cheap single-column
+		// UpdateProgress (logs stripped; they land in the terminal
+		// Update). Previously no updater was wired, so mid-run progress
+		// was never durable and a crash showed stages as pending.
+		service.WithRunUpdater(func(ctx context.Context, run *model.PipelineRun) error {
+			return st.Runs.UpdateProgress(ctx, run.ID, run.StageRuns)
+		}),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 	appDeployer.CacheRef = cfg.BuildCacheRepo

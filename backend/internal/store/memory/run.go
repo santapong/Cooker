@@ -73,6 +73,40 @@ func (s *runs) Get(_ context.Context, id string) (*model.PipelineRun, error) {
 	return &cp, nil
 }
 
+// GetSummary mirrors Get with per-stage Logs stripped (parity with the
+// postgres jsonb strip).
+func (s *runs) GetSummary(ctx context.Context, id string) (*model.PipelineRun, error) {
+	r, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	stripped := make([]model.StageRun, len(r.StageRuns))
+	copy(stripped, r.StageRuns)
+	for i := range stripped {
+		stripped[i].Logs = ""
+	}
+	r.StageRuns = stripped
+	return r, nil
+}
+
+// UpdateProgress writes only StageRuns (logs stripped), mirroring the
+// postgres single-column flush.
+func (s *runs) UpdateProgress(_ context.Context, id string, stageRuns []model.StageRun) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.m[id]
+	if !ok {
+		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+	}
+	stripped := make([]model.StageRun, len(stageRuns))
+	copy(stripped, stageRuns)
+	for i := range stripped {
+		stripped[i].Logs = ""
+	}
+	r.StageRuns = stripped
+	return nil
+}
+
 func (s *runs) Create(_ context.Context, r *model.PipelineRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

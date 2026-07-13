@@ -89,7 +89,6 @@ func (p ProxyConfig) hostFor(slug string) string {
 	return slug + "." + p.Domain
 }
 
-
 // cacheSpec returns the CacheSpec for synthesized build stages, or
 // nil when no cache repo is configured.
 func (d *AppDeployer) cacheSpec() *model.CacheSpec {

@@ -449,7 +449,7 @@ func (h *Handler) ListPipelineRuns(c *gin.Context) {
 }
 
 func (h *Handler) GetPipelineRun(c *gin.Context) {
-	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
+	run, ok := h.loadRunSummaryForPipeline(c, c.Param("runId"), c.Param("id"))
 	if !ok {
 		return
 	}

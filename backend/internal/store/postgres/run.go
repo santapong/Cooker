@@ -74,6 +74,55 @@ func (s *RunStore) List(ctx context.Context, pipelineID string, limit, offset in
 	return out, rows.Err()
 }
 
+// GetSummary mirrors Get but strips per-stage logs in SQL (same
+// jsonb_agg(elem - 'logs') trick List uses), so polled reads don't
+// deTOAST + ship the full log payload.
+func (s *RunStore) GetSummary(ctx context.Context, id string) (*model.PipelineRun, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, pipeline_id, status,
+		        COALESCE(
+		          (SELECT jsonb_agg(elem - 'logs' ORDER BY idx)
+		             FROM jsonb_array_elements(
+		                    CASE WHEN jsonb_typeof(stage_runs) = 'array'
+		                         THEN stage_runs ELSE '[]'::jsonb END
+		                  ) WITH ORDINALITY AS t(elem, idx)),
+		          '[]'::jsonb) AS stage_runs,
+		        env_statuses, variables,
+		        created_at, started_at, finished_at, error, heartbeat_at,
+		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash, pipeline_version
+		   FROM pipeline_runs WHERE id = $1`, id)
+	r, err := scanRun(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+	}
+	return r, err
+}
+
+// UpdateProgress writes only stage_runs (logs stripped) — the cheap
+// mid-run flush. Status/env/variables/heartbeat are untouched, so this
+// neither re-marshals the other JSONB blobs nor clobbers concurrent
+// heartbeat/status writes.
+func (s *RunStore) UpdateProgress(ctx context.Context, id string, stageRuns []model.StageRun) error {
+	stripped := make([]model.StageRun, len(stageRuns))
+	copy(stripped, stageRuns)
+	for i := range stripped {
+		stripped[i].Logs = ""
+	}
+	stageJSON, err := json.Marshal(stripped)
+	if err != nil {
+		return fmt.Errorf("marshal stage_runs: %w", err)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE pipeline_runs SET stage_runs=$2 WHERE id=$1`, id, stageJSON)
+	if err != nil {
+		return fmt.Errorf("updating run progress: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+	}
+	return nil
+}
+
 func (s *RunStore) Get(ctx context.Context, id string) (*model.PipelineRun, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, pipeline_id, status, stage_runs, env_statuses, variables,

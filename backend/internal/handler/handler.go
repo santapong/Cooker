@@ -209,6 +209,23 @@ func (h *Handler) loadRunForPipeline(c *gin.Context, runID, pipelineID string) (
 	return run, true
 }
 
+// loadRunSummaryForPipeline is loadRunForPipeline via RunStore.GetSummary:
+// same ownership check, but stage logs are stripped at the store layer so
+// the polled run-status endpoint doesn't ship (or, on Postgres, de-TOAST)
+// megabytes of logs every 2s. Use loadRunForPipeline when the caller
+// actually reads StageRuns[].Logs (stage-logs endpoint, run diff, triage).
+func (h *Handler) loadRunSummaryForPipeline(c *gin.Context, runID, pipelineID string) (*model.PipelineRun, bool) {
+	run, err := h.Store.Runs.GetSummary(c.Request.Context(), runID)
+	if abortStoreErr(c, err, "run not found") {
+		return nil, false
+	}
+	if run.PipelineID != pipelineID {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return nil, false
+	}
+	return run, true
+}
+
 // abortStoreErr maps common store errors to HTTP responses.
 func abortStoreErr(c *gin.Context, err error, notFoundMsg string) bool {
 	if err == nil {
