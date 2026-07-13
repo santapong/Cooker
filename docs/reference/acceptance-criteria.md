@@ -1,5 +1,7 @@
 # Acceptance criteria — restructure & deploy-simplification
 
+> **Validation:** every item was independently re-verified with fresh evidence on 2026-07-13 — see [`ac-validation-report.md`](ac-validation-report.md) (37 PASS / 9 DEFERRED-live / 1 BLOCKED-CI / 1 FAIL, with per-item commands and the quantitative change report).
+
 Binary, checkable conditions for the five-part effort (backend review, easy deploy, frontend reset, backend restructure, tech-debt hunt). A phase's PR is mergeable only when all of its criteria hold. Boxes are checked as each phase lands.
 
 | Phase | PR | Base |
@@ -17,12 +19,12 @@ Binary, checkable conditions for the five-part effort (backend review, easy depl
 
 ## AC-1 — Easy deploy (ask #2)
 - [ ] `make deploy-docker` on a clean host brings up **three separate services** (app + postgres + redis); `curl localhost:8080/health` returns 200.
-- [ ] First `make deploy-docker` generates `.env.prod` with fresh random secrets; `.env.prod` is git-ignored and never committed.
+- [x] First `make deploy-docker` generates `.env.prod` with fresh random secrets; `.env.prod` is git-ignored and never committed. *(validated 2026-07-13)*
 - [ ] The stack boots under `COOKER_ENV=production` (passes `Config.Validate()`): TLS Postgres over `sslmode=require`, local auth enabled, no dev-admin injection.
 - [ ] A pipeline run created via the API survives `docker compose -f docker-compose.prod.yml restart` (proves Postgres persistence, not the memory store).
 - [ ] `make deploy-k8s` installs the chart with `values-quickstart.yaml`; the pod reaches Ready with **no externally-provisioned database**; `helm template | kubeconform` (via `make helm-validate`) passes.
-- [ ] `cooker migrate up` (and `make migrate-up`) applies migrations without starting the server; `make migrate-down` prints manual-rollback guidance rather than silently booting.
-- [ ] No doc still claims the SPA is `//go:embed`-ed; `COOKER_STATIC_DIR` overrides the static root (default `/usr/share/cooker/static`).
+- [x] `cooker migrate up` (and `make migrate-up`) applies migrations without starting the server; `make migrate-down` prints manual-rollback guidance rather than silently booting. *(validated 2026-07-13: binary exits 2 on down, applies on up)*
+- [x] No doc still claims the SPA is `//go:embed`-ed; `COOKER_STATIC_DIR` overrides the static root (default `/usr/share/cooker/static`). *(validated 2026-07-13)*
 - [x] `go build ./... && go vet ./...` and the changed-package tests pass.
 
 ## AC-2 — Frontend reset (ask #3)
@@ -63,9 +65,9 @@ Binary, checkable conditions for the five-part effort (backend review, easy depl
 ## AC-4 — Deploy editions LIGHT / FULL
 - [ ] `make deploy-docker-light` boots with **no** Redis container, memory ws/ticket/rate backends, and jobqueue/scheduler/metrics/tracing off; passes production `Validate()`.
 - [ ] `make deploy-docker-full` (base + `docker-compose.full.yml` overlay) boots Redis with redis backends, jobqueue + scheduler + metrics + tracing on, audit `stdout,db` + retention.
-- [ ] Switching editions in place replaces the marker-delimited preset block in `.env.prod` (no duplicate keys) and preserves secrets/volumes.
+- [x] Switching editions in place replaces the marker-delimited preset block in `.env.prod` (no duplicate keys) and preserves secrets/volumes. *(validated 2026-07-13: light→full→light = 1 block, secrets unchanged)*
 - [ ] `values-light.yaml` / `values-full.yaml` render via the CI helm job; `make deploy-k8s-light|full` targets exist.
-- [ ] INSTALL.md documents both editions, the in-place upgrade path, and that license tiers are orthogonal.
+- [x] INSTALL.md documents both editions, the in-place upgrade path, and that license tiers are orthogonal. *(validated 2026-07-13)*
 
 ## AC-5 — ENV injection + DeployedURL + reverse proxy
 - [x] An app linked to an Environment receives its `PlainVars` + decrypted `Secrets` as container env on the docker, ssh, and k8s deploy paths; stage-explicit `Config.Env` keys win on conflict; no environment linked → unchanged behavior.
