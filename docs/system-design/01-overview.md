@@ -11,8 +11,10 @@ on port `8080`. One process, one deployable artifact. The rationale:
 
 - **Operational simplicity** — one container, one health check, one thing to scale.
 - **No CORS in the common case** — the SPA is served from the same origin as the API.
-- **Atomic releases** — the frontend bundle is embedded in the binary via `//go:embed`, so the UI and
-  API are always version-matched.
+- **Atomic releases** — the frontend bundle ships in the same image as the binary (served from
+  `COOKER_STATIC_DIR`, default `/usr/share/cooker/static`, which the Dockerfile populates with the Vite
+  build), so the UI and API are always version-matched. (The SQL migrations are embedded via `//go:embed`;
+  the SPA is served from disk, not embedded.)
 
 What's **in scope**: defining pipelines as graphs, executing them (build → push → deploy), managing
 apps/environments/hosts, streaming live logs, and promoting releases through ordered environments.

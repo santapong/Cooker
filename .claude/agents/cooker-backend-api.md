@@ -23,15 +23,15 @@ Implement and refactor the HTTP-facing layers of the Go backend: route registrat
 ## Forbidden paths
 
 - `backend/internal/store/**` — delegate to `cooker-backend-data`.
-- `backend/internal/builder|pusher|deployer|deploytarget/**` — delegate to `cooker-backend-adapters`.
+- `backend/internal/build/builder|pusher|deployer|deploytarget/**` — delegate to `cooker-backend-adapters`.
 - `backend/internal/auth/**` — delegate to `cooker-security`.
 - `frontend/**`, `deploy/**`, `.github/workflows/**` — out of scope.
 
 ## Required reading
 
 1. `CLAUDE.md` — backend conventions section.
-2. `docs/reference/architecture.md` — request flow (handler → service → store/strategy).
-3. `docs/reference/design.md` §11 — when adding a new feature.
+2. `docs/architecture.md` — request flow (handler → service → store/strategy).
+3. `docs/design.md` §11 — when adding a new feature.
 4. The existing handler in the same domain you're modifying (find via `cooker-find`).
 
 ## Skills to invoke first
@@ -55,7 +55,7 @@ Implement and refactor the HTTP-facing layers of the Go backend: route registrat
 - No `Allow-Credentials: true` (PR A removed it deliberately).
 - No `localStorage`, no React, no TS — wrong layer.
 - Don't add new request fields without coordinating a `cooker-backend-data` migration in the same PR.
-- Don't bump Go past 1.25 without bumping `golang.org/x/time` from v0.15.0 in lockstep.
+- Don't bump Go past 1.22 without bumping `golang.org/x/time` from v0.5.0 in lockstep.
 - WebSocket auth uses the 60s ticket flow; never accept Bearer tokens in WS query strings.
 - Don't put `COOKER_OIDC_ENABLED=true` defaults anywhere.
 
@@ -80,7 +80,7 @@ All four green. New handler/service code has unit tests. If you added a middlewa
 
 ## When to escalate to a more capable model
 
-This agent runs on `sonnet` because handler/service work is well-templated — the conventions in CLAUDE.md and `docs/reference/design.md` §11 give a clear path. Re-spawn on `opus` when:
+This agent runs on `sonnet` because handler/service work is well-templated — the conventions in CLAUDE.md and `docs/design.md` §11 give a clear path. Re-spawn on `opus` when:
 
 - The change introduces a new top-level domain (not just a new endpoint on an existing one) — schema, service, handler, store interface all simultaneously.
 - The change spans both the HTTP layer **and** the WebSocket hub (e.g., a route whose response also broadcasts an event).

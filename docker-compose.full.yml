@@ -1,0 +1,49 @@
+# FULL edition overlay — layer on top of docker-compose.prod.yml:
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.full.yml \
+#     --env-file .env.prod up -d --build
+#
+# or `make deploy-docker-full`.
+#
+# Adds the Redis sidecar and switches the ws-hub / ws-ticket / rate-limit
+# backends to redis (required for >1 replica; harmless at 1). The feature
+# flags themselves (jobqueue, scheduler, metrics, tracing, audit db,
+# triage, cloud inventory) are env-driven and come from .env.prod — the
+# `make deploy-docker-full` target seeds them from
+# deploy/editions/full.env.example.
+#
+# Same overlay idiom as docker-compose.uat.socketproxy.yml.
+
+name: cooker
+
+services:
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-prod:/data
+    # No host port: internal network only.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    # Redis is ephemeral coordination state (WS hub / tickets / rate
+    # limit) — tiny by design (INSTALL.md resource table).
+    mem_limit: 128m
+    cpus: 0.2
+
+  cooker:
+    environment:
+      REDIS_URL: redis://redis:6379
+      COOKER_WS_HUB_BACKEND: ${COOKER_WS_HUB_BACKEND:-redis}
+      COOKER_WS_TICKET_BACKEND: ${COOKER_WS_TICKET_BACKEND:-redis}
+      COOKER_RATE_LIMIT_BACKEND: ${COOKER_RATE_LIMIT_BACKEND:-redis}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-prod:

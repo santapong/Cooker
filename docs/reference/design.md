@@ -45,12 +45,12 @@ The pipeline executor doesn't know how to build, push, or deploy — it delegate
 
 | Interface | File | Implementations |
 |---|---|---|
-| `builder.Builder` | `internal/builder/builder.go:49` | `DockerSock`, `Kaniko` (in-cluster Job), `Buildah` (in-cluster Job, full Dockerfile parity), `BuildKit` (gRPC), `Noop` |
-| `pusher.Pusher` | `internal/pusher/pusher.go:37` | `DockerSock`, `Crane` (`go-containerregistry`), `Noop` |
-| `deployer.Deployer` | `internal/deployer/deployer.go:54` | `Kubectl`, `ClientGo` (dynamic client + server-side apply), `Noop` |
-| `deployer.WeightedDeployer` (optional) | `internal/deployer/deployer.go` | `Kubectl`, `ClientGo` — canary traffic split via replica weighting (OR-1). Backends that can't split traffic simply don't implement it; the service returns 422. |
+| `builder.Builder` | `internal/build/builder/builder.go:49` | `DockerSock`, `Kaniko` (in-cluster Job), `Buildah` (in-cluster Job, full Dockerfile parity), `BuildKit` (gRPC), `Noop` |
+| `pusher.Pusher` | `internal/build/pusher/pusher.go:37` | `DockerSock`, `Crane` (`go-containerregistry`), `Noop` |
+| `deployer.Deployer` | `internal/deploy/deployer/deployer.go:54` | `Kubectl`, `ClientGo` (dynamic client + server-side apply), `Noop` |
+| `deployer.WeightedDeployer` (optional) | `internal/deploy/deployer/deployer.go` | `Kubectl`, `ClientGo` — canary traffic split via replica weighting (OR-1). Backends that can't split traffic simply don't implement it; the service returns 422. |
 | `secrets.Manager` | `internal/secrets/manager.go` | `database` (AES-GCM), `keepsave`, `vault`, `awsm` (AWS Secrets Manager), `gcpsm` (GCP Secret Manager) |
-| `deploytarget.Target` | `internal/deploytarget/target.go` | `kubernetes`, `cloudrun`, `ecs` (Fargate), `flyio`, `render`. Self-register on non-empty config. |
+| `deploytarget.Target` | `internal/deploy/deploytarget/target.go` | `kubernetes`, `cloudrun`, `ecs` (Fargate), `flyio`, `render`. Self-register on non-empty config. |
 | `gitops.Writer` | `internal/gitops/writer.go` | `gogit` (`go-git/v5`), `noop` |
 
 **Why:** lets us run UAT end-to-end against `docker` + `kubectl` (operationally simple) and ship a production deploy with `buildkit` + `client-go` (no shell-out, no docker-cli dependency) without changing handler or service code. Unknown values fall back to `Noop` with a log line so a typo'd env var doesn't crash boot.
@@ -114,11 +114,11 @@ Configuration errors and unreachable dependencies are surfaced at boot, not on t
 
 ### 2.8 Read-only provider aggregation — cloud inventory
 
-`internal/cloudinventory` (OR-2) is a second strategy-style extension point, distinct from the deploy/build adapters in §2.1 because it is **strictly read-only** and **cache-fronted** rather than action-oriented. A narrow `Provider` interface (`Name() / ListResources(ctx) / CostSummary(ctx)`) has `aws/` and `gcp/` implementations; a `Service` fans out to the enabled providers concurrently, aggregates into `model.CloudInventory`, and caches the result in memory with a TTL. Per-provider failures are isolated — one cloud being unreachable yields partial results with a per-provider `Error` rather than failing the whole request.
+`internal/cloud/cloudinventory` (OR-2) is a second strategy-style extension point, distinct from the deploy/build adapters in §2.1 because it is **strictly read-only** and **cache-fronted** rather than action-oriented. A narrow `Provider` interface (`Name() / ListResources(ctx) / CostSummary(ctx)`) has `aws/` and `gcp/` implementations; a `Service` fans out to the enabled providers concurrently, aggregates into `model.CloudInventory`, and caches the result in memory with a TTL. Per-provider failures are isolated — one cloud being unreachable yields partial results with a per-provider `Error` rather than failing the whole request.
 
 It mirrors `internal/kube`'s posture (lazy construction, nil-safe at the handler boundary, no mutation surface) and wires the same way the secrets/deploy adapters do: `newCloudInventory` in `server.go` constructs a provider per enabled cloud from `COOKER_CLOUD_*` config, and `h.CloudInventory` is the injected `CloudInventoryService` the three `GET/POST /cloud/*` handlers consume.
 
-**Adding a cloud provider:** implement `cloudinventory.Provider` in a new `internal/cloudinventory/<cloud>/` package (list/describe/cost APIs only — never a mutation), add an `if cfg.<Cloud>.Enabled` branch to `newCloudInventory` in `server.go`, extend `config.CloudInventoryConfig` + `Validate()`, and render the env vars (credentials via `secretKeyRef`) in the Helm chart and raw manifests. Cover the adapter with tests against fake SDK clients / an httptest endpoint — no real cloud calls in CI.
+**Adding a cloud provider:** implement `cloudinventory.Provider` in a new `internal/cloud/cloudinventory/<cloud>/` package (list/describe/cost APIs only — never a mutation), add an `if cfg.<Cloud>.Enabled` branch to `newCloudInventory` in `server.go`, extend `config.CloudInventoryConfig` + `Validate()`, and render the env vars (credentials via `secretKeyRef`) in the Helm chart and raw manifests. Cover the adapter with tests against fake SDK clients / an httptest endpoint — no real cloud calls in CI.
 
 ---
 

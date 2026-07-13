@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/santapong/cooker/internal/oci"
+	"github.com/santapong/cooker/internal/build/oci"
 )
 
 // ParseManifest attempts to parse JSON as an OCI Manifest.

@@ -31,12 +31,14 @@ import (
 // without importing the server package.
 type captureSpawner struct{ runIDs []string }
 
-func (s *captureSpawner) Spawn(_ context.Context, runID string, _ func(context.Context) error) {
+func (s *captureSpawner) Spawn(_ context.Context, runID string, _ func(context.Context) error) error {
 	s.runIDs = append(s.runIDs, runID)
+	return nil
 }
 
-func (s *captureSpawner) SpawnWithDeadline(_ context.Context, runID string, _ time.Duration, _ func(context.Context) error) {
+func (s *captureSpawner) SpawnWithDeadline(_ context.Context, runID string, _ time.Duration, _ func(context.Context) error) error {
 	s.runIDs = append(s.runIDs, runID)
+	return nil
 }
 
 // signedPush builds an HMAC-SHA256 X-Hub-Signature-256 header value for

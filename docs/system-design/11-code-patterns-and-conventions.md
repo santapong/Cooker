@@ -14,7 +14,7 @@
 | **Middleware** | Compose cross-cutting HTTP concerns | CORS / OIDC / RBAC wiring in `server.go` + `internal/auth` |
 | **Observer / pub-sub** | Fan out live updates to N clients | WebSocket hub (+ Redis) — see [07](07-realtime-and-concurrency.md) |
 | **Fail-fast init** | Surface config/connection errors at boot, not mid-request | `main.go` Load→Validate→New; OIDC discovery; Postgres ping |
-| **Embedded resources** | Single self-contained binary | `//go:embed migrations/*.sql` + embedded SPA |
+| **Embedded resources** | Ship migrations inside the binary | `//go:embed migrations/*.sql` (the SPA is served from disk at `COOKER_STATIC_DIR`, not embedded) |
 | **Provider + module helpers** | Read auth token outside React context | `OIDCProvider` exporting `getAccessToken`/`triggerSignIn` |
 | **Route guard** | Gate routes on auth + role | `ProtectedRoute.tsx` |
 | **Domain stores** | One Zustand store per domain, no cross-imports | `frontend/src/stores/*` |

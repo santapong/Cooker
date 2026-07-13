@@ -27,6 +27,7 @@ import (
 
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/server"
+	"github.com/santapong/cooker/internal/store/postgres"
 )
 
 // Build-time metadata. Populated by the Makefile and GoReleaser via:
@@ -42,6 +43,16 @@ var (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+
+	// Subcommand dispatch. `cooker migrate up` applies embedded
+	// migrations and exits without starting the server, so operators
+	// (and `make migrate-up`) have an explicit migration step rather
+	// than relying solely on the implicit apply-at-boot in NewStore.
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		os.Exit(runMigrate(os.Args[2:]))
+	}
+
 	printVersion := flag.Bool("version", false, "print build version and exit")
 	flag.Parse()
 
@@ -55,8 +66,6 @@ func main() {
 	server.BuildVersion = version
 	server.BuildSHA = commit
 	server.BuildTime = date
-
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 
 	cfg := config.Load()
 	if err := cfg.Validate(); err != nil {
@@ -84,4 +93,36 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("cooker stopped cleanly")
+}
+
+// runMigrate applies embedded up-migrations against DATABASE_URL and
+// returns a process exit code. Only "up" is supported: down-migrations
+// are an explicit operator action, not a CLI convenience. Migrations are
+// also applied implicitly at server boot; this command exists so the
+// step can be run on its own (CI, one-off jobs, `make migrate-up`).
+func runMigrate(args []string) int {
+	direction := "up"
+	if len(args) > 0 {
+		direction = args[0]
+	}
+	if direction != "up" {
+		slog.Error("migrate: only 'up' is supported", "got", direction)
+		return 2
+	}
+
+	cfg := config.Load()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
+	slog.Info("migrate: applying migrations", "database", "DATABASE_URL")
+	st, err := postgres.NewStore(ctx, cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("migrate: failed", "err", err)
+		return 1
+	}
+	if err := st.Close(); err != nil {
+		slog.Warn("migrate: store close failed", "err", err)
+	}
+	slog.Info("migrate: done")
+	return 0
 }

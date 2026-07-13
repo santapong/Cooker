@@ -15,7 +15,7 @@ type environments struct {
 	m  map[string]*model.Environment
 }
 
-func (s *environments) List(_ context.Context) ([]*model.Environment, error) {
+func (s *environments) List(_ context.Context, limit, offset int) ([]*model.Environment, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*model.Environment, 0, len(s.m))
@@ -23,7 +23,7 @@ func (s *environments) List(_ context.Context) ([]*model.Environment, error) {
 		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Order < out[j].Order })
-	return out, nil
+	return paginate(out, limit, offset), nil
 }
 
 func (s *environments) Get(_ context.Context, id string) (*model.Environment, error) {

@@ -29,10 +29,11 @@ type AppStore struct {
 
 func NewAppStore(db *sql.DB) *AppStore { return &AppStore{db: db} }
 
-func (s *AppStore) List(ctx context.Context) ([]*model.App, error) {
+func (s *AppStore) List(ctx context.Context, limit, offset int) ([]*model.App, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+appColumns+`
-		FROM apps ORDER BY updated_at DESC`)
+		FROM apps ORDER BY updated_at DESC LIMIT $1 OFFSET $2`,
+		limitArg(limit), clampOffset(offset))
 	if err != nil {
 		return nil, fmt.Errorf("listing apps: %w", err)
 	}
@@ -146,6 +147,17 @@ func (s *AppStore) UpdateHealth(ctx context.Context, id string, status model.App
 		WHERE id=$1`, id, string(status), at, msg, deployedURL)
 	if err != nil {
 		return fmt.Errorf("updating app health: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("app %s: %w", id, store.ErrNotFound)
+	}
+	return nil
+}
+
+func (s *AppStore) UpdateDeployedURL(ctx context.Context, id, url string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE apps SET deployed_url=$2 WHERE id=$1`, id, url)
+	if err != nil {
+		return fmt.Errorf("updating app deployed url: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("app %s: %w", id, store.ErrNotFound)

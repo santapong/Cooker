@@ -64,7 +64,7 @@ Before touching code:
 | Cross-cutting helper (one-purpose, used by ≥2 callers) | New `internal/<thing>/` package — see `internal/{retry,validate,idempotency}` as templates |
 | Schema change | New migration `backend/internal/store/postgres/migrations/<NNN>_<topic>.up.sql` + matching `.down.sql`. NNN strictly monotonic. |
 | New stage type | `model/pipeline.go` const + `service/executor.go` switch arm + `validate/validate.go` enum + tests in all three |
-| New external adapter (builder / pusher / deployer / secrets) | Implement the interface; add a constructor case to `selectXxx` in `server/server.go`; document the env-var value in `.env.uat.example` and `docs/guides/UAT.md` |
+| New external adapter (builder / pusher / deployer / secrets) | Implement the interface; add a constructor case to `selectXxx` in `server/server.go`; document the env-var value in `.env.uat.example` and `docs/UAT.md` |
 | New HTTP route | Handler in `internal/handler/<domain>.go`; register in `internal/server/router.go` with the appropriate role + middleware (writeRole / adminRole / mfa) |
 
 ## Anti-patterns to refuse

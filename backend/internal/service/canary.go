@@ -10,9 +10,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/santapong/cooker/internal/deployer"
+	"github.com/santapong/cooker/internal/deploy/deployer"
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/notify/notifier"
 	"github.com/santapong/cooker/internal/store"
 )
 

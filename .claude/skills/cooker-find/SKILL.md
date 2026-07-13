@@ -14,9 +14,9 @@ Cooker is a Go-backend + React-frontend CI/CD platform. Single binary on port 80
 | HTTP endpoint for `/api/v1/<domain>/…` | `backend/internal/handler/<domain>.go` |
 | Business logic for pipeline runs / app deploys | `backend/internal/service/` (`executor.go`, `app_deployer.go`, `promoter.go`) |
 | Database access (CRUD) | `backend/internal/store/postgres/<domain>.go` (memory mirror in `store/memory/memory.go`) |
-| Image-build adapters (Kaniko / Buildah / BuildKit / docker.sock) | `backend/internal/builder/` |
-| Push-to-registry adapters | `backend/internal/pusher/` |
-| Deploy adapters (clientgo / Helm / cloud targets) | `backend/internal/deployer/` |
+| Image-build adapters (Kaniko / Buildah / BuildKit / docker.sock) | `backend/internal/build/builder/` |
+| Push-to-registry adapters | `backend/internal/build/pusher/` |
+| Deploy adapters (clientgo / Helm / cloud targets) | `backend/internal/deploy/deployer/` |
 | Auth (OIDC + local) + RBAC | `backend/internal/auth/` |
 | WebSocket hub, ticket store, rate limiter | `backend/internal/server/{websocket,wshub_backend,wsticket,ratelimit}*.go` |
 | Run lifecycle, heartbeat, orphan sweep | `backend/internal/server/runs.go` + `store/postgres/run.go` |
@@ -35,13 +35,13 @@ Cooker is a Go-backend + React-frontend CI/CD platform. Single binary on port 80
 | File | When |
 |---|---|
 | `CLAUDE.md` | Always — orientation + conventions |
-| `docs/reference/architecture.md` | Need the system map (what calls what) |
-| `docs/reference/design.md` § 11 | Adding a new feature; checklist |
+| `docs/architecture.md` | Need the system map (what calls what) |
+| `docs/design.md` § 11 | Adding a new feature; checklist |
 | `docs/audits/remediation-plan.md` | Picking a known fix (themes T1–T24) |
 | `docs/audits/chain-recheck.md` | Current state of every chain failure (Open / Closed / Mitigated) |
 | `docs/audits/{dag-performance,spof-and-database,crash-and-service-quality,vulnerabilities-and-chains}.md` | Detailed findings for an area |
-| `docs/guides/UAT.md` | Touching `make uat-up` |
-| `docs/guides/RUNBOOK.md` | Runbook + alert reference |
+| `docs/UAT.md` | Touching `make uat-up` |
+| `docs/RUNBOOK.md` | Runbook + alert reference |
 | `SECURITY.md` | Auth, CORS, secrets, Dockerfile changes |
 | `backlog.md` | Why something isn't done yet |
 

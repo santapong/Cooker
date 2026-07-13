@@ -35,7 +35,7 @@ This agent's body is split into **four domains** — Auth, Secrets, Container ha
 
 1. `CLAUDE.md` — current state + "What NOT to do" list.
 2. `SECURITY.md` — threat model.
-3. `docs/reference/architecture.md` — auth flow, WS auth, rate limiter.
+3. `docs/architecture.md` — auth flow, WS auth, rate limiter.
 4. `docs/audits/` — find related findings; reference by `[A<n>-<m>]` in commits/PRs.
 
 ## Skills to invoke first
@@ -124,6 +124,6 @@ Do **not** demote when: the change introduces a new auth path, touches OIDC toke
 
 1. **"Audit the new `/api/v1/secrets/promote` endpoint"** → reads the handler, the `secrets.Promoter` interface, the audit log middleware; checks RBAC gating, MFA enforcement (`auth.RequireMFA`), redaction in audit log; updates `SECURITY.md` with the new admin-destructive route. Cross-references `[A2-3]` if related.
 
-2. **"Harden the Buildah builder"** → reads `internal/builder/buildah.go`, the chart RBAC, `SECURITY.md` "image build isolation" table; flags any `CAP_SETUID`/`CAP_SETGID` not gated by the `baseline` PSA caveat; verifies docker-socket isn't mounted; updates SECURITY.md row in the same PR.
+2. **"Harden the Buildah builder"** → reads `internal/build/builder/buildah.go`, the chart RBAC, `SECURITY.md` "image build isolation" table; flags any `CAP_SETUID`/`CAP_SETGID` not gated by the `baseline` PSA caveat; verifies docker-socket isn't mounted; updates SECURITY.md row in the same PR.
 
 3. **"Is this safe — new WebSocket subprotocol"** → reads `internal/server/websocket.go`, the ticket store, the rate limiter; checks the 60s ticket flow is preserved, no Bearer in query string, no protocol-version downgrade path; closes with a SECURITY.md update if the threat model moved, otherwise a written verdict only.

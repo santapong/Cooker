@@ -21,9 +21,11 @@ func NewEnvironmentStore(db *sql.DB) *EnvironmentStore {
 	return &EnvironmentStore{db: db}
 }
 
-func (s *EnvironmentStore) List(ctx context.Context) ([]*model.Environment, error) {
+func (s *EnvironmentStore) List(ctx context.Context, limit, offset int) ([]*model.Environment, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, sort_order, target, promotion, variables, secrets, created_at, version FROM environments ORDER BY sort_order ASC`)
+		`SELECT id, name, sort_order, target, promotion, variables, secrets, created_at, version
+		   FROM environments ORDER BY sort_order ASC LIMIT $1 OFFSET $2`,
+		limitArg(limit), clampOffset(offset))
 	if err != nil {
 		return nil, fmt.Errorf("listing environments: %w", err)
 	}

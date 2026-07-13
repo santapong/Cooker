@@ -118,25 +118,25 @@ func NewStore(ctx context.Context, databaseURL string) (*store.Store, error) {
 		return nil, err
 	}
 
-	return store.New(
-		NewPipelineStore(db),
-		NewRunStore(db),
-		NewEnvironmentStore(db),
-		NewPromotionStore(db),
-		NewStageApprovalStore(db),
-		NewAppStore(db),
-		NewAppDeployStore(db),
-		NewAppCanaryStore(db),
-		NewAuditEventStore(db),
-		NewHostStore(db),
-		NewRegistryConfigStore(db),
-		NewClusterConfigStore(db),
-		NewUserStore(db),
-		NewAPITokenStore(db),
-		NewLicenseStore(db),
-		db.Close,
-		db.PingContext,
-	), nil
+	return store.New(store.Components{
+		Pipelines:      NewPipelineStore(db),
+		Runs:           NewRunStore(db),
+		Environments:   NewEnvironmentStore(db),
+		Promotions:     NewPromotionStore(db),
+		StageApprovals: NewStageApprovalStore(db),
+		Apps:           NewAppStore(db),
+		AppDeploys:     NewAppDeployStore(db),
+		AppCanaries:    NewAppCanaryStore(db),
+		AuditEvents:    NewAuditEventStore(db),
+		Hosts:          NewHostStore(db),
+		Registries:     NewRegistryConfigStore(db),
+		Clusters:       NewClusterConfigStore(db),
+		Users:          NewUserStore(db),
+		APITokens:      NewAPITokenStore(db),
+		Licenses:       NewLicenseStore(db),
+		Close:          db.Close,
+		Ping:           db.PingContext,
+	}), nil
 }
 
 // pingWithBackoff retries Ping with jittered exponential backoff up to

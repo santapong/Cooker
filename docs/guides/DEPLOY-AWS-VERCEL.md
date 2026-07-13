@@ -231,7 +231,7 @@ flowchart TB
 - **ECR creds:** Kaniko Jobs use the built-in credential helper + Pod Identity
   (zero config). The **crane in-process pusher** instead reads
   `$DOCKER_CONFIG/config.json` per push (`authn.DefaultKeychain`, verified at
-  [`../../backend/internal/pusher/crane.go`](../../backend/internal/pusher/crane.go):29-33),
+  [`../../backend/internal/build/pusher/crane.go`](../../backend/internal/build/pusher/crane.go):29-33),
   so a **CronJob refreshes a `dockerconfigjson` Secret every 6h** (ECR tokens
   live ~12h) mounted via `DOCKER_CONFIG=/etc/cooker-docker`. **Repo follow-up:**
   wiring the `ecr-login` keychain into crane deletes that CronJob.
@@ -571,7 +571,7 @@ These are unresolved as of 2026-06-11. Items the synthesis could not close are
 
 - **crane `ecr-login` keychain** — wiring the
   `amazon-ecr-credential-helper` keychain into the crane pusher
-  ([crane.go](../../backend/internal/pusher/crane.go)) would **delete the
+  ([crane.go](../../backend/internal/build/pusher/crane.go)) would **delete the
   dockerconfig-refresh CronJob** entirely (the pusher would mint ECR tokens via
   Pod Identity itself).
 - **builder nodeSelector/tolerations** — the builder doesn't stamp

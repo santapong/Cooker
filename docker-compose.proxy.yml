@@ -1,0 +1,63 @@
+# Reverse-proxy overlay — Traefik routing for DEPLOYED APPS.
+#
+#   docker compose -f docker-compose.prod.yml [-f docker-compose.full.yml] \
+#     -f docker-compose.proxy.yml --env-file .env.prod up -d --build
+#
+# What it does: runs Traefik v3 with the Docker provider. When
+# COOKER_PROXY_DOMAIN is set in .env.prod (e.g. apps.example.com — or
+# 127.0.0.1.sslip.io for local, DNS-free use), Cooker's docker-run
+# deploys attach each app container to the `cooker-proxy` network with
+# Traefik router labels, making it reachable at
+#   http://<app-slug>.<COOKER_PROXY_DOMAIN>
+# and the app's DeployedURL is populated with exactly that URL.
+#
+# Security posture:
+#   - exposedByDefault=false: only containers Cooker explicitly labels
+#     are routed. The cooker/postgres/redis services carry no labels
+#     and are never exposed through the proxy.
+#   - Dashboard/API disabled.
+#   - The proxy bind-mounts the docker socket READ-ONLY — it needs to
+#     watch container events. This concentrates host-API exposure in
+#     one small, well-audited service (same trade-off as the UAT
+#     socket-proxy overlay; see SECURITY.md "deployed-app proxy").
+#   - Port 80 only. For TLS, front Traefik with your own termination
+#     or extend this overlay with certresolver config, then set
+#     COOKER_PROXY_SCHEME=https so DeployedURLs advertise https.
+
+name: cooker
+
+services:
+  traefik:
+    image: traefik:v3.3
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=cooker-proxy
+      - --entrypoints.web.address=:80
+      - --api.dashboard=false
+      - --log.level=INFO
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - cooker-proxy
+    restart: unless-stopped
+    # Negligible until high request volume (INSTALL.md resource table).
+    mem_limit: 128m
+    cpus: 0.5
+
+  cooker:
+    environment:
+      COOKER_PROXY_DOMAIN: ${COOKER_PROXY_DOMAIN:?set COOKER_PROXY_DOMAIN in .env.prod to use the proxy overlay}
+      COOKER_PROXY_SCHEME: ${COOKER_PROXY_SCHEME:-http}
+      COOKER_PROXY_NETWORK: cooker-proxy
+    networks:
+      - default
+      - cooker-proxy
+
+networks:
+  # Fixed name (not project-prefixed) because Cooker passes it verbatim
+  # to `docker run --network` for deployed app containers.
+  cooker-proxy:
+    name: cooker-proxy

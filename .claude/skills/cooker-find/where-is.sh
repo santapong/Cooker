@@ -57,7 +57,7 @@ case "$noun" in
       "backend/internal/handler/app.go"
       "backend/internal/service/app_deployer.go"
       "backend/internal/store/postgres/app.go"
-      "backend/internal/deployer/clientgo.go"
+      "backend/internal/deploy/deployer/clientgo.go"
     )
     ;;
   environment|environments|env|secret|secrets)
@@ -85,17 +85,17 @@ case "$noun" in
     ;;
   builder|build|kaniko|buildah|buildkit)
     paths=(
-      "backend/internal/builder/builder.go"
-      "backend/internal/builder/kaniko.go"
-      "backend/internal/builder/buildah.go"
-      "backend/internal/builder/buildkit.go"
+      "backend/internal/build/builder/builder.go"
+      "backend/internal/build/builder/kaniko.go"
+      "backend/internal/build/builder/buildah.go"
+      "backend/internal/build/builder/buildkit.go"
     )
     ;;
   pusher|push|registry)
     paths=(
-      "backend/internal/pusher/pusher.go"
-      "backend/internal/pusher/crane.go"
-      "backend/internal/pusher/docker.go"
+      "backend/internal/build/pusher/pusher.go"
+      "backend/internal/build/pusher/crane.go"
+      "backend/internal/build/pusher/docker.go"
     )
     ;;
   websocket|ws|hub)

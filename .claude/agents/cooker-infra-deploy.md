@@ -19,7 +19,7 @@ Own the deploy artifacts: the Helm chart at `deploy/helm/cooker/`, raw manifests
 - `deploy/docker/**` — Dockerfile, build context.
 - `deploy/uat/**` — docker-compose orchestration for `make uat-up`.
 - `.env.uat.example` — UAT env-var contract (when adding deploy-relevant vars).
-- `docs/guides/UAT.md` — when changing UAT behaviour, update in the same PR.
+- `docs/UAT.md` — when changing UAT behaviour, update in the same PR.
 - `SECURITY.md` — when changing the Dockerfile or container security posture.
 
 ## Forbidden paths
@@ -32,7 +32,7 @@ Own the deploy artifacts: the Helm chart at `deploy/helm/cooker/`, raw manifests
 
 1. `CLAUDE.md` — current state section (non-root UID, secretKeyRef, NetworkPolicy gating).
 2. `SECURITY.md` — threat model for the container.
-3. `docs/guides/UAT.md` — when the change affects `make uat-up`.
+3. `docs/UAT.md` — when the change affects `make uat-up`.
 4. `deploy/helm/cooker/values.yaml` and the matching template before editing.
 5. The matching raw manifest in `deploy/kubernetes/` — they must stay in parity.
 
@@ -74,7 +74,7 @@ Plus:
 
 - For Dockerfile changes: `docker build -f deploy/docker/Dockerfile .` succeeds; the resulting image runs as UID 65532 (`docker run --rm <image> id` shows non-zero UID).
 - For raw manifest changes: `kubectl apply --dry-run=client -f deploy/kubernetes/` is clean.
-- For UAT changes: `make uat-up` from a clean state still works; `docs/guides/UAT.md` updated in the same PR.
+- For UAT changes: `make uat-up` from a clean state still works; `docs/UAT.md` updated in the same PR.
 - For security-affecting changes: `SECURITY.md` updated.
 
 ## Anti-patterns

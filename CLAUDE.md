@@ -13,8 +13,10 @@ backend/
 ├── cmd/cooker/main.go            entry point — Load + Validate + server.New + Run
 └── internal/
     ├── auth/                     OIDC middleware, RBAC group→role mapping
-    ├── builder/  pusher/  deployer/  deploytarget/   strategy adapters (Builder, Pusher, Deployer interfaces)
-    ├── config/                   env-var loading + production-mode Validate()
+    ├── build/                    builder/ pusher/ stagerunner/ oci/ buildplan/  (build+push adapters)
+    ├── deploy/                   deployer/ deploytarget/   (deploy adapters — Builder/Pusher/Deployer interfaces)
+    ├── cloud/                    cloudinventory/   ·   notify/  notifier/   (grouped by domain, Phase 3c)
+    ├── config/                   env-var loading + production-mode Validate() (+ validate.go, env.go)
     ├── handler/                  thin HTTP layer (one file per domain)
     ├── service/                  business logic (Executor, AppDeployer, Promoter)
     ├── server/                   Gin router, middleware, WebSocket hub, ticket store, rate limiter
@@ -39,7 +41,6 @@ deploy/
 |---|---|
 | [`docs/reference/architecture.md`](docs/reference/architecture.md) | You need the system map (what calls what) |
 | [`docs/reference/design.md`](docs/reference/design.md) | You're adding a new feature — patterns, conventions, "Adding a new feature" checklist at §11 |
-| [`docs/reference/file-structure-pattern.md`](docs/reference/file-structure-pattern.md) | You're adding or splitting a file — the canonical per-layer structure pattern, size ceilings, and where new code goes |
 | [`docs/engineering/ADLC.md`](docs/engineering/ADLC.md) | You want the end-to-end development lifecycle and which agent/skill/workflow drives each phase |
 | [`docs/engineering/harness-engineering.md`](docs/engineering/harness-engineering.md) | You're adding or changing an agent, skill, or workflow under `.claude/` |
 | [`docs/guides/UAT.md`](docs/guides/UAT.md) | You're touching anything that affects `make uat-up` |
@@ -65,7 +66,7 @@ The honest production-readiness verdict and the open work are in `backlog.md`'s 
 - **Layering**: handler → service → store/strategy. Handlers do HTTP parsing only. Services hold business logic. Adapters implement narrow interfaces.
 - **Errors**: wrap with package prefix — `fmt.Errorf("oidc: discover: %w", err)`. The store package exposes typed `ErrNotFound`; check via `errors.Is`.
 - **Tests**: every `internal/<pkg>/*.go` ships with a `*_test.go` for non-trivial logic. Race detector is on in CI: `go test ./... -race`. `go vet ./...` runs before tests.
-- **Adding a new pluggable backend** (e.g. a new builder): implement the interface, add a constructor case to `selectXxx` in `server/factories.go`, document the env-var value in `.env.uat.example` and `docs/guides/UAT.md`.
+- **Adding a new pluggable backend** (e.g. a new builder): implement the interface, add a constructor case to `selectXxx` in `server.go`, document the env-var value in `.env.uat.example` and `docs/guides/UAT.md`.
 - **No business logic in handlers. No HTTP types in services. No `panic` outside startup.**
 
 ### Frontend (TypeScript)
@@ -115,4 +116,4 @@ The full list is in `backlog.md`. The three highest-impact items I scoped in det
 2. **P1.2 — Audit logging middleware.** Per-route opt-in slog audit trail. ~2 hours.
 3. **P6.1 — `helm lint` + `helm template` + `kubeconform` in CI.** ~10 minutes; YAML is in the backlog ready to drop in.
 
-**KeepSave secrets manager (P2)** ships at HEAD — adapter at `backend/internal/secrets/keepsave/` (~457 LOC), Helm wiring renders `COOKER_SECRETS_KEEPSAVE_{URL,PROJECT_ID,API_KEY}` (API key via `secretKeyRef`), and `Config.Validate()` (`backend/internal/config/validate.go:79-89`) enforces the required env vars before boot. Select it with `COOKER_SECRETS_BACKEND=keepsave` (chart: `secrets.backend=keepsave`).
+**KeepSave secrets manager (P2)** ships at HEAD — adapter at `backend/internal/secrets/keepsave/` (~457 LOC), Helm wiring renders `COOKER_SECRETS_KEEPSAVE_{URL,PROJECT_ID,API_KEY}` (API key via `secretKeyRef`), and `Config.Validate()` (`backend/internal/config/config.go:413-423`) enforces the required env vars before boot. Select it with `COOKER_SECRETS_BACKEND=keepsave` (chart: `secrets.backend=keepsave`).

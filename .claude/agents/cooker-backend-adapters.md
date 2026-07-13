@@ -14,15 +14,15 @@ Own the strategy/adapter layer of the backend — every pluggable backend that i
 
 ## Allowed paths
 
-- `backend/internal/builder/**` — image builders (Buildah, Kaniko WIP, BuildKit, etc.).
-- `backend/internal/pusher/**` — registry push adapters.
-- `backend/internal/deployer/**` — deployers (kubectl, Helm, cloud).
-- `backend/internal/deploytarget/**` — target environments (Dev/Staging/Prod cluster definitions).
-- `backend/internal/buildplan/**` — pipeline graph compilation.
+- `backend/internal/build/builder/**` — image builders (Buildah, Kaniko WIP, BuildKit, etc.).
+- `backend/internal/build/pusher/**` — registry push adapters.
+- `backend/internal/deploy/deployer/**` — deployers (kubectl, Helm, cloud).
+- `backend/internal/deploy/deploytarget/**` — target environments (Dev/Staging/Prod cluster definitions).
+- `backend/internal/build/buildplan/**` — pipeline graph compilation.
 - `backend/internal/model/**` — stage-type definitions.
 - `backend/internal/source/**`, `backend/internal/gitops/**`, `backend/internal/transport/**` — adapter-shaped supporting packages.
 - `backend/internal/server/server.go` — **only** to add a `case` to a `selectXxx` constructor switch.
-- `.env.uat.example`, `docs/guides/UAT.md` — to document new env-var values.
+- `.env.uat.example`, `docs/UAT.md` — to document new env-var values.
 - Matching `*_test.go` files.
 
 ## Forbidden paths
@@ -35,8 +35,8 @@ Own the strategy/adapter layer of the backend — every pluggable backend that i
 ## Required reading
 
 1. `CLAUDE.md` — see the "Adding a new pluggable backend" line.
-2. `docs/reference/architecture.md` — strategy-adapter section.
-3. `docs/reference/design.md` §11 — for stage-type additions.
+2. `docs/architecture.md` — strategy-adapter section.
+3. `docs/design.md` §11 — for stage-type additions.
 4. `backlog.md` — especially P1.1 (Kaniko) which closes the docker.sock RCE-to-host gap.
 5. The existing adapter for the same interface to mirror its style.
 
@@ -50,7 +50,7 @@ Own the strategy/adapter layer of the backend — every pluggable backend that i
 - **Implement the narrow interface** — Builder/Pusher/Deployer/DeployTarget. Don't expand the interface to fit your adapter; if the contract is wrong, that's a separate, deliberate change.
 - **Constructor lives in the package**, named `New<Adapter>(cfg <Adapter>Config) (Interface, error)`.
 - **Register via `selectXxx` in `server.go`**: add a `case "<env-var-value>":` returning your constructor.
-- **Document the env-var value** in `.env.uat.example` and `docs/guides/UAT.md` in the **same PR**.
+- **Document the env-var value** in `.env.uat.example` and `docs/UAT.md` in the **same PR**.
 - **Errors wrapped**: `fmt.Errorf("kaniko: build: %w", err)`.
 - **Tests**: unit tests for the adapter against a mock or real container, integration markers if it needs a daemon.
 - **Stage types**: add `model.StageType<N>` with a unique numeric value, update any switch statements that consume it (compiler will help — no default branches that swallow new types).
@@ -60,7 +60,7 @@ Own the strategy/adapter layer of the backend — every pluggable backend that i
 - **Never bind-mount `/var/run/docker.sock`** in any new adapter, compose, or doc. P1.1 (Kaniko) exists specifically to close that gap.
 - Don't reuse env-var names across adapters — namespace per adapter (`COOKER_BUILDER_KANIKO_*`).
 - Don't add a new pluggable backend without the `selectXxx` case + UAT docs in the same PR.
-- Don't bump Go past 1.25 without `golang.org/x/time` lockstep (v0.15.0).
+- Don't bump Go past 1.22 without `golang.org/x/time` lockstep (v0.5.0).
 - No `panic` outside startup.
 
 ## Done criteria
@@ -68,7 +68,7 @@ Own the strategy/adapter layer of the backend — every pluggable backend that i
 ```
 cd backend
 go vet ./...
-go test ./internal/builder/... ./internal/pusher/... ./internal/deployer/... ./internal/deploytarget/... -race
+go test ./internal/build/builder/... ./internal/build/pusher/... ./internal/deploy/deployer/... ./internal/deploy/deploytarget/... -race
 go test ./... -race                       # cross-package check
 go build ./cmd/cooker
 ```
@@ -76,7 +76,7 @@ go build ./cmd/cooker
 Plus:
 
 - `.env.uat.example` lists the new env-var with a comment.
-- `docs/guides/UAT.md` documents how to enable the adapter.
+- `docs/UAT.md` documents how to enable the adapter.
 - For stage-types: every consumer's switch statement covers the new value (run `go vet` and look for `exhaustive`-style hints; if not enforced, grep manually).
 - Backlog item moved to "Closed" if applicable.
 
@@ -98,6 +98,6 @@ This agent runs on `sonnet` because adapter work follows a tight pattern (`New<A
 
 ## Worked examples
 
-1. **"Add Buildah builder"** (P9.5) → `internal/builder/buildah.go` mirrors Kaniko's Job pattern, `selectBuilder` in `server.go` adds `case "buildah"`, `.env.uat.example` documents `COOKER_BUILDER=buildah` + `COOKER_BUILDAH_STORAGE_DRIVER`, unit tests assert Job spec + caps. Hand chart wiring to `cooker-infra-deploy`.
+1. **"Add Buildah builder"** (P9.5) → `internal/build/builder/buildah.go` mirrors Kaniko's Job pattern, `selectBuilder` in `server.go` adds `case "buildah"`, `.env.uat.example` documents `COOKER_BUILDER=buildah` + `COOKER_BUILDAH_STORAGE_DRIVER`, unit tests assert Job spec + caps. Hand chart wiring to `cooker-infra-deploy`.
 
-2. **"Add Render deploy target"** (P9.2) → `internal/deploytarget/render/` self-registers when its config block is non-empty, implements `DeployTarget` against `https://api.render.com/v1/`, unit tests use `httptest.Server` to assert the SDK calls fire correctly.
+2. **"Add Render deploy target"** (P9.2) → `internal/deploy/deploytarget/render/` self-registers when its config block is non-empty, implements `DeployTarget` against `https://api.render.com/v1/`, unit tests use `httptest.Server` to assert the SDK calls fire correctly.

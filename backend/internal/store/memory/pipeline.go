@@ -15,7 +15,7 @@ type pipelines struct {
 	m  map[string]*model.Pipeline
 }
 
-func (s *pipelines) List(_ context.Context) ([]*model.Pipeline, error) {
+func (s *pipelines) List(_ context.Context, limit, offset int) ([]*model.Pipeline, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*model.Pipeline, 0, len(s.m))
@@ -23,7 +23,7 @@ func (s *pipelines) List(_ context.Context) ([]*model.Pipeline, error) {
 		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
-	return out, nil
+	return paginate(out, limit, offset), nil
 }
 
 func (s *pipelines) Get(_ context.Context, id string) (*model.Pipeline, error) {

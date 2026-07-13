@@ -9,7 +9,7 @@ import (
 
 	"github.com/santapong/cooker/internal/jobqueue"
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/notify/notifier"
 	"github.com/santapong/cooker/internal/store"
 	"github.com/santapong/cooker/internal/store/memory"
 )

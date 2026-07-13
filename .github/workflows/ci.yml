@@ -2,14 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    # Run on PRs to main, the develop integration branch, and any
-    # in-flight stacked PR branches under claude/** so each stacked
-    # PR in a series gets verified without waiting for the parent.
+    # Run on PRs to main and to any in-flight stacked PR branches
+    # under claude/** so each stacked PR in a series gets verified
+    # without waiting for the parent to merge first.
     branches:
       - main
-      - develop
       - "claude/**"
 
 jobs:

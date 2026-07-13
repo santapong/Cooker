@@ -1,0 +1,52 @@
+# Quickstart preset — one-command Kubernetes install with no external
+# dependencies. Use with:
+#
+#   helm upgrade --install cooker ./deploy/helm/cooker \
+#     -f ./deploy/helm/cooker/values-quickstart.yaml
+#
+# or `make deploy-k8s`.
+#
+# This bundles Postgres and Redis inside the release and generates all
+# secrets (DB password, AES-256 secret key, local-auth JWT signing key)
+# so the production-posture backend boots with zero manual wiring. After
+# install, port-forward and sign up:
+#
+#   kubectl port-forward svc/cooker 8080:8080
+#   open http://localhost:8080/signup
+#
+# NOT tuned for scale or HA — it runs single replicas with modest
+# resources. For production at scale, provision Postgres/Redis externally
+# (postgresql.bundled=false + database.*), use a real IdP (oidc.*), and
+# manage secrets out-of-band (existingSecret refs).
+
+cookerEnv: production
+
+# Bundled datastores.
+postgresql:
+  enabled: true
+  bundled: true
+  sslMode: require
+redis:
+  enabled: true
+  url: "redis://cooker-redis:6379"
+
+# Generated AES-256 key for the database secrets backend.
+secretKey:
+  autogenerate: true
+
+# First-run auth: local accounts (no IdP needed). Sign up at /signup.
+localAuth:
+  enabled: true
+  autogenerate: true
+  allowSignup: true
+
+# Served origin. Override to your real hostname when you expose Cooker
+# via an Ingress/LoadBalancer — production rejects "*" and empty.
+oidc:
+  allowedOrigins: ["http://localhost:8080"]
+
+# Management-plane defaults: no in-cluster image build/deploy wired out
+# of the box. Set builder.kind=kaniko + a deployer to enable real
+# build/deploy once the cluster is ready.
+builder:
+  kind: noop

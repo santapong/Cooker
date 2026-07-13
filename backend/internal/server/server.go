@@ -16,18 +16,17 @@ import (
 	"github.com/santapong/cooker/internal/auth/local"
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/crypto"
-	"github.com/santapong/cooker/internal/deployer"
+	"github.com/santapong/cooker/internal/deploy/deployer"
 	"github.com/santapong/cooker/internal/governance"
 	"github.com/santapong/cooker/internal/handler"
 	"github.com/santapong/cooker/internal/idempotency"
 	"github.com/santapong/cooker/internal/kube"
 	"github.com/santapong/cooker/internal/license"
 	"github.com/santapong/cooker/internal/logstore"
+	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/observability"
 	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/store"
-	"github.com/santapong/cooker/internal/store/memory"
-	"github.com/santapong/cooker/internal/store/postgres"
 	"github.com/santapong/cooker/internal/triage"
 )
 
@@ -287,6 +286,15 @@ func New(cfg *config.Config) (*Server, error) {
 	// the canary service (weighted traffic split). Type-asserted below for
 	// the optional WeightedDeployer capability.
 	deploy := selectDeployer(cfg.DeployerBackend, cfg.Kubernetes.Kubeconfig)
+	// Deployed-app reverse proxy / URL surface (COOKER_PROXY_*). Passed
+	// to both the executor (docker-run Traefik labels) and the app
+	// deployer (ProxyHost stamping, Ingress synthesis, DeployedURL).
+	svcProxy := service.ProxyConfig{
+		Domain:       cfg.Proxy.Domain,
+		Scheme:       cfg.Proxy.Scheme,
+		IngressClass: cfg.Proxy.IngressClass,
+		Network:      cfg.Proxy.Network,
+	}
 	exec := service.NewExecutor(
 		service.WithBuilder(bld),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
@@ -304,11 +312,25 @@ func New(cfg *config.Config) (*Server, error) {
 		service.WithLogStore(logStore),
 		service.WithStatusBroadcaster(wsHub.Broadcast),
 		service.WithDeployGovernanceHook(govDeployHook),
+		service.WithProxyConfig(svcProxy),
+		// Mid-run progress persistence: the executor's batched drain
+		// flushes stage transitions through the cheap single-column
+		// UpdateProgress (logs stripped; they land in the terminal
+		// Update). Previously no updater was wired, so mid-run progress
+		// was never durable and a crash showed stages as pending.
+		service.WithRunUpdater(func(ctx context.Context, run *model.PipelineRun) error {
+			return st.Runs.UpdateProgress(ctx, run.ID, run.StageRuns)
+		}),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
 	appDeployer.CacheRef = cfg.BuildCacheRepo
 	appDeployer.Deploys = st.AppDeploys
 	appDeployer.Notifier = notifDeps.Dispatcher
+	// Environment (PlainVars + Secrets) injection into deployed
+	// workloads, and the deployed-app URL/proxy surface.
+	appDeployer.EnvResolver = &service.AppEnvResolver{Environments: st.Environments, Secrets: secMgr}
+	appDeployer.Proxy = svcProxy
+	appDeployer.Apps = st.Apps
 
 	// Canary deployments (OR-1). The weighted split needs a deployer that
 	// can rebalance replicas — only the Kubernetes-backed deployers
@@ -633,6 +655,50 @@ func New(cfg *config.Config) (*Server, error) {
 		})
 	}
 
+	// Daily retention sweep for the durable job queue: deletes TERMINAL
+	// jobs older than COOKER_JOBQUEUE_RETENTION (default 30d, 0
+	// disables). Same shape as the audit sweep above — boot sweep
+	// first, then a 24h ticker. Without this the jobs table grows one
+	// row per pipeline run forever.
+	if jobDeps.Store != nil && cfg.JobQueue.Retention > 0 {
+		jobSweepCtx, jobSweepCancel := context.WithCancel(context.Background())
+		jobSweepDone := make(chan struct{})
+		retention := cfg.JobQueue.Retention
+		jobs := jobDeps.Store
+		go func() {
+			defer close(jobSweepDone)
+			sweep := func() {
+				c, cancelSweep := context.WithTimeout(jobSweepCtx, time.Minute)
+				n, err := jobs.DeleteOlderThan(c, time.Now().Add(-retention))
+				cancelSweep()
+				if err != nil {
+					slog.Warn("jobqueue: retention sweep failed", "err", err)
+				} else if n > 0 {
+					slog.Info("jobqueue: retention sweep deleted jobs",
+						"deleted", n, "retention", retention.String())
+				}
+			}
+			sweep()
+			t := time.NewTicker(24 * time.Hour)
+			defer t.Stop()
+			for {
+				select {
+				case <-jobSweepCtx.Done():
+					return
+				case <-t.C:
+					sweep()
+				}
+			}
+		}()
+		cleanups = append(cleanups, func() {
+			jobSweepCancel()
+			select {
+			case <-jobSweepDone:
+			case <-time.After(2 * time.Second):
+			}
+		})
+	}
+
 	s := &Server{
 		router:           router,
 		config:           cfg,
@@ -870,13 +936,36 @@ func (s *Server) Close() error {
 	return s.store.Close()
 }
 
-func newStore(ctx context.Context, cfg *config.Config) (*store.Store, error) {
-	if cfg.DatabaseURL == "" {
-		return memory.New(), nil
+func corsMiddleware(allowed []string) gin.HandlerFunc {
+	allowAll, set := originSet(allowed)
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		switch {
+		case allowAll:
+			c.Header("Access-Control-Allow-Origin", "*")
+		case origin != "" && set[origin]:
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+		}
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
 	}
-	st, err := postgres.NewStore(ctx, cfg.DatabaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("store: %w", err)
+}
+
+func originSet(allowed []string) (bool, map[string]bool) {
+	if len(allowed) == 1 && allowed[0] == "*" {
+		return true, nil
 	}
-	return st, nil
+	set := make(map[string]bool, len(allowed))
+	for _, o := range allowed {
+		if o != "" {
+			set[o] = true
+		}
+	}
+	return false, set
 }

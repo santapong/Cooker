@@ -23,13 +23,13 @@ Own everything inside `backend/internal/store/`: the `PipelineStore`, `RunStore`
 ## Forbidden paths
 
 - `backend/internal/handler|service|server/**` — delegate to `cooker-backend-api`.
-- `backend/internal/builder|pusher|deployer|deploytarget/**` — delegate to `cooker-backend-adapters`.
+- `backend/internal/build/builder|pusher|deployer|deploytarget/**` — delegate to `cooker-backend-adapters`.
 - `frontend/**`, `deploy/**`, `.github/workflows/**`.
 
 ## Required reading
 
 1. `CLAUDE.md` — backend conventions, especially the migration rule.
-2. `docs/reference/architecture.md` — store contract.
+2. `docs/architecture.md` — store contract.
 3. The existing `internal/store/*.go` interface file matching the entity you're changing.
 4. The latest migration in `internal/store/postgres/migrations/` to follow numbering and style.
 
@@ -53,7 +53,7 @@ Own everything inside `backend/internal/store/`: the `PipelineStore`, `RunStore`
 - **Never** allow a `cooker-backend-api` PR to land that adds a handler request field without a matching migration here. If you see one in review, request changes.
 - Don't change interface method signatures without auditing every call site — `cooker-find` makes this easy.
 - Don't drop columns or tables without a deprecation migration that lands first; production data is real.
-- Don't bump Go past 1.25 without `golang.org/x/time` lockstep (currently v0.15.0).
+- Don't bump Go past 1.22 without `golang.org/x/time` lockstep (currently v0.5.0).
 
 ## Done criteria
 

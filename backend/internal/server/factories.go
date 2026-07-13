@@ -5,23 +5,36 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/santapong/cooker/internal/builder"
-	"github.com/santapong/cooker/internal/cloudinventory"
-	cloudaws "github.com/santapong/cooker/internal/cloudinventory/aws"
-	cloudgcp "github.com/santapong/cooker/internal/cloudinventory/gcp"
+	"github.com/santapong/cooker/internal/build/builder"
+	"github.com/santapong/cooker/internal/build/pusher"
+	"github.com/santapong/cooker/internal/build/stagerunner"
+	"github.com/santapong/cooker/internal/cloud/cloudinventory"
+	cloudaws "github.com/santapong/cooker/internal/cloud/cloudinventory/aws"
+	cloudgcp "github.com/santapong/cooker/internal/cloud/cloudinventory/gcp"
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/crypto"
-	"github.com/santapong/cooker/internal/deployer"
-	"github.com/santapong/cooker/internal/pusher"
+	"github.com/santapong/cooker/internal/deploy/deployer"
 	"github.com/santapong/cooker/internal/secrets"
 	"github.com/santapong/cooker/internal/secrets/awsm"
 	"github.com/santapong/cooker/internal/secrets/database"
 	"github.com/santapong/cooker/internal/secrets/gcpsm"
 	"github.com/santapong/cooker/internal/secrets/keepsave"
 	"github.com/santapong/cooker/internal/secrets/vault"
-	"github.com/santapong/cooker/internal/stagerunner"
 	"github.com/santapong/cooker/internal/store"
+	"github.com/santapong/cooker/internal/store/memory"
+	"github.com/santapong/cooker/internal/store/postgres"
 )
+
+func newStore(ctx context.Context, cfg *config.Config) (*store.Store, error) {
+	if cfg.DatabaseURL == "" {
+		return memory.New(), nil
+	}
+	st, err := postgres.NewStore(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	return st, nil
+}
 
 func selectBuilder(kind string, k8s config.KubernetesConfig) (builder.Builder, error) {
 	switch kind {

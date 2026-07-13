@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/santapong/cooker/internal/deployer"
+	"github.com/santapong/cooker/internal/deploy/deployer"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/store"
 	"github.com/santapong/cooker/internal/store/memory"

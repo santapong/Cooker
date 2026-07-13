@@ -270,7 +270,7 @@ leaves the other enforcing.
 
 ---
 
-## 4. Notifications (`internal/notifier/`)
+## 4. Notifications (`internal/notify/notifier/`)
 
 ### Table
 

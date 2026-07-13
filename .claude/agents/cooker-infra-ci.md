@@ -52,7 +52,7 @@ Own everything that runs in CI and the local dev loop short of the actual deploy
 
 ## Hard rules (from CLAUDE.md)
 
-- Don't bump Go past 1.25 in `go.mod` or the workflow `go-version` without bumping `golang.org/x/time` from v0.15.0 in lockstep — v0.15+ requires Go 1.25.
+- Don't bump Go past 1.22 in `go.mod` or the workflow `go-version` without bumping `golang.org/x/time` from v0.5.0 in lockstep — v0.15+ requires Go 1.25.
 - Don't drop the race detector.
 - Don't merge to `main` from CI itself (no auto-merge of substantive code).
 - Don't add a workflow that pushes to the registry without a pinned, audited build context.

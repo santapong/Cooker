@@ -7,12 +7,12 @@ import (
 	"log/slog"
 
 	"github.com/santapong/cooker/internal/config"
-	"github.com/santapong/cooker/internal/deploytarget"
-	"github.com/santapong/cooker/internal/deploytarget/cloudrun"
-	"github.com/santapong/cooker/internal/deploytarget/ecs"
-	"github.com/santapong/cooker/internal/deploytarget/flyio"
-	"github.com/santapong/cooker/internal/deploytarget/render"
-	sshtarget "github.com/santapong/cooker/internal/deploytarget/ssh"
+	"github.com/santapong/cooker/internal/deploy/deploytarget"
+	"github.com/santapong/cooker/internal/deploy/deploytarget/cloudrun"
+	"github.com/santapong/cooker/internal/deploy/deploytarget/ecs"
+	"github.com/santapong/cooker/internal/deploy/deploytarget/flyio"
+	"github.com/santapong/cooker/internal/deploy/deploytarget/render"
+	sshtarget "github.com/santapong/cooker/internal/deploy/deploytarget/ssh"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/store"
@@ -110,7 +110,7 @@ func (l sshHostLister) ListSSHHostsLaxStrictHostKey(ctx context.Context) ([]conf
 	if l.st == nil || l.st.Hosts == nil {
 		return nil, nil
 	}
-	all, err := l.st.Hosts.List(ctx)
+	all, err := l.st.Hosts.List(ctx, 0, 0)
 	if err != nil {
 		return nil, err
 	}

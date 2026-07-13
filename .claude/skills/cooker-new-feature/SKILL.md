@@ -33,7 +33,7 @@ Don't proceed with the build until you've confirmed no existing thing serves the
 
 ### 2. Read the design checklist
 
-`docs/reference/design.md` § 11 has the canonical "adding a feature" checklist. Read it. Map your feature into its layers:
+`docs/design.md` § 11 has the canonical "adding a feature" checklist. Read it. Map your feature into its layers:
 
 | Layer | Question |
 |---|---|
@@ -54,9 +54,9 @@ For most feature shapes, Cooker already has one or two precedents:
 | New shape | Template |
 |---|---|
 | New stage type | `model.StageTypeGitOpsCommit` + `service/executor.go` switch arm + `validate/validate.go` enum |
-| New builder | `internal/builder/kaniko.go` (full impl), wired via `selectBuilder` in `server/server.go` |
-| New pusher | `internal/pusher/crane.go` |
-| New deployer | `internal/deployer/clientgo.go` (or, for cloud targets, `internal/deploytarget/render/render.go`) |
+| New builder | `internal/build/builder/kaniko.go` (full impl), wired via `selectBuilder` in `server/server.go` |
+| New pusher | `internal/build/pusher/crane.go` |
+| New deployer | `internal/deploy/deployer/clientgo.go` (or, for cloud targets, `internal/deploy/deploytarget/render/render.go`) |
 | New secrets backend | `internal/secrets/keepsave/` |
 | New cross-cutting helper (idempotent ops, rate ctrl) | `internal/{retry,validate,idempotency}/` |
 | New HTTP route | The handlers in `internal/handler/<domain>.go`, registered in `internal/server/router.go` |
@@ -76,7 +76,7 @@ Target one commit per layer, in dependency order so each one stands alone:
 6. **Frontend** (if user-facing). API client method in `frontend/src/api/`, Zustand store update, page in `frontend/src/pages/`.
 7. **Helm** (if it needs deployment changes). Values block, template additions, RBAC.
 8. **Tests** (interleaved — write each layer's test in the same commit as the layer, not all at the end).
-9. **Docs** (`docs/reference/architecture.md` for the system map, `docs/reference/design.md` § 11 if you added a new template, `.env.uat.example` for new env vars, `RUNBOOK.md` if there are new failure modes).
+9. **Docs** (`docs/architecture.md` for the system map, `docs/design.md` § 11 if you added a new template, `.env.uat.example` for new env vars, `RUNBOOK.md` if there are new failure modes).
 
 ### 5. Implement, layer by layer
 
@@ -96,7 +96,7 @@ If a layer needs more than ~150 lines, split it. Reviewers can't load 500-line c
 For new pluggable backends (builder / pusher / deployer / secrets):
 
 - Add the constructor case to `selectXxx` in `backend/internal/server/server.go`.
-- Document the env-var value in `.env.uat.example` and `docs/guides/UAT.md`.
+- Document the env-var value in `.env.uat.example` and `docs/UAT.md`.
 - Add a Helm values block for it.
 
 For new stage types:
@@ -151,7 +151,7 @@ Before opening the PR:
 
 - A draft PR with one commit per layer (or close to it).
 - All CI jobs green.
-- Updated docs: at minimum `.env.uat.example` if you added an env var, `docs/reference/architecture.md` if you added a major component, `docs/reference/design.md` § 11 if you added a new template-worthy pattern.
+- Updated docs: at minimum `.env.uat.example` if you added an env var, `docs/architecture.md` if you added a major component, `docs/design.md` § 11 if you added a new template-worthy pattern.
 - Test plan in the PR body, exercised manually if needed.
 
 ## Checklist before declaring done

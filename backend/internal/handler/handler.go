@@ -14,7 +14,7 @@ import (
 	"github.com/santapong/cooker/internal/crypto"
 	"github.com/santapong/cooker/internal/kube"
 	"github.com/santapong/cooker/internal/model"
-	"github.com/santapong/cooker/internal/notifier"
+	"github.com/santapong/cooker/internal/notify/notifier"
 	"github.com/santapong/cooker/internal/scheduler"
 	"github.com/santapong/cooker/internal/secrets"
 	"github.com/santapong/cooker/internal/service"
@@ -22,15 +22,38 @@ import (
 	"github.com/santapong/cooker/internal/templates"
 )
 
+// ErrRunCapacity is returned by RunSpawner implementations when the
+// global in-flight run limit (COOKER_MAX_CONCURRENT_RUNS) is reached.
+// Handlers map it to HTTP 429 so clients back off instead of the host
+// accepting unbounded concurrent build/deploy work.
+var ErrRunCapacity = errors.New("run capacity reached")
+
+// abortRunCapacity writes the 429 response for ErrRunCapacity (any
+// other spawn error maps to 500 — today ErrRunCapacity is the only
+// one). Retry-After gives clients a polite backoff hint.
+func abortRunCapacity(c *gin.Context, err error) {
+	if errors.Is(err, ErrRunCapacity) {
+		c.Header("Retry-After", "30")
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+			"error": "run capacity reached; retry later or raise COOKER_MAX_CONCURRENT_RUNS",
+		})
+		return
+	}
+	c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+}
+
 // RunSpawner is a narrow interface implemented by server.RunCoordinator.
 // Defining it here avoids a server→handler import cycle while letting
 // tests inject a fake.
 type RunSpawner interface {
-	Spawn(ctx context.Context, runID string, work func(context.Context) error)
+	// Spawn launches work in a tracked goroutine. Returns
+	// ErrRunCapacity (and does not launch) when the global
+	// concurrent-run limit is saturated.
+	Spawn(ctx context.Context, runID string, work func(context.Context) error) error
 	// SpawnWithDeadline is Spawn with an explicit run deadline
 	// (per-pipeline RunDeadline override); deadline <= 0 means "use
 	// the cluster default".
-	SpawnWithDeadline(ctx context.Context, runID string, deadline time.Duration, work func(context.Context) error)
+	SpawnWithDeadline(ctx context.Context, runID string, deadline time.Duration, work func(context.Context) error) error
 }
 
 // JobEnqueuer enqueues a pipeline-run job onto an async durable queue
@@ -155,13 +178,18 @@ type Handler struct {
 	// enabled=false rather than an error. Read-only — never mutates any
 	// cloud resource.
 	CloudInventory CloudInventoryService
+	// composeBaseDir is the only directory ParseComposeFile reads from.
+	// An authenticated caller can name a file inside it but never escape
+	// it. Defaults to "." (set by New); replaces the former package-level
+	// mutable global.
+	composeBaseDir string
 }
 
 // New constructs a Handler bound to the given store. secs may be nil
 // when no secrets backend is configured (dev mode with backend=database
 // and no COOKER_SECRET_KEY set); the secret endpoints will return 503.
 func New(s *store.Store, codec *crypto.Codec, secs secrets.Manager) *Handler {
-	return &Handler{Store: s, Codec: codec, Secrets: secs}
+	return &Handler{Store: s, Codec: codec, Secrets: secs, composeBaseDir: "."}
 }
 
 // loadRunForPipeline fetches a run by runId and verifies it belongs
@@ -171,6 +199,23 @@ func New(s *store.Store, codec *crypto.Codec, secs secrets.Manager) *Handler {
 // has already been written (caller should return immediately).
 func (h *Handler) loadRunForPipeline(c *gin.Context, runID, pipelineID string) (*model.PipelineRun, bool) {
 	run, err := h.Store.Runs.Get(c.Request.Context(), runID)
+	if abortStoreErr(c, err, "run not found") {
+		return nil, false
+	}
+	if run.PipelineID != pipelineID {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "run not found"})
+		return nil, false
+	}
+	return run, true
+}
+
+// loadRunSummaryForPipeline is loadRunForPipeline via RunStore.GetSummary:
+// same ownership check, but stage logs are stripped at the store layer so
+// the polled run-status endpoint doesn't ship (or, on Postgres, de-TOAST)
+// megabytes of logs every 2s. Use loadRunForPipeline when the caller
+// actually reads StageRuns[].Logs (stage-logs endpoint, run diff, triage).
+func (h *Handler) loadRunSummaryForPipeline(c *gin.Context, runID, pipelineID string) (*model.PipelineRun, bool) {
+	run, err := h.Store.Runs.GetSummary(c.Request.Context(), runID)
 	if abortStoreErr(c, err, "run not found") {
 		return nil, false
 	}
