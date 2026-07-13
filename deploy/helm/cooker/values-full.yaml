@@ -68,6 +68,14 @@ extraEnv:
     value: "true"
   - name: COOKER_JOBQUEUE_WORKERS
     value: "4"
+  # Terminal jobs are swept daily after this window (0 disables).
+  - name: COOKER_JOBQUEUE_RETENTION
+    value: "720h"
+  # Registry layer cache for kaniko builds (70-90% faster repeat
+  # builds). Needs a real repo your build jobs can push to — uncomment
+  # and point at one:
+  # - name: COOKER_BUILD_CACHE_REPO
+  #   value: "registry.example.com/cooker/build-cache"
   - name: COOKER_SCHEDULER_ENABLED
     value: "true"
   - name: COOKER_TRACING_ENABLED

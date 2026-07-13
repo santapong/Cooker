@@ -293,6 +293,21 @@ func (p *Postgres) Stats(ctx context.Context) (map[Status]int, error) {
 	return out, rows.Err()
 }
 
+// DeleteOlderThan implements Store. Only terminal rows are eligible;
+// COALESCE(finished_at, updated_at) guards against a terminal row
+// missing its finish stamp.
+func (p *Postgres) DeleteOlderThan(ctx context.Context, cutoff time.Time) (int, error) {
+	res, err := p.db.ExecContext(ctx,
+		`DELETE FROM jobs
+		  WHERE status IN ('succeeded','failed','cancelled')
+		    AND COALESCE(finished_at, updated_at) < $1`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("jobqueue: delete older than: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 // checkOwnedRowAffected disambiguates a zero-rows-affected result.
 // Either the job doesn't exist at all (ErrNotFound) or it exists but
 // the caller doesn't own the lock (ErrNotLocked). Worth the extra

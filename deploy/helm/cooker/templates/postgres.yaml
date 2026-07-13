@@ -10,6 +10,14 @@
   This is a convenience for quickstart / small installs. For production at
   scale, run Postgres with an operator or managed service and set
   postgresql.bundled=false + the database.* block instead.
+
+  WARNING (GitOps / template flows): `helm template` and
+  `helm install --dry-run` CANNOT run lookup — every such render mints
+  a FRESH password (and cert). Applying a template-rendered manifest
+  over a live release rotates the DB password out from under the
+  running Postgres and the app. If you render outside `helm upgrade`
+  (Argo CD, Flux, CI), pre-create the Secret and switch to
+  postgresql.bundled=false + database.* / existingSecret wiring.
 */}}
 {{- if .Values.postgresql.bundled }}
 {{- $pgName := printf "%s-postgres" (include "cooker.fullname" .) }}

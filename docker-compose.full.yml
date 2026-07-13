@@ -28,6 +28,10 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    # Redis is ephemeral coordination state (WS hub / tickets / rate
+    # limit) — tiny by design (INSTALL.md resource table).
+    mem_limit: 128m
+    cpus: 0.2
 
   cooker:
     environment:

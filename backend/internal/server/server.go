@@ -655,6 +655,50 @@ func New(cfg *config.Config) (*Server, error) {
 		})
 	}
 
+	// Daily retention sweep for the durable job queue: deletes TERMINAL
+	// jobs older than COOKER_JOBQUEUE_RETENTION (default 30d, 0
+	// disables). Same shape as the audit sweep above — boot sweep
+	// first, then a 24h ticker. Without this the jobs table grows one
+	// row per pipeline run forever.
+	if jobDeps.Store != nil && cfg.JobQueue.Retention > 0 {
+		jobSweepCtx, jobSweepCancel := context.WithCancel(context.Background())
+		jobSweepDone := make(chan struct{})
+		retention := cfg.JobQueue.Retention
+		jobs := jobDeps.Store
+		go func() {
+			defer close(jobSweepDone)
+			sweep := func() {
+				c, cancelSweep := context.WithTimeout(jobSweepCtx, time.Minute)
+				n, err := jobs.DeleteOlderThan(c, time.Now().Add(-retention))
+				cancelSweep()
+				if err != nil {
+					slog.Warn("jobqueue: retention sweep failed", "err", err)
+				} else if n > 0 {
+					slog.Info("jobqueue: retention sweep deleted jobs",
+						"deleted", n, "retention", retention.String())
+				}
+			}
+			sweep()
+			t := time.NewTicker(24 * time.Hour)
+			defer t.Stop()
+			for {
+				select {
+				case <-jobSweepCtx.Done():
+					return
+				case <-t.C:
+					sweep()
+				}
+			}
+		}()
+		cleanups = append(cleanups, func() {
+			jobSweepCancel()
+			select {
+			case <-jobSweepDone:
+			case <-time.After(2 * time.Second):
+			}
+		})
+	}
+
 	s := &Server{
 		router:           router,
 		config:           cfg,

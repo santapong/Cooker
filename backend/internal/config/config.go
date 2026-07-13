@@ -377,6 +377,11 @@ type JobQueueConfig struct {
 	Enabled        bool
 	Workers        int
 	WorkerIDPrefix string
+	// Retention is how long terminal (succeeded/failed/cancelled) jobs
+	// are kept before the daily sweep deletes them
+	// (COOKER_JOBQUEUE_RETENTION, default 720h = 30 days; 0 disables
+	// the sweep). Pending/running jobs are never swept.
+	Retention time.Duration
 }
 
 // SchedulerConfig configures the Phase-2 cron scheduler. Requires
@@ -525,6 +530,7 @@ func Load() *Config {
 			Enabled:        getEnvBool("COOKER_JOBQUEUE_ENABLED", false),
 			Workers:        getEnvInt("COOKER_JOBQUEUE_WORKERS", 4),
 			WorkerIDPrefix: getEnv("COOKER_JOBQUEUE_WORKER_PREFIX", "cooker"),
+			Retention:      getEnvDuration("COOKER_JOBQUEUE_RETENTION", 720*time.Hour),
 		},
 		Scheduler: SchedulerConfig{
 			Enabled:   getEnvBool("COOKER_SCHEDULER_ENABLED", false),

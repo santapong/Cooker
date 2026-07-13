@@ -133,12 +133,17 @@ No new findings. Scripts under `scripts/` and `.claude/skills/` use `set -euo pi
 
 ## Recommended remediation order (for a future fix round — nothing applied here)
 
-1. **[High, perf] Global run-concurrency cap** — `server/runs.go` `RunCoordinator`: bound in-flight spawns (worker pool or semaphore) so deploy/run bursts can't exhaust the host. Highest blast-radius, already tracked.
-2. **[Medium, security] Helm secret-regen footgun** — `secret-key.yaml` / `postgres.yaml`: document loudly that template/`--dry-run` workflows must supply `existingSecret`/`secretKey.value`, or gate the `randAlphaNum` path behind an explicit `.Values.*.autogenerate` that GitOps sets false. (Introduced by round-2; fix alongside it.)
-3. **[Medium, perf] Run JSONB read/write bloat** — strip logs from `RunStore.Get` (mirror `List`); make `RunStore.Update` write only `stage_runs` on progress flush.
-4. **[Medium, perf] jobs-table retention** + **[Medium, perf] list-endpoint pagination** (apps/pipelines/hosts/envs).
+> **Status update (2026-07-13, optimization round):** items 1–4 **LANDED** on
+> `claude/optimization-round-wwh912` — see `docs/reference/acceptance-criteria.md` AC-7 for
+> the per-item evidence. Items 5–7 remain open (item 7's "compose resource limits" sub-point
+> also landed in the same round).
+
+1. ✅ **LANDED** — **[High, perf] Global run-concurrency cap** — `RunCoordinator` now holds a `semaphore.Weighted` sized by `COOKER_MAX_CONCURRENT_RUNS` (default 8, 0 = unlimited); saturated spawns return HTTP 429 + `Retry-After` and increment `cooker_run_capacity_rejected_total`.
+2. ✅ **LANDED** — **[Medium, security] Helm secret-regen footgun** — loud WARNING blocks in `secret-key.yaml` / `postgres.yaml` + an INSTALL.md callout: GitOps/template flows must set `existingSecret` (lookup cannot run under `helm template`/`--dry-run`).
+3. ✅ **LANDED** — **[Medium, perf] Run JSONB read/write bloat** — `RunStore.GetSummary` (SQL-side log strip) now serves the polled run endpoint; `RunStore.UpdateProgress` writes only `stage_runs` (logs stripped) and is wired as the executor's progress updater.
+4. ✅ **LANDED** — **[Medium, perf] jobs-table retention** (`COOKER_JOBQUEUE_RETENTION`, default 720h, daily terminal-job sweep) + **list-endpoint pagination** (`?limit=&offset=` on pipelines/apps/hosts/environments, default 100).
 5. **[Medium, hardening] Pin the AWS-overlay Kaniko executor** to the chart's digest; add `permissions:` to `ci.yml`/`oci-conformance.yml`; set EKS endpoint access explicitly.
 6. **[CI, coverage] Add the tool jobs that couldn't run here:** `govulncheck` (proxy-blocked), `trivy` image scan, `shellcheck`, `hadolint`, and `.dockerignore`. This turns one-off gaps into standing gates.
-7. **[Low] Cleanup sweep** — golangci `unused`/`errcheck`/`staticcheck` (delete dead down-migration harness, check the empty `if` in `clone.go:88`, close ssh sessions); tighten `0644→0600` on secret-bearing writes; drop redundant `idx_*_run` indexes; add `IF NOT EXISTS` to migration 015; add compose resource limits + postgres container securityContext.
+7. **[Low] Cleanup sweep** — golangci `unused`/`errcheck`/`staticcheck` (delete dead down-migration harness, check the empty `if` in `clone.go:88`, close ssh sessions); tighten `0644→0600` on secret-bearing writes; drop redundant `idx_*_run` indexes; add `IF NOT EXISTS` to migration 015; ~~add compose resource limits~~ (landed: `mem_limit`/`cpus` across prod/full/proxy compose) + postgres container securityContext.
 
-Nothing in this report was fixed in this PR (per scope). Each item carries enough evidence (file:line, tool) to action in a targeted follow-up.
+Items 1–4 were fixed in the optimization round that followed this report; the report text above is otherwise preserved as originally issued.

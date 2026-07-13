@@ -41,6 +41,9 @@ func (s *stubStore) Get(context.Context, string) (*jobqueue.Job, error) { panic(
 func (s *stubStore) Stats(context.Context) (map[jobqueue.Status]int, error) {
 	panic("not used")
 }
+func (s *stubStore) DeleteOlderThan(context.Context, time.Time) (int, error) {
+	panic("not used")
+}
 
 // recordStore is the real interface (typed time.Time etc.). We use it
 // to side-step the stub's interface-method signatures and just verify
