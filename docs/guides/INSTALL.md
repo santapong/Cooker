@@ -25,6 +25,38 @@ re-applying those guards yourself.
 | Raw manifests (`deploy/kubernetes/`) | **Reference parity** (kept in sync; Helm is authoritative) | Learning, air-gapped GitOps that templates its own values, or environments that cannot run Helm. You are responsible for parity with the chart's safety defaults. |
 | Single binary / container (no orchestration) | Dev / evaluation only | Local trials, UAT (`make uat-up`). Not a production shape. |
 
+## Resource requirements
+
+Grounded in the Helm chart's shipped requests/limits, the per-feature goroutine/sidecar
+inventory, and the full-scan growth findings (`docs/audits/2026-07-full-scan-report.md`).
+
+### Per-mode sizing (host / node totals)
+
+| Mode | vCPU (min → rec) | RAM (min → rec) | Disk | When to use |
+|---|---|---|---|---|
+| LIGHT docker (cooker + postgres) | 1 → 2 | 1 GB → 2 GB | 10–20 GB SSD | Solo/evaluation, few runs/day |
+| FULL docker (+ redis, jobqueue, scheduler, metrics, audit-db) | 2 → 4 | 2 GB → 4 GB | 20–40 GB SSD | Single-host production, cron pipelines |
+| FULL + proxy overlay (+ Traefik **+ your deployed apps**) | 2 → 4 *+ apps'* | 4 GB *+ apps'* → 8 GB | 40 GB+ (app images accumulate) | Single-host PaaS — **size for the apps, not Cooker** |
+| K8s quickstart / light | ~0.5 vCPU requests | ~0.5 GB req / ~1.5 GB lim | 8 Gi PVC | Trial on an existing cluster |
+| K8s FULL, 1 replica | ~1 vCPU requests | ~1 GB req / ~2 GB lim | 8–20 Gi PVC | Small production cluster (+ kaniko bursts, below) |
+| K8s FULL, HA 3 replicas | 2–3 vCPU requests | 2–4 GB | managed PG 20 GB+ | Real production; external PG/Redis recommended |
+| UAT stack (+ k3s + registry) | 4 | 8 GB | 40 GB | Full build→push→deploy testing; heaviest |
+
+### Per-container breakdown
+
+| Container | CPU req → limit | RAM req → limit | Notes |
+|---|---|---|---|
+| cooker | 100m → 500m | 128 Mi → 512 Mi | Raise CPU limit to 1000m if builds run in-process |
+| postgres (bundled) | 100m → (none) | 128 Mi → 512 Mi | 8 Gi PVC; growth = runs JSONB + audit (90d sweep) + jobs table |
+| redis | 50m → 200m | 32 Mi → 128 Mi | Ephemeral by design |
+| traefik (proxy overlay) | ~50m | ~64–128 Mi | Negligible until high request volume |
+| kaniko build Job (per concurrent build) | 500m–1000m burst | 1–2 Gi burst | **The real consumer** — budget `concurrent builds × ~1 vCPU / 1.5 Gi` |
+
+### Sizing rules of thumb
+1. **Builds dominate, not the API** — idle Cooker is ~100 MB RAM; each concurrent image build costs ~1 vCPU + 1–2 GB wherever it runs. Size burst headroom by concurrent builds (see `COOKER_MAX_CONCURRENT_RUNS`).
+2. **Disk grows in three places:** Postgres (runs/audit/jobs), your image registry, and — with the proxy — deployed-app images on the docker host.
+3. **Move off bundled Postgres** (managed/external) at HA scale or >5 GB DB.
+
 ## Editions: LIGHT vs FULL
 
 Two curated deploy postures, expressed purely as env/values presets (every Cooker
