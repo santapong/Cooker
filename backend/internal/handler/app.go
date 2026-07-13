@@ -272,7 +272,10 @@ func (h *Handler) DeployApp(c *gin.Context) {
 		return nil
 	}
 	if h.Runs != nil {
-		h.Runs.Spawn(context.Background(), runID, work)
+		if err := h.Runs.Spawn(context.Background(), runID, work); err != nil {
+			abortRunCapacity(c, err)
+			return
+		}
 	} else if canary {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -517,10 +520,13 @@ func (h *Handler) triggerWebhookDeploy(c *gin.Context, app *model.App, source, b
 	}
 
 	if h.Runs != nil {
-		h.Runs.Spawn(context.Background(), runID, func(ctx context.Context) error {
+		if err := h.Runs.Spawn(context.Background(), runID, func(ctx context.Context) error {
 			h.runAppDeployCtx(ctx, app, runID, channel)
 			return nil
-		})
+		}); err != nil {
+			abortRunCapacity(c, err)
+			return
+		}
 	} else {
 		go h.runAppDeploy(app, runID, channel)
 	}
@@ -703,7 +709,10 @@ func (h *Handler) RollbackApp(c *gin.Context) {
 		return nil
 	}
 	if h.Runs != nil {
-		h.Runs.Spawn(context.Background(), runID, work)
+		if err := h.Runs.Spawn(context.Background(), runID, work); err != nil {
+			abortRunCapacity(c, err)
+			return
+		}
 	} else {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)

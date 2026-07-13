@@ -385,7 +385,7 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 		snapshot := run.Clone()
 		// Per-pipeline RunDeadline override; 0 falls back to the
 		// cluster default inside the coordinator.
-		h.Runs.SpawnWithDeadline(context.Background(), run.ID, service.PipelineRunDeadline(p), func(ctx context.Context) error {
+		spawnErr := h.Runs.SpawnWithDeadline(context.Background(), run.ID, service.PipelineRunDeadline(p), func(ctx context.Context) error {
 			_, execErr := h.Executor.Execute(ctx, p, run)
 			if err := h.Store.Runs.Update(ctx, run); err != nil {
 				return err
@@ -396,6 +396,10 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 			service.NotifyRunOutcome(h.Dispatcher, p, run, execErr)
 			return execErr
 		})
+		if spawnErr != nil {
+			abortRunCapacity(c, spawnErr)
+			return
+		}
 		c.JSON(http.StatusAccepted, snapshot)
 		return
 	}

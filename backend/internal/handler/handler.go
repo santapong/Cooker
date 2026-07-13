@@ -22,15 +22,38 @@ import (
 	"github.com/santapong/cooker/internal/templates"
 )
 
+// ErrRunCapacity is returned by RunSpawner implementations when the
+// global in-flight run limit (COOKER_MAX_CONCURRENT_RUNS) is reached.
+// Handlers map it to HTTP 429 so clients back off instead of the host
+// accepting unbounded concurrent build/deploy work.
+var ErrRunCapacity = errors.New("run capacity reached")
+
+// abortRunCapacity writes the 429 response for ErrRunCapacity (any
+// other spawn error maps to 500 — today ErrRunCapacity is the only
+// one). Retry-After gives clients a polite backoff hint.
+func abortRunCapacity(c *gin.Context, err error) {
+	if errors.Is(err, ErrRunCapacity) {
+		c.Header("Retry-After", "30")
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+			"error": "run capacity reached; retry later or raise COOKER_MAX_CONCURRENT_RUNS",
+		})
+		return
+	}
+	c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+}
+
 // RunSpawner is a narrow interface implemented by server.RunCoordinator.
 // Defining it here avoids a server→handler import cycle while letting
 // tests inject a fake.
 type RunSpawner interface {
-	Spawn(ctx context.Context, runID string, work func(context.Context) error)
+	// Spawn launches work in a tracked goroutine. Returns
+	// ErrRunCapacity (and does not launch) when the global
+	// concurrent-run limit is saturated.
+	Spawn(ctx context.Context, runID string, work func(context.Context) error) error
 	// SpawnWithDeadline is Spawn with an explicit run deadline
 	// (per-pipeline RunDeadline override); deadline <= 0 means "use
 	// the cluster default".
-	SpawnWithDeadline(ctx context.Context, runID string, deadline time.Duration, work func(context.Context) error)
+	SpawnWithDeadline(ctx context.Context, runID string, deadline time.Duration, work func(context.Context) error) error
 }
 
 // JobEnqueuer enqueues a pipeline-run job onto an async durable queue
