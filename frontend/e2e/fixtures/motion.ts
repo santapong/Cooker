@@ -65,9 +65,25 @@ export async function entranceAnimationNames(page: Page): Promise<{ star: string
   });
 }
 
+/** Entrance / panel animations: transient by design, never part of idle motion. */
+const ENTRANCES = new Set(['porthole-open', 'porthole-fade', 'star-in', 'draw', 'fade-in', 'panel-in', 'airlock-in', 'airlock-fade', 'step-in']);
+
+/**
+ * Wait until every entrance animation has finished. A fast machine (the CI
+ * runner) reaches the ready state while the 320 ms porthole open is still
+ * playing; auditing idle motion at that moment would count it as transform
+ * motion.
+ */
+export async function settleEntrances(page: Page): Promise<void> {
+  await expect
+    .poll(async () => (await runningAnimations(page)).filter((a) => ENTRANCES.has(a.name)).length, { timeout: 5_000 })
+    .toBe(0);
+}
+
 async function waitForConstellation(page: Page, stars: number): Promise<void> {
   await expect(page.locator('.star')).toHaveCount(stars);
   await expect.poll(() => page.locator('.react-flow__edges > *').count(), { timeout: 10_000 }).toBeGreaterThan(0);
+  await settleEntrances(page);
 }
 
 /** Pipeline editor on the fixture pipeline, settled (stars measured, edges drawn). */
