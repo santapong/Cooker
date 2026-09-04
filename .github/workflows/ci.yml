@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # main = release, develop = integration (develop-branch model since
+    # 27 Jul 2026): both get the full gate, so a red develop is visible
+    # before the release PR.
+    branches: [main, develop]
   pull_request:
     # Run on PRs to main and to any in-flight stacked PR branches
     # under claude/** so each stacked PR in a series gets verified
