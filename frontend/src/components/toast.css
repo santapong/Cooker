@@ -1,0 +1,82 @@
+/* ── Toasts: a stack of small hull cards at the bottom-right ──
+   One accent colour per kind (the star tokens), a 200 ms rise on entry with an
+   opacity-only substitute under reduced motion and Calm. Errors stay until
+   dismissed; the others auto-dismiss (paused while hovered or focused). */
+.toasts {
+  position: fixed;
+  z-index: 9999;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 360px;
+  max-width: calc(100vw - 2 * var(--sp-4));
+  pointer-events: none;
+}
+.toast {
+  --toast-accent: var(--ink-3);
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  background: rgba(20, 20, 22, 0.92);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: var(--ink-1);
+  pointer-events: auto;
+  animation: toast-in 200ms var(--ease-std) both;
+}
+.toast::before {
+  /* the kind's star: a 6px core with a faint halo, sitting on the first text line */
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--toast-accent);
+  box-shadow: 0 0 0 3px rgba(128, 128, 121, 0.22);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--toast-accent) 22%, transparent);
+}
+.toast[data-kind='success'] { --toast-accent: var(--star-ok); }
+.toast[data-kind='warning'] { --toast-accent: var(--ember); }
+.toast[data-kind='error']   { --toast-accent: var(--star-fail); border-color: rgba(255, 107, 122, 0.35); }
+.toast-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.toast-kind { color: var(--toast-accent); }
+.toast[data-kind='info'] .toast-kind { color: var(--ink-3); }
+.toast-msg {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-1);
+  overflow-wrap: anywhere;
+}
+.toast-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: -4px -4px -4px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-std), background var(--dur-fast) var(--ease-std);
+}
+.toast-close:hover { color: var(--ink-1); background: var(--hull-2); }
+.toast-close:focus-visible { outline: var(--focus); outline-offset: 1px; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes toast-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: toast-fade 160ms var(--ease-std) both; } }
+[data-calm='true'] .toast { animation: toast-fade 160ms var(--ease-std) both; }

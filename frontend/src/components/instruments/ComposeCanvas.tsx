@@ -53,7 +53,8 @@ function ComposeCanvas({ graph, onSelect }: Props) {
         target: c.target,
         type: 'constellation',
         selectable: false,
-        data: { condition: c.type === 'depends_on' ? undefined : c.type === 'env_reference' ? 'always' : undefined, state: 'idle', drawDelay: edgeDelay(i), label: c.label },
+        // depends_on is the plain line; env references are dashed (the 'always' stroke) and named by the variable, networks by the network
+        data: { condition: c.type === 'env_reference' ? 'always' : undefined, label: c.type === 'depends_on' ? undefined : c.label, state: 'idle', drawDelay: edgeDelay(i) },
       })),
     [graph],
   );

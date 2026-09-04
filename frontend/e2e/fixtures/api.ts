@@ -80,3 +80,54 @@ export async function mockApi(page: Page): Promise<void> {
   await page.route('**/api/v1/pipelines/gates/runs/r1/env-status', (route) => route.fulfill({ json: { runId: 'r1', statuses: [] } }));
   await page.route('**/api/v1/pipelines/gates/runs/r1/logs/*', (route) => route.fulfill({ json: { logs: '' } }));
 }
+
+/** A three-service compose file: web → api → db, with an env reference web → api. */
+export const COMPOSE_GRAPH = {
+  services: [
+    { name: 'web', image: 'ghcr.io/acme/web:1.4.0', ports: ['8080:80'], environment: { API_URL: 'http://api:9000' }, dependsOn: ['api'], networks: ['front'], volumes: [], command: '', status: '' },
+    {
+      name: 'api',
+      image: 'ghcr.io/acme/api:2.1.0',
+      ports: ['9000:9000'],
+      environment: { DATABASE_URL: 'postgres://db/acme', LOG_LEVEL: 'info' },
+      dependsOn: ['db'],
+      networks: ['front', 'back'],
+      volumes: [],
+      command: 'api serve',
+      status: '',
+      group: 'core',
+      resources: { memory: '512m', memoryBytes: 536870912, cpus: '0.5', nanoCpus: 500000000 },
+    },
+    { name: 'db', image: 'postgres:16', ports: [], environment: { POSTGRES_DB: 'acme' }, dependsOn: [], networks: ['back'], volumes: ['pgdata:/var/lib/postgresql/data'], command: '', status: '' },
+  ],
+  connections: [
+    { source: 'web', target: 'api', type: 'depends_on', label: 'depends on' },
+    { source: 'api', target: 'db', type: 'depends_on', label: 'depends on' },
+    { source: 'api', target: 'web', type: 'env_reference', label: 'API_URL' },
+  ],
+  networks: ['front', 'back'],
+  volumes: ['pgdata'],
+};
+
+/** Compose routes on top of mockApi. `updateStatus` other than 200 makes the service PUT fail with that status. */
+export async function mockCompose(page: Page, opts: { updateStatus?: number } = {}): Promise<void> {
+  await page.route('**/api/v1/docker/compose/parse', (route) => route.fulfill({ json: COMPOSE_GRAPH }));
+  await page.route('**/api/v1/docker/compose/services/*', (route) => {
+    const name = decodeURIComponent(route.request().url().split('/').pop() ?? '');
+    if (opts.updateStatus && opts.updateStatus !== 200) return route.fulfill({ status: opts.updateStatus, json: { error: `cannot update ${name}` } });
+    return route.fulfill({ json: { message: 'Service config updated', service: name } });
+  });
+}
+
+/**
+ * A signed-out session on the dev build: the SPA boots as the dev user unless
+ * a stored local token exists, so plant an expired one — the whoami probe fails,
+ * the token is dropped and the app lands on the airlock with both methods on.
+ */
+export async function mockSignedOut(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cooker.local.token', 'e2e-expired-token');
+  });
+  await page.route('**/api/v1/auth/local/me', (route) => route.fulfill({ status: 401, json: { error: 'token expired' } }));
+  await page.route('**/api/v1/auth/methods', (route) => route.fulfill({ json: { oidc: { enabled: true }, local: { enabled: true, allowSignup: true } } }));
+}

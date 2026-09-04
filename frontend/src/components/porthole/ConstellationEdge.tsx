@@ -6,6 +6,8 @@ import { edgeMidpoint, edgePath } from './constellation';
 
 export interface ConstellationData extends Record<string, unknown> {
   condition?: PipelineEdge['condition'];
+  /** Free-text mid-line label (compose links: the env variable or network); shown instead of the condition word. */
+  label?: string;
   /** Run state of the edge: light has passed (done) or is passing (hot). */
   state?: 'idle' | 'done' | 'hot';
   drawDelay?: number;
@@ -35,14 +37,15 @@ function ConstellationEdge({ sourceX, sourceY, targetX, targetY, data, selected 
     .filter(Boolean)
     .join(' ');
   const style = { '--draw-delay': `${data?.drawDelay ?? 0}ms` } as CSSProperties;
-  const mid = data?.condition ? edgeMidpoint(sourceX, sourceY, targetX, targetY) : null;
+  const text = data?.label ?? data?.condition;
+  const mid = text ? edgeMidpoint(sourceX, sourceY, targetX, targetY) : null;
   return (
     <g className={cls} style={style}>
       <path d={d} className="constellation-hit" />
       <path d={d} className="constellation-path" pathLength={1} />
       {mid && (
         <text className="constellation-cond" x={mid.x} y={mid.y - 6}>
-          {data?.condition}
+          {text}
         </text>
       )}
       {comet && (

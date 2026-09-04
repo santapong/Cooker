@@ -3,6 +3,14 @@ export interface ComposeBuild {
   dockerfile: string;
 }
 
+/** CPU / memory limits as parsed from `deploy.resources.limits` (or `mem_limit` / `cpus`). */
+export interface ComposeResourceLimits {
+  memory?: string;
+  memoryBytes?: number;
+  cpus?: string;
+  nanoCpus?: number;
+}
+
 export interface ComposeService {
   name: string;
   image: string;
@@ -14,7 +22,14 @@ export interface ComposeService {
   volumes: string[];
   command: string;
   status: string;
+  labels?: Record<string, string>;
+  /** Deployment group-box: `com.cooker.group` label → single network → "default". */
+  group?: string;
+  resources?: ComposeResourceLimits;
 }
+
+/** The fields `PUT /docker/compose/services/:name` accepts. */
+export type ComposeServicePatch = Pick<ComposeService, 'image' | 'ports' | 'environment'>;
 
 export interface ComposeConnection {
   source: string;

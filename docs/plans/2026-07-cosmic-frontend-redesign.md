@@ -50,6 +50,10 @@ suite serves the production build with `vite preview` on port 4620.
 Authored 28 Jul 2026 against the post-reset stubs (PR #150 / Phase 2 reset).
 Stack it lands on: React 18 + Vite, react-router 6, zustand, `@xyflow/react` 12,
 plain CSS in `frontend/src/index.css` (no CSS framework, no motion library — by design, see §4).
+Polish pass 5 Sep 2026 — toasts restyled (kind-coloured star dot, rise/fade branches), Compose
+service editor (image / ports / environment, the fields the update endpoint accepts), airlock
+verified signed-out in Playwright (`e2e/airlock.spec.ts`) with axe on `/signin`, `/signup`,
+`/docker/compose`. Light mode remains deferred by decision.
 
 Visual companion: `cosmic-porthole-mockup.html` (this directory) — a
 self-contained mockup of the RunPage porthole; open in a browser for the live

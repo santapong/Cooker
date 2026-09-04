@@ -172,6 +172,7 @@ remaining bullet is operator-side only:
 - [x] **Loading skeletons** — `Skeleton` + `SkeletonStack` shipped. `ProtectedRoute` uses them during auth restore.
 - [x] **App-root error boundary** — `ErrorBoundary` shipped.
 - [x] **Toast primitive + OIDC silent renew toast.** `frontend/src/stores/toastStore.ts` (Zustand) + `components/Toast.tsx` viewport mounted in `App.tsx`. `OIDCProvider` pushes a warning toast on `addSilentRenewError`.
+- [ ] **Compose service edits do not persist.** `handler.UpdateComposeService` binds `{image, ports, environment}` and replies "Service config updated" without touching the compose file; the frontend editor (`instruments/ComposeInspector`, 5 Sep 2026) honours that contract and mirrors the patch into the loaded graph. To make it real: take `composePath` in the request, resolve it through the same allowlist as parse, rewrite the service node with `yaml.v3` (comment-preserving Node API), and return the re-parsed graph.
 - [x] **WebSocket auto-reconnect with backoff.** `useWebSocket` exponential backoff (default 500ms → 30s) with fresh ticket fetch on each reconnect; opt-out via `reconnect.enabled=false`.
 
 ---

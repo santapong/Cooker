@@ -383,6 +383,7 @@
 .inspector-name:hover { border-bottom-color: var(--line); }
 .inspector-name:focus-visible { outline: none; border-bottom-color: var(--ember); }
 .field { display: flex; flex-direction: column; gap: 6px; }
+.inspector-form { display: flex; flex-direction: column; gap: var(--sp-3); }
 /* .input / textarea styles live in styles/ui.css */
 .inspector-foot { margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--line); }
 .btn-danger {

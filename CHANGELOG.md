@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — frontend redesign polish (toasts, compose editor, airlock checks)
+
+- **Toasts restyled** (`components/Toast.tsx` + `toast.css`): hull cards at the
+  bottom-right with a kind-coloured star dot and small-caps label (Note / Done /
+  Heads up / Error), 200 ms rise with an opacity-only substitute under reduced
+  motion and Calm, auto-dismiss paused while hovered or focused; errors persist
+  and announce as alerts.
+- **Compose service editor** (`instruments/ComposeInspector`): image, ports and
+  environment are editable — the three fields `PUT /docker/compose/services/:name`
+  accepts — with dirty tracking, Reset, inline validation of `KEY=value` lines and
+  an inline server error; group and resource limits are shown read-only. The store
+  mirrors an accepted patch into the loaded graph instead of re-parsing the file.
+  Known gap: the backend handler acknowledges the patch without writing it back to
+  the compose file (tracked in `backlog.md`).
+- **Airlock verified signed-out** via Playwright (`e2e/airlock.spec.ts`): sign-in
+  with both methods, sign-up via the card link, the protected-route bounce and
+  return after local sign-in, reduced-motion substitution of the card rise. axe
+  now also scans `/docker/compose`, `/signin` and `/signup`.
+- e2e fixtures gained `mockCompose` and `mockSignedOut`; `e2e/compose.spec.ts`
+  covers the editor round-trip, rejected patches and the toast motion branches.
+
 ### Added — frontend redesign, P1 foundation (brand-recolored Porthole)
 
 - **Design tokens** (`frontend/src/styles/tokens.css`): greyscale hull + one

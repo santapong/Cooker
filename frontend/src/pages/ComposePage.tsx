@@ -4,9 +4,10 @@ import { useComposeStore } from '../stores/composeStore';
 import Porthole from '../components/porthole/Porthole';
 import { SceneContext } from '../components/porthole/sceneContext';
 import ComposeCanvas from '../components/instruments/ComposeCanvas';
-import Badge from '../components/ui/Badge';
-import Caps from '../components/ui/Caps';
-import { Actions, TextInput } from '../components/ui/form';
+import ComposeInspector from '../components/instruments/ComposeInspector';
+import { TextInput } from '../components/ui/form';
+import { pushToast } from '../stores/toastStore';
+import type { ComposeServicePatch } from '../types/compose';
 
 /** Compose — parse a compose file on the build host and see its services as a constellation. */
 export default function ComposePage() {
@@ -16,7 +17,9 @@ export default function ComposePage() {
   const fetchComposeGraph = useComposeStore((s) => s.fetchComposeGraph);
   const selectedName = useComposeStore((s) => s.selectedServiceName);
   const setSelected = useComposeStore((s) => s.setSelectedService);
+  const updateServiceConfig = useComposeStore((s) => s.updateServiceConfig);
   const [path, setPath] = useState('docker-compose.yml');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!graph && !loading && !error) void fetchComposeGraph();
@@ -29,6 +32,16 @@ export default function ComposePage() {
     void fetchComposeGraph(path.trim() || undefined);
   };
   const svc = graph?.services.find((s) => s.name === selectedName) ?? null;
+  const save = async (patch: ComposeServicePatch) => {
+    if (!svc) return;
+    setSaving(true);
+    try {
+      const res = await updateServiceConfig(svc.name, patch);
+      pushToast('success', `${svc.name}: ${res.message || 'service config updated'}.`);
+    } finally {
+      setSaving(false);
+    }
+  };
   const counts = graph ? `${graph.services.length} services · ${graph.connections.length} links · ${graph.networks.length} networks · ${graph.volumes.length} volumes` : '';
 
   return (
@@ -70,40 +83,7 @@ export default function ComposePage() {
             <span className="mono hud-stats">{counts}</span>
           </div>
         )}
-        {svc && (
-          <aside className="inspector" aria-label={`Service ${svc.name}`}>
-            <div className="inspector-head">
-              <Badge variant="muted">service</Badge>
-              {svc.status && <Badge variant={svc.status === 'running' ? 'ok' : 'muted'}>{svc.status}</Badge>}
-              <span className="spacer" />
-              <button type="button" className="inspector-close" onClick={() => setSelected(null)} aria-label="Close inspector">
-                ×
-              </button>
-            </div>
-            <h2>{svc.name}</h2>
-            <div className="kv">
-              <Caps>Image</Caps>
-              <span className={svc.image ? 'v' : 'v muted'}>{svc.image || (svc.build ? `build ${svc.build.context}${svc.build.dockerfile ? ` (${svc.build.dockerfile})` : ''}` : '—')}</span>
-              <Caps>Ports</Caps>
-              <span className={svc.ports?.length ? 'v' : 'v muted'}>{svc.ports?.join(', ') || '—'}</span>
-              <Caps>Depends on</Caps>
-              <span className={svc.dependsOn?.length ? 'v' : 'v muted'}>{svc.dependsOn?.join(', ') || '—'}</span>
-              <Caps>Networks</Caps>
-              <span className={svc.networks?.length ? 'v' : 'v muted'}>{svc.networks?.join(', ') || '—'}</span>
-              <Caps>Volumes</Caps>
-              <span className={svc.volumes?.length ? 'v' : 'v muted'}>{svc.volumes?.join(', ') || '—'}</span>
-              <Caps>Command</Caps>
-              <span className={svc.command ? 'v' : 'v muted'}>{svc.command || '—'}</span>
-              <Caps>Env</Caps>
-              <span className={Object.keys(svc.environment ?? {}).length ? 'v' : 'v muted'}>{Object.keys(svc.environment ?? {}).join(', ') || '—'}</span>
-            </div>
-            <Actions>
-              <span className="mono" style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-                edits land in P5c
-              </span>
-            </Actions>
-          </aside>
-        )}
+        {svc && <ComposeInspector key={svc.name} service={svc} busy={saving} onSave={save} onClose={() => setSelected(null)} />}
       </Porthole>
     </div>
   );
