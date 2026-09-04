@@ -1,0 +1,249 @@
+/* App shell — 64px instrument rail + 48px top strip + content.
+   Mirrors the mockup grid (docs/plans/cosmic-porthole-mockup.html). */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail-w) 1fr;
+  grid-template-rows: var(--strip-h) 1fr;
+  height: 100%;
+  min-height: 0;
+  background: var(--hull-0);
+}
+
+.shell-main {
+  grid-column: 2;
+  grid-row: 2;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+/* ── instrument rail ── */
+.rail {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 14px 0;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.rail::-webkit-scrollbar {
+  display: none;
+}
+
+.rail-logo {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: var(--sp-2);
+  border-radius: 50%;
+  text-decoration: none;
+}
+.rail-logo:hover {
+  text-decoration: none;
+}
+/* Ember disc — a lit core, the one radial sprite allowed by the brand rule
+   (lighting, not decoration). */
+.rail-logo-core {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, var(--ember), #4a2a10 68%, transparent 72%);
+}
+
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.rail-gap {
+  width: 28px;
+  height: 1px;
+  margin: 6px 0;
+  background: var(--line);
+}
+
+.rail-item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--ink-2);
+  opacity: 0.55;
+  transition:
+    opacity var(--dur-fast) var(--ease-std),
+    background var(--dur-fast) var(--ease-std),
+    color var(--dur-fast) var(--ease-std);
+}
+.rail-item:hover {
+  opacity: 1;
+  background: var(--hull-1);
+  text-decoration: none;
+}
+.rail-item.is-active {
+  opacity: 1;
+  color: var(--ink-1);
+}
+/* lit dot in the gutter — static glow, never animated */
+.rail-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -2.5px;
+  border-radius: 50%;
+  background: var(--ember);
+  box-shadow: 0 0 8px 1px var(--ember);
+}
+
+/* ── top strip ── */
+.strip {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-5);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.strip-spacer {
+  flex: 1;
+}
+
+.strip-crumbs ol {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+.strip-crumbs li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 13px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.strip-crumbs a {
+  color: var(--ink-2);
+}
+.strip-crumbs a:hover {
+  color: var(--ink-1);
+  text-decoration: none;
+}
+.strip-crumbs [aria-current='page'] {
+  color: var(--ink-1);
+  font-weight: 600;
+}
+.strip-crumbs .mono {
+  font-size: 12px;
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.strip-sep {
+  color: var(--ink-3);
+}
+
+.strip-caps {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.strip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-std),
+    border-color var(--dur-fast) var(--ease-std),
+    background var(--dur-fast) var(--ease-std);
+}
+.strip-toggle:hover {
+  color: var(--ink-2);
+  background: var(--hull-1);
+}
+.strip-toggle.is-on {
+  color: var(--ember);
+  border-color: var(--ember-line);
+  background: var(--ember-soft);
+}
+
+.strip-user {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.strip-user-name {
+  font-size: 13px;
+  color: var(--ink-2);
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.strip-iconbtn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-std),
+    background var(--dur-fast) var(--ease-std);
+}
+.strip-iconbtn:hover {
+  color: var(--ink-1);
+  background: var(--hull-1);
+}
+
+/* ── route skeleton ── */
+.route-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--page-pad);
+}
+.route-skeleton-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.route-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: var(--row-h);
+  border-bottom: 1px solid var(--line);
+}

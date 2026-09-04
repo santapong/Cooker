@@ -4,12 +4,13 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0b0c" />
     <!-- CSP fallback for cases where the backend CSP header is
          missing (e.g. static preview, file://). The backend's
          securityHeadersMiddleware sets the canonical policy.
-         Design reset (Phase 2): external Google Fonts removed with the
-         cosmic theme, so the font-src/style-src remote allowances are
-         dropped here too — reinstate them if the redesign adds web fonts. -->
+         Fonts are self-hosted (src/assets/fonts, served under /assets/),
+         so font-src stays 'self' — no CDN allowance is needed. -->
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"

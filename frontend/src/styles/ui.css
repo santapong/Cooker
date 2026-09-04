@@ -1,0 +1,68 @@
+/* Shared primitives: Caps, Hairline, Badge, Skeleton, .mono. */
+
+.caps {
+  font-family: var(--font-display);
+  font-size: var(--fs-1);
+  font-weight: 500;
+  letter-spacing: var(--caps-tracking);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.hairline {
+  border: 0;
+  margin: 0;
+  height: 1px;
+  width: 100%;
+  background: var(--line);
+}
+.hairline-v {
+  height: auto;
+  width: 1px;
+  align-self: stretch;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.badge-muted   { color: var(--ink-3); }
+.badge-ember   { color: var(--ember); border-color: var(--ember-line); }
+.badge-running { color: var(--star-running); border-color: var(--ember-line); }
+.badge-ok      { color: var(--star-ok); border-color: rgba(126, 226, 168, 0.35); }
+.badge-fail    { color: var(--star-fail); border-color: rgba(255, 107, 122, 0.35); }
+
+/* Skeleton — solid block, opacity-only breathing (no gradient sweep, no
+   transform). Reduced motion: already opacity-only, nothing to substitute.
+   Calm mode: paused (WCAG 2.2.2 — Calm is the pause control). */
+.skeleton {
+  display: inline-block;
+  background: var(--hull-1);
+  border-radius: var(--radius-1);
+  animation: skeleton-breathe 2000ms ease-in-out infinite;
+}
+@keyframes skeleton-breathe {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+[data-calm='true'] .skeleton {
+  animation: none;
+  opacity: 0.7;
+}

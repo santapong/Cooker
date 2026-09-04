@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added — frontend redesign, P1 foundation (brand-recolored Porthole)
+
+- **Design tokens** (`frontend/src/styles/tokens.css`): greyscale hull + one
+  ember accent (`#E07A1F`), semantic star colours, ×1.25 type scale, 4px grid,
+  motion budgets. Dark only (light mode deferred). Spec + mockup committed under
+  `docs/plans/` with the 4 Sep 2026 palette decision recorded.
+- **Self-hosted fonts** — Space Grotesk, Inter variable, JetBrains Mono (latin
+  subsets, SIL OFL, licences vendored) under `frontend/src/assets/fonts/`;
+  served from `/assets/`, CSP unchanged, no CDN.
+- **App shell** — 64px instrument rail (15 routes in Build / Infrastructure /
+  Operate groups, lit ember dot on the active route), 48px top strip
+  (breadcrumb derived from the pathname, capability badges from
+  `GET /capabilities`, Calm-mode toggle, user + sign-out), skeleton route
+  fallback. Sign-in / sign-up stay outside the shell.
+- **Calm mode** (`uiStore.calmMode`, persisted) publishes `data-calm` on
+  `<html>`; `useMotionAllowed()` gates JS/WAAPI motion. The blanket
+  reduced-motion kill-switch in `index.css` is gone — every animation now
+  carries its own opacity-only substitute (WCAG 2.2.2 / 2.3.1 posture).
+- **Primitives** — `Caps`, `Hairline`, `Badge`, `Skeleton`; inline SVG icon set
+  (no icon dependency). Unit tests for rail mapping, breadcrumb, store
+  persistence (including pre-P1 blobs) and palette contrast (WCAG AA/AAA).
+
+### Fixed
+
+- **OCI conformance workflow** — `go test` path updated to
+  `./internal/build/pusher/...` after the #153 package move (the step matched no
+  packages since 12 Jul), and `TestPushConformance` now sets the config before
+  appending layers and declares OCI media types. Previously `remote.Write`
+  uploaded only the config blob (the post-hoc `mutate.ConfigFile` wiped
+  `rootfs.diff_ids`) and the registry answered `MANIFEST_BLOB_UNKNOWN`, failing
+  every weekly run since at least 14 Jun.
+
+### Docs
+
+- GitHub Topics (20) and the About description defined
+  (`docs/marketing/research/channels/geo.md`); README Go badge → 1.25 to match
+  `go.mod`.
 
 ## [0.2.0] - 2026-07-13
 

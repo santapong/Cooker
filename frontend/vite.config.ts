@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
@@ -33,6 +34,12 @@ export default defineConfig({
         },
       },
     },
+  },
+  test: {
+    // Vitest stubs CSS imports to '' by default; the palette contrast test
+    // (src/styles/tokens.test.ts) reads tokens.css via `?raw`, so let that
+    // one file through Vite's asset pipeline.
+    css: { include: [/tokens\.css/] },
   },
   server: {
     port: 5173,

@@ -1,0 +1,74 @@
+/* Cooker design tokens — brand-recolored Porthole (decided 4 Sep 2026).
+   Source of truth: docs/plans/2026-07-cosmic-frontend-redesign.md §2.
+   Rule: greyscale hull + ONE accent (ember). Green/red are semantic run
+   status only. No decorative gradients (halo sprites are the sole exception). */
+:root {
+  color-scheme: dark;
+
+  /* surfaces */
+  --void:   #050506;               /* porthole space */
+  --hull-0: #0b0b0c;               /* app background */
+  --hull-1: #141416;               /* raised panel / card / row hover */
+  --hull-2: #1c1c1f;               /* hover on a panel */
+  --line:        rgba(255, 255, 255, 0.10);   /* hairlines */
+  --line-strong: rgba(255, 255, 255, 0.18);
+
+  /* ink */
+  --ink-1: #f2f2f0;
+  --ink-2: #a3a39c;
+  --ink-3: #66665f;
+
+  /* accent — the only hue outside greyscale + semantic status */
+  --ember:      #e07a1f;
+  --ember-soft: rgba(224, 122, 31, 0.16);
+  --ember-line: rgba(224, 122, 31, 0.40);
+
+  /* star states (DAG nodes, run status) */
+  --star-idle:    #d6d6d0;
+  --star-running: var(--ember);
+  --star-ok:      #7ee2a8;
+  --star-fail:    #ff6b7a;
+  --star-queued:  #66665f;
+
+  /* type — self-hosted, see fonts.css */
+  --font-display: 'Space Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-body:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  /* modular scale ×1.25 off 15px body */
+  --fs-1: 12px;
+  --fs-2: 15px;
+  --fs-3: 19px;
+  --fs-4: 24px;
+  --fs-5: 30px;
+  --fs-6: 38px;
+  --caps-tracking: 0.08em;
+
+  /* space — 4px grid */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --page-pad: 32px;
+  --row-h: 48px;
+  --rail-w: 64px;
+  --strip-h: 48px;
+
+  /* shape */
+  --radius-1: 6px;
+  --radius-2: 12px;
+  --radius-porthole: 24px;
+  --radius-pill: 999px;
+
+  /* motion — budgets from spec §3 */
+  --ease-std: cubic-bezier(0.2, 0, 0, 1);   /* decelerate on entry */
+  --ease-out: cubic-bezier(0.4, 0, 1, 1);   /* accelerate on exit */
+  --dur-fast: 120ms;                        /* hover / focus / press */
+  --dur-panel-in: 200ms;
+  --dur-panel-out: 160ms;
+
+  /* focus ring — never removed */
+  --focus: 2px solid var(--ember);
+}
