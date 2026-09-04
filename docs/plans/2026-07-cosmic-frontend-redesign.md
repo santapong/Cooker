@@ -6,7 +6,10 @@ original navy/nebula/violet set to match the brand rule in
 `docs/marketing/strategy.md` §2 (greyscale + one warm amber accent, no decorative
 gradients, lowercase mono wordmark). Layout, motion budgets, substitution table and
 phases are unchanged. Light mode is deferred (`uiStore.themeMode` keeps its type;
-no light toggle is wired). P1 landed the same day.
+no light toggle is wired). P1 landed the same day; P2 (porthole editor) landed 5 Sep 2026 —
+`components/porthole/` (Porthole, Starfield, StarNode, ConstellationEdge) + `components/pipeline/`
+(PipelineCanvas, StageTray, StageInspector). The list→porthole shared-element transition
+(rung 3) waits for the P4 list thumbnails; P2 opens the porthole with a 320 ms CSS scale/fade.
 Authored 28 Jul 2026 against the post-reset stubs (PR #150 / Phase 2 reset).
 Stack it lands on: React 18 + Vite, react-router 6, zustand, `@xyflow/react` 12,
 plain CSS in `frontend/src/index.css` (no CSS framework, no motion library — by design, see §4).
@@ -71,7 +74,7 @@ Density low: hairline row separators, no zebra, no cell borders.
 | Hover / focus / press / toggle | 80–120 ms | `cubic-bezier(.2,0,0,1)` | 1 (transition) |
 | Panel / inspector / dialog | 200 ms in / 160 ms out | decel in, accel out | 1 |
 | Route → porthole open | **≤ 400 ms total** | 320 ms decel in / 240 ms accel out | 3 (View Transition) |
-| Constellation draw-in | scene ≤ 600 ms; star stagger `min(30ms, 360/N)` | decel | 2 (`@keyframes`) |
+| Constellation draw-in | scene ≤ 600 ms **settled**: 60 ms lead, stars pop 280 ms on a `min(30ms, 240/N)` stagger, edges draw 280 ms from 120 ms (+30 ms each, last start ≤ 320 ms) | decel | 2 (`@keyframes`) |
 | Run comet (edge traversal) | 1200 ms / edge, loops while running | ease-in-out | 2 (`offset-path`) |
 | Active-star halo pulse | 1600 ms cycle, opacity .6↔1, halo scale 1↔1.15 | sine-ish | 2 |
 | Ambient starfield drift | 240 s / 360 s loops, 2 parallax layers | linear | 2 |
@@ -80,7 +83,8 @@ Density low: hairline row separators, no zebra, no cell borders.
 | Skeleton star chart | appears at 120 ms if pending; matches final layout | — | 1 |
 
 Asymmetry rule everywhere: decelerate on entry, accelerate on exit.
-Stagger is a *scene* budget, not per-item — 20 stages must still settle by 600 ms.
+Stagger is a *scene* budget, not per-item — 20 stages must still settle by 600 ms
+(P2 reconciled the numbers: the original `360/N` span plus a 320 ms pop overran the budget).
 (100 ms direct-response and 400 ms Doherty ceilings are research-backed
 heuristics, not W3C criteria.)
 

@@ -10,6 +10,9 @@ export interface Pipeline {
   variables: Record<string, string>;
   createdAt: string;
   updatedAt: string;
+  // Server-managed revision for optimistic concurrency on PUT; the store
+  // adopts the value the server returns after each save.
+  version?: number;
   // Per-pipeline run deadline override (Go duration, e.g. "45m");
   // empty/undefined uses the cluster default.
   runDeadline?: string;

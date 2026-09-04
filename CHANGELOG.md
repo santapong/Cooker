@@ -29,6 +29,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (no icon dependency). Unit tests for rail mapping, breadcrumb, store
   persistence (including pre-P1 blobs) and palette contrast (WCAG AA/AAA).
 
+### Added — frontend redesign, P2 porthole editor
+
+- **Porthole** (`components/porthole/`): the hull window with rim light and
+  HUD brackets, a seeded two-layer starfield (transform-only drift, sparse
+  9 s twinkle, static under reduced motion / Calm), `StarNode` (6px core +
+  halo sprite + small-caps label + mono sub-label, run-state colours ready
+  for P3) and `ConstellationEdge` (curved 1.5px line, condition label,
+  stroke-dashoffset draw-in). Scene entrance settles inside 600 ms: 60 ms
+  lead, 280 ms star pops on a `min(30ms, 240/N)` stagger, edges after.
+- **Pipeline editor** (`PipelineEditorPage` + `components/pipeline/`):
+  React Flow canvas seeded from the store and kept in sync both ways —
+  drag persists positions, delete keys remove stages/edges, edge click
+  cycles the condition, tray chips drag-drop or click-add stages, a right
+  inspector edits name / per-type config / timeout, HUD shows stage & edge
+  counts, version and an unsaved marker, with Validate (local DAG check
+  then server), Save (adopts the server version) and Run (saves first,
+  navigates to the run page). Drag settle and new-star pop-in are the only
+  JS-driven motion, gated by `useMotionAllowed`. Skeleton star chart after
+  120 ms; empty and error states with a primary action; focus lands on the
+  porthole heading after load.
+- Store: constellation edge type, `dirty`, `moveStage`, `updateStage`,
+  `addStage` returns the id, `savePipeline` adopts the server copy;
+  `Pipeline.version` typed. 18 new unit tests (starfield, choreography
+  budget, geometry, store contract).
+
 ### Fixed
 
 - **OCI conformance workflow** — `go test` path updated to

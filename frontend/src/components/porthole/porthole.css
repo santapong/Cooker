@@ -1,0 +1,468 @@
+/* ── Porthole — window into space ──────────────────────────────────────
+   Motion rule: every animation below has a reduced-motion SUBSTITUTE and a
+   [data-calm="true"] branch. Ambient motion (drift, twinkle) is static under
+   both; entrances cross-fade; loops become opacity-only. */
+
+.porthole {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: var(--radius-porthole);
+  overflow: hidden;
+  background:
+    radial-gradient(900px 500px at 78% 18%, rgba(255, 255, 255, 0.035), transparent 60%),
+    radial-gradient(700px 450px at 15% 85%, rgba(224, 122, 31, 0.04), transparent 60%),
+    var(--void);
+  border: 1px solid var(--line);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 0 80px rgba(0, 0, 0, 0.9);
+}
+
+/* route → porthole open (≤ 400 ms budget: 320 ms decel) */
+.porthole-enter {
+  animation: porthole-open 320ms var(--ease-std) both;
+}
+@keyframes porthole-open {
+  from { opacity: 0; transform: scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes porthole-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .porthole-enter { animation: porthole-fade 160ms var(--ease-std) both; }
+}
+[data-calm='true'] .porthole-enter { animation: porthole-fade 160ms var(--ease-std) both; }
+
+/* ── starfield ── */
+.starfield {
+  position: absolute;
+  inset: -15%;
+  width: 130%;
+  height: 130%;
+  z-index: 0;
+  pointer-events: none;
+}
+.starfield .dot { fill: #d6d6d0; }
+.starfield .f1 { animation: drift1 240s linear infinite; }
+.starfield .f2 { animation: drift2 360s linear infinite; }
+@keyframes drift1 { to { transform: translate(-120px, 60px); } }
+@keyframes drift2 { to { transform: translate(80px, -40px); } }
+.starfield .tw { animation: twinkle 9s ease-in-out infinite; }
+@keyframes twinkle {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 0.8; }
+}
+/* ambient motion off — stars remain */
+@media (prefers-reduced-motion: reduce) {
+  .starfield .f1, .starfield .f2, .starfield .tw { animation: none; }
+}
+[data-calm='true'] .starfield .f1,
+[data-calm='true'] .starfield .f2,
+[data-calm='true'] .starfield .tw { animation: none; }
+
+/* ── frame furniture ── */
+.bracket {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 0 solid rgba(255, 255, 255, 0.35);
+  z-index: 5;
+  pointer-events: none;
+}
+.bracket.tl { top: 10px; left: 10px; border-top-width: 1px; border-left-width: 1px; }
+.bracket.tr { top: 10px; right: 10px; border-top-width: 1px; border-right-width: 1px; }
+.bracket.bl { bottom: 10px; left: 10px; border-bottom-width: 1px; border-left-width: 1px; }
+.bracket.br { bottom: 10px; right: 10px; border-bottom-width: 1px; border-right-width: 1px; }
+
+.hud { position: absolute; z-index: 6; }
+.hud-tl { top: 18px; left: 26px; }
+.hud-tr { top: 14px; right: 26px; display: flex; align-items: center; gap: var(--sp-3); }
+.hud-bl { bottom: 18px; left: 26px; display: flex; align-items: center; gap: var(--sp-2); }
+.hud-title {
+  margin: 0;
+  font-size: var(--fs-1);
+  font-weight: 500;
+  outline: none;
+}
+.hud-title:focus-visible { outline: var(--focus); outline-offset: 4px; border-radius: 2px; }
+.hud-stats {
+  font-size: 12px;
+  color: var(--ink-3);
+  text-align: right;
+  line-height: 1.4;
+}
+.hud-stats b { color: var(--ink-2); font-weight: 500; }
+.hud-dirty { color: var(--ember); }
+.hud-actions { display: flex; gap: 6px; }
+.hud-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgba(11, 11, 12, 0.6);
+  color: var(--ink-2);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition:
+    color var(--dur-fast) var(--ease-std),
+    background var(--dur-fast) var(--ease-std),
+    border-color var(--dur-fast) var(--ease-std);
+}
+.hud-btn:hover { color: var(--ink-1); background: var(--hull-1); }
+.hud-btn-primary { color: var(--ember); border-color: var(--ember-line); }
+.hud-btn-primary:hover { color: var(--ember); background: var(--ember-soft); }
+.hud-btn[disabled] { opacity: 0.5; cursor: default; }
+
+.porthole-scene {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+
+/* ── React Flow inside the porthole: strip its chrome ── */
+.porthole .canvas { position: absolute; inset: 0; }
+.porthole .react-flow { background: transparent; }
+.porthole .react-flow__pane { cursor: default; }
+.porthole .react-flow__node {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  font: inherit;
+  color: inherit;
+}
+.porthole .react-flow__node.selected,
+.porthole .react-flow__node:focus,
+.porthole .react-flow__node:focus-visible { box-shadow: none; outline: none; }
+.porthole .react-flow__node:focus-visible .core { outline: var(--focus); outline-offset: 5px; border-radius: 50%; }
+.porthole .react-flow__handle {
+  width: 8px;
+  height: 8px;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--ink-3);
+  border-radius: 50%;
+  background: var(--hull-1);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-std);
+}
+.porthole .react-flow__handle-left { left: -2px; }
+.porthole .react-flow__handle-right { right: -2px; }
+.porthole .star:hover .react-flow__handle,
+.porthole .react-flow__node.selected .react-flow__handle,
+.porthole .react-flow__handle.connectingfrom,
+.porthole .react-flow__handle.connectingto,
+.porthole .react-flow__handle.valid { opacity: 1; }
+.porthole .react-flow__connection-path {
+  stroke: var(--ember);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+.porthole .react-flow__edge.selectable { cursor: pointer; }
+
+/* ── stars ── */
+.star { position: relative; width: 48px; height: 48px; }
+.halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  opacity: 0.55;
+  background: radial-gradient(circle, rgba(214, 214, 208, 0.5), rgba(214, 214, 208, 0.12) 45%, transparent 70%);
+  transition: opacity var(--dur-fast) var(--ease-std);
+}
+.core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--star-idle);
+  transition: box-shadow var(--dur-fast) var(--ease-std);
+}
+.lbl {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  transition: color var(--dur-fast) var(--ease-std);
+}
+.sub {
+  position: absolute;
+  top: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.star:hover .halo, .star.is-selected .halo { opacity: 0.9; }
+.star.is-selected .core { box-shadow: 0 0 0 3px var(--void), 0 0 0 4px var(--ember); }
+.star.is-selected .lbl { color: var(--ink-1); }
+
+/* run states (P3 lights them; tokens fixed here) */
+.star-success .core { background: var(--star-ok); }
+.star-success .halo { background: radial-gradient(circle, rgba(126, 226, 168, 0.55), rgba(126, 226, 168, 0.12) 45%, transparent 70%); }
+.star-failed .core { background: var(--star-fail); }
+.star-failed .halo { background: radial-gradient(circle, rgba(255, 107, 122, 0.55), rgba(255, 107, 122, 0.12) 45%, transparent 70%); }
+.star-pending .core, .star-cancelled .core, .star-skipped .core { background: var(--star-queued); }
+.star-pending .halo, .star-cancelled .halo, .star-skipped .halo { opacity: 0.22; }
+.star-pending .lbl, .star-cancelled .lbl, .star-skipped .lbl { color: var(--ink-3); }
+.star-running .core { background: var(--star-running); }
+.star-running .halo {
+  background: radial-gradient(circle, rgba(224, 122, 31, 0.7), rgba(224, 122, 31, 0.16) 45%, transparent 70%);
+  animation: halo-pulse 1600ms ease-in-out infinite;
+}
+@keyframes halo-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.15); }
+}
+@keyframes halo-pulse-static {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .star-running .halo { animation: halo-pulse-static 2s ease-in-out infinite; }
+}
+[data-calm='true'] .star-running .halo { animation: halo-pulse-static 2s ease-in-out infinite; }
+
+/* scene entrance: stars pop in on a stagger, edges draw in after them */
+.is-entering .star {
+  animation: star-in 280ms var(--ease-std) both;
+  animation-delay: var(--draw-delay, 0ms);
+}
+@keyframes star-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-entering .star { animation: fade-in 160ms var(--ease-std) both; }
+}
+[data-calm='true'] .is-entering .star { animation: fade-in 160ms var(--ease-std) both; }
+
+/* ── constellation lines ── */
+.constellation-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 20;
+  pointer-events: stroke;
+}
+.constellation-path {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.22);
+  stroke-width: 1.5;
+  transition: stroke var(--dur-fast) var(--ease-std);
+}
+.constellation:hover .constellation-path { stroke: rgba(255, 255, 255, 0.45); }
+.constellation.is-selected .constellation-path { stroke: var(--ember); }
+.constellation.cond-failure .constellation-path { stroke: rgba(255, 107, 122, 0.45); }
+.constellation.cond-always .constellation-path { stroke-dasharray: 0.02 0.012; }
+.constellation.is-done .constellation-path { stroke: rgba(126, 226, 168, 0.45); }
+.constellation.is-hot .constellation-path { stroke: rgba(224, 122, 31, 0.65); }
+.constellation-cond {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  fill: var(--ink-3);
+  text-anchor: middle;
+  pointer-events: none;
+}
+.constellation.cond-failure .constellation-cond { fill: var(--star-fail); }
+
+.is-entering .constellation-path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: draw 280ms var(--ease-std) forwards;
+  animation-delay: var(--draw-delay, 0ms);
+}
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .is-entering .constellation-path {
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+    animation: fade-in 160ms var(--ease-std) both;
+  }
+}
+[data-calm='true'] .is-entering .constellation-path {
+  stroke-dasharray: none;
+  stroke-dashoffset: 0;
+  animation: fade-in 160ms var(--ease-std) both;
+}
+
+/* ── tool tray ── */
+.tray {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgba(11, 11, 12, 0.72);
+  backdrop-filter: blur(4px);
+}
+.chip {
+  border: 0;
+  background: transparent;
+  padding: 4px 11px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  cursor: grab;
+  transition: background var(--dur-fast) var(--ease-std), color var(--dur-fast) var(--ease-std);
+}
+.chip:hover { background: var(--hull-1); color: var(--ink-1); }
+.chip:active { cursor: grabbing; }
+
+/* ── stage inspector ── */
+.inspector {
+  position: absolute;
+  z-index: 7;
+  top: 56px; /* below the HUD row */
+  right: 16px;
+  bottom: 16px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  background: rgba(11, 11, 12, 0.88);
+  backdrop-filter: blur(6px);
+  overflow: auto;
+  animation: panel-in 200ms var(--ease-std) both;
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .inspector { animation: fade-in 160ms var(--ease-std) both; }
+}
+[data-calm='true'] .inspector { animation: fade-in 160ms var(--ease-std) both; }
+.inspector-head { display: flex; align-items: center; gap: var(--sp-2); }
+.inspector-head .spacer { flex: 1; }
+.inspector-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 16px;
+  cursor: pointer;
+}
+.inspector-close:hover { color: var(--ink-1); background: var(--hull-1); }
+.inspector-name {
+  font-family: var(--font-display);
+  font-size: var(--fs-3);
+  font-weight: 500;
+  color: var(--ink-1);
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  padding: 2px 0;
+}
+.inspector-name:hover { border-bottom-color: var(--line); }
+.inspector-name:focus-visible { outline: none; border-bottom-color: var(--ember); }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-1);
+  background: var(--hull-1);
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+textarea.input { height: auto; min-height: 88px; padding: 8px 10px; resize: vertical; line-height: 1.5; }
+.input::placeholder { color: var(--ink-3); }
+.input:focus-visible { outline: var(--focus); outline-offset: 1px; border-color: var(--ember); }
+.inspector-foot { margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.btn-danger {
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 6px 0;
+  color: var(--star-fail);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.btn-danger:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* ── empty + skeleton states ── */
+.porthole-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+.porthole-empty svg { display: block; margin: 0 auto var(--sp-4); }
+.porthole-empty p { color: var(--ink-2); margin-bottom: var(--sp-4); }
+.chart-skeleton {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  animation: skeleton-breathe 2000ms ease-in-out infinite;
+}
+[data-calm='true'] .chart-skeleton { animation: none; opacity: 0.7; }
+.chart-skeleton circle { fill: var(--hull-1); }
+.chart-skeleton path { stroke: var(--line); stroke-width: 1.5; fill: none; }
+
+/* ── page ── */
+.editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 20px 24px 24px;
+}
+
+/* static sketch (empty / error state) — same drawing as the skeleton, no breathing */
+.chart-skeleton-static circle { fill: var(--hull-1); }
+.chart-skeleton-static path { stroke: var(--line); stroke-width: 1.5; fill: none; }
