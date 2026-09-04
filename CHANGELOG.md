@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — compose service edits persist to the file
+
+- `PUT /docker/compose/services/:name` now rewrites the service in the compose
+  file and returns the re-parsed graph. `internal/service/compose_edit.go`
+  edits the yaml.v3 node tree and re-encodes only that service, splicing it
+  into the original text: comments, blank lines, key order and every other
+  service stay byte-identical; `environment` keeps the file's list or mapping
+  style and key order (new keys append sorted); port mappings are written
+  double-quoted. The file is replaced
+  atomically (temp file + rename, mode preserved); a rejected request never
+  touches it. 404 for an unknown service, 400 for an empty patch or a bad
+  filename. The file is resolved through the same allowlist as parse.
+- **`COOKER_COMPOSE_DIR`** (default `.`) sets the only directory the compose
+  parse/edit endpoints touch (`handler.SetComposeBaseDir`).
+- Frontend sends `composePath` with the patch and adopts the returned graph;
+  the compose store remembers the path it parsed.
+
 ### Changed — frontend redesign polish (toasts, compose editor, airlock checks)
 
 - **Toasts restyled** (`components/Toast.tsx` + `toast.css`): hull cards at the

@@ -18,8 +18,9 @@ export const dockerApi = {
 
   parseCompose: (composePath?: string) =>
     post<ComposeGraph>('/docker/compose/parse', composePath ? { composePath } : {}),
-  updateComposeService: (name: string, patch: ComposeServicePatch) =>
-    put<{ message: string; service: string }>(`/docker/compose/services/${encodeURIComponent(name)}`, patch),
+  /** Rewrites the service in `composePath` (inside the server's compose dir) and returns the re-parsed graph. */
+  updateComposeService: (name: string, patch: ComposeServicePatch, composePath?: string) =>
+    put<{ message: string; service: string; graph?: ComposeGraph }>(`/docker/compose/services/${encodeURIComponent(name)}`, composePath ? { ...patch, composePath } : patch),
 
   listNetworks: (hostId?: string) =>
     get<DockerNetwork[]>(`/docker/networks${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`),

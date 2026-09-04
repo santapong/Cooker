@@ -24,6 +24,7 @@ Every Cooker configuration variable. Generated from `backend/internal/config/con
 | Variable | Default | Values | Description | Source |
 |---|---|---|---|---|
 | `COOKER_BUILDER` | `noop` | `noop`, `docker`, `kaniko`, `buildah`, `buildkit` | Image builder. Production refuses `docker`. | `config.go:256` |
+| `COOKER_COMPOSE_DIR` | `.` | directory path | The only directory the compose porthole reads and writes: `POST /docker/compose/parse` resolves bare filenames inside it and `PUT /docker/compose/services/:name` rewrites the service there (atomic replace, comments kept). Mount your compose files here. | `config.go` |
 | `COOKER_PUSHER` | `noop` | `noop`, `docker`, `crane` | Registry pusher. | `config.go:257` |
 | `COOKER_DEPLOYER` | `noop` | `noop`, `kubectl`, `clientgo` | K8s deployer. | `config.go:258` |
 | `COOKER_SECRETS_BACKEND` | `database` | `database`, `keepsave`, `vault`, `aws`, `gcp` | Secrets storage backend. | `config.go:259` |

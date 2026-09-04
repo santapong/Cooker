@@ -33,6 +33,7 @@ test.describe('compose porthole — service editor', () => {
     const put = page.waitForRequest((r) => r.method() === 'PUT' && r.url().includes('/docker/compose/services/api'));
     await inspector.getByRole('button', { name: 'Save' }).click();
     expect((await put).postDataJSON()).toEqual({
+      composePath: 'docker-compose.yml',
       image: 'ghcr.io/acme/api:2.2.0',
       ports: ['9000:9000', '9443:9443'],
       environment: { DATABASE_URL: 'postgres://db/acme', LOG_LEVEL: 'debug' },

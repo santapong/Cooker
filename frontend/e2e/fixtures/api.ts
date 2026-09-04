@@ -115,7 +115,9 @@ export async function mockCompose(page: Page, opts: { updateStatus?: number } = 
   await page.route('**/api/v1/docker/compose/services/*', (route) => {
     const name = decodeURIComponent(route.request().url().split('/').pop() ?? '');
     if (opts.updateStatus && opts.updateStatus !== 200) return route.fulfill({ status: opts.updateStatus, json: { error: `cannot update ${name}` } });
-    return route.fulfill({ json: { message: 'Service config updated', service: name } });
+    const patch = Object.fromEntries(Object.entries(route.request().postDataJSON() as Record<string, unknown>).filter(([k]) => k !== 'composePath'));
+    const graph = { ...COMPOSE_GRAPH, services: COMPOSE_GRAPH.services.map((s) => (s.name === name ? { ...s, ...patch } : s)) };
+    return route.fulfill({ json: { message: 'Service config updated', service: name, graph } });
   });
 }
 

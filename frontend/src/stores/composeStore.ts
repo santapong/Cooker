@@ -4,18 +4,21 @@ import { dockerApi } from '../api/docker';
 
 interface ComposeStore {
   graph: ComposeGraph | null;
+  /** The file the loaded graph came from (relative to the server's compose dir). */
+  composePath: string;
   selectedServiceName: string | null;
   loading: boolean;
   error: string | null;
 
   fetchComposeGraph: (composePath?: string) => Promise<void>;
   setSelectedService: (name: string | null) => void;
-  /** Send the patch to the server and mirror it into the loaded graph. Rejects with the server's message. */
+  /** Send the patch to the server; the server rewrites the file and returns the re-parsed graph. Rejects with the server's message. */
   updateServiceConfig: (name: string, patch: ComposeServicePatch) => Promise<{ message: string; service: string }>;
 }
 
-export const useComposeStore = create<ComposeStore>((set) => ({
+export const useComposeStore = create<ComposeStore>((set, get) => ({
   graph: null,
+  composePath: 'docker-compose.yml',
   selectedServiceName: null,
   loading: false,
   error: null,
@@ -24,7 +27,7 @@ export const useComposeStore = create<ComposeStore>((set) => ({
     set({ loading: true, error: null });
     try {
       const graph = await dockerApi.parseCompose(composePath);
-      set({ graph, loading: false });
+      set({ graph, composePath: composePath || 'docker-compose.yml', loading: false });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
@@ -35,12 +38,12 @@ export const useComposeStore = create<ComposeStore>((set) => ({
   },
 
   updateServiceConfig: async (name, patch) => {
-    const res = await dockerApi.updateComposeService(name, patch);
-    // The server acknowledges the patch; re-parsing the file would show the
-    // pre-edit values, so the loaded graph is patched in place instead.
-    set((s) =>
-      s.graph ? { graph: { ...s.graph, services: s.graph.services.map((svc) => (svc.name === name ? { ...svc, ...patch } : svc)) } } : {},
-    );
+    const res = await dockerApi.updateComposeService(name, patch, get().composePath);
+    set((s) => {
+      if (res.graph) return { graph: res.graph };
+      // Older server without the graph in its reply: mirror the patch locally.
+      return s.graph ? { graph: { ...s.graph, services: s.graph.services.map((svc) => (svc.name === name ? { ...svc, ...patch } : svc)) } } : {};
+    });
     return res;
   },
 }));

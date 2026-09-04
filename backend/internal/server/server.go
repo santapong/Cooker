@@ -351,6 +351,7 @@ func New(cfg *config.Config) (*Server, error) {
 	cleanups = append(cleanups, func() { idem.Close() })
 
 	h := handler.New(st, codec, secMgr)
+	h.SetComposeBaseDir(cfg.ComposeDir)
 	h.SecretsBackend = cfg.SecretsBackend
 	h.AppDeployer = appDeployer
 	h.Canary = canarySvc

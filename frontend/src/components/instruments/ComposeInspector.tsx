@@ -66,7 +66,7 @@ export default function ComposeInspector({ service, busy, onSave, onClose }: Pro
     <aside className="inspector" aria-label={`Service ${service.name}`}>
       <div className="inspector-head">
         <Badge variant="muted">service</Badge>
-        {service.status && <Badge variant={service.status === 'running' ? 'ok' : 'muted'}>{service.status}</Badge>}
+        {service.status && service.status !== 'unknown' && <Badge variant={service.status === 'running' ? 'ok' : 'muted'}>{service.status}</Badge>}
         {dirty && <Badge variant="ember">edited</Badge>}
         <span className="spacer" />
         <button type="button" className="inspector-close" onClick={onClose} aria-label="Close inspector">
