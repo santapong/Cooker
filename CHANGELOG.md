@@ -97,6 +97,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pipelineApi.listRuns` takes a page. Capsule button styles moved to the
   global sheet so list pages get them without loading the porthole CSS.
 
+### Added — frontend redesign, P5a airlock + panels
+
+- **Airlock** (`components/airlock/`): a card floating over the starfield for
+  Sign in (SSO and/or local, driven by `GET /auth/methods`), Sign up (when the
+  server allows it) and the **New App wizard** — three steps (source, build,
+  run) with repository inspection, build plan and recipe choice, deploy target
+  (docker host / Kubernetes namespace / Cloud Run), environment and
+  auto-deploy, landing on the new app.
+- **App detail**: health, webhook, canary and drift badges; Deploy follows the
+  deploy record into the deployment porthole; deploy history with rollback;
+  webhook URL + secret; drift report; rollout strategy with canary
+  promote/abort; delete. Destructive actions use a two-step armed button
+  instead of a browser dialog.
+- **Settings**: single 640px column — interface (Calm mode, Simple/Pro),
+  secrets-backend probe, image registries, Kubernetes clusters, API tokens
+  (shown once on creation), license install/remove.
+- **Create / remove forms** on Environments (lanes, target, promotion policy,
+  variables), Hosts (docker, SSH-docker with key, Kubernetes, tailnet
+  reachability), Notifications (kind-specific config, event picks) and
+  Registry (credentials).
+- Primitives: `Field`, `TextInput`, `TextArea`, `Select`, `Check`, `Panel`,
+  `ConfirmButton`; form/panel/detail styles in the global sheet.
+
 ### Fixed
 
 - **OCI conformance workflow** — `go test` path updated to

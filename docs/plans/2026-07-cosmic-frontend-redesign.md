@@ -23,6 +23,15 @@ feature-detected, skipped for hidden documents, not named under reduced motion /
 root cross-fade is the substitute). All nine list pages read live data; Pipelines has the
 inline "New pipeline" flow. Create/edit forms for environments, hosts, registries, templates,
 schedules and notification targets are P5 instrument panels.
+P5a (airlock + panels, first slice) landed 5 Sep 2026 — `components/airlock/Airlock` (card over the
+starfield; sign-in, sign-up, New App wizard as a 3-step airlock with 200 ms step cross-fade + 8px
+rise), `components/ui/{form,Panel,ConfirmButton}` (instrument-panel primitives; destructive actions
+arm for 3 s instead of opening a browser dialog), AppDetailPage (deploy → follows the deploy record
+into the porthole, history + rollback, webhook secret, drift, rollout strategy + canary
+promote/abort), SettingsPage (640px column: interface, secrets probe, registries, clusters, API
+tokens, license), and create/remove forms on Environments, Hosts, Notifications and Registry.
+Remaining for P5b: Docker / Compose / Kubernetes / Cloud instrument panels, Analytics charts,
+template + schedule forms, environment promotion and AI triage on the run page.
 Authored 28 Jul 2026 against the post-reset stubs (PR #150 / Phase 2 reset).
 Stack it lands on: React 18 + Vite, react-router 6, zustand, `@xyflow/react` 12,
 plain CSS in `frontend/src/index.css` (no CSS framework, no motion library — by design, see §4).

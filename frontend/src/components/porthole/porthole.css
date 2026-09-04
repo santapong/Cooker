@@ -383,20 +383,7 @@
 .inspector-name:hover { border-bottom-color: var(--line); }
 .inspector-name:focus-visible { outline: none; border-bottom-color: var(--ember); }
 .field { display: flex; flex-direction: column; gap: 6px; }
-.input {
-  width: 100%;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-1);
-  background: var(--hull-1);
-  color: var(--ink-1);
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-textarea.input { height: auto; min-height: 88px; padding: 8px 10px; resize: vertical; line-height: 1.5; }
-.input::placeholder { color: var(--ink-3); }
-.input:focus-visible { outline: var(--focus); outline-offset: 1px; border-color: var(--ember); }
+/* .input / textarea styles live in styles/ui.css */
 .inspector-foot { margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--line); }
 .btn-danger {
   border: 1px solid transparent;
