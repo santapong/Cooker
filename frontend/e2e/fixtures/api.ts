@@ -116,7 +116,8 @@ export async function mockCompose(page: Page, opts: { updateStatus?: number } = 
     const name = decodeURIComponent(route.request().url().split('/').pop() ?? '');
     if (opts.updateStatus && opts.updateStatus !== 200) return route.fulfill({ status: opts.updateStatus, json: { error: `cannot update ${name}` } });
     const patch = Object.fromEntries(Object.entries(route.request().postDataJSON() as Record<string, unknown>).filter(([k]) => k !== 'composePath'));
-    const graph = { ...COMPOSE_GRAPH, services: COMPOSE_GRAPH.services.map((s) => (s.name === name ? { ...s, ...patch } : s)) };
+    // like the real parser, hand the services back in a different order
+    const graph = { ...COMPOSE_GRAPH, services: [...COMPOSE_GRAPH.services].reverse().map((s) => (s.name === name ? { ...s, ...patch } : s)) };
     return route.fulfill({ json: { message: 'Service config updated', service: name, graph } });
   });
 }

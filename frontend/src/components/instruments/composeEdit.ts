@@ -39,3 +39,17 @@ export function sameEnv(a: Record<string, string>, b: Record<string, string>): b
   const kb = Object.keys(b);
   return ka.length === kb.length && ka.every((k) => k in b && a[k] === b[k]);
 }
+
+/**
+ * Re-order `next`'s services to match `prev` (the parser returns services in
+ * map order, so a re-parse would shuffle the star rows on every save);
+ * services unknown to `prev` keep their relative order at the end.
+ */
+export function keepServiceOrder<T extends { name: string }>(prev: T[] | undefined, next: T[]): T[] {
+  if (!prev?.length) return next;
+  const rank = new Map(prev.map((s, i) => [s.name, i]));
+  return next
+    .map((s, i) => ({ s, key: rank.get(s.name) ?? prev.length + i }))
+    .sort((a, b) => a.key - b.key)
+    .map((x) => x.s);
+}

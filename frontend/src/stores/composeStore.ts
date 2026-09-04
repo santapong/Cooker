@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { ComposeGraph, ComposeServicePatch } from '../types/compose';
 import { dockerApi } from '../api/docker';
+import { keepServiceOrder } from '../components/instruments/composeEdit';
 
 interface ComposeStore {
   graph: ComposeGraph | null;
@@ -40,7 +41,7 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
   updateServiceConfig: async (name, patch) => {
     const res = await dockerApi.updateComposeService(name, patch, get().composePath);
     set((s) => {
-      if (res.graph) return { graph: res.graph };
+      if (res.graph) return { graph: { ...res.graph, services: keepServiceOrder(s.graph?.services, res.graph.services) } };
       // Older server without the graph in its reply: mirror the patch locally.
       return s.graph ? { graph: { ...s.graph, services: s.graph.services.map((svc) => (svc.name === name ? { ...svc, ...patch } : svc)) } } : {};
     });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { envToLines, parseEnvLines, parseList, sameEnv, sameList } from './composeEdit';
+import { envToLines, keepServiceOrder, parseEnvLines, parseList, sameEnv, sameList } from './composeEdit';
 
 describe('compose service editor helpers', () => {
   it('parses one entry per line and drops blanks', () => {
@@ -28,5 +28,17 @@ describe('compose service editor helpers', () => {
     expect(sameEnv({ A: '1' }, { A: '1' })).toBe(true);
     expect(sameEnv({ A: '1' }, { A: '2' })).toBe(false);
     expect(sameEnv({ A: '1' }, { A: '1', B: '' })).toBe(false);
+  });
+});
+
+describe('keepServiceOrder', () => {
+  it('restores the previous order and appends newcomers', () => {
+    const prev = [{ name: 'web' }, { name: 'api' }, { name: 'db' }];
+    const next = [{ name: 'db' }, { name: 'cache' }, { name: 'web' }, { name: 'api' }];
+    expect(keepServiceOrder(prev, next).map((s) => s.name)).toEqual(['web', 'api', 'db', 'cache']);
+  });
+  it('passes through when there is no previous graph', () => {
+    const next = [{ name: 'b' }, { name: 'a' }];
+    expect(keepServiceOrder(undefined, next)).toBe(next);
   });
 });

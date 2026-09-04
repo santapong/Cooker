@@ -30,6 +30,8 @@ test.describe('compose porthole — service editor', () => {
     await inspector.getByLabel('Environment').fill('DATABASE_URL=postgres://db/acme\nLOG_LEVEL=debug');
     await expect(inspector.getByText('edited')).toBeVisible();
 
+    const starTop = async () => Object.fromEntries(await page.$$eval('.react-flow__node', (ns) => ns.map((n) => [n.textContent?.slice(0, 3), n.getBoundingClientRect().top])));
+    const before = await starTop();
     const put = page.waitForRequest((r) => r.method() === 'PUT' && r.url().includes('/docker/compose/services/api'));
     await inspector.getByRole('button', { name: 'Save' }).click();
     expect((await put).postDataJSON()).toEqual({
@@ -45,6 +47,8 @@ test.describe('compose porthole — service editor', () => {
     // the scene mirrors the patch: the star's sub-label is the image
     await expect(page.locator('.star', { hasText: 'api' })).toContainText('ghcr.io/acme/api:2.2.0');
     await expect(inspector.getByRole('button', { name: 'Save' })).toBeDisabled();
+    // the server's graph comes back shuffled; the stars must not change rows
+    expect(await starTop()).toEqual(before);
     await page.screenshot({ path: testInfo.outputPath('compose-editor.png') });
     await testInfo.attach('compose-editor', { path: testInfo.outputPath('compose-editor.png'), contentType: 'image/png' });
 
