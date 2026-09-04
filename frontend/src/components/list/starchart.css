@@ -1,0 +1,165 @@
+/* ── Star-chart lists (spec §5.A) — hairline rows, thumbnail, status star, name, mono meta ── */
+
+.chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  padding: var(--page-pad);
+  min-height: 100%;
+}
+.chart-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.chart-head h1 {
+  outline: none;
+}
+.chart-head h1:focus-visible { outline: var(--focus); outline-offset: 4px; border-radius: 2px; }
+.chart-count {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.chart-spacer { flex: 1; }
+.chart-actions { display: flex; gap: 6px; align-items: center; }
+
+/* inline "new" form */
+.chart-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chart-form .input { width: 260px; }
+
+.chart-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.chart-rows {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+.chart-row {
+  display: grid;
+  grid-template-columns: 72px 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-4);
+  min-height: var(--row-h);
+  padding: 4px var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+  transition: background var(--dur-fast) var(--ease-std);
+}
+.chart-row.no-thumb { grid-template-columns: 8px minmax(0, 1fr) auto; }
+.chart-row.is-link { cursor: pointer; }
+.chart-row.is-link:hover,
+.chart-row.is-link:focus-visible { background: var(--hull-1); text-decoration: none; }
+.chart-row:has(.chart-name:focus-visible) { background: var(--hull-1); }
+.chart-name:focus-visible { outline: var(--focus); outline-offset: 2px; border-radius: 2px; }
+a.chart-name:hover { text-decoration: none; color: var(--ink-1); }
+
+.chart-thumb {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 40px;
+  color: var(--ink-3);
+}
+.mini { display: block; overflow: visible; }
+.mini .mini-edge { stroke: rgba(255, 255, 255, 0.22); stroke-width: 1; }
+.mini .dot { fill: var(--star-idle); opacity: 0.7; transition: opacity var(--dur-fast) var(--ease-std); }
+.chart-row:hover .mini .dot { opacity: 1; }
+.mini .dot.st-success { fill: var(--star-ok); opacity: 0.9; }
+.mini .dot.st-failed { fill: var(--star-fail); opacity: 0.9; }
+.mini .dot.st-running { fill: var(--ember); opacity: 1; }
+.mini .dot.st-pending, .mini .dot.st-skipped, .mini .dot.st-cancelled { fill: var(--star-queued); }
+
+.chart-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--star-queued);
+  opacity: 0.6;
+}
+.chart-status.st-ok { background: var(--star-ok); opacity: 1; }
+.chart-status.st-fail { background: var(--star-fail); opacity: 1; }
+.chart-status.st-running { background: var(--ember); opacity: 1; box-shadow: 0 0 6px 1px rgba(224, 122, 31, 0.6); }
+.chart-status.st-warn { background: var(--ember); opacity: 0.8; }
+
+.chart-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.chart-name {
+  color: inherit;
+  text-decoration: none;
+  font-family: var(--font-display);
+  font-size: var(--fs-2);
+  font-weight: 500;
+  color: var(--ink-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chart-sub {
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chart-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.chart-meta > span + span::before { content: '·'; margin-right: var(--sp-3); color: var(--ink-3); }
+.chart-meta a { color: var(--ink-2); }
+.chart-meta a:hover { color: var(--ember); }
+
+.chart-empty {
+  display: grid;
+  place-items: center;
+  padding: var(--sp-7) 0;
+  text-align: center;
+}
+.chart-empty p { margin-bottom: var(--sp-4); }
+.chart-empty svg { display: block; margin: 0 auto var(--sp-4); }
+.chart-empty .sketch path { stroke: var(--line); stroke-width: 1.5; fill: none; }
+.chart-empty .sketch circle { fill: var(--hull-1); }
+
+.chart-error {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 107, 122, 0.35);
+  border-radius: var(--radius-1);
+  color: var(--star-fail);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.chart-more { align-self: flex-start; }
+
+/* ── View Transitions (rung 3): thumbnail → porthole frame ── */
+.porthole { view-transition-name: porthole; }
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 240ms;
+  animation-timing-function: var(--ease-std);
+}
+::view-transition-group(porthole) {
+  animation-duration: 320ms;
+  animation-timing-function: var(--ease-std);
+}
+::view-transition-old(porthole) { animation: 160ms var(--ease-out) both vt-fade-out; }
+::view-transition-new(porthole) { animation: 240ms var(--ease-std) both vt-fade-in; }
+@keyframes vt-fade-out { to { opacity: 0; } }
+@keyframes vt-fade-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root), ::view-transition-new(root),
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration: 160ms; }
+}
+[data-calm='true'] ::view-transition-old(root), [data-calm='true'] ::view-transition-new(root) { animation-duration: 160ms; }

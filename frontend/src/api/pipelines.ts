@@ -21,7 +21,7 @@ export const pipelineApi = {
   exportYaml: (id: string) => getText(`/pipelines/${id}/export`, 'application/yaml'),
   importYaml: (yaml: string) => postText<Pipeline>('/pipelines/import', yaml),
   run: (id: string) => post<PipelineRun>(`/pipelines/${id}/run`),
-  listRuns: (id: string) => get<PipelineRun[]>(`/pipelines/${id}/runs`),
+  listRuns: (id: string, page?: PageParams) => get<PipelineRun[]>(`/pipelines/${id}/runs${pageQuery(page)}`),
   getRun: (pipelineId: string, runId: string) => get<PipelineRun>(`/pipelines/${pipelineId}/runs/${runId}`),
   cancelRun: (pipelineId: string, runId: string) =>
     post<{ status: string }>(`/pipelines/${pipelineId}/runs/${runId}/cancel`),

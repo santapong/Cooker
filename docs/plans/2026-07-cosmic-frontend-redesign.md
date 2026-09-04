@@ -15,6 +15,14 @@ StageRunInspector), `hooks/useRun.ts`, `components/porthole/runState.ts`; RunPag
 DeploymentPage are thin wrappers over RunView. The comet is SMIL `animateMotion` inside
 ConstellationEdge (1.2 s/edge), gated by `useMotionAllowed` — reduced motion / Calm show the
 static hot stroke. Environment promotion UI and AI triage are deferred to P5.
+P4 (star-chart lists) landed 5 Sep 2026 — `components/list/StarChart` (+ `starchart.css`),
+`components/porthole/MiniConstellation` (72×40 thumbnail from real stages/edges, coloured by the
+latest run), `hooks/usePortholeTransition` (rung 3: the clicked thumbnail is named
+`porthole` and `document.startViewTransition` morphs it into the porthole frame, ≤ 400 ms;
+feature-detected, skipped for hidden documents, not named under reduced motion / Calm so the
+root cross-fade is the substitute). All nine list pages read live data; Pipelines has the
+inline "New pipeline" flow. Create/edit forms for environments, hosts, registries, templates,
+schedules and notification targets are P5 instrument panels.
 Authored 28 Jul 2026 against the post-reset stubs (PR #150 / Phase 2 reset).
 Stack it lands on: React 18 + Vite, react-router 6, zustand, `@xyflow/react` 12,
 plain CSS in `frontend/src/index.css` (no CSS framework, no motion library — by design, see §4).

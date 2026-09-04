@@ -66,3 +66,33 @@
   animation: none;
   opacity: 0.7;
 }
+
+/* Capsule buttons — porthole HUD, list headers, inspectors. */
+.hud-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgba(11, 11, 12, 0.6);
+  color: var(--ink-2);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition:
+    color var(--dur-fast) var(--ease-std),
+    background var(--dur-fast) var(--ease-std),
+    border-color var(--dur-fast) var(--ease-std);
+}
+.hud-btn:hover { color: var(--ink-1); background: var(--hull-1); }
+.hud-btn-primary { color: var(--ember); border-color: var(--ember-line); }
+.hud-btn-primary:hover { color: var(--ember); background: var(--ember-soft); }
+.hud-btn[disabled] { opacity: 0.5; cursor: default; }
+.hud-link { text-decoration: none; }
+.hud-link:hover { text-decoration: none; }

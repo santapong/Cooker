@@ -76,6 +76,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deferred to P5: environment promotion / approval-promotion UI and AI
   triage (both existed in the pre-reset run page).
 
+### Added — frontend redesign, P4 star-chart lists
+
+- **StarChart** (`components/list/`): the list family from spec §5.A —
+  hairline rows, a 72×40 mini-constellation thumbnail drawn from the
+  pipeline's real stages and edges (stars coloured by the latest run),
+  status star, display-face name, mono meta, hover lift, skeleton, empty
+  and error states, focus on the heading.
+- **Nine pages on live data**: Pipelines (latest run per row, run links,
+  inline "New pipeline" → editor), Apps (latest deploy → thumbnail and
+  deployment link, health star, Open app), Environments, Hosts, Registry
+  (repositories + configured registries), Templates, Schedules (surfaces
+  "scheduler not configured"), Notifications, Audit (paged, status-coded).
+- **List → porthole continuity (rung 3)**: `usePortholeTransition` names the
+  clicked thumbnail and lets the View Transitions API morph it into the
+  porthole frame (320 ms); plain navigation without the API or on hidden
+  documents; not named under reduced motion / Calm (160 ms cross-fade).
+  Route chunks prefetch on hover so the morph lands on a real porthole.
+- Helpers with tests: `layoutMini`, `timeAgo`/`shortId`, `runChartStatus`;
+  `pipelineApi.listRuns` takes a page. Capsule button styles moved to the
+  global sheet so list pages get them without loading the porthole CSS.
+
 ### Fixed
 
 - **OCI conformance workflow** — `go test` path updated to
