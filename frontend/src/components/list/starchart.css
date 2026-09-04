@@ -43,7 +43,8 @@
 }
 .chart-row {
   display: grid;
-  grid-template-columns: 72px 8px minmax(0, 1fr) auto;
+  /* the name keeps a readable minimum; meta wraps on narrow viewports */
+  grid-template-columns: 72px 8px minmax(160px, 1fr) minmax(0, max-content);
   align-items: center;
   gap: var(--sp-4);
   min-height: var(--row-h);
@@ -53,7 +54,7 @@
   text-decoration: none;
   transition: background var(--dur-fast) var(--ease-std);
 }
-.chart-row.no-thumb { grid-template-columns: 8px minmax(0, 1fr) auto; }
+.chart-row.no-thumb { grid-template-columns: 8px minmax(160px, 1fr) minmax(0, max-content); }
 .chart-row.is-link { cursor: pointer; }
 .chart-row.is-link:hover,
 .chart-row.is-link:focus-visible { background: var(--hull-1); text-decoration: none; }
@@ -110,7 +111,10 @@ a.chart-name:hover { text-decoration: none; color: var(--ink-1); }
 }
 .chart-meta {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
+  row-gap: 2px;
   gap: var(--sp-3);
   font-family: var(--font-mono);
   font-size: 12px;
