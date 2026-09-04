@@ -155,7 +155,7 @@ oci-conformance:
 		COOKER_OCI_REGISTRY=localhost:5000 \
 		go test -tags oci_conformance -v \
 			-run 'TestPushConformance|TestManifestSpecConformance' \
-			./internal/pusher/...
+			./internal/build/pusher/...
 	@echo "Push + image-spec validation OK; building upstream conformance binary..."
 	@tmp=$$(mktemp -d); \
 	 git clone --depth 1 https://github.com/opencontainers/distribution-spec "$$tmp/dist-spec" >/dev/null 2>&1 && \

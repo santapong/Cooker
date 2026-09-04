@@ -50,7 +50,7 @@ jobs:
           # against OCI image-spec v1.1. Backlog item P0.7.
           go test -tags oci_conformance -v \
             -run 'TestPushConformance|TestManifestSpecConformance' \
-            ./internal/pusher/...
+            ./internal/build/pusher/...
 
       - name: Build OCI distribution-spec conformance binary
         # The conformance package is a Ginkgo test suite (no main),
