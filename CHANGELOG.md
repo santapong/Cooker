@@ -54,6 +54,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Pipeline.version` typed. 18 new unit tests (starfield, choreography
   budget, geometry, store contract).
 
+### Added — frontend redesign, P3 run telemetry
+
+- **Run view** (`components/run/RunView` behind `RunPage` and
+  `DeploymentPage`): the constellation lit by the run — stars coloured by
+  stage status with live durations, edges lit as light passes, a comet
+  riding the hot edge (SMIL `animateMotion`, gated by `useMotionAllowed`;
+  reduced motion / Calm keep the static bright stroke). HUD shows elapsed
+  time, stage progress, the run status badge, Cancel while live, Re-run
+  when terminal, and an Editor link.
+- **Telemetry console**: collapsible bottom panel (40 % of the porthole)
+  showing run-level transitions, or the selected stage's logs via the
+  existing `useStageLogs` stream (runtime logs for compose services on the
+  deployment page), following the tail until the reader scrolls up.
+- **Stage inspector**: timing, error, artifacts, outputs, and approval-gate
+  Approve / Reject with a note (polls gate state), plus runtime status for
+  compose services on the deployment page.
+- `useRun` hook: snapshot + `/ws/pipeline-run/:runId` status frames +
+  3 s polling until terminal; pure `runState` helpers (edge light, progress,
+  durations, telemetry lines, status badge variants) with unit tests.
+- Deferred to P5: environment promotion / approval-promotion UI and AI
+  triage (both existed in the pre-reset run page).
+
 ### Fixed
 
 - **OCI conformance workflow** — `go test` path updated to

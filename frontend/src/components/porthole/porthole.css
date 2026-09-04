@@ -316,6 +316,10 @@
   animation: fade-in 160ms var(--ease-std) both;
 }
 
+/* comet — the light travelling a hot edge (SMIL motion, gated in the component) */
+.comet-core { fill: var(--ember); }
+.comet-glow { fill: rgba(224, 122, 31, 0.28); }
+
 /* ── tool tray ── */
 .tray {
   position: absolute;

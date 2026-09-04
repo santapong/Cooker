@@ -93,6 +93,8 @@ export interface PipelineRun {
   id: string;
   pipelineId: string;
   status: RunStatus;
+  createdAt?: string;
+  startedByEmail?: string;
   stageRuns: StageRun[];
   environmentStatuses: EnvironmentStatus[];
   variables: Record<string, string>;

@@ -10,6 +10,11 @@ no light toggle is wired). P1 landed the same day; P2 (porthole editor) landed 5
 `components/porthole/` (Porthole, Starfield, StarNode, ConstellationEdge) + `components/pipeline/`
 (PipelineCanvas, StageTray, StageInspector). The list→porthole shared-element transition
 (rung 3) waits for the P4 list thumbnails; P2 opens the porthole with a 320 ms CSS scale/fade.
+P3 (run telemetry) landed 5 Sep 2026 — `components/run/` (RunView, RunCanvas, TelemetryConsole,
+StageRunInspector), `hooks/useRun.ts`, `components/porthole/runState.ts`; RunPage and
+DeploymentPage are thin wrappers over RunView. The comet is SMIL `animateMotion` inside
+ConstellationEdge (1.2 s/edge), gated by `useMotionAllowed` — reduced motion / Calm show the
+static hot stroke. Environment promotion UI and AI triage are deferred to P5.
 Authored 28 Jul 2026 against the post-reset stubs (PR #150 / Phase 2 reset).
 Stack it lands on: React 18 + Vite, react-router 6, zustand, `@xyflow/react` 12,
 plain CSS in `frontend/src/index.css` (no CSS framework, no motion library — by design, see §4).
