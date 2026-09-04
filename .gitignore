@@ -28,3 +28,7 @@ frontend/dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Playwright (frontend/e2e)
+frontend/playwright-report/
+frontend/test-results/

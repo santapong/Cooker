@@ -36,7 +36,17 @@ graceful "not configured" states), Compose as a porthole constellation (`instrum
 series on hull-0, hairline axes, hover tooltip, table view; chart discipline per the dataviz
 method — single hue, one axis, no legend for one series), template + schedule forms,
 `run/PromotionPanel` (environment lanes: promote / approve) and AI triage in the stage inspector
-(capability-gated). P5 is complete; P6 (Playwright checks from §6) remains.
+(capability-gated). P5 is complete.
+P6 (verification) landed 5 Sep 2026 — `frontend/e2e/` Playwright suite (`npm run test:e2e`, CI
+gate in the frontend job): §6.1 reduced-motion substitution (porthole opens by opacity, no
+`transform` animates, entrances resolve to `fade-in`, no comet, opacity-only halo pulse), §6.2
+flash ceiling (twinkle ≥ 7 s, no infinite opacity loop > 3 Hz, halo ≥ 1 s, only ambient drift on
+`transform`), §6.3 focus lands on `h1.hud-title` after the list → porthole transition, Calm mode
+(stops drift/twinkle/comet, persists, restores), `will-change` hygiene, and an axe scan (no
+serious/critical) on list, editor, run and settings. The axe scan found `--ink-3` at 3.3:1 on
+12px labels; it is now `#808079` (4.9:1 on hull-0, 4.7:1 on hull-1). Open-time and CLS budgets
+run locally via `npm run test:e2e:perf`. All API calls are mocked (`e2e/fixtures/api.ts`); the
+suite serves the production build with `vite preview` on port 4620.
 Authored 28 Jul 2026 against the post-reset stubs (PR #150 / Phase 2 reset).
 Stack it lands on: React 18 + Vite, react-router 6, zustand, `@xyflow/react` 12,
 plain CSS in `frontend/src/index.css` (no CSS framework, no motion library — by design, see §4).
@@ -67,7 +77,7 @@ If a container can be removed without losing scanability, remove it.
   --hull-1:  #141416;   /* raised panel / card */
   --line:    rgba(255,255,255,.10);  /* hairlines */
   /* ink */
-  --ink-1:   #f2f2f0;   --ink-2: #a3a39c;   --ink-3: #66665f;
+  --ink-1:   #f2f2f0;   --ink-2: #a3a39c;   --ink-3: #808079;   /* ink-3 raised from #66665f in P6: AA on 12px labels */
   /* star states */
   --star-idle:    #d6d6d0;
   --star-running: #E07A1F;  /* ember — pulses; same hue as the accent */

@@ -37,8 +37,9 @@ describe('brand palette contrast', () => {
     expect(contrast(token('ink-2'), hull1)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('tertiary ink (small-caps labels, 12px) clears the large-text / UI floor', () => {
-    expect(contrast(token('ink-3'), hull0)).toBeGreaterThanOrEqual(3);
+  it('tertiary ink (small-caps labels, 12px) is AA on both hull surfaces', () => {
+    expect(contrast(token('ink-3'), hull0)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(token('ink-3'), hull1)).toBeGreaterThanOrEqual(4.5);
   });
 
   it('ember accent is AA as text and as a focus ring', () => {

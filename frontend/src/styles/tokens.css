@@ -16,7 +16,7 @@
   /* ink */
   --ink-1: #f2f2f0;
   --ink-2: #a3a39c;
-  --ink-3: #66665f;
+  --ink-3: #808079; /* 4.9:1 on hull-0, 4.7:1 on hull-1 — AA for the 12px small-caps labels (axe, P6) */
 
   /* accent — the only hue outside greyscale + semantic status */
   --ember:      #e07a1f;
@@ -28,7 +28,7 @@
   --star-running: var(--ember);
   --star-ok:      #7ee2a8;
   --star-fail:    #ff6b7a;
-  --star-queued:  #66665f;
+  --star-queued:  #66665f; /* decorative only (never text) */
 
   /* type — self-hosted, see fonts.css */
   --font-display: 'Space Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;

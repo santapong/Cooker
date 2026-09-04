@@ -104,32 +104,28 @@ export default function PipelineEditorPage() {
     }
   }, [pipeline, dirty, savePipeline, navigate]);
 
-  if (error) {
+  // One porthole frame for every state (error, loading, loaded) so the
+  // open animation plays once instead of replaying when data lands.
+  if (error || !loaded || !pipeline) {
     return (
       <div className="editor">
         <Porthole title={<Caps as="h2" className="hud-title">Porthole</Caps>}>
-          <div className="porthole-empty">
-            <div>
-              <ConstellationSketch className="chart-skeleton-static" />
-              <p>{error}</p>
-              <button type="button" className="hud-btn" onClick={() => navigate('/pipelines')}>
-                Back to pipelines
-              </button>
+          {error ? (
+            <div className="porthole-empty">
+              <div>
+                <ConstellationSketch className="chart-skeleton-static" />
+                <p>{error}</p>
+                <button type="button" className="hud-btn" onClick={() => navigate('/pipelines')}>
+                  Back to pipelines
+                </button>
+              </div>
             </div>
-          </div>
-        </Porthole>
-      </div>
-    );
-  }
-
-  if (!loaded) {
-    return (
-      <div className="editor">
-        <Porthole title={<Caps as="h2" className="hud-title">Porthole</Caps>}>
-          {showSkeleton && (
-            <div role="status" aria-live="polite" aria-label="Loading pipeline" className="porthole-empty">
-              <ConstellationSketch className="chart-skeleton" width={520} height={260} />
-            </div>
+          ) : (
+            showSkeleton && (
+              <div role="status" aria-live="polite" aria-label="Loading pipeline" className="porthole-empty">
+                <ConstellationSketch className="chart-skeleton" width={520} height={260} />
+              </div>
+            )
           )}
         </Porthole>
       </div>

@@ -36,6 +36,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Unit tests live under src/; e2e/ holds Playwright specs (own runner).
+    include: ['src/**/*.test.ts'],
     // Vitest stubs CSS imports to '' by default; the palette contrast test
     // (src/styles/tokens.test.ts) reads tokens.css via `?raw`, so let that
     // one file through Vite's asset pipeline.

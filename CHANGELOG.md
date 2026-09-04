@@ -143,8 +143,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failure") in the stage inspector when the capability is enabled.
 - Gauge primitive and chart styles in the global sheets.
 
+### Added — frontend redesign, P6 verification gate
+
+- **Playwright suite** (`frontend/e2e/`, `npm run test:e2e`) wired into the
+  CI frontend job against the production build served by `vite preview`,
+  every API call mocked from fixtures. It proves the motion system is not
+  harmful (spec §6): reduced-motion substitution (the porthole still opens by
+  opacity, nothing animates `transform`, entrances become fades, no comet,
+  opacity-only halo pulse), the flash ceiling (twinkle ≥ 7 s, no infinite
+  opacity loop above 3 Hz, halo ≥ 1 s), focus landing on the porthole heading
+  after the list → porthole transition, Calm mode stopping and restoring
+  ambient motion, `will-change` hygiene, and an axe-core scan of the list,
+  editor, run and settings pages with no serious/critical violations.
+  Open-time and CLS budgets live in a local-only `perf` project.
+- On failure CI uploads the Playwright HTML report as an artifact.
+
 ### Fixed
 
+- **Tertiary ink contrast**: `--ink-3` was 3.3:1 on 12px small-caps labels,
+  meta text and hints (found by the new axe gate); it is now `#808079`,
+  4.9:1 on the app background and 4.7:1 on panels.
 - **OCI conformance workflow** — `go test` path updated to
   `./internal/build/pusher/...` after the #153 package move (the step matched no
   packages since 12 Jul), and `TestPushConformance` now sets the config before
