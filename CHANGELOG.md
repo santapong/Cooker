@@ -120,6 +120,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Primitives: `Field`, `TextInput`, `TextArea`, `Select`, `Check`, `Panel`,
   `ConfirmButton`; form/panel/detail styles in the global sheet.
 
+### Added — frontend redesign, P5b instrument panels + analytics
+
+- **Instrument panels** (spec §5.C): Docker (images, containers with
+  stop/remove, networks and volumes with create/remove, gauge tiles),
+  Kubernetes (namespace picker, workloads with scale/restart, live refresh
+  from the watch socket, "cluster not reachable" panel with the hint),
+  Cloud (inventory + spend per provider, provider/type filters, refresh,
+  "inventory is off" panel). Compose parses a file on the build host and
+  shows its services as a constellation in the porthole with a service
+  inspector.
+- **Analytics** (spec §5.E): gauges for runs, success rate, median run and
+  stages; run duration over the last 30 runs (one ember series, hairline
+  axes, crosshair tooltip, failed runs marked red) and per-stage median
+  bars with a p95 tick; a table view of the same runs. Chart geometry
+  helpers unit-tested.
+- **Templates**: create (JSON schema validated client-side), enable/disable,
+  remove. **Schedules**: create (pipeline, cron, timezone), remove; the
+  scheduler-disabled error stays visible.
+- **Run page**: Promote panel with environment lanes — status per lane,
+  Promote here / Approve with confirmation; AI triage ("Explain this
+  failure") in the stage inspector when the capability is enabled.
+- Gauge primitive and chart styles in the global sheets.
+
 ### Fixed
 
 - **OCI conformance workflow** — `go test` path updated to

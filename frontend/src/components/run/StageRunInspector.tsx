@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Stage, StageApproval, StageRun } from '../../types/pipeline';
-import { runtimeApi, type ServiceRuntimeStatus } from '../../api/pipelines';
+import { pipelineApi, runtimeApi, type ServiceRuntimeStatus } from '../../api/pipelines';
+import { useCapabilitiesStore } from '../../stores/capabilitiesStore';
 import Badge from '../ui/Badge';
 import Caps from '../ui/Caps';
 import { formatDuration, stageDurationMs, statusVariant } from '../porthole/runState';
@@ -20,14 +21,37 @@ interface Props {
   onGate?: (kind: 'approve' | 'reject', note: string) => Promise<void>;
   /** Deployment view: the app whose compose service this stage deployed. */
   appId?: string;
+  /** Run coordinates for AI triage of a failed stage. */
+  pipelineId?: string;
+  runId?: string;
 }
 
 /** Right-hand inspector for a stage of a run: timing, error, artifacts, outputs, approval gate, runtime. */
-export default function StageRunInspector({ stage, stageRun, gate, now, onClose, onGate, appId }: Props) {
+export default function StageRunInspector({ stage, stageRun, gate, now, onClose, onGate, appId, pipelineId, runId }: Props) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<'approve' | 'reject' | null>(null);
   const [runtime, setRuntime] = useState<ServiceRuntimeStatus | null>(null);
+  const [triage, setTriage] = useState<{ advisory: string; model: string } | null>(null);
+  const [triaging, setTriaging] = useState(false);
+  const [triageError, setTriageError] = useState<string | null>(null);
+  const aiTriage = useCapabilitiesStore((s) => s.capabilities?.aiTriage ?? false);
   const service = stage.config.composeServiceName;
+  useEffect(() => {
+    setTriage(null);
+    setTriageError(null);
+  }, [stage.id, runId]);
+  const runTriage = async () => {
+    if (!pipelineId || !runId) return;
+    setTriaging(true);
+    setTriageError(null);
+    try {
+      setTriage(await pipelineApi.triageStage(pipelineId, runId, stage.id));
+    } catch (e) {
+      setTriageError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTriaging(false);
+    }
+  };
 
   useEffect(() => {
     setRuntime(null);
@@ -82,6 +106,26 @@ export default function StageRunInspector({ stage, stageRun, gate, now, onClose,
       </div>
 
       {stageRun?.error && <div className="inspector-error">{stageRun.error}</div>}
+      {aiTriage && stageRun?.status === 'failed' && pipelineId && runId && (
+        <div className="field">
+          <Caps>Triage</Caps>
+          {triage ? (
+            <>
+              <p style={{ whiteSpace: 'pre-wrap' }}>{triage.advisory}</p>
+              <span className="mono" style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                {triage.model}
+              </span>
+            </>
+          ) : (
+            <div className="gate-actions">
+              <button type="button" className="hud-btn" onClick={runTriage} disabled={triaging}>
+                {triaging ? 'Analysing…' : 'Explain this failure'}
+              </button>
+            </div>
+          )}
+          {triageError && <div className="inspector-error">{triageError}</div>}
+        </div>
+      )}
 
       {awaiting && (
         <div className="field">

@@ -30,8 +30,13 @@ arm for 3 s instead of opening a browser dialog), AppDetailPage (deploy → foll
 into the porthole, history + rollback, webhook secret, drift, rollout strategy + canary
 promote/abort), SettingsPage (640px column: interface, secrets probe, registries, clusters, API
 tokens, license), and create/remove forms on Environments, Hosts, Notifications and Registry.
-Remaining for P5b: Docker / Compose / Kubernetes / Cloud instrument panels, Analytics charts,
-template + schedule forms, environment promotion and AI triage on the run page.
+P5b landed the same day — instrument panels (Docker, Kubernetes, Cloud: gauge tiles + panels,
+graceful "not configured" states), Compose as a porthole constellation (`instruments/ComposeCanvas`
++ `composeLayout`), Analytics (`instruments/RunDurationChart`, `StageDurationChart`: one ember
+series on hull-0, hairline axes, hover tooltip, table view; chart discipline per the dataviz
+method — single hue, one axis, no legend for one series), template + schedule forms,
+`run/PromotionPanel` (environment lanes: promote / approve) and AI triage in the stage inspector
+(capability-gated). P5 is complete; P6 (Playwright checks from §6) remains.
 Authored 28 Jul 2026 against the post-reset stubs (PR #150 / Phase 2 reset).
 Stack it lands on: React 18 + Vite, react-router 6, zustand, `@xyflow/react` 12,
 plain CSS in `frontend/src/index.css` (no CSS framework, no motion library — by design, see §4).

@@ -41,8 +41,11 @@ export const pipelineApi = {
     ),
   analytics: (pipelineId: string, runs = 30) =>
     get<PipelineAnalytics>(`/pipelines/${pipelineId}/analytics?runs=${runs}`),
+  // The backend wraps the lanes: { runId, statuses: [...] }.
   envStatus: (pipelineId: string, runId: string) =>
-    get<EnvironmentStatus[]>(`/pipelines/${pipelineId}/runs/${runId}/env-status`),
+    get<{ runId: string; statuses: EnvironmentStatus[] } | EnvironmentStatus[]>(`/pipelines/${pipelineId}/runs/${runId}/env-status`).then((r) =>
+      Array.isArray(r) ? r : (r?.statuses ?? []),
+    ),
   // Approval-gate stages (StageTypeApproval). The run page polls
   // stageApprovals to find paused stages, then approves/rejects them.
   stageApprovals: (pipelineId: string, runId: string) =>

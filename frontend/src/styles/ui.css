@@ -194,3 +194,22 @@ select.input { appearance: none; padding-right: 28px; background-image: linear-g
 .detail-meta { display: flex; gap: var(--sp-3); flex-wrap: wrap; font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); }
 .detail-meta a { color: var(--ink-2); }
 .detail-meta a:hover { color: var(--ember); }
+
+/* ── instrument gauges ── */
+.gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); }
+.gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  background: var(--hull-1);
+}
+.gauge-value { font-size: var(--fs-4); font-weight: 500; color: var(--ink-1); line-height: 1.2; }
+.gauge-sub { font-size: 12px; color: var(--ink-3); }
+.gauge-ok .gauge-value { color: var(--star-ok); }
+.gauge-fail .gauge-value { color: var(--star-fail); }
+.gauge-ember .gauge-value { color: var(--ember); }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.filters .hud-btn[aria-pressed='true'] { color: var(--ember); border-color: var(--ember-line); background: var(--ember-soft); }

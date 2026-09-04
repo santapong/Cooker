@@ -8,6 +8,7 @@ import Caps from '../ui/Caps';
 import RunCanvas from './RunCanvas';
 import TelemetryConsole from './TelemetryConsole';
 import StageRunInspector from './StageRunInspector';
+import PromotionPanel from './PromotionPanel';
 import { useRun } from '../../hooks/useRun';
 import { useStageLogs } from '../../hooks/useStageLogs';
 import { useRuntimeLogs } from '../../hooks/useRuntimeLogs';
@@ -40,6 +41,7 @@ export default function RunView({ pipelineId, runId, heading, app }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(true);
   const [consoleMode, setConsoleMode] = useState<'stage' | 'runtime'>('stage');
+  const [promotion, setPromotion] = useState(false);
   const [busy, setBusy] = useState<'cancel' | 'rerun' | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -60,8 +62,12 @@ export default function RunView({ pipelineId, runId, heading, app }: Props) {
   useEffect(() => {
     setSelectedId(null);
     setConsoleMode('stage');
+    setPromotion(false);
   }, [runId]);
 
+  useEffect(() => {
+    if (selectedId) setPromotion(false);
+  }, [selectedId]);
   const byId = useMemo(() => stageRunMap(run), [run]);
   const selectedStage = selectedId ? (pipeline?.stages.find((s) => s.id === selectedId) ?? null) : null;
   const selectedRun = selectedId ? byId.get(selectedId) : undefined;
@@ -177,6 +183,19 @@ export default function RunView({ pipelineId, runId, heading, app }: Props) {
                   {busy === 'rerun' ? 'Starting…' : '▶ Re-run'}
                 </button>
               )}
+              {!app && (
+                <button
+                  type="button"
+                  className="hud-btn"
+                  aria-pressed={promotion}
+                  onClick={() => {
+                    setPromotion((v) => !v);
+                    setSelectedId(null);
+                  }}
+                >
+                  Promote
+                </button>
+              )}
               <Link className="hud-btn hud-link" to={`/pipelines/${pipelineId}/edit`}>
                 Editor
               </Link>
@@ -240,8 +259,11 @@ export default function RunView({ pipelineId, runId, heading, app }: Props) {
             onClose={() => setSelectedId(null)}
             onGate={onGate}
             appId={app?.id}
+            pipelineId={pipelineId}
+            runId={runId}
           />
         )}
+        {promotion && !selectedStage && <PromotionPanel pipelineId={pipelineId} runId={runId} terminal={terminal} onClose={() => setPromotion(false)} />}
       </Porthole>
     </div>
   );
