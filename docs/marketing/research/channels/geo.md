@@ -134,7 +134,7 @@ Same structure as above, plus the full README comparison table, the feature matr
 
 | Corpus | Why it matters | Action | Owner | Timing |
 |--------|----------------|--------|-------|--------|
-| **GitHub README `Topics`** | GitHub is a primary training source for code-focused LLMs | Set topics: `ci`, `cd`, `pipeline`, `kubernetes`, `docker`, `oci`, `golang`, `react`, `self-hosted`, `dag-editor` | maintainer | Before launch |
+| **GitHub README `Topics`** | GitHub is a primary training source for code-focused LLMs | Set all 20 topics (defined 4 Sep 2026): `ci`, `cd`, `cicd`, `continuous-integration`, `continuous-deployment`, `devops`, `self-hosted`, `pipeline`, `dag`, `dag-editor`, `kubernetes`, `docker`, `oci`, `kaniko`, `buildkit`, `helm`, `golang`, `react`, `containers`, `deployment`. About description: "Open-source, self-hosted CI/CD with a visual drag-drop DAG pipeline editor. Builds OCI images without docker.sock (Kaniko, BuildKit, Buildah) and deploys to Kubernetes, AWS ECS, Cloud Run, Fly.io and Render. Single Go binary, Apache-2.0, no SaaS, no agents." Website field stays empty until a docs site exists | maintainer | Before launch |
 | **awesome-selfhosted** | Widely scraped; appears in most "self-hosted X" answers | Submit PR with factual description matching the canonical sentence | maintainer | Week 3 (post-launch) |
 | **awesome-ci-cd** (ligurio/awesome-ci) | Direct corpus for CI/CD queries | Submit PR | maintainer | Week 3 |
 | **awesome-go** | Go-community credibility; feeds Go-aware LLMs | Submit PR | maintainer | Week 3 |

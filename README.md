@@ -6,7 +6,7 @@
 
 *Drag stages onto a canvas. Wire them into a DAG. Ship to production.*
 
-[![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?logo=go&logoColor=white)](https://golang.org/dl/)
+[![Go Version](https://img.shields.io/badge/go-1.25+-00ADD8?logo=go&logoColor=white)](https://golang.org/dl/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/santapong/Cooker/actions/workflows/ci.yml/badge.svg)](https://github.com/santapong/Cooker/actions/workflows/ci.yml)
 [![OCI Conformance](https://github.com/santapong/Cooker/actions/workflows/oci-conformance.yml/badge.svg)](https://github.com/santapong/Cooker/actions/workflows/oci-conformance.yml)
@@ -373,7 +373,7 @@ curl localhost:8080/health/ready
 | Layer | Tech |
 |-------|------|
 | **Frontend** | React 18 + TypeScript + React Flow + Zustand + Vite |
-| **Backend** | Go 1.22+ · Gin · Docker SDK · client-go · go-containerregistry |
+| **Backend** | Go 1.25+ · Gin · Docker SDK · client-go · go-containerregistry |
 | **State** | PostgreSQL 14+ (pipelines, runs, envs, apps) |
 | **Cache / pub-sub** | Redis 7+ (rate limit, WS tickets, broadcast hub) |
 | **Container** | Multi-stage Alpine, non-root UID 65532, distroless-style |
