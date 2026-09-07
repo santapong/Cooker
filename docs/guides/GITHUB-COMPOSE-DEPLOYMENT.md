@@ -1,6 +1,6 @@
 # GitHub Compose deployment — UAT candidate
 
-Implemented locally for the 6 September 2026 Cooker change. Human acceptance,
+Implemented in `develop` at `6d6ca01` for the 6 September 2026 Cooker change; unreleased. Human acceptance,
 connection to a real GitHub App installation, and live cloud deployment remain
 pending. The automated evidence below uses repository fixtures, local service
 emulation and disposable PostgreSQL.
@@ -22,6 +22,11 @@ across browsers. It stores the current reviewed source revision, files, profiles
 prefix and bindings. Browser-local file references remain available beside it.
 This is not an OCI Compose artifact publisher or an immutable revision archive.
 
+![Five steps from repository selection to a saved review](../images/compose-workflow.svg)
+
+See also [Compose library and registries](../user-guide/guides/compose-library.md)
+and the [execution architecture](../reference/github-compose-architecture.md).
+
 ## Operator setup
 
 ### Source builds and persistence
@@ -37,6 +42,14 @@ COOKER_BUILDER=docker
 COOKER_PUSHER=docker
 COOKER_REGISTRY=registry.example.com/team
 ```
+
+**Dev/UAT source-build path:** `COOKER_ENV=production` rejects the Docker builder
+and Docker pusher in `Config.Validate`. The current GitHub source-build handoff
+therefore cannot run under production-mode validation. Keep that guard in place;
+a production-compatible App build handoff remains work to complete and accept.
+The bundled image includes Docker CLI but does not install the Compose v2 plugin;
+verify `docker compose version` in the backend environment before native Docker
+Compose deployment, and supply the plugin in your operator-managed image.
 
 Install Git, Docker CLI and Compose v2 in the backend environment, with access to
 the intended Docker daemon. Cooker's Docker CLI must already have registry push
@@ -110,6 +123,11 @@ AWS distinguishes [ECS compute options](https://docs.aws.amazon.com/AmazonECS/la
 this release implements Fargate containers rather than VM provisioning.
 
 ## Example: GitHub API on ECS, database on GCP
+
+![Source review, image build/push, existing ECS Fargate compute and external Cloud SQL](../images/github-compose.svg)
+
+[Open the interactive architecture](../images/github-compose.html). This is an
+implementation map; live account/network acceptance has not been completed.
 
 For a repository with `deploy/compose.yaml`, `api/`, and
 `docker/api.Dockerfile`, a starting configuration is:

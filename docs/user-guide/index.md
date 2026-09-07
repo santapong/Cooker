@@ -1,39 +1,45 @@
 # Cooker user guide
 
-Cooker is a self-hosted CI/CD tool. You author pipelines as a graph in the browser, Cooker builds OCI-compliant container images, pushes them to a registry, and deploys to Kubernetes (or Cloud Run, ECS, Fly, Render). The whole server is a single Go binary that also serves the React frontend on one port.
+Cooker provides visual pipelines and reviewed GitHub Compose deployments. Its Go
+server serves the API and React frontend on port 8080. The current September
+`develop` candidate is ready for UAT; live GitHub and cloud acceptance are pending.
 
-## The 60-second pitch
-
-- **Visual pipeline editor.** Drag stages onto a canvas, connect them, hit Run. No YAML, no DSL (yet — see the [roadmap](https://github.com/santapong/cooker/blob/main/docs/roadmap-2026.md)).
-- **OCI native.** Builds produce OCI v1.1 manifests; pushes use the distribution-spec; the referrers API is supported for supply-chain metadata.
-- **Apps, not just pipelines.** An "App" is a higher-level shortcut: point at a GitHub repo, pick a deploy target, click Deploy. Cooker synthesises a Clone -> Build -> Push -> Deploy run.
-- **One binary.** API, frontend, migrations, and OIDC client all ship in one container.
-- **Pluggable backends.** Builders (`docker` / `kaniko` / `buildah` / `buildkit`), pushers (`docker` / `crane`), deployers (`kubectl` / `clientgo`), secrets (`database` / `keepsave` / `vault` / `aws` / `gcp`), deploy targets (Kubernetes / Cloud Run / ECS / Fly / Render). Selected at boot via env vars.
+![Repository selection, Compose files, preview, destination and review](../images/compose-workflow.svg)
 
 ## Where to start
 
-| You are… | Read |
+| You want to… | Read |
 |---|---|
-| The operator about to `docker compose up` for the first time | [Quickstart](getting-started/quickstart.md) |
-| The operator preparing a production install | [Helm install](getting-started/helm-install.md), then [Auth & RBAC](operations/auth-and-rbac.md) |
-| A developer who wants to build and deploy an App | [Your first pipeline](guides/first-pipeline.md) |
-| An SRE wiring observability | [Observability](operations/observability.md) |
-| Debugging | [Troubleshooting](operations/troubleshooting.md) |
+| Explore Cooker locally or start a real UAT stack | [Quickstart](getting-started/quickstart.md) |
+| Import Compose from GitHub and deploy a reviewed revision | [GitHub Compose deployment](../guides/GITHUB-COMPOSE-DEPLOYMENT.md) |
+| Understand Apps, Pipelines and Environments | [Product concepts](concepts/apps.md) |
+| Save and reopen Compose stacks | [Compose library and registries](guides/compose-library.md) |
+| Author a custom stage graph | [Your first pipeline](guides/first-pipeline.md) |
+| Configure targets | [Hosts and targets](concepts/hosts-and-targets.md) |
+| Prepare a production installation | [Helm install](getting-started/helm-install.md) and [Auth & RBAC](operations/auth-and-rbac.md) |
+| Configure logs, metrics and tracing | [Observability](operations/observability.md) |
+| Diagnose a problem | [Troubleshooting](operations/troubleshooting.md) |
 
-## What this guide is and isn't
+## Current App contract
 
-This is the **end-user operational** guide. It covers install, configuration, day-2 operations, and authoring pipelines.
+The import wizard discovers Compose files and Dockerfiles before deployment,
+resolves ordered overrides/profiles, and saves a full Git SHA with your prefix and
+bindings. Deployment starts from the App page. Reviewed Compose Apps require
+explicit reinspection for source updates and use manual deployment.
 
-It does NOT cover:
+Source builds require Docker builder + Docker pusher today. Production-mode
+validation rejects both, so this App path is for dev/UAT. Image-only plans and
+separately authored pipelines still have their own target/configuration checks.
+The presence of an adapter does not establish support for every Compose feature.
 
-- **Contributor docs.** See [`docs/design.md`](../reference/design.md) for architecture-level patterns, layering rules, and the new-feature checklist.
-- **Security policy / threat model.** See [`SECURITY.md`](../../SECURITY.md). Where this guide and `SECURITY.md` overlap, `SECURITY.md` is authoritative.
-- **Marketing.** See [`docs/marketing/strategy.md`](../marketing/strategy.md).
+For ECS plus Cloud SQL, provision infrastructure, database access and networking
+separately. Cooker maps an existing external database into the application's
+Environment keys; live cross-cloud acceptance remains to be completed.
 
-## Stability notice
+## Documentation scope
 
-Cooker is pre-1.0. Treat every minor version as potentially breaking until [`UPGRADING.md`](https://github.com/santapong/cooker/blob/main/CHANGELOG.md) is stable (tracked under shipping-go 30-90d in the [roadmap](https://github.com/santapong/cooker/blob/main/docs/roadmap-2026.md)). Where a feature in this guide is incomplete, it is called out inline with a note like:
-
-> **Partial.** This works for X but does not yet do Y. Tracked in the roadmap as [item ID].
-
-When in doubt, [the roadmap](https://github.com/santapong/cooker/blob/main/docs/roadmap-2026.md) and [backlog](https://github.com/santapong/cooker/blob/main/backlog.md) are the honest list of what isn't done.
+This is the user/operator guide. Contributor architecture lives in the
+[system design](../system-design/README.md) and [execution reference](../reference/github-compose-architecture.md).
+See [SECURITY.md](../../SECURITY.md) for vulnerability reporting and security
+policy. Cooker is pre-1.0; check the [changelog](../../CHANGELOG.md) before upgrading
+and use the [UAT runbook](../guides/UAT.md) to accept the behavior you depend on.

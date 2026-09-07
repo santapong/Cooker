@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — reviewed GitHub Compose deployments (6 September 2026)
+
+- Five-step import flow: repository, Compose files, preview, destination and
+  review. Supports administrator-approved GitHub App installations, public repo
+  entry, recursive Compose discovery, ordered overrides, profiles and explicit
+  interpolation inputs.
+- Commit-pinned preview with Dockerfile/context/target details, service and build
+  dependencies, masked configuration, and target compatibility diagnostics.
+- Deployment prefixes and Environment-key bindings to existing Cloud SQL or
+  external databases. Bound database services are excluded from build/runtime.
+- Server-backed GitHub stack catalogue beside the browser-local Compose library.
+  Saved file references support naming, search, reopen and forget.
+- Distinct DAG symbols for stage types and external databases across editor,
+  preview and run views; responsive import review and keyboard focus handling.
+- PostgreSQL migration `027_app_prefix` enforces explicit prefix uniqueness per
+  target scope without changing legacy apps that have no explicit prefix.
+
+### Changed — explicit App deployment contracts
+
+- Preview and execution share the Compose loader. Reviewed Apps retain a full
+  commit SHA, use manual deployment and require reinspection for branch updates.
+- App execution dispatches explicitly to native Docker Compose, Kubernetes,
+  configured ECS Fargate or Cloud Run. Unavailable targets, no-op backends and
+  unsupported fields fail instead of silently using Kubernetes.
+- GitHub source builds require Docker builder + Docker pusher today. Production
+  validation forbids both; this source-build path remains a dev/UAT candidate.
+- ECS waits for service stability and verifies the deployed image. Docker Compose
+  uses project-scoped names, service DNS, named volumes and readiness waiting.
+- External database bindings override local Compose connection variables for the
+  selected consumers. They do not provision databases, credentials or networking.
+
+### Security — source and execution boundaries
+
+- GitHub checkout uses short-lived contents-read tokens scoped to an approved
+  installation and repository. Tokens stay out of checkout URLs and arguments.
+- Repository paths are checked through symlinks. Generated runtime Compose files
+  stay outside build contexts, use private permissions and are removed after use.
+- Persisted deployment graphs mask values and are review-only; rerun deployments
+  through the App so redacted data cannot become executable configuration.
+
+### Documentation — September 2026 refresh
+
+- Updated README, quickstart, product overview, App concepts and documentation
+  navigation; added Compose library and execution architecture references.
+- Added scalable stage/workflow SVGs and a source-linked architecture SVG with an
+  interactive HTML companion and regeneration instructions.
+- Corrected the default dev URL to port 8080, removed blanket production-readiness
+  claims, and documented source-build and infrastructure prerequisites.
+
+**Validation and release scope:** the implementation record includes 178 frontend
+unit tests, 32 browser checks, backend race tests and a disposable PostgreSQL
+migration/persistence check. It also records 31 Go lint findings in unchanged
+files. Live GitHub and AWS-to-GCP acceptance remain pending. No release, VM or
+Cloud SQL provisioning is implied. See the [setup/UAT guide](docs/guides/GITHUB-COMPOSE-DEPLOYMENT.md)
+and [verification record](docs/plans/2026-09-06-github-compose-deployment.md#verification-record).
+
 ### Added — compose service edits persist to the file
 
 - `PUT /docker/compose/services/:name` now rewrites the service in the compose
@@ -36,8 +92,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepts — with dirty tracking, Reset, inline validation of `KEY=value` lines and
   an inline server error; group and resource limits are shown read-only. The store
   mirrors an accepted patch into the loaded graph instead of re-parsing the file.
-  Known gap: the backend handler acknowledges the patch without writing it back to
-  the compose file (tracked in `backlog.md`).
+  The initial backend persistence gap was closed by the Compose file-write change
+  recorded above.
 - **Airlock verified signed-out** via Playwright (`e2e/airlock.spec.ts`): sign-in
   with both methods, sign-up via the card link, the protected-route bounce and
   return after local sign-in, reduced-motion substitution of the card rise. axe
