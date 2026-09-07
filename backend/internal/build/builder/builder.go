@@ -26,6 +26,7 @@ type Request struct {
 	Tags []string
 	// BuildArgs are forwarded as --build-arg.
 	BuildArgs map[string]string
+	Target    string
 	// Platforms enables multi-arch builds via OCI image index.
 	// Empty falls back to the builder's default.
 	Platforms []string

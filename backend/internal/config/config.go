@@ -61,6 +61,7 @@ type Config struct {
 	AWSSecrets        AWSSecretsConfig
 	GCPSecrets        GCPSecretsConfig
 	DeployTargets     DeployTargetsConfig
+	GitHubApp         GitHubAppConfig
 	CloudInventory    CloudInventoryConfig
 	Audit             AuditConfig
 	Observability     ObservabilityConfig
@@ -326,6 +327,13 @@ type DeployTargetsConfig struct {
 	RenderOwnerID     string
 }
 
+type GitHubAppConfig struct {
+	ID              string
+	Slug            string
+	PrivateKeyFile  string
+	InstallationIDs []string
+}
+
 // CloudInventoryConfig configures the read-only cloud inventory & cost
 // panel (OR-2). Each provider is enabled independently; when neither is
 // enabled the feature is dormant (the GET endpoints return 200 with
@@ -481,6 +489,12 @@ func Load() *Config {
 		GCPSecrets: GCPSecretsConfig{
 			ProjectID: getEnv("COOKER_SECRETS_GCP_PROJECT_ID", ""),
 			Prefix:    getEnv("COOKER_SECRETS_GCP_PREFIX", "cooker"),
+		},
+		GitHubApp: GitHubAppConfig{
+			ID:              getEnv("COOKER_GITHUB_APP_ID", ""),
+			Slug:            getEnv("COOKER_GITHUB_APP_SLUG", ""),
+			PrivateKeyFile:  getEnv("COOKER_GITHUB_APP_PRIVATE_KEY_FILE", ""),
+			InstallationIDs: getEnvCSV("COOKER_GITHUB_INSTALLATION_IDS", nil),
 		},
 		DeployTargets: DeployTargetsConfig{
 			CloudRunProject:   getEnv("COOKER_DEPLOY_CLOUDRUN_PROJECT", ""),

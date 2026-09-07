@@ -68,7 +68,7 @@ func CheckDrift(ctx context.Context, kc KubeWorkloadGetter, deploys store.AppDep
 		return out
 	}
 
-	wl, err := kc.GetWorkload(ctx, app.DeployTarget.Namespace, "deployment", sanitize(app.Name))
+	wl, err := kc.GetWorkload(ctx, app.DeployTarget.Namespace, "deployment", AppPrefix(app))
 	if err != nil {
 		if errors.Is(err, kube.ErrUnavailable) {
 			out.Message = "cluster unreachable"

@@ -1,6 +1,8 @@
 export interface ComposeBuild {
+  target?: string;
   context: string;
   dockerfile: string;
+  args?: Record<string, string>;
 }
 
 /** CPU / memory limits as parsed from `deploy.resources.limits` (or `mem_limit` / `cpus`). */
@@ -26,6 +28,9 @@ export interface ComposeService {
   /** Deployment group-box: `com.cooker.group` label → single network → "default". */
   group?: string;
   resources?: ComposeResourceLimits;
+  external?: boolean;
+  runtimeSize?: string;
+  healthcheck?: { command: string[]; interval: number; timeout: number; retries: number; startPeriod: number };
 }
 
 /** The fields `PUT /docker/compose/services/:name` accepts. */

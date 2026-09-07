@@ -18,6 +18,9 @@ import (
 )
 
 func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
+	if stage.Config.ReviewOnly {
+		return fmt.Errorf("use App Deploy to resolve this saved deployment graph")
+	}
 	logs := newCappedBuffer(stageLogCap)
 	// LogWriter receives the on-disk capture by default. When a
 	// broadcaster is wired (production wiring via WithLogBroadcaster),
@@ -41,6 +44,7 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 		Dockerfile: stage.Config.Dockerfile,
 		Tags:       stage.Config.Tags,
 		BuildArgs:  stage.Config.BuildArgs,
+		Target:     stage.Config.BuildTarget,
 		Platforms:  stage.Config.Platforms,
 		LogWriter:  writer,
 		Cache:      builderCacheSpec(stage.Config.Cache),
@@ -268,6 +272,28 @@ func (e *Executor) executePush(ctx context.Context, runID string, stage *model.S
 }
 
 func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
+	if stage.Config.ReviewOnly {
+		return fmt.Errorf("use App Deploy to resolve this saved deployment graph")
+	}
+	if stage.Config.DeployRuntime == "ecs" || stage.Config.DeployRuntime == "cloud-run" {
+		logs := newCappedBuffer(stageLogCap)
+		var writer io.Writer = logs
+		lw := e.newStageLineWriter(runID, stage)
+		if lw != nil {
+			writer = io.MultiWriter(logs, lw)
+		}
+		defer func() {
+			if lw != nil {
+				lw.flush()
+			}
+			sr.Logs = logs.String()
+		}()
+		if err := e.executeCloudDeploy(ctx, stage, writer); err != nil {
+			return err
+		}
+		sr.Artifacts = append(sr.Artifacts, model.Artifact{Type: "cloud-service", Ref: stage.Config.DeployRuntime + "/" + stage.Config.RuntimeName})
+		return nil
+	}
 	// Select the deployer + request kind. DeployRuntime (set by compose
 	// per-service synthesis) routes docker/compose stages to the Docker
 	// deployers; everything else keeps the legacy manifest/helm dispatch
@@ -285,7 +311,7 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 		if e.composeDeployer != nil {
 			dep = e.composeDeployer
 		}
-	default:
+	case "", "kubernetes":
 		switch {
 		case stage.Config.HelmChart != "":
 			kind = deployer.KindHelm
@@ -294,6 +320,8 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 		default:
 			return fmt.Errorf("deploy stage %q: need ManifestPath or HelmChart", stage.Name)
 		}
+	default:
+		return fmt.Errorf("unsupported deployment runtime %q", stage.Config.DeployRuntime)
 	}
 
 	// Mirror executeBuild's LogWriter wiring (see executor.go executeBuild
@@ -336,7 +364,10 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 	case deployer.KindDockerRun:
 		// Per-service docker run: name from the compose service, with
 		// resource limits and the build/image tag from the stage.
-		req.Name = stage.Config.ComposeServiceName
+		req.Name = stage.Config.RuntimeName
+		if req.Name == "" {
+			req.Name = stage.Config.ComposeServiceName
+		}
 		req.Ports = composePortsToPublish(stage.Config)
 		req.Env = stage.Config.Env
 		if r := stage.Config.Resources; r != nil {
@@ -346,7 +377,7 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 		// ProxyHost becomes Traefik router labels + the shared proxy
 		// network, so the container is routable at http(s)://ProxyHost.
 		if host := stage.Config.ProxyHost; host != "" {
-			router := sanitize(stage.Config.ComposeServiceName)
+			router := sanitize(req.Name)
 			if router == "" {
 				router = sanitize(stage.Name)
 			}
@@ -357,6 +388,10 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 		}
 	case deployer.KindCompose:
 		req.Name = stage.Config.ComposeServiceName
+		if stage.Config.ComposeProject != "" {
+			req.Name = stage.Config.ComposeProject
+			req.ComposeService = stage.Config.ComposeServiceName
+		}
 		req.ComposeFile = stage.Config.ManifestPath // reused field: compose-file path
 	}
 	res, err := dep.Deploy(ctx, req)

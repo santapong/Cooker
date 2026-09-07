@@ -18,6 +18,7 @@ import (
 	"github.com/santapong/cooker/internal/scheduler"
 	"github.com/santapong/cooker/internal/secrets"
 	"github.com/santapong/cooker/internal/service"
+	"github.com/santapong/cooker/internal/source/github"
 	"github.com/santapong/cooker/internal/store"
 	"github.com/santapong/cooker/internal/templates"
 )
@@ -117,7 +118,8 @@ type Handler struct {
 	Triage TriageRunner
 	// AppDetector backs POST /apps/detect-build (New-App wizard recipe
 	// suggestion). Set by server.New; nil returns 503.
-	AppDetector *service.AppDetector
+	AppDetector  *service.AppDetector
+	GitHubSource *github.AppClient
 	// Feedback relays in-app feedback to GitHub issues (pure relay —
 	// nothing is persisted). Set by server.New when
 	// COOKER_FEEDBACK_GITHUB_TOKEN is non-empty; nil keeps the route

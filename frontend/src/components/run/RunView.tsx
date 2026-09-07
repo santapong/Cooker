@@ -178,7 +178,7 @@ export default function RunView({ pipelineId, runId, heading, app }: Props) {
                   {busy === 'cancel' ? 'Cancelling…' : 'Cancel'}
                 </button>
               )}
-              {terminal && (
+              {terminal && !app && (
                 <button type="button" className="hud-btn hud-btn-primary" onClick={rerun} disabled={busy !== null}>
                   {busy === 'rerun' ? 'Starting…' : '▶ Re-run'}
                 </button>
@@ -196,14 +196,15 @@ export default function RunView({ pipelineId, runId, heading, app }: Props) {
                   Promote
                 </button>
               )}
-              <Link className="hud-btn hud-link" to={`/pipelines/${pipelineId}/edit`}>
-                Editor
+              <Link className="hud-btn hud-link" to={app ? `/apps/${app.id}` : `/pipelines/${pipelineId}/edit`}>
+                {app ? 'App settings' : 'Editor'}
               </Link>
             </div>
           </>
         }
       >
         <div className={consoleOpen ? 'run-canvas console-open' : 'run-canvas'}>
+          {pipeline.stages.length === 0 && <div className="porthole-empty" role="status"><p>{terminal ? run.error || 'Source inspection ended before a deployment graph was created.' : 'Inspecting the source revision… The deployment graph will appear here.'}</p></div>}
           <ReactFlowProvider>
             <SceneContext.Provider value={scene}>
               <RunCanvas pipeline={pipeline} run={run} onSelect={setSelectedId} layoutKey={consoleOpen ? 'open' : 'closed'} />

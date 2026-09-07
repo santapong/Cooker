@@ -3,6 +3,7 @@ import { usePipelineStore } from '../../stores/pipelineStore';
 import type { Stage, StageConfig } from '../../types/pipeline';
 import Badge from '../ui/Badge';
 import Caps from '../ui/Caps';
+import StageSymbol from './StageSymbol';
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -117,6 +118,7 @@ export default function StageInspector() {
   return (
     <aside className="inspector" aria-label={`Stage ${stage.name}`}>
       <div className="inspector-head">
+        <StageSymbol kind={stage.type} />
         <Badge variant="muted">{stage.type}</Badge>
         <span className="spacer" />
         <button type="button" className="inspector-close" onClick={() => setSelectedNode(null)} aria-label="Close inspector">

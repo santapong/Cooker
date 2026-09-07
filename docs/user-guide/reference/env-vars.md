@@ -139,9 +139,26 @@ Every Cooker configuration variable. Generated from `backend/internal/config/con
 | `COOKER_SECRETS_GCP_PROJECT_ID` | empty | GCP project ID. Required when backend=gcp. | `config.go:323` |
 | `COOKER_SECRETS_GCP_PREFIX` | `cooker` | Secret name prefix: `<prefix>__<envID>__<key>`. | `config.go:324` |
 
+## GitHub repository connection
+
+These server-only settings enable the shared GitHub App installation/repository
+picker. Empty settings retain manual public-repository input. See the
+[setup guide](../../guides/GITHUB-COMPOSE-DEPLOYMENT.md#github-app).
+
+| Variable | Default | Description |
+|---|---|---|
+| `COOKER_GITHUB_APP_ID` | empty | GitHub App numeric ID. |
+| `COOKER_GITHUB_APP_SLUG` | empty | App slug used by the Connect GitHub installation link. |
+| `COOKER_GITHUB_APP_PRIVATE_KEY_FILE` | empty | Readable RSA PEM key mounted in the backend. |
+| `COOKER_GITHUB_INSTALLATION_IDS` | empty (CSV) | Administrator-approved installation IDs exposed to workspace operators. |
+
 ## Deploy targets
 
-Each cloud deploy target self-registers when its required config is non-empty.
+Each cloud deploy target self-registers when its registration config is non-empty.
+The App capability check separately validates deployment prerequisites; registration
+alone is insufficient. Source-build Apps require `COOKER_BUILDER=docker` and
+`COOKER_PUSHER=docker`. ECS and Cloud Run use explicit App dispatch; other adapter
+kinds are outside the current GitHub Compose flow.
 
 ### Cloud Run
 

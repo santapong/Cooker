@@ -4,6 +4,7 @@ import { pipelineApi, runtimeApi, type ServiceRuntimeStatus } from '../../api/pi
 import { useCapabilitiesStore } from '../../stores/capabilitiesStore';
 import Badge from '../ui/Badge';
 import Caps from '../ui/Caps';
+import StageSymbol from '../pipeline/StageSymbol';
 import { formatDuration, stageDurationMs, statusVariant } from '../porthole/runState';
 
 function clock(iso: string | null | undefined): string | null {
@@ -86,6 +87,7 @@ export default function StageRunInspector({ stage, stageRun, gate, now, onClose,
     <aside className="inspector" aria-label={`Stage ${stage.name}`}>
       <div className="inspector-head">
         <div className="inspector-status">
+          <StageSymbol kind={stage.type} />
           <Badge variant="muted">{stage.type}</Badge>
           <Badge variant={statusVariant(stageRun?.status)}>{stageRun?.status ?? 'not run'}</Badge>
         </div>

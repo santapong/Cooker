@@ -93,6 +93,7 @@ jobs:
         working-directory: backend
         env:
           DATABASE_URL: postgres://cooker:cooker@localhost:5432/cooker_test?sslmode=disable
+          COOKER_INTEGRATION_DATABASE_URL: postgres://cooker:cooker@localhost:5432/cooker_test?sslmode=disable
         run: |
           # Run all packages in one invocation so go test can parallelise
           # across packages (bounded by GOMAXPROCS). The race detector stays

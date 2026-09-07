@@ -55,6 +55,7 @@ export interface StageConfig {
   dockerfile?: string;
   context?: string;
   buildArgs?: Record<string, string>;
+  buildTarget?: string;
   tags?: string[];
   platforms?: string[];
   cache?: CacheSpec;
@@ -75,7 +76,10 @@ export interface StageConfig {
   retries?: number;
   retry?: RetryPolicy;
   // Compose deployment DAG provenance + per-service deploy runtime.
-  deployRuntime?: 'kubernetes' | 'docker' | 'compose';
+  deployRuntime?: 'kubernetes' | 'docker' | 'compose' | 'ecs' | 'cloud-run';
+  runtimeName?: string;
+  composeProject?: string;
+  reviewOnly?: boolean;
   composeServiceName?: string;
   composeBuildContext?: string;
   composeDockerfile?: string;

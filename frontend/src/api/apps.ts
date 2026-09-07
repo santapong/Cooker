@@ -5,6 +5,7 @@ import type {
   AppDeployRecord,
   AppDriftReport,
   AppCanary,
+  RepositoryInspection, GitHubConnection, GitHubRepository, TargetCapability,
 } from '../types/app';
 
 export const appsApi = {
@@ -14,6 +15,11 @@ export const appsApi = {
   update: (id: string, data: AppModel) => put<AppModel>(`/apps/${id}`, data),
   delete: (id: string) => del(`/apps/${id}`),
   deploy: (id: string) => post<AppDeployResponse>(`/apps/${id}/deploy`),
+  inspect: (app: Partial<AppModel>) => post<RepositoryInspection>('/apps/inspect', app),
+  deploymentCapabilities: () => get<{ targets: TargetCapability[]; registry?: string }>('/apps/deployment-capabilities'),
+  githubConnection: () => get<GitHubConnection>('/apps/github/connection'),
+  githubRepositories: (installationId: number, page = 1) => get<{ repositories: GitHubRepository[]; hasMore: boolean }>(`/apps/github/repositories?installationId=${installationId}&page=${page}`),
+  githubRevisions: (repo: string, installationId = 0, kind: 'branches' | 'tags' = 'branches', page = 1) => get<{ revisions: { name: string; commit: { sha: string } }[]; hasMore: boolean }>(`/apps/github/revisions?repo=${encodeURIComponent(repo)}&installationId=${installationId}&kind=${kind}&page=${page}`),
   detectBuild: (githubRepo: string, branch: string) =>
     post<{
       plan: { kind: string; path?: string };

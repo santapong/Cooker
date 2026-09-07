@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ReactFlow, useNodesInitialized, type Edge, type EdgeTypes, type Node, type NodeChange, type NodeTypes } from '@xyflow/react';
+import { ReactFlow, useNodesInitialized, useReactFlow, type Edge, type EdgeTypes, type Node, type NodeChange, type NodeTypes } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { ComposeGraph } from '../../types/compose';
 import StarNode from '../porthole/StarNode';
@@ -17,8 +17,18 @@ interface Props {
 
 /** A compose file as a constellation: services are stars, depends_on / env / network links are the lines. */
 function ComposeCanvas({ graph, onSelect }: Props) {
+  const container = useRef<HTMLDivElement>(null);
+  const { fitView } = useReactFlow();
   const cacheRef = useRef(new Map<string, Node>());
   const initialized = useNodesInitialized();
+  useEffect(() => {
+    if (!initialized || !container.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width > 0 && entry.contentRect.height > 0) void fitView({ padding: 0.35, maxZoom: 1.1 });
+    });
+    observer.observe(container.current);
+    return () => observer.disconnect();
+  }, [initialized, fitView]);
   const [tick, setTick] = useState(0);
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     if (changes.some((c) => c.type === 'dimensions')) setTick((t) => t + 1);
@@ -37,7 +47,7 @@ function ComposeCanvas({ graph, onSelect }: Props) {
         position: { x: p.x, y: p.y },
         draggable: false,
         connectable: false,
-        data: { label: p.name, stageType: 'custom', config: {}, status: 'idle', sub: svc.image || 'build', drawDelay: drawDelay(i, n) },
+        data: { label: p.name, stageType: 'custom', kind: 'service', config: {}, status: 'idle', sub: svc.image || 'build', drawDelay: drawDelay(i, n) },
       };
       cacheRef.current.set(key, node);
       return node;
@@ -64,7 +74,7 @@ function ComposeCanvas({ graph, onSelect }: Props) {
     return () => window.clearTimeout(t);
   }, []);
   return (
-    <div className={entering ? 'canvas is-entering' : 'canvas'}>
+    <div ref={container} className={entering ? 'canvas is-entering' : 'canvas'}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -84,6 +94,9 @@ function ComposeCanvas({ graph, onSelect }: Props) {
         proOptions={{ hideAttribution: true }}
         style={{ background: 'transparent' }}
       />
+      <button type="button" className="hud-btn compose-fit" onClick={() => { void fitView({ padding: 0.35, maxZoom: 1.1 }); }} title="Fit all services in the map">
+        Fit map
+      </button>
     </div>
   );
 }

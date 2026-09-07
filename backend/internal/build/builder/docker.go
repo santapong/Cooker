@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -50,7 +51,14 @@ func (d *DockerSock) Build(ctx context.Context, req Request) (Result, error) {
 
 	args := []string{"build"}
 	if req.Dockerfile != "" {
-		args = append(args, "-f", req.Dockerfile)
+		df := req.Dockerfile
+		if !filepath.IsAbs(df) {
+			df = filepath.Join(req.ContextDir, df)
+		}
+		args = append(args, "-f", df)
+	}
+	if req.Target != "" {
+		args = append(args, "--target", req.Target)
 	}
 	for _, t := range req.Tags {
 		args = append(args, "-t", t)

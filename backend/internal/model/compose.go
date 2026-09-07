@@ -2,16 +2,19 @@ package model
 
 // ComposeService represents a service defined in a docker-compose file.
 type ComposeService struct {
-	Name        string            `json:"name"`
-	Image       string            `json:"image"`
-	Build       *ComposeBuild     `json:"build,omitempty"`
-	Ports       []string          `json:"ports"`
-	Environment map[string]string `json:"environment"`
-	DependsOn   []string          `json:"dependsOn"`
-	Networks    []string          `json:"networks"`
-	Volumes     []string          `json:"volumes"`
-	Command     string            `json:"command"`
-	Status      string            `json:"status"`
+	Name        string                `json:"name"`
+	Image       string                `json:"image"`
+	Build       *ComposeBuild         `json:"build,omitempty"`
+	Ports       []string              `json:"ports"`
+	Environment map[string]string     `json:"environment"`
+	DependsOn   []string              `json:"dependsOn"`
+	Networks    []string              `json:"networks"`
+	Volumes     []string              `json:"volumes"`
+	Command     string                `json:"command"`
+	CommandArgs []string              `json:"-"`
+	HealthCheck *ContainerHealthCheck `json:"healthcheck,omitempty"`
+	RuntimeSize string                `json:"runtimeSize,omitempty"`
+	Status      string                `json:"status"`
 	// Labels holds the raw compose `labels` for the service. Used to
 	// derive Group (via the com.cooker.group key) and available for
 	// future label-driven behaviour.
@@ -24,6 +27,15 @@ type ComposeService struct {
 	// sourced from `deploy.resources.limits` or the top-level
 	// `mem_limit`/`cpus` keys. Nil when the compose file sets none.
 	Resources *ResourceLimits `json:"resources,omitempty"`
+	External  bool            `json:"external,omitempty"`
+}
+
+type ContainerHealthCheck struct {
+	Command     []string `json:"command"`
+	Interval    int32    `json:"interval"`
+	Timeout     int32    `json:"timeout"`
+	Retries     int32    `json:"retries"`
+	StartPeriod int32    `json:"startPeriod"`
 }
 
 // ResourceLimits captures per-service CPU/memory limits in a
@@ -48,8 +60,10 @@ const ComposeGroupLabel = "com.cooker.group"
 
 // ComposeBuild represents the build config of a compose service.
 type ComposeBuild struct {
-	Context    string `json:"context"`
-	Dockerfile string `json:"dockerfile"`
+	Target     string            `json:"target,omitempty"`
+	Context    string            `json:"context"`
+	Dockerfile string            `json:"dockerfile"`
+	Args       map[string]string `json:"args,omitempty"`
 }
 
 // ComposeConnection represents a relationship between two compose services.

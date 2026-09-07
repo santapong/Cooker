@@ -33,6 +33,7 @@ export function useRun(pipelineId: string, runId: string): UseRunResult {
   const loaded = !!pipeline && !!run && run.id === runId;
   const terminal = isTerminal(run?.status);
   const idsRef = useRef({ pipelineId, runId });
+  const sourcePending = useRef(false);
   idsRef.current = { pipelineId, runId };
 
   const refresh = useCallback(async () => {
@@ -40,7 +41,14 @@ export function useRun(pipelineId: string, runId: string): UseRunResult {
     if (!pid || !rid) return;
     try {
       const next = await pipelineApi.getRun(pid, rid);
+      if (idsRef.current.pipelineId !== pid || idsRef.current.runId !== rid) return;
       setRun(next);
+      if (sourcePending.current) {
+        const p = await pipelineApi.get(pid);
+        if (idsRef.current.pipelineId !== pid || idsRef.current.runId !== rid) return;
+        setPipeline(p);
+        sourcePending.current = p.stages.length === 0;
+      }
     } catch {
       // transient — the next tick retries; the initial load surfaces errors
     }
@@ -62,10 +70,14 @@ export function useRun(pipelineId: string, runId: string): UseRunResult {
     let cancelled = false;
     setError(null);
     setRun(null);
+    setGates([]);
+    setPipeline(null);
     Promise.all([pipelineApi.get(pipelineId), pipelineApi.getRun(pipelineId, runId)])
-      .then(([p, r]) => {
+      .then(async ([initial, r]) => {
+        const p = initial.stages.length === 0 && isTerminal(r.status) ? await pipelineApi.get(pipelineId) : initial;
         if (cancelled) return;
         setPipeline(p);
+        sourcePending.current = p.stages.length === 0;
         setRun(r);
       })
       .catch((e: unknown) => {

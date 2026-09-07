@@ -65,6 +65,7 @@ export default function AppDetailPage() {
     try {
       const res = await appsApi.deploy(id);
       pushToast('success', `Deploy ${shortId(res.runId)} started.`);
+    if (res.strategy !== 'canary' && res.deploymentView && res.pipelineId) { open(res.deploymentView, null); return; }
       // The deploy record (with its pipeline id) lands a moment later; follow it into the porthole.
       for (let i = 0; i < 8; i++) {
         await new Promise((r) => window.setTimeout(r, 1500));
@@ -213,6 +214,8 @@ export default function AppDetailPage() {
               {app.githubRepo}@{app.branch}
             </span>
             <span>{app.deployTarget?.kind}</span>
+            {app.buildPlan?.commit && <span>commit {app.buildPlan.commit.slice(0, 12)}</span>}
+            {app.deployTarget?.prefix && <span>prefix {app.deployTarget.prefix}</span>}
             {app.environmentId && <span>env {shortId(app.environmentId)}</span>}
             <span>{app.autoDeploy ? 'auto-deploy' : 'manual deploy'}</span>
             {app.deployedURL && (
@@ -223,6 +226,7 @@ export default function AppDetailPage() {
           </div>
         </div>
         <Actions>
+          {app.buildPlan?.kind === 'compose' && <Link className="hud-btn" to={`/apps/new?appId=${encodeURIComponent(app.id)}`}>Review source & targets</Link>}
           <button type="button" className="hud-btn hud-btn-primary" onClick={deploy} disabled={deploying}>
             {deploying ? 'Deploying…' : '▶ Deploy'}
           </button>

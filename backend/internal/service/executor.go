@@ -350,6 +350,12 @@ func (e *Executor) broadcastStatus(runID, stageID, status string) {
 //   - Any other runner error → RunStatusFailed.
 //   - Clean return → RunStatusSuccess.
 func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.PipelineRun) (model.RunResult, error) {
+	for _, stage := range p.Stages {
+		if stage.Config.ReviewOnly {
+			err := fmt.Errorf("use App Deploy to resolve this saved deployment graph")
+			return e.finalize(run, err, false), err
+		}
+	}
 	// Bind run-id to the logger so every line emitted from this
 	// goroutine (and any goroutine that takes ctx) carries it.
 	// Operators tailing stderr can grep `run=<id>` instead of

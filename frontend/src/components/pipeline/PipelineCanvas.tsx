@@ -19,7 +19,7 @@ import ConstellationEdge from '../porthole/ConstellationEdge';
 import { drawDelay, edgeDelay, SCENE_BUDGET_MS } from '../porthole/constellation';
 import StageTray, { DRAG_MIME } from './StageTray';
 
-// Every stage type is a star; the type shows in the sub-label.
+// One renderer preserves graph behaviour; each type has its own symbol and label.
 const nodeTypes: NodeTypes = {
   build: StarNode,
   test: StarNode,

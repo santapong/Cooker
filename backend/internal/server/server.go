@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -26,6 +27,7 @@ import (
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/observability"
 	"github.com/santapong/cooker/internal/service"
+	"github.com/santapong/cooker/internal/source/github"
 	"github.com/santapong/cooker/internal/store"
 	"github.com/santapong/cooker/internal/triage"
 )
@@ -323,6 +325,25 @@ func New(cfg *config.Config) (*Server, error) {
 		}),
 	)
 	appDeployer := service.NewAppDeployer(exec, cfg.Registry)
+	source, err := github.NewAppClient(cfg.GitHubApp.ID, cfg.GitHubApp.Slug, cfg.GitHubApp.PrivateKeyFile, cfg.GitHubApp.InstallationIDs)
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
+	appDeployer.Source = source
+	appDeployer.CheckExecution = appExecutionCheck(cfg)
+	appDeployer.SaveRun = st.Runs.Update
+	appDeployer.SavePipeline = func(ctx context.Context, p *model.Pipeline) error {
+		existing, err := st.Pipelines.Get(ctx, p.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return st.Pipelines.Create(ctx, p)
+		}
+		if err != nil {
+			return err
+		}
+		p.Version = existing.Version
+		return st.Pipelines.Update(ctx, p)
+	}
 	appDeployer.CacheRef = cfg.BuildCacheRepo
 	appDeployer.Deploys = st.AppDeploys
 	appDeployer.Notifier = notifDeps.Dispatcher
@@ -354,6 +375,7 @@ func New(cfg *config.Config) (*Server, error) {
 	h.SetComposeBaseDir(cfg.ComposeDir)
 	h.SecretsBackend = cfg.SecretsBackend
 	h.AppDeployer = appDeployer
+	h.GitHubSource = source
 	h.Canary = canarySvc
 	// Persistent promotion/approval flow (HS26-05-01 / -08 / -14):
 	// promote/approve/env-status route through this service, which
@@ -459,7 +481,8 @@ func New(cfg *config.Config) (*Server, error) {
 	} else {
 		slog.Info("feedback disabled (set COOKER_FEEDBACK_GITHUB_TOKEN to enable)")
 	}
-	h.AppDetector = service.NewAppDetector()
+	h.AppDetector = service.NewAppDetectorWithClone(source.Clone)
+	h.AppDetector.CheckExecution = appDeployer.CheckExecution
 	h.WSBroadcast = wsHub.Broadcast
 	h.Executor = exec
 	h.Runs = runs

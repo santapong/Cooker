@@ -247,6 +247,11 @@ func (s *Server) registerRoutes() {
 		// segment beside /:id siblings; network-bound (shallow clone)
 		// → rate-limited like deploy.
 		apps.POST("/detect-build", writeRole, expensive, h.DetectAppBuild)
+		apps.POST("/inspect", writeRole, expensive, h.InspectAppRepository)
+		apps.GET("/deployment-capabilities", writeRole, h.AppDeploymentCapabilities)
+		apps.GET("/github/connection", writeRole, expensive, h.GitHubConnection)
+		apps.GET("/github/repositories", writeRole, expensive, h.GitHubRepositories)
+		apps.GET("/github/revisions", writeRole, expensive, h.GitHubRevisions)
 		apps.GET("/:id", h.GetApp)
 		apps.PUT("/:id", writeRole, h.UpdateApp)
 		apps.DELETE("/:id", adminRole, mfa, h.DeleteApp)

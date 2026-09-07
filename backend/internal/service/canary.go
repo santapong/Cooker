@@ -189,7 +189,7 @@ func (s *CanaryService) Start(ctx context.Context, app *model.App, runID string,
 	c.CanaryImage = canaryImage
 	if _, err := s.weighted.DeployWeighted(ctx, deployer.WeightedRequest{
 		Namespace:   app.DeployTarget.Namespace,
-		Name:        app.Name,
+		Name:        AppPrefix(app),
 		StableImage: stableImage,
 		CanaryImage: canaryImage,
 		Weight:      cfg.Weight,
@@ -242,7 +242,7 @@ func (s *CanaryService) Promote(ctx context.Context, appID string) (*model.AppCa
 	}
 	if _, err := s.weighted.DeployWeighted(ctx, deployer.WeightedRequest{
 		Namespace:   app.DeployTarget.Namespace,
-		Name:        app.Name,
+		Name:        AppPrefix(app),
 		StableImage: c.StableImage,
 		CanaryImage: c.CanaryImage,
 		Weight:      100,
@@ -288,7 +288,7 @@ func (s *CanaryService) Abort(ctx context.Context, appID, reason string) (*model
 	}
 	if _, err := s.weighted.DeployWeighted(ctx, deployer.WeightedRequest{
 		Namespace:   app.DeployTarget.Namespace,
-		Name:        app.Name,
+		Name:        AppPrefix(app),
 		StableImage: c.StableImage,
 		CanaryImage: c.CanaryImage,
 		Weight:      0,
@@ -487,7 +487,7 @@ func (s *CanaryService) evaluate(ctx context.Context, app *model.App, c *model.A
 func (s *CanaryService) decide(ctx context.Context, app *model.App, c *model.AppCanary) (canaryDecision, string) {
 	pastDeadline := s.clock().After(c.StartedAt.Add(canaryHardDeadline))
 	if cp, ok := s.weighted.(deployer.CanaryProber); ok {
-		ready, detail, err := cp.CanaryReady(ctx, app.DeployTarget.Namespace, app.Name)
+		ready, detail, err := cp.CanaryReady(ctx, app.DeployTarget.Namespace, AppPrefix(app))
 		switch {
 		case err != nil:
 			// Inconclusive: wait and retry, unless we've waited too long —

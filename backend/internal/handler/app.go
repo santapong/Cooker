@@ -43,7 +43,7 @@ func validateAppInput(a *model.App) error {
 	if err := a.Canary.Validate(); err != nil {
 		return err
 	}
-	return nil
+	return service.ValidateAppDeployment(a)
 }
 
 // ListApps returns all apps with webhook secrets redacted.
@@ -117,12 +117,16 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		a.Branch = "main"
 	}
 	// Secrets are set via PUT /apps/:id/webhook — never on Create.
+	a.ID = "" // A caller-supplied ID must never bypass the prefix check.
+	if err := h.checkAppPrefix(c, &a); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
 	a.WebhookSecret = nil
 	a.ID = uuid.New().String()
 	now := time.Now()
 	a.CreatedAt, a.UpdatedAt = now, now
-	if err := h.Store.Apps.Create(c.Request.Context(), &a); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if abortStoreErr(c, h.Store.Apps.Create(c.Request.Context(), &a), "app not found") {
 		return
 	}
 	c.JSON(http.StatusCreated, a.Redact())
@@ -144,6 +148,10 @@ func (h *Handler) UpdateApp(c *gin.Context) {
 		return
 	}
 	a.ID = id
+	if err := h.checkAppPrefix(c, &a); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
 	a.CreatedAt = existing.CreatedAt
 	a.WebhookSecret = existing.WebhookSecret // keep; rotate via dedicated endpoint
 	a.UpdatedAt = time.Now()
@@ -231,6 +239,20 @@ func (h *Handler) DeployApp(c *gin.Context) {
 	}
 
 	// A run ID the client can subscribe to before the work starts.
+	if err := service.CheckAppTarget(a); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		return
+	}
+	if err := service.ValidateAppDeployment(a); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		return
+	}
+	if h.AppDeployer.CheckExecution != nil {
+		if err := h.AppDeployer.CheckExecution(a, false); err != nil {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	runID := uuid.New().String()
 	channel := "app-run:" + runID
 
@@ -248,9 +270,15 @@ func (h *Handler) DeployApp(c *gin.Context) {
 	// internal/server/runs.go:78 (first heartbeat) and :111 (silent swallow).
 	if h.Runs != nil && h.Store != nil {
 		now := time.Now()
+		pipelineID := service.ComposePipelineID(runID, a.ID, 0)
+		placeholder := &model.Pipeline{ID: pipelineID, Name: "Deploy " + a.Name, Stages: []model.Stage{}, Edges: []model.Edge{}, CreatedAt: now, UpdatedAt: now}
+		if err := h.Store.Pipelines.Create(c.Request.Context(), placeholder); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "cannot create deployment view"})
+			return
+		}
 		stub := &model.PipelineRun{
 			ID:         runID,
-			PipelineID: a.ID,
+			PipelineID: pipelineID,
 			Status:     model.RunStatusRunning,
 			StartedAt:  &now,
 		}
@@ -333,8 +361,8 @@ func (h *Handler) runAppDeployCtx(ctx context.Context, a *model.App, runID, chan
 	// Persist the synthesized pipeline for the grouped compose DAG so the
 	// deployment view can fetch its stages/edges/groups. Best-effort:
 	// the run is the source of truth, the pipeline is for visualization.
-	if pipeline != nil {
-		if createErr := h.Store.Pipelines.Create(ctx, pipeline); createErr != nil {
+	if pipeline != nil && h.AppDeployer.SavePipeline == nil {
+		if createErr := h.Store.Pipelines.Create(ctx, service.DeploymentViewPipeline(pipeline)); createErr != nil {
 			sink.writef("[warn] persist pipeline: %v\n", createErr)
 		}
 	}
@@ -353,7 +381,8 @@ func (h *Handler) runAppDeployCtx(ctx context.Context, a *model.App, runID, chan
 		now := time.Now()
 		failed := &model.PipelineRun{
 			ID:         runID,
-			PipelineID: a.ID,
+			PipelineID: service.ComposePipelineID(runID, a.ID, 0),
+			Error:      err.Error(),
 			Status:     model.RunStatusFailed,
 			StartedAt:  &now,
 			FinishedAt: &now,

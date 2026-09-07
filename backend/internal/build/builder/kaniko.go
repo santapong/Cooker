@@ -183,6 +183,9 @@ func (k *Kaniko) buildJob(req Request) *batchv1.Job {
 	for k, v := range req.BuildArgs {
 		args = append(args, "--build-arg="+k+"="+v)
 	}
+	if req.Target != "" {
+		args = append(args, "--target="+req.Target)
+	}
 	if len(req.Platforms) == 1 {
 		args = append(args, "--customPlatform="+req.Platforms[0])
 	}

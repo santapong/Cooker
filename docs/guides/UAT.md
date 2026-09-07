@@ -1,5 +1,16 @@
 # Cooker — UAT Runbook
 
+**Frontend candidate, 6 September 2026:** typed DAG nodes and the Compose stack
+library are ready for UAT, with human acceptance pending. See the
+[scoped checklist and automated evidence](../plans/2026-09-06-frontend-node-types-compose-registry.md#uat-acceptance-checklist).
+This local candidate has not been released or deployed.
+
+**GitHub Compose candidate:** repository connection/discovery, commit-pinned
+preview, prefixes, shared GitHub stacks and ECS/external Cloud SQL mapping are
+implemented locally. Follow the [setup and acceptance guide](GITHUB-COMPOSE-DEPLOYMENT.md).
+Human acceptance and live GitHub/cloud deployment are pending; automated fixture
+tests do not establish that your cloud network or credentials are configured.
+
 One command to start, a reachable URL, a working build+deploy
 target, and clean teardown. Intended for testers exercising the
 Apps "Deploy" button and filing bugs.
@@ -64,7 +75,7 @@ What `uat-up` brings up (compose services):
 
 ### Scenario 1 — Happy path, Kubernetes target
 
-1. Browse http://localhost:8080 → **Apps → New App**. Fill:
+1. Browse http://localhost:8080 → **Apps → New App → Use a single Dockerfile**. Fill:
    - Name: `demo`
    - GitHub repo: any public repo with a root `Dockerfile`
      (e.g. `nginxinc/docker-nginx-unprivileged` branch `main`)
@@ -122,9 +133,9 @@ config. With `COOKER_DEPLOYER=noop` the canary endpoints return **422**.
 
 1. Edit `docker-compose.uat.yml` → set `COOKER_BUILDER: noop` on
    the `cooker` service. `make uat-reset`.
-2. Deploy an App. Expect the build stage to succeed (noop), the
-   push stage to succeed (noop), and the deploy to fail only if
-   the manifest references a non-existent image.
+2. Deploy a source-build App. Expect a configuration error before checkout or
+   build: GitHub app builds require `COOKER_BUILDER=docker` and
+   `COOKER_PUSHER=docker`. No-op success must not be reported as deployment.
 3. The failure surfaces in the log stream with a clear error —
    not a hung request.
 
@@ -140,7 +151,8 @@ No public URL required — we forge the HMAC locally.
         -d '{"secret":"hunter2"}'
    ```
 
-2. Toggle `autoDeploy=true` via PUT on the App.
+2. Toggle `autoDeploy=true` via PUT on an unpinned single-Dockerfile App. Reviewed
+   Compose revisions use manual deployment and reject pinned auto-deploy.
 3. Simulate a push from GitHub:
 
    ```sh
@@ -311,12 +323,12 @@ curl -s http://localhost:5001/v2/cooker/demo/tags/list | jq
 | GitHub webhook HMAC | Real — SHA-256 constant-time compare |
 | Secret seal/reveal (admin-only) | Real — AES-GCM |
 | RBAC: approver vs operator vs viewer | Real |
-| Build-plan detection (Dockerfile/compose/buildpack) | Real |
+| Build-plan detection | Dockerfile/Compose supported for App execution; buildpack execution rejected |
 | Environments, Pipelines, Runs | Real |
 | Docker/K8s/Registry handlers | **Stubbed** — return empty lists |
 | Networks / Volumes | **Stubbed** — routes exist, no Docker client yet |
-| Cloud Run deploy target | **Stubbed** — returns `ErrUnavailable` |
-| BuildKit gRPC, Crane push, client-go deploy | **Stubbed** — rely on CLI fallbacks for UAT |
+| ECS / Cloud Run App dispatch | Implemented for configured existing infrastructure and the supported Compose subset; live cloud UAT pending |
+| Source build handoff | App builds require Docker builder + Docker pusher; Kubernetes uses kubectl or client-go |
 | Tailscale tsnet transport | **Build-tagged** — needs `-tags tsnet` |
 | GitOps commit (go-git) | **Stubbed** — Noop gives a deterministic fake SHA |
 
@@ -521,14 +533,13 @@ These are intentional placeholders documented as such. They'll
 return `ErrUnavailable` or `"status":"pending"` and that's the
 expected UAT behaviour:
 
-- BuildKit gRPC client (use `COOKER_BUILDER=docker` instead)
-- go-containerregistry pusher (use `COOKER_PUSHER=docker`)
-- client-go deployer (use `COOKER_DEPLOYER=kubectl`)
+- App source build handoffs beyond Docker builder + Docker pusher
 - Test/Custom stage runner defaults to `noop` (logs the intended
   command, reports success, runs nothing). Set `COOKER_STAGE_RUNNER=docker`
   (or `kube`) to actually run Test/Custom stages in a container; a
   Test/Custom stage with no `image` fails loudly either way.
-- Cloud Run, ECS, Fly, Render deploy targets
+- Fly/Render/SSH dispatch through the App import flow; cloud runtime log streaming
+- EC2/cluster/VPC/Cloud SQL provisioning, cloud volumes and proxy sidecar grouping
 - go-git writer for the GitOpsCommit node
 - Real Docker network/volume handlers
 - Tailscale tsnet real transport in default builds

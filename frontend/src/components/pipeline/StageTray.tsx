@@ -1,5 +1,6 @@
 import type { DragEvent } from 'react';
 import type { StageType } from '../../types/pipeline';
+import StageSymbol from './StageSymbol';
 
 export const DRAG_MIME = 'application/cooker-node';
 
@@ -34,7 +35,7 @@ export default function StageTray({ onAdd }: Props) {
           onClick={() => onAdd(s.type)}
           title={`Add a ${s.label} stage — drag onto the porthole or click`}
         >
-          ＋ {s.label}
+          <StageSymbol kind={s.type} /> {s.label}
         </button>
       ))}
     </div>

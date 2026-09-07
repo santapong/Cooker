@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/moby/buildkit/client"
@@ -91,6 +92,18 @@ func solveOptions(req Request) client.SolveOpt {
 		tagAttr = "cooker:local"
 	}
 	frontendAttrs := map[string]string{"filename": dockerfile}
+	dockerfileDir := req.ContextDir
+	if filepath.Dir(dockerfile) != "." {
+		path := dockerfile
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(req.ContextDir, path)
+		}
+		dockerfileDir = filepath.Dir(path)
+		frontendAttrs["filename"] = filepath.Base(path)
+	}
+	if req.Target != "" {
+		frontendAttrs["target"] = req.Target
+	}
 	for k, v := range req.BuildArgs {
 		frontendAttrs["build-arg:"+k] = v
 	}
@@ -102,7 +115,7 @@ func solveOptions(req Request) client.SolveOpt {
 		FrontendAttrs: frontendAttrs,
 		LocalDirs: map[string]string{
 			"context":    req.ContextDir,
-			"dockerfile": req.ContextDir,
+			"dockerfile": dockerfileDir,
 		},
 		Exports: []client.ExportEntry{{
 			Type:  client.ExporterImage,

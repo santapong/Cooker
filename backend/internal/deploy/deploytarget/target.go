@@ -33,11 +33,14 @@ var ErrDuplicateKind = errors.New("deploytarget: duplicate kind")
 // Adapters translate this to K8s manifests, a cloud-run service
 // YAML, or a Docker container spec as appropriate.
 type Spec struct {
-	AppID    string
-	Image    string
-	Env      map[string]string
-	Ports    []int
-	Replicas int
+	AppID       string
+	Image       string
+	Env         map[string]string
+	Ports       []int
+	Replicas    int
+	Command     []string
+	Resources   *model.ResourceLimits
+	HealthCheck *model.ContainerHealthCheck
 	// LogWriter, when non-nil, receives per-call streaming output
 	// from the adapter (docker pull progress for SSH, kubectl apply
 	// output for K8s, etc.). Adapters that don't stream may ignore

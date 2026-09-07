@@ -67,7 +67,13 @@ type AppDeployer struct {
 	Proxy ProxyConfig
 	// Apps, when non-nil, persists the computed DeployedURL after a
 	// successful deploy (best-effort, like Deploys/Notifier).
-	Apps store.AppStore
+	Apps   store.AppStore
+	Source *github.AppClient
+	// Persist the synthesized graph before execution so deployment views can
+	// render it while stages run. It is also retained on execution failure.
+	SavePipeline   func(context.Context, *model.Pipeline) error
+	SaveRun        func(context.Context, *model.PipelineRun) error
+	CheckExecution func(*model.App, bool) error
 }
 
 // ProxyConfig mirrors config.ProxyConfig in a service-local form so the
@@ -109,6 +115,9 @@ func NewAppDeployer(exec *Executor, registry string) *AppDeployer {
 func (d *AppDeployer) clone(ctx context.Context, opts github.CloneOptions) (string, error) {
 	if d.cloneFn != nil {
 		return d.cloneFn(ctx, opts)
+	}
+	if d.Source != nil {
+		return d.Source.Clone(ctx, opts)
 	}
 	return github.Clone(ctx, opts)
 }
@@ -164,6 +173,17 @@ func deployRecordFromRun(app *model.App, p *model.Pipeline, run *model.PipelineR
 // app-run:<runID> WebSocket channel. An empty runID falls back to a
 // fresh UUID (used by callers without a coordinator/stub row).
 func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, logW io.Writer) (*model.Pipeline, *model.PipelineRun, error) {
+	if err := ValidateAppDeployment(app); err != nil {
+		return nil, nil, err
+	}
+	if err := CheckAppTarget(app); err != nil {
+		return nil, nil, err
+	}
+	if d.CheckExecution != nil {
+		if err := d.CheckExecution(app, false); err != nil {
+			return nil, nil, err
+		}
+	}
 	if app.GitHubRepo == "" {
 		return nil, nil, fmt.Errorf("app %s: GitHubRepo is empty", app.ID)
 	}
@@ -183,12 +203,17 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 	opts := synthOpts{appEnv: appEnv, proxy: d.Proxy}
 
 	fmt.Fprintf(logW, "[clone] github.com/%s @ %s\n", app.GitHubRepo, app.Branch)
-	workdir, err := d.clone(ctx, github.CloneOptions{
+	cloneOpts := github.CloneOptions{
 		Repo:      app.GitHubRepo,
 		Branch:    app.Branch,
 		Depth:     1,
 		LogWriter: logW,
-	})
+	}
+	if app.BuildPlan != nil {
+		cloneOpts.Commit = app.BuildPlan.Commit
+		cloneOpts.InstallationID = app.BuildPlan.InstallationID
+	}
+	workdir, err := d.clone(ctx, cloneOpts)
 	if err != nil {
 		return nil, nil, fmt.Errorf("clone: %w", err)
 	}
@@ -197,6 +222,13 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 			slog.Warn("app-deploy: rm workdir failed", "workdir", workdir, "err", err)
 		}
 	}()
+	if cloneOpts.Commit != "" {
+		sha, err := github.HeadCommit(ctx, workdir)
+		if err != nil || sha != cloneOpts.Commit {
+			return nil, nil, fmt.Errorf("source checkout does not match reviewed commit")
+		}
+		fmt.Fprintf(logW, "[source] reviewed commit %s\n", sha)
+	}
 
 	plan := app.BuildPlan
 	if plan == nil {
@@ -214,8 +246,8 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 	if registry == "" {
 		registry = d.Registry
 	}
-	ts := time.Now().Unix()
-	tag := fmt.Sprintf("%s/%s:%d", registry, app.Name, ts)
+	ts := time.Now().UnixNano()
+	tag := fmt.Sprintf("%s/%s:%d", registry, AppPrefix(app), ts)
 
 	var p *model.Pipeline
 	var run *model.PipelineRun
@@ -223,14 +255,22 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 		// Grouped per-service deployment DAG. Parse the compose file the
 		// build-plan detector pointed at, then synthesize one
 		// build→push→deploy sub-chain per service.
-		composePath := filepath.Join(workdir, plan.Path)
-		data, readErr := os.ReadFile(composePath)
-		if readErr != nil {
-			return nil, nil, fmt.Errorf("read compose %s: %w", plan.Path, readErr)
-		}
-		graph, parseErr := ParseComposeGraph(data)
+		resolvedApp := *app
+		resolvedApp.BuildPlan = plan
+		resolved, parseErr := loadRepositoryCompose(ctx, workdir, &resolvedApp, appEnv)
 		if parseErr != nil {
-			return nil, nil, fmt.Errorf("parse compose: %w", parseErr)
+			return nil, nil, parseErr
+		}
+		if len(resolved.Diagnostics) > 0 {
+			return nil, nil, fmt.Errorf("compose deployment needs review: %s", resolved.Diagnostics[0].Message)
+		}
+		graph := resolved.Graph
+		if app.DeployTarget.Kind == model.DeployTargetDockerHost {
+			opts.composeFile, err = writeRuntimeCompose(resolved, app, workdir, registry, ts, opts)
+			if err != nil {
+				return nil, nil, err
+			}
+			defer func() { _ = os.Remove(opts.composeFile) }()
 		}
 		fmt.Fprintf(logW, "[plan] compose: %d service(s) → per-service DAG\n", len(graph.Services))
 		// Deterministic per-deploy pipeline ID derived from the runID so
@@ -243,9 +283,46 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 			return nil, nil, synthErr
 		}
 	} else {
+		if plan.Kind == model.BuildPlanBuildpack {
+			return nil, nil, fmt.Errorf("app buildpack execution is not implemented; select a Dockerfile or Compose file")
+		}
+		path := plan.Path
+		if path == "" {
+			path = "Dockerfile"
+		}
+		if _, err := repositoryPath(workdir, workdir, path); err != nil {
+			return nil, nil, err
+		}
 		p, run = synthesizePipeline(app, plan, workdir, tag, d.cacheSpec(), opts)
 		if runID != "" {
 			run.ID = runID
+		}
+	}
+	// Use a unique graph for every app deployment, including Dockerfile apps.
+	p.ID = ComposePipelineID(runID, app.ID, ts)
+	run.PipelineID = p.ID
+	if d.CheckExecution != nil {
+		hasBuild := false
+		for _, s := range p.Stages {
+			if s.Type == model.StageTypeBuild {
+				hasBuild = true
+			}
+		}
+		if err := d.CheckExecution(app, hasBuild); err != nil {
+			return nil, nil, err
+		}
+	}
+	if d.SavePipeline != nil {
+		if err := d.SavePipeline(ctx, DeploymentViewPipeline(p)); err != nil {
+			return p, nil, fmt.Errorf("save deployment graph: %w", err)
+		}
+	}
+	if d.SaveRun != nil {
+		run.Status = model.RunStatusRunning
+		now := time.Now()
+		run.StartedAt = &now
+		if err := d.SaveRun(ctx, run); err != nil {
+			return p, nil, fmt.Errorf("save deployment run: %w", err)
 		}
 	}
 
@@ -362,7 +439,7 @@ func (d *AppDeployer) DeployImage(ctx context.Context, app *model.App, imageRef,
 	if err != nil {
 		return nil, nil, err
 	}
-	proxyHost := d.Proxy.hostFor(sanitize(app.Name))
+	proxyHost := d.Proxy.hostFor(AppPrefix(app))
 
 	now := time.Now()
 	p := &model.Pipeline{
@@ -451,7 +528,7 @@ func (d *AppDeployer) BuildAndPushImage(ctx context.Context, app *model.App, run
 		registry = d.Registry
 	}
 	ts := time.Now().Unix()
-	tag := fmt.Sprintf("%s/%s:%d", registry, app.Name, ts)
+	tag := fmt.Sprintf("%s/%s:%d", registry, AppPrefix(app), ts)
 
 	// Build the Clone→Build→Push DAG and drop the deploy stage: the
 	// weighted deployer owns the deploy for a canary.
@@ -502,20 +579,23 @@ func stripDeployStage(p *model.Pipeline, run *model.PipelineRun) (*model.Pipelin
 	return p, run
 }
 
-// synthesizePipeline builds the four-stage Clone→Build→Push→Deploy
-// DAG for an App deploy. Clone already ran by the time we call this,
-// so Stage 1 ("Checkout") is marked succeeded and left as a record.
 // synthOpts carries the cross-cutting inputs app-deploy synthesis
 // stamps onto deploy stages: the App's resolved Environment env
 // (PlainVars + decrypted Secrets) and the deployed-app proxy config.
 // The zero value keeps pre-injection behavior.
 type synthOpts struct {
-	appEnv map[string]string
-	proxy  ProxyConfig
+	appEnv      map[string]string
+	proxy       ProxyConfig
+	composeFile string
 }
 
+// synthesizePipeline builds Build → Push → Deploy after checkout completes.
 func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag string, cache *model.CacheSpec, opts synthOpts) (*model.Pipeline, *model.PipelineRun) {
 	dockerfile := "Dockerfile"
+	var buildArgs map[string]string
+	if plan != nil {
+		buildArgs = plan.Args
+	}
 	if plan != nil && plan.Kind == model.BuildPlanDockerfile && plan.Path != "" {
 		// BuildPlan.Path is operator-supplied via App config; reject
 		// absolute paths or any "../" escape so a hostile config
@@ -531,6 +611,7 @@ func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag stri
 			ID: "build", Name: "Build", Type: model.StageTypeBuild,
 			Config: model.StageConfig{
 				Dockerfile: dockerfile,
+				BuildArgs:  buildArgs,
 				Context:    workdir,
 				Tags:       []string{tag},
 				Cache:      cache,
@@ -548,7 +629,7 @@ func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag stri
 		{ID: "e1", Source: "build", Target: "push"},
 	}
 	if app.DeployTarget.Kind == model.DeployTargetKubernetes {
-		proxyHost := opts.proxy.hostFor(sanitize(app.Name))
+		proxyHost := opts.proxy.hostFor(AppPrefix(app))
 		manifest := defaultKubernetesManifest(app, tag, opts.appEnv, proxyHost, opts.proxy.IngressClass)
 		stages = append(stages, model.Stage{
 			ID: "deploy", Name: "Deploy", Type: model.StageTypeDeploy,
@@ -559,6 +640,9 @@ func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag stri
 				ProxyHost:    proxyHost,
 			},
 		})
+		edges = append(edges, model.Edge{ID: "e2", Source: "push", Target: "deploy"})
+	} else {
+		stages = append(stages, model.Stage{ID: "deploy", Name: "Deploy", Type: model.StageTypeDeploy, Config: model.StageConfig{DeployRuntime: string(deployRuntimeFor(app.DeployTarget.Kind)), RuntimeName: AppPrefix(app), Image: tag, Env: mergeEnv(opts.appEnv, nil)}})
 		edges = append(edges, model.Edge{ID: "e2", Source: "push", Target: "deploy"})
 	}
 
@@ -588,7 +672,7 @@ func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag stri
 // target without first writing YAML. Real workloads override this
 // via App.BuildPlan / a custom pipeline.
 func defaultKubernetesManifest(app *model.App, image string, env map[string]string, proxyHost, ingressClass string) string {
-	name := sanitize(app.Name)
+	name := AppPrefix(app)
 	m := fmt.Sprintf(`apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -644,6 +728,12 @@ func ComposePipelineID(runID, appID string, ts int64) string {
 // error if the depends_on graph contains a cycle.
 func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, workdir, registry string, ts int64, pipelineID, runID string, cache *model.CacheSpec, opts synthOpts) (*model.Pipeline, *model.PipelineRun, error) {
 	runtime := deployRuntimeFor(app.DeployTarget.Kind)
+	if runtime == deployRuntimeDocker && opts.composeFile != "" {
+		runtime = deployRuntimeCompose
+	}
+	if runtime == "" {
+		return nil, nil, fmt.Errorf("unsupported app deployment target %q", app.DeployTarget.Kind)
+	}
 
 	// Assign each service a unique, sanitized slug for stage IDs,
 	// disambiguating collisions (two service names → same slug).
@@ -674,6 +764,9 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 
 	for _, svc := range graph.Services {
 		slug := slugOf[svc.Name]
+		if svc.External {
+			continue
+		}
 		hasBuild := svc.Build != nil
 		deployImage := svc.Image // image-only services deploy as-is
 
@@ -689,14 +782,14 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 			// Guard against path escape in operator-supplied context/df
 			// (mirrors the single-service guard in synthesizePipeline).
 			cleanCtx := filepath.Clean(bctx)
-			if filepath.IsAbs(cleanCtx) || cleanCtx == ".." || strings.HasPrefix(cleanCtx, ".."+string(filepath.Separator)) {
-				cleanCtx = "."
+			if !safeRelativePath(cleanCtx) {
+				return nil, nil, fmt.Errorf("invalid context for %s", svc.Name)
 			}
 			cleanDf := filepath.Clean(df)
-			if filepath.IsAbs(cleanDf) || cleanDf == ".." || strings.HasPrefix(cleanDf, ".."+string(filepath.Separator)) {
-				cleanDf = "Dockerfile"
+			if !safeRelativePath(filepath.Join(cleanCtx, cleanDf)) || filepath.IsAbs(cleanDf) {
+				return nil, nil, fmt.Errorf("invalid Dockerfile for %s", svc.Name)
 			}
-			deployImage = fmt.Sprintf("%s/%s-%s:%d", registry, sanitize(app.Name), slug, ts)
+			deployImage = fmt.Sprintf("%s/%s-%s:%d", registry, AppPrefix(app), slug, ts)
 
 			buildID := "build-" + slug
 			pushID := "push-" + slug
@@ -705,6 +798,8 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 					ID: buildID, Name: "Build " + svc.Name, Type: model.StageTypeBuild, Group: svc.Group,
 					Config: model.StageConfig{
 						Dockerfile:          cleanDf,
+						BuildArgs:           svc.Build.Args,
+						BuildTarget:         svc.Build.Target,
 						Context:             filepath.Join(workdir, cleanCtx),
 						Tags:                []string{deployImage},
 						Cache:               cache,
@@ -730,9 +825,12 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 		// Merged runtime env: the App's linked Environment (PlainVars +
 		// Secrets) under the compose-literal environment (compose wins).
 		svcEnv := mergeEnv(opts.appEnv, svc.Environment)
-		proxyHost := opts.proxy.hostFor(sanitize(app.Name) + "-" + slug)
+		proxyHost := opts.proxy.hostFor(RuntimeServiceName(app, svc.Name))
 		deployCfg := model.StageConfig{
+			Command:            svc.CommandArgs,
+			HealthCheck:        svc.HealthCheck,
 			DeployRuntime:      string(runtime),
+			RuntimeName:        RuntimeServiceName(app, svc.Name),
 			ComposeServiceName: svc.Name,
 			Resources:          svc.Resources,
 			Image:              deployImage,
@@ -743,9 +841,16 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 			Env:          svcEnv,
 			ProxyHost:    proxyHost,
 		}
+		if runtime == deployRuntimeCompose {
+			deployCfg.ManifestPath = opts.composeFile
+			deployCfg.ComposeProject = AppPrefix(app)
+			deployCfg.RuntimeName = AppPrefix(app) + "-" + svc.Name + "-1"
+		}
 		if runtime == deployRuntimeKubernetes {
 			deployCfg.Namespace = app.DeployTarget.Namespace
-			deployCfg.ManifestPath = composeServiceManifest(&svc, deployImage, svcEnv, proxyHost, opts.proxy.IngressClass)
+			scoped := svc
+			scoped.Name = RuntimeServiceName(app, svc.Name)
+			deployCfg.ManifestPath = composeServiceManifest(&scoped, deployImage, svcEnv, proxyHost, opts.proxy.IngressClass)
 		}
 		stages = append(stages, model.Stage{
 			ID: deployID, Name: "Deploy " + svc.Name, Type: model.StageTypeDeploy, Group: svc.Group,
@@ -758,6 +863,9 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 
 	// Cross-service edges: deploy-<svc> waits on deploy-<dep>.
 	for _, svc := range graph.Services {
+		if svc.External {
+			continue
+		}
 		for _, dep := range svc.DependsOn {
 			depDeploy, ok := deployStageID[dep]
 			if !ok {
@@ -812,14 +920,20 @@ const (
 
 // deployRuntimeFor maps an App's deploy-target kind to the per-service
 // deploy runtime. Kubernetes → manifest apply; docker-host → per-
-// service docker run. Other targets default to kubernetes-manifest
-// semantics for now.
+// service docker run. Cloud targets use their registered adapter; unknown
+// kinds remain unset and are rejected before execution.
 func deployRuntimeFor(kind model.DeployTargetKind) deployRuntime {
 	switch kind {
 	case model.DeployTargetDockerHost:
 		return deployRuntimeDocker
-	default:
+	case model.DeployTargetKubernetes:
 		return deployRuntimeKubernetes
+	case model.DeployTargetECS:
+		return deployRuntime("ecs")
+	case model.DeployTargetCloudRun:
+		return deployRuntime("cloud-run")
+	default:
+		return ""
 	}
 }
 

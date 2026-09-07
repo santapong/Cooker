@@ -24,6 +24,22 @@ export const GATES_PIPELINE = {
   version: 1,
 };
 
+/** All editor stage types, with meaningful names independent of their types. */
+export const TYPED_PIPELINE = {
+  ...GATES_PIPELINE,
+  name: 'Release workflow',
+  description: 'Compile, verify, publish and release an application',
+  stages: [
+    { id: 'a', name: 'Compile image', type: 'build', config: { dockerfile: 'Dockerfile' }, position: { x: 120, y: 140 } },
+    { id: 'b', name: 'Verify suite', type: 'test', config: { image: 'node:22', command: ['npm', 'test'] }, position: { x: 420, y: 140 } },
+    { id: 'c', name: 'Publish artifact', type: 'push', config: { repository: 'acme/api' }, position: { x: 720, y: 140 } },
+    { id: 'd', name: 'Review release', type: 'approval', config: {}, position: { x: 120, y: 380 } },
+    { id: 'e', name: 'Ship to staging', type: 'deploy', config: { namespace: 'staging' }, position: { x: 420, y: 380 } },
+    { id: 'f', name: 'Notify team', type: 'custom', config: { script: './notify.sh' }, position: { x: 720, y: 380 } },
+  ],
+  edges: [{ id: 'ab', source: 'a', target: 'b' }, { id: 'bc', source: 'b', target: 'c' }, { id: 'de', source: 'd', target: 'e' }, { id: 'ef', source: 'e', target: 'f' }, { id: 'ad', source: 'a', target: 'd' }],
+};
+
 export const GATES_RUN = {
   id: 'r1',
   pipelineId: 'gates',
@@ -67,6 +83,7 @@ export async function mockApi(page: Page): Promise<void> {
   await page.route('**/api/v1/ws-tickets', (route) => route.fulfill({ status: 403, json: { error: 'forbidden' } }));
   await page.route('**/api/v1/capabilities', (route) => route.fulfill({ json: { aiTriage: false, cloudInventory: false, feedback: false } }));
   await page.route('**/api/v1/environments**', (route) => route.fulfill({ json: [] }));
+  await page.route('**/api/v1/apps?*', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/v1/settings/registries', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/v1/settings/clusters', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/v1/tokens**', (route) => route.fulfill({ json: { tokens: [] } }));

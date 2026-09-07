@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // AppHealth is the post-deploy health verdict observed by the
 // AppHealthChecker. "unknown" means no probe has run yet (or the
@@ -50,15 +53,48 @@ type BuildPlan struct {
 	Path       string            `json:"path,omitempty"`       // e.g., "Dockerfile", "docker-compose.yml"
 	Args       map[string]string `json:"args,omitempty"`       // Build args / buildpack env
 	Buildpacks []string          `json:"buildpacks,omitempty"` // Paketo buildpack IDs
+	// Source identity and ordered Compose inputs are persisted in build_plan JSONB.
+	Commit         string   `json:"commit,omitempty"`
+	InstallationID int64    `json:"installationId,omitempty"`
+	Files          []string `json:"files,omitempty"`
+	Profiles       []string `json:"profiles,omitempty"`
+	// Variables contains non-secret Compose interpolation inputs. Secrets belong
+	// in the linked Environment; they are never copied into this configuration.
+	Variables map[string]string `json:"variables,omitempty"`
 }
 
 // DeployTarget pins an App to a specific runtime.
 type DeployTarget struct {
-	Kind      DeployTargetKind `json:"kind"`
-	HostID    string           `json:"hostId,omitempty"`    // Managed host (Phase 4)
-	Namespace string           `json:"namespace,omitempty"` // Kubernetes only
-	Region    string           `json:"region,omitempty"`    // Cloud targets
-	Service   string           `json:"service,omitempty"`   // Cloud Run service name
+	Kind             DeployTargetKind         `json:"kind"`
+	HostID           string                   `json:"hostId,omitempty"`    // Managed host (Phase 4)
+	Namespace        string                   `json:"namespace,omitempty"` // Kubernetes only
+	Region           string                   `json:"region,omitempty"`    // Cloud targets
+	Service          string                   `json:"service,omitempty"`   // Cloud Run service name
+	Prefix           string                   `json:"prefix,omitempty"`
+	ExternalServices []ExternalServiceBinding `json:"externalServices,omitempty"`
+}
+
+// ExternalServiceBinding replaces a Compose service with an existing resource.
+// Environment maps consumer variable names to keys in the linked Environment.
+// Values are references, never passwords or connection strings.
+type ExternalServiceBinding struct {
+	Service     string            `json:"service"`
+	Provider    string            `json:"provider"`
+	Resource    string            `json:"resource"`
+	Consumers   []string          `json:"consumers"`
+	Environment map[string]string `json:"environment"`
+}
+
+// DeploymentScope excludes fields that do not select a runtime destination.
+func DeploymentScope(t DeployTarget) string {
+	ns := ""
+	if t.Kind == DeployTargetKubernetes {
+		ns = strings.TrimSpace(t.Namespace)
+		if ns == "" {
+			ns = "default"
+		}
+	}
+	return string(t.Kind) + "/" + ns + "/" + t.HostID
 }
 
 // App is a user-facing unit of deployment: one GitHub repo, one

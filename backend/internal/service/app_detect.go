@@ -21,7 +21,8 @@ const appDetectTimeout = 30 * time.Second
 // New-App wizard can pre-select a build recipe. The clone function is
 // swappable for tests.
 type AppDetector struct {
-	cloneFn func(ctx context.Context, opts github.CloneOptions) (string, error)
+	cloneFn        func(ctx context.Context, opts github.CloneOptions) (string, error)
+	CheckExecution func(*model.App, bool) error
 }
 
 // NewAppDetector returns a detector backed by the real GitHub clone.

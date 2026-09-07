@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/lib/pq"
 	"time"
 
 	"github.com/santapong/cooker/internal/model"
@@ -87,7 +88,7 @@ func (s *AppStore) Create(ctx context.Context, a *model.App) error {
 		a.RegistryRef, a.EnvironmentID, secret, a.AutoDeploy, cc,
 		a.CreatedAt, a.UpdatedAt)
 	if err != nil {
-		return fmt.Errorf("creating app: %w", err)
+		return appWriteError(err)
 	}
 	return nil
 }
@@ -107,7 +108,7 @@ func (s *AppStore) Update(ctx context.Context, a *model.App) error {
 		a.ID, a.Name, a.Description, a.GitHubRepo, a.Branch, bp, dt,
 		a.RegistryRef, a.EnvironmentID, secret, a.AutoDeploy, cc, a.UpdatedAt, a.Version)
 	if err != nil {
-		return fmt.Errorf("updating app: %w", err)
+		return appWriteError(err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		var exists bool
@@ -118,6 +119,14 @@ func (s *AppStore) Update(ctx context.Context, a *model.App) error {
 	}
 	a.Version++
 	return nil
+}
+
+func appWriteError(err error) error {
+	var pe *pq.Error
+	if errors.As(err, &pe) && pe.Code == "23505" {
+		return fmt.Errorf("app or deployment prefix already exists: %w", store.ErrConflict)
+	}
+	return fmt.Errorf("saving app: %w", err)
 }
 
 func (s *AppStore) Delete(ctx context.Context, id string) error {

@@ -75,6 +75,8 @@ type Request struct {
 	Network string
 	// ComposeFile is the path to the compose file for KindCompose.
 	ComposeFile string
+	// ComposeService selects a reviewed service from the normalized project.
+	ComposeService string
 	// LogWriter, when non-nil, receives a stream of human-readable
 	// progress lines from the adapter. At minimum each implementation
 	// writes one "Applied <kind>/<name>" line per applied resource so

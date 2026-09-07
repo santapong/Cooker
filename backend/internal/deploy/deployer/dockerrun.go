@@ -68,7 +68,7 @@ func (d *DockerRun) Deploy(ctx context.Context, req Request) (Result, error) {
 	}
 
 	args := dockerRunArgs(name, req.Image, req.Env, req.Ports, req.Resources, req.Labels, req.Network)
-	logf(out, "Running: docker %s\n", strings.Join(args, " "))
+	logf(out, "Starting container %s with image %s\n", name, req.Image)
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout = out
 	cmd.Stderr = out
