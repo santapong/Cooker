@@ -1,12 +1,13 @@
 # Documentation visuals
 
-These illustrations describe the implementation at `6d6ca01`; they are not
+The diagrams describe the implementation at `6d6ca01`; they are not
 screenshots of a live deployment or proof of cloud acceptance. Each SVG is
 self-contained, has an accessible title/description, and can be embedded directly
 in GitHub Markdown without an external image service.
 
 | Asset | Purpose | Editable source |
 |---|---|---|
+| [cooker-banner.png](cooker-banner.png) | Project cover in the charcoal/ember palette; conceptual container DAG illustration | [Generation prompt](sources/cooker-banner-prompt.md) |
 | [stage-types.svg](stage-types.svg) | Actual six stage symbols, using the product's SVG path geometry | [Python generator](sources/render-ui-diagrams.py) reads [StageSymbol.tsx](../../frontend/src/components/pipeline/StageSymbol.tsx) |
 | [compose-workflow.svg](compose-workflow.svg) | The five import/review steps | [Python generator](sources/render-ui-diagrams.py) |
 | [github-compose.svg](github-compose.svg) | Compact AWS/GCP architecture for README readability | [Architecture JSON](sources/github-compose.architecture.json) + [Python generator](sources/render-ui-diagrams.py) |
@@ -16,6 +17,15 @@ The static SVGs use Cooker's hull/ember palette. The interactive viewer uses
 Archify's semantic component palette. Both architecture layouts use the same six
 components and five directed relationships. The HTML can be downloaded and
 opened locally; GitHub's file viewer does not execute interactive HTML.
+
+## Project banner
+
+[cooker-banner.png](cooker-banner.png) was generated with the built-in image tool
+on 9 September 2026 and reviewed for text accuracy, composition and readability.
+It is a 2172×724 PNG, intended for the README and project covers. It illustrates
+the product concept; it is not a screenshot or a claim of live cloud acceptance.
+The [saved prompt](sources/cooker-banner-prompt.md) records the generation brief.
+Keep future banner variants in sibling files until a replacement is selected.
 
 ## Regenerate the SVGs
 

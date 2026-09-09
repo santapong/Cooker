@@ -1,3 +1,5 @@
+![Cooker — visual pipelines and reviewed GitHub Compose deployments](docs/images/cooker-banner.png)
+
 <div align="center">
 
 # Cooker
