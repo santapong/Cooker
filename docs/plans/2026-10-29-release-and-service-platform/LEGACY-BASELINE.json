@@ -1,0 +1,630 @@
+{
+  "sourceDate": "2026-10-02 through 2026-10-27",
+  "reviewDate": "2026-10-29",
+  "sourceLedgerSHA256": "f2be8c35801a7d615de547b11cef990ce41ded98c9b5892d20679ec0fcd614aa",
+  "ecosystemSourceSHA256": "ef323949db2b75474f88500ca21b443b4b29465bad2af2f66fe76d391f3577e6",
+  "packages": [
+    {
+      "id": "CAT-01",
+      "stage": "R0",
+      "requirement": {
+        "work": "Classify ordinary projects separately from unavailable multi-service metadata",
+        "acceptance": "A justified ordinary project displays one generic Application component; missing/permission-reduced multi-service records remain unavailable; no inferred DB/queue/function/runtime/health"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "bounded_owner_application_aggregate_locally_verified_strict_ordinary_proof_open"
+    },
+    {
+      "id": "CAT-02",
+      "stage": "R0",
+      "requirement": {
+        "work": "Enrich aliases for the exact current production deployment",
+        "acceptance": "Confirmed aliases match the dedicated alias API; deployment URLs remain separate; no aliases copied from unrelated or former deployments"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "implemented_locally_verified_read_only_team_alias_parity"
+    },
+    {
+      "id": "CAT-03",
+      "stage": "R0",
+      "requirement": {
+        "work": "Reconcile selected inventory and navigation",
+        "acceptance": "Every successfully synced selected project has one app and provider flow, correctly linked services and exact release history; rename/overlap/token replacement cannot duplicate it"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "selected_inventory_read_only_team_13_of_13_locally_verified"
+    },
+    {
+      "id": "CAT-04",
+      "stage": "R0",
+      "requirement": {
+        "work": "Complete actual workspace acceptance",
+        "acceptance": "Owner follows Apps \u2192 Services \u2192 flow \u2192 release \u2192 provider dashboard; both themes, narrow screens, keyboard access and role restrictions pass"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "implemented_pending_acceptance"
+    },
+    {
+      "id": "CAT-05",
+      "stage": "R0",
+      "requirement": {
+        "work": "Expose coverage and operational limitations",
+        "acceptance": "Show connected account/team, selected versus discovered counts, last success, stale/partial warnings and pagination; new accessible projects are discoverable but not silently selected"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "coverage_and_pagination_locally_rolled_out_polling_observed_owner_pending"
+    },
+    {
+      "id": "AUTH-01",
+      "stage": "R0a",
+      "requirement": {
+        "work": "1. **AUTH-01: register and configure GitHub first**, then Google, using the existing [setup guide](../user-guide/operations/social-sign-in.md). GitHub is first because developers are the initial audience; Google completes the requested alternative.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "instructions_ready_external_setup_missing"
+    },
+    {
+      "id": "AUTH-02",
+      "stage": "R0a",
+      "requirement": {
+        "work": "2. **AUTH-02: configure the operator-managed Keycloak broker.** Keep exact issuer/audience, S256 PKCE, callback/logout URLs, provider allowlist and trusted role groups. Provider callbacks terminate at Keycloak; Cooker receives the broker's OIDC callback at its existing `/callback` route.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "client_integration_present_broker_unconfigured"
+    },
+    {
+      "id": "AUTH-03",
+      "stage": "R0a",
+      "requirement": {
+        "work": "3. **AUTH-03: verify accounts and recovery.** Test existing local administrator access, ordinary social users, explicitly assigned roles, denial/cancel/retry, expired callbacks, deep-link return, logout and configured MFA/step-up behavior.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "mocked_contracts_only"
+    },
+    {
+      "id": "AUTH-04",
+      "stage": "R0a",
+      "requirement": {
+        "work": "4. **AUTH-04: document activation and rollback.** Advertise a provider only after its configuration works; preserve a tested local administrator path while enabling OIDC. Keep provider secrets in the broker, never frontend build variables.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "documentation_present_activation_unverified"
+    },
+    {
+      "id": "GIT-01",
+      "stage": "R1",
+      "requirement": {
+        "work": "Hosted GitHub acceptance using one permitted disposable private repository",
+        "acceptance": "Signed delivery \u2192 exact branch/tag \u2192 server-reviewed App \u2192 durable job \u2192 production build/digest \u2192 Docker readiness and service logs"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "implementation_present_hosted_acceptance_missing"
+    },
+    {
+      "id": "GIT-02",
+      "stage": "R1",
+      "requirement": {
+        "work": "Real GitLab acceptance; retain Gitea regression",
+        "acceptance": "Private checkout, repository identity, nested paths, webhook mode, same-name branch/tag, annotated tags, revocation and missed delivery behavior verified per provider"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "gitlab_contracts_only_gitea_local_accepted"
+    },
+    {
+      "id": "GIT-03",
+      "stage": "R1",
+      "requirement": {
+        "work": "Bind authored DAGs to Git rules",
+        "acceptance": "Rule pins repository, typed ref, pipeline version, target/environment, actor and review policy; edits cannot silently change an admitted run"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "named_after_runtime_recovery_checkout_receipt_locally_verified_full_release_open"
+    },
+    {
+      "id": "GIT-04",
+      "stage": "R1",
+      "requirement": {
+        "work": "Complete delivery/decision UI",
+        "acceptance": "Show accepted, ignored, duplicate, stale, rejected, review-required and failed events with reasons and links to intent/job/run"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "journal036_and_read_ui_locally_rolled_out_owner_and_hosted_pending"
+    },
+    {
+      "id": "GIT-05",
+      "stage": "R1",
+      "requirement": {
+        "work": "Source credential rotation and missed-event recovery",
+        "acceptance": "Validate replacement in secure Settings; preserve unchanged webhook keys; old authority is revoked; bounded recovery cannot duplicate jobs or deploy obsolete refs"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "current877_official_metadata_api_ui_and_manual_app_recovery_locally_verified_worker_hosted_automatic_release_open"
+    },
+    {
+      "id": "SEC-01",
+      "stage": "R1",
+      "requirement": {
+        "work": "Improve ordinary/secret editing and service bindings",
+        "acceptance": "Database name/service settings remain readable; passwords/tokens remain protected; a service receives only its explicitly bound values"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "configuration_http_ui_older_runtime_current_and_same_fallback_generation_workers_locally_verified_coherent_release_open"
+    },
+    {
+      "id": "SEC-02",
+      "stage": "R1",
+      "requirement": {
+        "work": "Pin external-secret versions",
+        "acceptance": "Accepted runs resolve an immutable version or fail closed; unverifiable historic versions cannot authorize log replay"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "immutable_versions_locally_rolled_out_live_IAM_retention_pending"
+    },
+    {
+      "id": "SEC-03",
+      "stage": "R1",
+      "requirement": {
+        "work": "Add an encryption-key rotation procedure/tool",
+        "acceptance": "Inventory every encrypted record, retain original key recovery, tag ciphertext key versions, test interrupted/partial rotation and restore; online rotation follows a separately validated multi-key transition"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "offline_cli_restart_commit_admitted_resolution_verified_crash_reader_release_open"
+    },
+    {
+      "id": "SEC-04",
+      "stage": "R1",
+      "requirement": {
+        "work": "Scope registry authority to each App and native Pipeline",
+        "acceptance": "An App cannot use an unrelated registry credential; accepted build/push plans pin authorized connection/version; runtime secrets are not arbitrary build inputs. Native pipelines also pin exact per-stage selections; credential/grant changes around durable admission cannot silently change accepted authority"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "named_after_runtime_recovery_checkout_receipt_locally_verified_full_release_open"
+    },
+    {
+      "id": "SEC-05",
+      "stage": "R1",
+      "requirement": {
+        "work": "Verify redaction at every output boundary",
+        "acceptance": "Canary values never enter persisted logs, broadcasts, error responses, notifications, downloads or fixtures; streaming chunk splits are covered"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "known_value_redaction_implemented_more_boundaries_needed"
+    },
+    {
+      "id": "LOG-01",
+      "stage": "R1",
+      "requirement": {
+        "work": "Docker replica, time-range, bounded search and redacted download controls",
+        "acceptance": "Every result binds to a concrete container/run identity; reconnect cursor ordering, permissions, limits and retention work"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "bounded_snapshot_API_UI_official_HTTP_Docker_locally_verified_coherent_owner_rollout_open"
+    },
+    {
+      "id": "LOG-02",
+      "stage": "R1",
+      "requirement": {
+        "work": "Immutable Kubernetes log sessions",
+        "acceptance": "Capture deployment/controller generation and pod UID/container; rotation cannot attach a session to an unrelated new pod; real-cluster verification precedes availability claims"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "intentionally_unavailable"
+    },
+    {
+      "id": "REL-01",
+      "stage": "R1",
+      "requirement": {
+        "work": "Extend queue crash/cancellation boundaries",
+        "acceptance": "Worker loss before/during/after mutation and during result persistence cannot cause blind redeployment; stale writes remain fenced and uncertain outcomes visible"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "fenced_recovery_partial_real_boundary"
+    },
+    {
+      "id": "REL-02",
+      "stage": "R1",
+      "requirement": {
+        "work": "Close scheduler admission crash windows and define notification delivery",
+        "acceptance": "Restart cannot double-fire a schedule; notifications expose their retry/status policy and do not determine deployment success"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "scheduler_notifications_status_ui_locally_rolled_out_full_recovery_pending"
+    },
+    {
+      "id": "REL-03",
+      "stage": "R1",
+      "requirement": {
+        "work": "Older-schema upgrade/restore and capacity checks",
+        "acceptance": "Encrypted records, histories, operation IDs and log cursors survive the tested upgrade path; measure queue delay/acknowledgement/API latency before setting capacity claims"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "same_version_restore_only_capacity_unmeasured"
+    },
+    {
+      "id": "VRC-01",
+      "stage": "R2",
+      "requirement": {
+        "work": "**VRC-01:** register an appropriate Vercel integration, then implement authorization/callback, exact account/team binding, explicit selected projects, encrypted credential storage, revocation/disconnect and changed-scope handling. Begin with read permissions. Require a separate permission upgrade and ownership review before enabling write capabilities. Keep the encrypted token connection as an operator option.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "token_connection_only_oauth_missing"
+    },
+    {
+      "id": "VRC-02",
+      "stage": "R2",
+      "requirement": {
+        "work": "**VRC-02:** optionally ingest authenticated Vercel project/deployment events for faster refresh. Events schedule safe read reconciliation; they are not unquestioned catalog truth. Keep polling as repair/fallback, with deduplication, backoff, revocation handling and event-driven project discovery. A new project appears in selection/discovery before any opt-in catalog inclusion.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "polling_only_events_missing_optional"
+    },
+    {
+      "id": "VRC-03",
+      "stage": "R2",
+      "requirement": {
+        "work": "Update the existing Cooker landing project",
+        "acceptance": "Exact retained account/project + reviewed public bundle \u2192 one durable operation \u2192 retained deployment ID \u2192 readiness and production alias; no duplicate project"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "new_project_publisher_only"
+    },
+    {
+      "id": "VRC-04",
+      "stage": "R2",
+      "requirement": {
+        "work": "Introduce explicit deployment bindings for adopted projects",
+        "acceptance": "Admin/operator review establishes source, environment, permitted actions, provider project identity and deployment owner; imported records remain inspection-only by default"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "missing_adoption_binding"
+    },
+    {
+      "id": "VRC-05",
+      "stage": "R2",
+      "requirement": {
+        "work": "Implement a bounded Vercel deployment stage",
+        "acceptance": "Authored Cooker DAG references the binding and immutable Git revision or reviewed artifact; result links native run to provider deployment/catalog history"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "missing_vercel_executable_stage"
+    },
+    {
+      "id": "VRC-06",
+      "stage": "R2",
+      "requirement": {
+        "work": "Add provider inspection/log adapter where supported",
+        "acceptance": "Expose build/runtime streams only for tested API permissions and retention; missing provider access remains unavailable; redact before capture/download"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "dashboard_inspection_only_logs_missing"
+    },
+    {
+      "id": "VRC-07",
+      "stage": "R2",
+      "requirement": {
+        "work": "Promote/rollback supported provider releases",
+        "acceptance": "Pin exact deployment and current production before change, preserve operation/alias history, reconcile external changes and uncertain writes"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "missing_provider_promote_rollback"
+    },
+    {
+      "id": "VRC-08",
+      "stage": "R2",
+      "requirement": {
+        "work": "Add separately permitted provider environment editing",
+        "acceptance": "Scope by project/environment/service where supported; list names/targets with protected values masked; review writes and rotation, never import provider environment values into catalog snapshots"
+      },
+      "completion": "not_proven",
+      "implementationObservation": "read_decoder_excludes_environment_values_no_write_surface"
+    },
+    {
+      "id": "LIFE-01",
+      "stage": "R3",
+      "requirement": {
+        "work": "**LIFE-01:** replace approval-only promotion with actual dispatch where supported. Capture source/target environments, immutable artifact and configuration versions, preconditions, approver and resulting deployment. UI distinguishes approved, queued, provider accepted, ready, failed and needs attention.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "approval_records_only"
+    },
+    {
+      "id": "LIFE-02",
+      "stage": "R3",
+      "requirement": {
+        "work": "**LIFE-02:** implement rollback to a known prior application artifact/revision with audited selection, readiness checks and reconciliation. Application rollback does not automatically downgrade a database or restore business data. Identify schema compatibility/backup prerequisites before exposing the action.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "kubernetes_single_image_process_bound_partial"
+    },
+    {
+      "id": "LIFE-03",
+      "stage": "R3",
+      "requirement": {
+        "work": "**LIFE-03:** add gradual traffic/canary controls only where a tested adapter supports them. Record desired and observed traffic separately; preserve manual resolution for uncertain or externally changed states.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "kubernetes_weighted_canary_partial"
+    },
+    {
+      "id": "DOM-01",
+      "stage": "R3",
+      "requirement": {
+        "work": "**DOM-01:** model domain/route bindings by exact App/service/environment and provider deployment. Ownership verification, DNS propagation, routing and TLS are separate states, with actionable failures. Begin with manual DNS instructions and read verification before automated DNS writes. Use ACME staging for certificate tests, then renewal/restart/expired-certificate acceptance.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "operator_route_generation_only"
+    },
+    {
+      "id": "DOM-02",
+      "stage": "R3",
+      "requirement": {
+        "work": "**DOM-02:** support operator-provided subdomains. Users of that installation need not each buy a domain; the operator must supply and control its base zone and routing. Do not assign `draveniq.dev` apex/www or expose other applications merely because that domain is owned.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "base_domain_config_route_generation_partial"
+    },
+    {
+      "id": "TUN-01",
+      "stage": "R3",
+      "requirement": {
+        "work": "**TUN-01:** begin with an explicitly configured persistent Cloudflare Tunnel adapter, because it is an agreed proposal aligned with the existing Cloudflare-managed domain. Keep tunnel credentials encrypted and process/service routing owned, with restart/reconnect/revocation, health and access policy. Cloudflare Tunnel connects origins outbound without requiring a public origin IP. [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/)",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "missing_persistent_tunnel_adapter"
+    },
+    {
+      "id": "TUN-02",
+      "stage": "R3",
+      "requirement": {
+        "work": "**TUN-02:** allow a separate optional temporary development tunnel flow. Cloudflare Quick Tunnels can issue a temporary address without a user domain, but are intended for development/testing. A stable production tunnel requires the appropriate account/hostname setup. ngrok is a later adapter option, not a second simultaneous implementation. [Quick Tunnel scope](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "missing_optional_preview_tunnel"
+    },
+    {
+      "id": "AWS-01",
+      "stage": "R4",
+      "requirement": {
+        "work": "**AWS-01:** connect a permitted account/region/resource scope; import selected ECS/Fargate services and deployments into the shared catalog using account/region/resource identity. Store permitted references and safe metadata; avoid enumerating every cloud product.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "generic_ec2_eks_ecr_inventory_not_selected_ecs_catalog"
+    },
+    {
+      "id": "AWS-02",
+      "stage": "R4",
+      "requirement": {
+        "work": "**AWS-02:** complete the existing ECR/ECS path: immutable image digest, task/service revision, provider operation status, readiness, configured endpoint/load-balancer information, CloudWatch logs and permission preflight. CloudWatch container log collection needs the appropriate ECS log-driver configuration. [ECS logging](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/using_awslogs.html)",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "ecs_deploy_status_verifyimage_present_logs_endpoint_preflight_incomplete"
+    },
+    {
+      "id": "AWS-03",
+      "stage": "R4",
+      "requirement": {
+        "work": "**AWS-03:** reconcile failed/uncertain rollout, cancellation and supported return to a completed revision. Validate the deployment strategy and previous-good-revision prerequisites before enabling circuit-breaker/rollback options. [ECS deployment circuit breaker](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentCircuitBreaker.html)",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "previous_revision_rollback_partial_no_durable_reconcile"
+    },
+    {
+      "id": "GCP-01",
+      "stage": "R4",
+      "requirement": {
+        "work": "**GCP-01:** connect a permitted project/region and import selected Cloud Run services/revisions into the catalog with stable resource identity and freshness.",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "generic_compute_gke_registry_inventory_not_cloudrun_catalog"
+    },
+    {
+      "id": "GCP-02",
+      "stage": "R4",
+      "requirement": {
+        "work": "**GCP-02:** complete Artifact Registry/Cloud Run deployment, revision readiness, available service address, IAM/ingress visibility, Cloud Logging and operation reconciliation. A Cloud Run URL does not by itself imply anonymous accessibility; private invocation needs authentication. [Cloud Run HTTPS invocation](https://docs.cloud.google.com/run/docs/triggering/https-request)",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "cloudrun_deploy_status_present_logs_reconcile_incomplete"
+    },
+    {
+      "id": "GCP-03",
+      "stage": "R4",
+      "requirement": {
+        "work": "**GCP-03:** add tested revision traffic migration and rollback, with explicit observed traffic and provider operation tracking. Cloud Run supports routing traffic among revisions; handle its transition behavior rather than reporting instantaneous completion. [Cloud Run rollouts/rollbacks](https://docs.cloud.google.com/run/docs/rollouts-rollbacks-traffic-migration?hl=en)",
+        "acceptance": "See the full adjacent milestone section and exit gate; no acceptance narrowed to this sentence."
+      },
+      "completion": "not_proven",
+      "implementationObservation": "rollback_heuristic_partial"
+    }
+  ],
+  "gates": [
+    {
+      "id": "GATE-R0",
+      "stage": "R0",
+      "requirement": "Inventory equality/alias parity/classification/exact landing attribution/signed-in graph-text-history/native permission regression/rehearsed rollback.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "GATE-R0a",
+      "stage": "R0a",
+      "requirement": "Both real GitHub and Google login return to intended page, role/MFA checks/local sign-in/Vercel preservation pass.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "GATE-R1",
+      "stage": "R1",
+      "requirement": "Hosted GitHub complete source-build-to-Docker; Gitea regression; immutable artifact/config/secret/log; crash/upgrade/operator runbooks. Explicit authored GIT-03 DAG acceptance: accepted source to verified checkout to real OCI image/digest to Docker readiness/service logs and durable run-source linkage. App-only acceptance remains partial.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "GATE-R2",
+      "stage": "R2",
+      "requirement": "OAuth revocation/selection, scoped deploy/inspect/failure/reconcile, same landing project/address, run/provider ID traceability, no uncertain POST replay.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "GATE-R3",
+      "stage": "R3",
+      "requirement": "Domain ownership/DNS/TLS renewal/collisions/service routing/persistent tunnel recovery; tested promotion/rollback/canary where supported.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "GATE-AWS",
+      "stage": "R4",
+      "requirement": "Selected resource import, authorized disposable update, revision/readiness/access/logs, failure/rollback, owned cleanup under account/region/budget.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "GATE-GCP",
+      "stage": "R4",
+      "requirement": "Selected Cloud Run import, authorized update, revision/readiness/access/logs/failure/traffic rollback/cleanup under project/region/budget.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "JOURNEY-LANDING-READ",
+      "stage": "R0",
+      "requirement": "Existing landing App -> Website -> provider flow -> exact publication-backed release; uploaded bundle source without invented Git; confirmed aliases/deployment URL/freshness/dashboard.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "JOURNEY-LANDING-UPDATE",
+      "stage": "R2",
+      "requirement": "Review new public bundle, update same retained project in one operation, anonymous production alias serves exact allowed seven files and selected icon.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "JOURNEY-N8N",
+      "stage": "R1/R3",
+      "requirement": "Real reviewed Compose/digest pins, plain/scoped protected config, durable App/DAG, per-service identity/logs, stop-worker queued -> worker-success DB/log proof, supported update/recovery/rollback with database distinction.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "VERIFY-CONTRACTS",
+      "stage": "all",
+      "requirement": "Affected Go/frontend/TypeScript-build/lint; identity, pagination, permissions, secrecy, failure; run scripts named by each feature.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "VERIFY-PERSISTENCE",
+      "stage": "all",
+      "requirement": "Actual disposable PG/restart/version/lease/old-new snapshots plus each additive migration and upgrade/restore.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "VERIFY-ACTUAL-UI",
+      "stage": "all",
+      "requirement": "Actual authenticated navigation/read-only native separation/graph-text/keyboard/two themes/narrow layouts.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "VERIFY-LIVE-PROVIDER",
+      "stage": "all",
+      "requirement": "Exact account/resource scope, retained IDs, authorized scoped operations/cleanup; mock success is not access evidence.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "FREEZE-ROLLBACK",
+      "stage": "all",
+      "requirement": "Freeze exact revision and pending/build input hashes; retain executable builds/keys/DB backups; rollback app binary independently of schema.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "DOC-USER",
+      "stage": "all",
+      "requirement": "Existing user Documentation has exact connect/select/inspect/deploy/diagnose labels and expected supported results.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "DOC-DEVELOPER",
+      "stage": "all",
+      "requirement": "API/model/identity/auth/capabilities/errors/freshness/provider limits in existing developer reference.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "DOC-OPERATOR",
+      "stage": "all",
+      "requirement": "Per-slice setup/rotation/recovery/migration/rollback/cleanup runbook.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "DOC-STATUS-EVIDENCE",
+      "stage": "all",
+      "requirement": "Implemented/locally verified/live accepted/released are distinct fields, with artifacts and dates.",
+      "completion": "not_proven"
+    },
+    {
+      "id": "RELEASE-INTEGRATION",
+      "stage": "all",
+      "requirement": "Coherent accepted slices through verified develop workflow, plain Git; no merge/push/public deployment inferred.",
+      "completion": "not_proven"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "INV-IDENTITY",
+      "requirement": "Three separate auth/source/hosting authority domains; account/team/provider IDs stable; names/repositories never identity."
+    },
+    {
+      "id": "INV-READ-ONLY",
+      "requirement": "Imported snapshots never executable App/Pipeline/Run/jobs; five catalog endpoints authenticated reads; native mutations unchanged."
+    },
+    {
+      "id": "INV-SAFE-SNAPSHOTS",
+      "requirement": "Decode allowlisted fields only; no raw env values, credentials, protection bypass or logs in snapshot/catalog/browser fixtures."
+    },
+    {
+      "id": "INV-PRODUCTION",
+      "requirement": "Current production only exact targets.production.id; latest preview/latest activity distinct; production alias versus unique deployment URL separate."
+    },
+    {
+      "id": "INV-TRUTH",
+      "requirement": "READY is provider readiness, not health; services verified/configured/unavailable distinguished; no invented functions/DB/queue or fake DAG."
+    },
+    {
+      "id": "INV-LISTS",
+      "requirement": "Filter before pagination and expose total/limit/offset/sources; partial source data cannot appear complete."
+    },
+    {
+      "id": "INV-SYNC-BOUNDS",
+      "requirement": "120sec polling,90secdeadline,20selected,100history,max4concurrent detail reads; alias finite request budget/version-lease/backoff retention."
+    },
+    {
+      "id": "INV-GIT-REFS",
+      "requirement": "Exact branch/tag namespace plus annotated object and peeled commit; signed durable admission, dedup, queue freshness, no manual cancellation by push."
+    },
+    {
+      "id": "INV-SECRETS",
+      "requirement": "Plain config readable, bound secrets encrypted/protected; immutable accepted generations; register resolved secret redaction before external tools; never user authority in payload."
+    },
+    {
+      "id": "INV-UNCERTAIN",
+      "requirement": "Queue ack != rollout; provider external IDs survive context expiry under fence; uncertain POST not blindly replayed; inspect/reconcile/operator resolution."
+    },
+    {
+      "id": "INV-ADDRESSES",
+      "requirement": "Owned exact target exposure; DNS/TLS/routing distinct; no implicit public database/Redis/Docker/admin routes; no owned domain apex assignment by assumption."
+    },
+    {
+      "id": "INV-DESIGN",
+      "requirement": "Preserve ReadyBlock/brackets/OpenWorkbench charcoal-ember/Paper; document developer reference; actual projects in actual workspace not generic prototype demos."
+    }
+  ]
+}
