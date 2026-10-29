@@ -1,0 +1,18 @@
+{
+  "src/core/Geometry.js": "b38b6be72e7b0bf0ca5a273eb60df06cd6bd23429b8441f918e9c1b182d49c04",
+  "src/core/Mesh.js": "87ee0f924b3b7531ab18f21b2bb8afda8f180f8d52f100596d723368dccb87f4",
+  "src/core/Program.js": "f29c2901d2abd7be08402c710b09d1cf4677e802a4b3ce448594c3b3b48d2d72",
+  "src/core/Renderer.js": "615e688ddfe3c669e3f2ba1d0ecf8ed0485fc5ee064eac32230c58c5d40262b1",
+  "src/core/Transform.js": "83d6add0dc37a6c8ef96cd112934ed35bf33835aabbe89c14f85a4f80e2bce54",
+  "src/math/Euler.js": "617dae187caa463bdf4b7c8536a10f56ef9012cf43cebebf6404a09acbc7b366",
+  "src/math/Mat3.js": "b96f08ef6bae2f249ab552f692656430ae1e7c5f729b6a5b8fb3afd17f1f0d56",
+  "src/math/Mat4.js": "c091a2283bc334e19e17501f33158ba407ae0d3703ac589c15d636ef1bfefca6",
+  "src/math/Quat.js": "43ac0a8fe0b733d550e3a8021344da9db1063dbc16cc6aa640309432cfbd151c",
+  "src/math/Vec3.js": "a05a9e0726df48e62b3ccf7003dd922fddeead3618c8d06a1921644af4cfb121",
+  "src/math/functions/EulerFunc.js": "56f44178c29e64494c9fea9bc72b3574546201b0aed21aab7470bf74827f18d5",
+  "src/math/functions/Mat3Func.js": "c24f81aea1a9b4b62ebea37aabef2bc96e88d20c357adf07eda4a71bcca4e96d",
+  "src/math/functions/Mat4Func.js": "3c6af31af0a96e1c3bba9655b7afc5e490f569364293780415a712c82fa6718f",
+  "src/math/functions/QuatFunc.js": "25d57a0d2e470a4097e7fb188add6b1d78d4188586dd4b244ca5f58bc5835231",
+  "src/math/functions/Vec3Func.js": "1e1cbb442fa6661b4b8eeff69f2d56dd3468f8999271120bcd77f2a5bad1b56b",
+  "src/math/functions/Vec4Func.js": "9fc2276648e34f1dbe6993b3695c192f98abd413b4742e3e63abd4a46d3fef7a"
+}
