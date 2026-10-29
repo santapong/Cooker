@@ -1076,13 +1076,16 @@
       "title": "Freeze, sign off and push the landing plus complete repository plan",
       "kind": "delivery_slice",
       "phase": "delivery",
-      "state": "planned",
-      "fullAcceptance": "not_proven",
+      "state": "live_verified",
+      "fullAcceptance": "proven_for_feature_publication_slice",
       "priority": "P0",
       "dependencies": [],
       "owner": "current_session",
       "acceptance": "Review only owned frontend/example/plan files, scan the staged diff for private material, create a signed-off feature commit and verify the exact remote branch SHA. Preserve unrelated backend work and target develop for later integration.",
-      "evidence": [],
+      "evidence": [
+        "DELIVERY.md",
+        "https://github.com/santapong/Cooker/tree/feature/cooker-release-plan-20261029"
+      ],
       "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance."
     },
     {
@@ -1090,17 +1093,16 @@
       "title": "Verify B3/K1 story landing and actual OGL behavior",
       "kind": "delivery_slice",
       "phase": "delivery",
-      "state": "in_progress",
-      "fullAcceptance": "not_proven",
+      "state": "verified_slice",
+      "fullAcceptance": "proven_for_stated_browser_scope",
       "priority": "P0",
       "dependencies": [],
       "owner": "current_session",
       "acceptance": "Bounded Chromium: moving pixels and route registration, pause/resume, offscreen and reduced-motion stop, no-WebGL/vendor/no-JS fallback, keyboard join explanations, all six responsive widths and actual screenshot review. Store source/cap/cleanup receipts.",
       "evidence": [
-        "DELIVERY.md#current-observations"
+        "evidence/landing-verification.json"
       ],
-      "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance.",
-      "remaining": "1024px registration diagnosis and remaining browser checks."
+      "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance."
     },
     {
       "id": "SHIP-03",
@@ -1108,13 +1110,14 @@
       "kind": "delivery_slice",
       "phase": "delivery",
       "state": "verified_slice",
-      "fullAcceptance": "not_proven",
+      "fullAcceptance": "proven_for_public_export_scope",
       "priority": "P0",
       "dependencies": [],
       "owner": "current_session",
       "acceptance": "Exclude login studies, backups, test/controller inputs, local notes, credentials and source maps; preserve working docs/demo links, CSP and pinned OGL hashes; verify final bytes and the static envelope of100files,4MiB/file,8MiB total.",
       "evidence": [
-        "DELIVERY.md#current-observations"
+        "evidence/landing-artifact.json",
+        "evidence/landing-verification.json"
       ],
       "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance."
     },
@@ -1123,8 +1126,8 @@
       "title": "Publish and verify the existing Cooker landing project",
       "kind": "delivery_slice",
       "phase": "delivery",
-      "state": "planned",
-      "fullAcceptance": "not_proven",
+      "state": "live_verified",
+      "fullAcceptance": "proven_for_production_publication",
       "priority": "P0",
       "dependencies": [
         "SHIP-01",
@@ -1132,9 +1135,13 @@
         "SHIP-03"
       ],
       "owner": "current_session",
-      "acceptance": "Deploy exact reviewed commit/artifact to prj_oe2lsOOWP5p5AAafHtkjKsW77d6a in team_4xUt8aSlfT696WCBgbsjtJTV. Read back target, deployment ID/source and bytes/behavior, retain rollback deployment. Preserve existing protection; public-access/domain change is a separate explicit final decision.",
-      "evidence": [],
-      "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance."
+      "acceptance": "Deploy exact reviewed commit/artifact to prj_oe2lsOOWP5p5AAafHtkjKsW77d6a in team_4xUt8aSlfT696WCBgbsjtJTV. Read back target, deployment ID/source and bytes/behavior, retain rollback deployment. Preserve existing protection; any protection/domain change requires its own explicit decision.",
+      "evidence": [
+        "evidence/vercel-landing.json",
+        "evidence/public-access.json"
+      ],
+      "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance.",
+      "publicAccess": "Anonymous production-domain200 and real content verified; existing protection unchanged."
     },
     {
       "id": "EXM-01",
@@ -1150,7 +1157,8 @@
       "owner": "current_session",
       "acceptance": "One dependency-free Function and page, no secrets/data resources. Verify /api/health, no-store and structured runtime event against exact deployment. Record connector/direct deployment honestly; do not call it Cooker-managed.",
       "evidence": [
-        "DELIVERY.md#current-observations"
+        "evidence/vercel-example.json",
+        "evidence/public-access.json"
       ],
       "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance."
     },

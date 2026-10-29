@@ -1,0 +1,190 @@
+{
+  "files": {
+    "index.html": {
+      "bytes": 18853,
+      "sha256": "29f7fce2cb1b8fabef21deabb631e0d3294ec6ad8c3f6b5b344adf1c52a88ef7"
+    },
+    "styles.css": {
+      "bytes": 29217,
+      "sha256": "5c3fe2ea684bbe321ac103fdd91e47955d97b1b39a776e3c4c1bd6445b96dfe2"
+    },
+    "kitchen.css": {
+      "bytes": 9330,
+      "sha256": "78308860459a158908f6814e3a919fcb63bb3bf68644f48409108e37700ea1f6"
+    },
+    "kitchen-page.js": {
+      "bytes": 9234,
+      "sha256": "9c3010daca1f28238076a17fd65ed6d0c7fd3a479625f73ae986122a6e4f843c"
+    },
+    "kitchen-motion.js": {
+      "bytes": 6860,
+      "sha256": "828f86f6043d61fb8e1caa5b962a103a097319d3bedc4f6661343ae3c415755d"
+    },
+    "docs.html": {
+      "bytes": 32818,
+      "sha256": "ccbcfbb9212893b7decb86e6d1a3ee8a4758358ec761fbf3a88875fb8e630826"
+    },
+    "docs.css": {
+      "bytes": 17649,
+      "sha256": "b3a06b4b0d495a4b84c12d571ee2468afa98eda646277bafcec3752e973d2a1f"
+    },
+    "docs.js": {
+      "bytes": 7459,
+      "sha256": "2ab4575e558dc898a36624f42e0eca9e81a8c68bded59d05431dfc4117f7d510"
+    },
+    "workspace.html": {
+      "bytes": 9963,
+      "sha256": "a1e31e07847da292c45fd148a40750077fb69630bc8fcd9d28c1f762e1e481d2"
+    },
+    "workspace.css": {
+      "bytes": 30507,
+      "sha256": "84dbbf94fb0cc99acec6174d70a4db27957a460ccb270542c75de241b3b090f5"
+    },
+    "workspace.js": {
+      "bytes": 41795,
+      "sha256": "92585f8aeb8b6f8d5611455be441e42079acd99487342ba0f7a15b69f1a44458"
+    },
+    "workspace-dag.js": {
+      "bytes": 35190,
+      "sha256": "13257b1f217cbfc53523c7f64fdf2e566ccc8aa46b7fc8910e7126f95745e2f8"
+    },
+    "workspace-examples.js": {
+      "bytes": 8093,
+      "sha256": "48da784866dfe73593d429d76b9e1272153302ed07b03f87709bd483edc14907"
+    },
+    "workspace-dag.css": {
+      "bytes": 17473,
+      "sha256": "6fe8d7fa2e5c25e6abcaa133448b30341fbf964c7bfc72808da96d6eaec1ffad"
+    },
+    "workspace-n8n.js": {
+      "bytes": 7817,
+      "sha256": "cdeeed32f0e0da4c85115b66afb85f1617f5ff0eface28d5a60cdc5363e05a74"
+    },
+    "workspace-n8n.css": {
+      "bytes": 2910,
+      "sha256": "33be21128e445f308b6ccbdc7ff4ddd4401e5ebaa8374eed8989646924a10a8b"
+    },
+    "examples/n8n-queue/compose.yaml": {
+      "bytes": 3140,
+      "sha256": "36fd146a0e4d24a7cc6b0aa9e75c6816991907da34da517324f91c83ca35019c"
+    },
+    "examples/n8n-queue/env.example": {
+      "bytes": 475,
+      "sha256": "d6736b82e6add4eb7119f88aa396bb90012efb70fdf198fa954423aaf0a39852"
+    },
+    "examples/n8n-queue/README.md": {
+      "bytes": 3391,
+      "sha256": "d12ade1b2cfdaa247a7424dd07630dfc385a341feb0e9a230970036216e92645"
+    },
+    "assets/cooker-b3.svg": {
+      "bytes": 1825,
+      "sha256": "b547a2f70cb46267e9285cd4190203b8153fb586a8ab015aa951396f7756a6e1"
+    },
+    "assets/favicon.svg": {
+      "bytes": 438,
+      "sha256": "f3c17774568957a9d5c9e2b06a9279e343c3d7f9928cd8efb8460bb93a2132dd"
+    },
+    "assets/cooker-theme.css": {
+      "bytes": 1712,
+      "sha256": "0ad46a6f8ebd31cf4e84fafd4bc5a31667a03676dec8d9c7f62e2f14d9e226df"
+    },
+    "assets/tokens.css": {
+      "bytes": 1782,
+      "sha256": "288aac0b70ae38e25504daa0979e227f22f5772450d7824d12a31281cfbda28f"
+    },
+    "assets/cooker-kitchen-paths-v2.png": {
+      "bytes": 2694116,
+      "sha256": "fdc9f0667db93e8e5a74db3ce080efc64dbb43ae68cc7beac8d711f1f56e30ec"
+    },
+    "assets/cooker-recipe-desk.png": {
+      "bytes": 2409532,
+      "sha256": "986f889dd3858a6c268644b7451dd2f927d81101dd3951d228e71894e84339a6"
+    },
+    "assets/cooker-service-pass.png": {
+      "bytes": 2047777,
+      "sha256": "2533edb1cb6d0089f1fcc5a977be039b75fcf089caabe59d58d32f6eb00e893b"
+    },
+    "vendor/ogl/src/core/Geometry.js": {
+      "bytes": 10815,
+      "sha256": "b38b6be72e7b0bf0ca5a273eb60df06cd6bd23429b8441f918e9c1b182d49c04"
+    },
+    "vendor/ogl/src/core/Mesh.js": {
+      "bytes": 2733,
+      "sha256": "87ee0f924b3b7531ab18f21b2bb8afda8f180f8d52f100596d723368dccb87f4"
+    },
+    "vendor/ogl/src/core/Program.js": {
+      "bytes": 12277,
+      "sha256": "f29c2901d2abd7be08402c710b09d1cf4677e802a4b3ce448594c3b3b48d2d72"
+    },
+    "vendor/ogl/src/core/Renderer.js": {
+      "bytes": 14512,
+      "sha256": "615e688ddfe3c669e3f2ba1d0ecf8ed0485fc5ee064eac32230c58c5d40262b1"
+    },
+    "vendor/ogl/src/core/Transform.js": {
+      "bytes": 2842,
+      "sha256": "83d6add0dc37a6c8ef96cd112934ed35bf33835aabbe89c14f85a4f80e2bce54"
+    },
+    "vendor/ogl/src/math/Euler.js": {
+      "bytes": 2388,
+      "sha256": "617dae187caa463bdf4b7c8536a10f56ef9012cf43cebebf6404a09acbc7b366"
+    },
+    "vendor/ogl/src/math/Mat3.js": {
+      "bytes": 1623,
+      "sha256": "b96f08ef6bae2f249ab552f692656430ae1e7c5f729b6a5b8fb3afd17f1f0d56"
+    },
+    "vendor/ogl/src/math/Mat4.js": {
+      "bytes": 4532,
+      "sha256": "c091a2283bc334e19e17501f33158ba407ae0d3703ac589c15d636ef1bfefca6"
+    },
+    "vendor/ogl/src/math/Quat.js": {
+      "bytes": 3645,
+      "sha256": "43ac0a8fe0b733d550e3a8021344da9db1063dbc16cc6aa640309432cfbd151c"
+    },
+    "vendor/ogl/src/math/Vec3.js": {
+      "bytes": 3617,
+      "sha256": "a05a9e0726df48e62b3ccf7003dd922fddeead3618c8d06a1921644af4cfb121"
+    },
+    "vendor/ogl/src/math/functions/EulerFunc.js": {
+      "bytes": 2094,
+      "sha256": "56f44178c29e64494c9fea9bc72b3574546201b0aed21aab7470bf74827f18d5"
+    },
+    "vendor/ogl/src/math/functions/Mat3Func.js": {
+      "bytes": 11097,
+      "sha256": "c24f81aea1a9b4b62ebea37aabef2bc96e88d20c357adf07eda4a71bcca4e96d"
+    },
+    "vendor/ogl/src/math/functions/Mat4Func.js": {
+      "bytes": 26642,
+      "sha256": "3c6af31af0a96e1c3bba9655b7afc5e490f569364293780415a712c82fa6718f"
+    },
+    "vendor/ogl/src/math/functions/QuatFunc.js": {
+      "bytes": 10660,
+      "sha256": "25d57a0d2e470a4097e7fb188add6b1d78d4188586dd4b244ca5f58bc5835231"
+    },
+    "vendor/ogl/src/math/functions/Vec3Func.js": {
+      "bytes": 9673,
+      "sha256": "1e1cbb442fa6661b4b8eeff69f2d56dd3468f8999271120bcd77f2a5bad1b56b"
+    },
+    "vendor/ogl/src/math/functions/Vec4Func.js": {
+      "bytes": 2916,
+      "sha256": "9fc2276648e34f1dbe6993b3695c192f98abd413b4742e3e63abd4a46d3fef7a"
+    },
+    "vendor/ogl/LICENSE": {
+      "bytes": 1212,
+      "sha256": "ebe129e476623b5abb5c67e959d9dd1daf192bf8fccf8ed0ec2ad84a5d47a1a5"
+    },
+    "vendor/ogl/VERSION": {
+      "bytes": 140,
+      "sha256": "0bd8e2c6ee773fa59726689fd262abdccb39571446982d65fd6c1b4f1c8f7b8d"
+    },
+    "vendor/ogl/manifest.json": {
+      "bytes": 1545,
+      "sha256": "cfa6f4bc887348dd9e2b9e358e533cb2c7099ca7d556f3399dce354dc51eaf52"
+    },
+    "vercel.json": {
+      "bytes": 766,
+      "sha256": "41d36073b2a039b12bbe0aa76b2299e1f43d7893d5b74d797b13f5f9893410e3"
+    }
+  },
+  "totalBytes": 7575085,
+  "artifactSHA256": "447c5f6916b548c2d457d0c035511e6e1b7d8145b6abf22e903c08f535731654"
+}

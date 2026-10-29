@@ -91,12 +91,12 @@ This is the requested Git-versioned execution view. Existing ClickUp identities 
 
 | ID | Task | State | Dependencies |
 |---|---|---|---|
-| [SHIP-01](#ship-01) | Freeze, sign off and push the landing plus complete repository plan | planned / not proven | Original stage gate / none for this slice |
-| [SHIP-02](#ship-02) | Verify B3/K1 story landing and actual OGL behavior | planned / not proven | Original stage gate / none for this slice |
-| [SHIP-03](#ship-03) | Export the explicit safe public artifact | planned / not proven | Original stage gate / none for this slice |
-| [SHIP-04](#ship-04) | Publish and verify the existing Cooker landing project | planned / not proven | SHIP-01, SHIP-02, SHIP-03 |
-| [EXM-01](#exm-01) | Deploy the isolated health/log Vercel example | planned / not proven | SHIP-01 |
-| [EXM-02](#exm-02) | Execute the example through Cooker itself | planned / not proven | VRC-01, VRC-04, VRC-05, INT-01, EXM-01 |
+| [SHIP-01](#ship-01) | Freeze, sign off and push the landing plus complete repository plan | live verified / proven for feature publication slice | Original stage gate / none for this slice |
+| [SHIP-02](#ship-02) | Verify B3/K1 story landing and actual OGL behavior | verified slice / proven for stated browser scope | Original stage gate / none for this slice |
+| [SHIP-03](#ship-03) | Export the explicit safe public artifact | verified slice / proven for public export scope | Original stage gate / none for this slice |
+| [SHIP-04](#ship-04) | Publish and verify the existing Cooker landing project | live verified / proven for production publication | SHIP-01, SHIP-02, SHIP-03 |
+| [EXM-01](#exm-01) | Deploy the isolated health/log Vercel example | live verified / proven for direct provider slice | SHIP-01 |
+| [EXM-02](#exm-02) | Execute the example through Cooker itself | blocked / not proven | VRC-01, VRC-04, VRC-05, INT-01, EXM-01 |
 
 ## integration
 
@@ -543,31 +543,31 @@ Retained task: [z8xxqwcd7d](https://app.clickup.com/t/z8xxqwcd7d). Historical st
 
 Review only owned frontend/example/plan files, scan the staged diff for private material, create a signed-off feature commit and verify the exact remote branch SHA. Preserve unrelated backend work and target develop for later integration.
 
-Owner: current_session. Evidence: not yet accepted for the full criterion.
+Owner: current session. Evidence: [DELIVERY.md](DELIVERY.md), [https://github.com/santapong/Cooker/tree/feature/cooker-release-plan-20261029](https://github.com/santapong/Cooker/tree/feature/cooker-release-plan-20261029). Full scope: proven for feature publication slice.
 
 ### SHIP-02
 
 Bounded Chromium: moving pixels and route registration, pause/resume, offscreen and reduced-motion stop, no-WebGL/vendor/no-JS fallback, keyboard join explanations, all six responsive widths and actual screenshot review. Store source/cap/cleanup receipts.
 
-Owner: current_session. Evidence: not yet accepted for the full criterion.
+Owner: current session. Evidence: [evidence/landing-verification.json](evidence/landing-verification.json). Full scope: proven for stated browser scope.
 
 ### SHIP-03
 
 Exclude login studies, backups, test/controller inputs, local notes, credentials and source maps; preserve working docs/demo links, CSP and pinned OGL hashes; verify final bytes and the static envelope of100files,4MiB/file,8MiB total.
 
-Owner: current_session. Evidence: not yet accepted for the full criterion.
+Owner: current session. Evidence: [evidence/landing-artifact.json](evidence/landing-artifact.json), [evidence/landing-verification.json](evidence/landing-verification.json). Full scope: proven for public export scope.
 
 ### SHIP-04
 
-Deploy exact reviewed commit/artifact to prj_oe2lsOOWP5p5AAafHtkjKsW77d6a in team_4xUt8aSlfT696WCBgbsjtJTV. Read back target, deployment ID/source and bytes/behavior, retain rollback deployment. Preserve existing protection; public-access/domain change is a separate explicit final decision.
+Deploy exact reviewed commit/artifact to prj_oe2lsOOWP5p5AAafHtkjKsW77d6a in team_4xUt8aSlfT696WCBgbsjtJTV. Read back target, deployment ID/source and bytes/behavior, retain rollback deployment. Preserve existing protection; any protection/domain change requires its own explicit decision.
 
-Owner: current_session. Evidence: not yet accepted for the full criterion.
+Owner: current session. Evidence: [evidence/vercel-landing.json](evidence/vercel-landing.json). Full scope: proven for production publication.
 
 ### EXM-01
 
 One dependency-free Function and page, no secrets/data resources. Verify /api/health, no-store and structured runtime event against exact deployment. Record connector/direct deployment honestly; do not call it Cooker-managed.
 
-Owner: current_session. Evidence: not yet accepted for the full criterion.
+Owner: current session. Evidence: [evidence/vercel-example.json](evidence/vercel-example.json), [evidence/public-access.json](evidence/public-access.json). Full scope: proven for direct provider slice.
 
 ### EXM-02
 

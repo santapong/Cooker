@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-29",
+  "method": "Fresh urllib default opener, no auth handler/cookie jar/connector share URL; final origin and actual body markers checked",
+  "observations": [
+    {
+      "url": "https://cooker-landing-cbf38579.vercel.app/",
+      "finalUrl": "https://cooker-landing-cbf38579.vercel.app/",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "landingMarker": true,
+      "title": [
+        "Cooker \u2014 From recipe to runtime."
+      ],
+      "health": null,
+      "cacheControl": "public, max-age=0, must-revalidate"
+    },
+    {
+      "url": "https://cooker-example-service-20261029.vercel.app/api/health",
+      "finalUrl": "https://cooker-example-service-20261029.vercel.app/api/health",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "landingMarker": false,
+      "title": [],
+      "health": {
+        "service": "cooker-example-service",
+        "status": "ok",
+        "timestamp": "2026-10-29T16:22:32.349Z"
+      },
+      "cacheControl": "no-store"
+    },
+    {
+      "url": "https://cooker-landing-cbf38579-21gzm7lca-santapongs-projects.vercel.app/",
+      "status": 200,
+      "finalUrl": "https://vercel.com/login",
+      "landingMarker": false,
+      "redirectQueryExcluded": true
+    }
+  ],
+  "settingsChanged": false,
+  "correction": "Protection label alone did not establish production-domain access. Pending setting question withdrawn after anonymous application200 checks."
+}

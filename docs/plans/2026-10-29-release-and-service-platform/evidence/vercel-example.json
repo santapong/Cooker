@@ -28,7 +28,7 @@
     "region": "iad1",
     "runtime": "nodejs24.x"
   },
-  "protection": "Vercel authentication enabled; no unauthenticated-public claim",
+  "protection": "Project protection unchanged; production-domain anonymous health verified. Deployment-specific access is distinct.",
   "nativeCooker": {
     "state": "blocked",
     "attempt": "4644 readiness connection refused",
@@ -38,5 +38,8 @@
       "generic Vercel deploy stage and existing-project update submission",
       "native worker/provider/run acceptance receipt"
     ]
-  }
+  },
+  "productionUrl": "https://cooker-example-service-20261029.vercel.app",
+  "anonymousHealthVerified": true,
+  "publicAccessEvidence": "public-access.json"
 }

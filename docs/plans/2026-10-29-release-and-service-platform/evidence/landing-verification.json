@@ -1,0 +1,245 @@
+{
+  "date": "2026-10-29",
+  "sourceCommit": "c1a59a95cfff377b72c17f11995f2debc5817a1d",
+  "scope": "static B3/K1 kitchen landing, not Cooker core or human product acceptance",
+  "sourcePins": 60,
+  "publicArtifact": {
+    "artifactSHA256": "447c5f6916b548c2d457d0c035511e6e1b7d8145b6abf22e903c08f535731654",
+    "totalBytes": 7575085
+  },
+  "publicFileCount": 46,
+  "uniquePassingChecks": 37,
+  "checks": [
+    {
+      "name": "OGL renders actual frames",
+      "pass": true
+    },
+    {
+      "name": "canvas/image registration",
+      "pass": true
+    },
+    {
+      "name": "visible moving pixels",
+      "pass": true
+    },
+    {
+      "name": "pause stops frames",
+      "pass": true
+    },
+    {
+      "name": "resume advances frames",
+      "pass": true
+    },
+    {
+      "name": "reduced motion hides canvas",
+      "pass": true
+    },
+    {
+      "name": "reduced motion stops frames",
+      "pass": true
+    },
+    {
+      "name": "offscreen stops frames",
+      "pass": true
+    },
+    {
+      "name": "release graph nodes",
+      "pass": true
+    },
+    {
+      "name": "release join explains both checks",
+      "pass": true
+    },
+    {
+      "name": "n8n graph nodes",
+      "pass": true
+    },
+    {
+      "name": "n8n dependency edges",
+      "pass": true
+    },
+    {
+      "name": "worker has three prerequisites",
+      "pass": true
+    },
+    {
+      "name": "main excludes worker prerequisite",
+      "pass": true
+    },
+    {
+      "name": "keyboard tabs",
+      "pass": true
+    },
+    {
+      "name": "example selection preserved",
+      "pass": true
+    },
+    {
+      "name": "no whole-page overflow 320",
+      "pass": true
+    },
+    {
+      "name": "art remains registered 320",
+      "pass": true
+    },
+    {
+      "name": "no whole-page overflow 390",
+      "pass": true
+    },
+    {
+      "name": "art remains registered 390",
+      "pass": true
+    },
+    {
+      "name": "no whole-page overflow 768",
+      "pass": true
+    },
+    {
+      "name": "art remains registered 768",
+      "pass": true
+    },
+    {
+      "name": "no whole-page overflow 1024",
+      "pass": true
+    },
+    {
+      "name": "art remains registered 1024",
+      "pass": true
+    },
+    {
+      "name": "no whole-page overflow 1440",
+      "pass": true
+    },
+    {
+      "name": "art remains registered 1440",
+      "pass": true
+    },
+    {
+      "name": "no whole-page overflow 1920",
+      "pass": true
+    },
+    {
+      "name": "art remains registered 1920",
+      "pass": true
+    },
+    {
+      "name": "mobile menu opens",
+      "pass": true
+    },
+    {
+      "name": "mobile Escape restores focus",
+      "pass": true
+    },
+    {
+      "name": "FAQ disclosure",
+      "pass": true
+    },
+    {
+      "name": "reduced motion initial state",
+      "pass": true
+    },
+    {
+      "name": "no-WebGL native fallback",
+      "pass": true
+    },
+    {
+      "name": "missing OGL native fallback",
+      "pass": true
+    },
+    {
+      "name": "no-JS static recipe",
+      "pass": true
+    },
+    {
+      "name": "no-JS story",
+      "pass": true
+    },
+    {
+      "name": "no uncaught main-page errors",
+      "pass": true
+    }
+  ],
+  "attempts": [
+    {
+      "attempt": "attempt-1",
+      "passed": 23,
+      "assertionsRecorded": 24,
+      "failure": "art remains registered 1024",
+      "controllerFailure": "browser phase failed",
+      "cleanupVerified": true,
+      "effective": {
+        "cpu.max": "80000 100000",
+        "memory.max": "1073741824",
+        "memory.swap.max": "0",
+        "pids.max": "256"
+      },
+      "sampledMemoryPeakBytes": 670646272
+    },
+    {
+      "attempt": "evidence-final3",
+      "passed": 26,
+      "assertionsRecorded": 26,
+      "failure": "Page.screenshot: Protocol error (Page.captureScreenshot): Unable to capture screenshot\nCall log:\n  - taking page screenshot\n  - waiting for fonts to load...\n  - fonts loaded\n",
+      "controllerFailure": "browser phase failed",
+      "cleanupVerified": true,
+      "effective": {
+        "cpu.max": "80000 100000",
+        "memory.max": "1073741824",
+        "memory.swap.max": "0",
+        "pids.max": "256"
+      },
+      "sampledMemoryPeakBytes": 839991296
+    },
+    {
+      "attempt": "evidence-final4",
+      "passed": 2,
+      "assertionsRecorded": 2,
+      "failure": "Locator.get_attribute: Timeout 30000ms exceeded.\nCall log:\n  - waiting for get_by_role(\"button\", name=\"Open navigation\", exact=True)\n",
+      "controllerFailure": "browser phase failed",
+      "cleanupVerified": true,
+      "effective": {
+        "cpu.max": "80000 100000",
+        "memory.max": "1073741824",
+        "memory.swap.max": "0",
+        "pids.max": "256"
+      },
+      "sampledMemoryPeakBytes": 605716480
+    },
+    {
+      "attempt": "evidence-final5",
+      "passed": 9,
+      "assertionsRecorded": 9,
+      "failure": null,
+      "controllerFailure": null,
+      "cleanupVerified": true,
+      "effective": {
+        "cpu.max": "80000 100000",
+        "memory.max": "1073741824",
+        "memory.swap.max": "0",
+        "pids.max": "256"
+      },
+      "sampledMemoryPeakBytes": 476086272
+    }
+  ],
+  "nonExecution": "Earlier diagnostic/final/final2 reservation conflicts did not execute browser cases. Their receipts remain private.",
+  "captureRecovery": "Full-page Chromium capture failed after26 passing assertions; viewport captures of hero/story/workflow/pass at390/1440 succeeded. Final4 then hit an automation locator whose accessible label changes on opening; stable menu selector allowed remaining9 cases to pass. Neither failure is erased or represented as a full-suite pass.",
+  "riskLimits": [
+    "Chromium ARM64 software rendering only; no cross-engine or physical-device/performance certification",
+    "Visible hosted review checked six widths, menu, n8n prerequisites and FAQ; no warnings/errors observed",
+    "B3 is a manual reconstruction; final owner outline review remains distinct",
+    "Shared user browser has no task-specific CPU/RAM cap; scoped visible checks only"
+  ],
+  "finalCleanup": {
+    "ownedProcessesStopped": true,
+    "cgroupsEmptyOrAbsent": true,
+    "port14637Closed": true,
+    "stagingRemoved": true,
+    "sharedLaneReleasedVerified": true,
+    "n8nReady": true,
+    "coreServices": {
+      "docker": "active",
+      "nginx": "active",
+      "tailscaled": "active"
+    }
+  }
+}
