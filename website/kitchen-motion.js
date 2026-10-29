@@ -43,6 +43,8 @@ function resize(){
   if(!renderer)return;
   const rect=image.getBoundingClientRect(); renderer.dpr=Math.min(window.devicePixelRatio||1,1.5);
   renderer.setSize(Math.max(1,Math.round(rect.width)),Math.max(1,Math.round(rect.height)));
+  // OGL writes pixel CSS sizes; layout must keep following the image immediately.
+  canvas.style.width='100%';canvas.style.height='100%';
   program.uniforms.uDpr.value=renderer.dpr;
 }
 function draw(now){
@@ -98,8 +100,9 @@ async function initialize(){
 }
 button.addEventListener('click',()=>{paused=!paused;sync();});reduced.addEventListener('change',sync);
 document.addEventListener('visibilitychange',sync);
+window.addEventListener('resize',resize,{passive:true});
 canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();fallback();});
 const resizeObserver=new ResizeObserver(resize);resizeObserver.observe(image);
 const observer=new IntersectionObserver(entries=>{inView=entries[0].isIntersecting;sync();},{threshold:.05});observer.observe(image);
-window.addEventListener('pagehide',event=>{stop();if(!event.persisted){disposed=true;observer.disconnect();resizeObserver.disconnect();geometry?.remove();program?.remove();gl?.getExtension('WEBGL_lose_context')?.loseContext();}});
+window.addEventListener('pagehide',event=>{stop();if(!event.persisted){disposed=true;observer.disconnect();resizeObserver.disconnect();window.removeEventListener('resize',resize);geometry?.remove();program?.remove();gl?.getExtension('WEBGL_lose_context')?.loseContext();}});
 window.addEventListener('pageshow',()=>{if(!disposed)sync();});mark(reduced.matches?'reduced':'idle');

@@ -1,0 +1,42 @@
+{
+  "checkedDate": "2026-10-29",
+  "task": "EXM-01",
+  "provenance": "direct Vercel connector; NOT Cooker-managed",
+  "teamId": "team_4xUt8aSlfT696WCBgbsjtJTV",
+  "projectId": "prj_7l0MbrL1FmW3rw7xKFi3WtXUWAGt",
+  "projectName": "cooker-example-service-20261029",
+  "deploymentId": "dpl_HvRpQzk9ptLCEywtD32B4hjZR8ET",
+  "sourceCommit": "7ac91132cb07916f8d1a65267ee64bc6a84f70b1",
+  "state": "READY",
+  "target": "production",
+  "url": "https://cooker-example-service-20261029-9usi0dtv1-santapongs-projects.vercel.app",
+  "health": {
+    "status": 200,
+    "cacheControl": "no-store",
+    "contentType": "application/json",
+    "response": {
+      "service": "cooker-example-service",
+      "status": "ok",
+      "timestamp": "2026-10-29T15:43:33.985Z"
+    }
+  },
+  "runtimeLog": {
+    "timestamp": "2026-10-29T15:43:33.988Z",
+    "event": "health_check",
+    "requestId": "h2lfb-1793288613925-605b4932c399",
+    "path": "/api/health",
+    "region": "iad1",
+    "runtime": "nodejs24.x"
+  },
+  "protection": "Vercel authentication enabled; no unauthenticated-public claim",
+  "nativeCooker": {
+    "state": "blocked",
+    "attempt": "4644 readiness connection refused",
+    "remaining": [
+      "running qualified Cooker instance",
+      "own permitted provider connection",
+      "generic Vercel deploy stage and existing-project update submission",
+      "native worker/provider/run acceptance receipt"
+    ]
+  }
+}
