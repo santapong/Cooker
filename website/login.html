@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-layout="split">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0b0c">
+  <meta name="robots" content="noindex">
+  <title>Sign in to Cooker — Design preview</title>
+  <meta name="description" content="Explore five distinct sign-in directions for Cooker, from warm editorial to a compact developer console.">
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="stylesheet" href="assets/tokens.css">
+  <link rel="stylesheet" href="assets/cooker-theme.css">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="login.css">
+  <script src="login.js" defer></script>
+</head>
+<body class="login-page">
+<a class="skip-link" href="#login-main">Skip to sign in</a>
+<svg class="icon-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+  <symbol id="login-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+  <symbol id="login-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="5"/><path d="m12 11 9-9m-3 3 3 3m-6 0 3 3"/></symbol>
+  <symbol id="login-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="login-cube" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5ZM3 8v9l9 5 9-5V8M12 13v9"/></symbol>
+  <symbol id="login-review" viewBox="0 0 24 24"><path d="M12 2 22 12 12 22 2 12Z"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="login-rocket" viewBox="0 0 24 24"><path d="M9 15 4 20m6-3-3-3c0-7 6-11 14-11 0 8-4 14-11 14ZM7 9H4l-2 6h5m8 2v3l-6 2v-5"/><circle cx="15" cy="9" r="2"/></symbol>
+  <symbol id="login-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="login-eye-off" viewBox="0 0 24 24"><path d="m3 3 18 18M10 5.2c.6-.1 1.3-.2 2-.2 7 0 10 7 10 7a19 19 0 0 1-3 4M6 6.5A21 21 0 0 0 2 12s3 7 10 7c2 0 3.7-.6 5.1-1.5M10 10a3 3 0 0 0 4 4"/></symbol>
+  <symbol id="login-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4M12 14v3"/></symbol>
+</defs></svg>
+
+<header class="login-header">
+  <a class="wordmark" href="./" aria-label="Cooker home"><img class="cooker-brand-icon" src="assets/favicon.svg" width="32" height="32" alt="" aria-hidden="true"><span class="brand-bracket">[</span> Cooker<span class="brand-period">.</span><span class="brand-bracket">]</span></a>
+  <a class="login-back" href="./"><span aria-hidden="true">←</span> Back to overview</a>
+</header>
+
+<main id="login-main" class="login-shell">
+  <section class="login-entry" aria-labelledby="login-title">
+    <div class="login-form-wrap"><div class="console-caption"><span>COOKER / ACCESS</span><span aria-hidden="true">01</span></div>
+      <div class="login-welcome"><span class="login-emblem" aria-hidden="true"><svg class="icon"><use href="#login-lock"/></svg></span><p class="eyebrow">YOUR COOKER WORKSPACE</p><h1 id="login-title">Welcome back.</h1><p>Sign in to see what’s ready to ship.</p></div>
+      <div class="login-preview-note"><span>DESIGN PREVIEW</span>Use sample details. Nothing is sent or saved.</div>
+      <button disabled id="sso-button" class="login-sso" type="button"><svg class="icon" aria-hidden="true"><use href="#login-key"/></svg>Continue with single sign-on <span aria-hidden="true">↗</span></button>
+      <div class="login-divider"><span>or use your email</span></div>
+      <form id="login-form" novalidate>
+        <fieldset id="login-fields" disabled>
+          <legend class="visually-hidden">Email and password</legend>
+          <div class="login-field"><label for="login-email">Email address</label><input id="login-email" type="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="you@example.com" required aria-describedby="email-error"><p id="email-error" class="login-field-error" hidden></p></div>
+          <div class="login-field"><label for="login-password">Password</label><div class="password-field"><input id="login-password" type="password" autocomplete="current-password" placeholder="Enter your password" required aria-describedby="password-error caps-lock"><button id="password-toggle" type="button" aria-label="Show password" aria-controls="login-password" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#login-eye"/></svg></button></div><p id="password-error" class="login-field-error" hidden></p><p id="caps-lock" class="caps-lock" hidden>Caps Lock is on.</p></div>
+          <button class="login-submit" type="submit">Sign in <svg class="icon" aria-hidden="true"><use href="#login-arrow"/></svg></button>
+        </fieldset>
+      </form>
+      <div id="login-status" class="login-status" role="status" aria-live="polite" hidden></div>
+      <details class="login-help"><summary>Need help signing in?<span aria-hidden="true">+</span></summary><p>For single sign-on, use your organization’s identity provider. For a local Cooker account, contact your instance administrator for access or password help.</p></details>
+      <div class="login-account">New to this workspace?<br><span>Ask your Cooker administrator for access.</span></div>
+      <noscript><p class="login-noscript">This is a design preview. JavaScript enables the form interactions; no sign-in requests are made.</p></noscript>
+    </div>
+  </section>
+
+  <aside class="login-story" aria-labelledby="story-title">
+    <div class="story-intro"><p class="eyebrow"><span aria-hidden="true">01 /</span> BACK TO BUILDING</p><h2 id="story-title">Your next deploy.<br><span>One clear path.</span></h2><p>Source, checks, and the next decision.<br>Right where you can see them.</p></div>
+    <div class="login-illustration" role="img" aria-label="Illustrative pipeline from build, through review, to deployment. This is an example, not a live project.">
+      <div class="illustration-bar"><span><i aria-hidden="true"></i> release / web</span><span>EXAMPLE PIPELINE</span></div>
+      <div class="illustration-flow">
+        <div class="illustration-link" aria-hidden="true"></div>
+        <div class="illustration-node"><span class="illustration-icon"><svg class="icon"><use href="#login-cube"/></svg></span><strong>Build</strong><span>01</span></div>
+        <div class="illustration-node illustration-node-active"><span class="illustration-icon"><svg class="icon"><use href="#login-review"/></svg></span><strong>Review</strong><span>02</span></div>
+        <div class="illustration-node illustration-node-waiting"><span class="illustration-icon"><svg class="icon"><use href="#login-rocket"/></svg></span><strong>Deploy</strong><span>03</span></div>
+      </div>
+      <div class="illustration-receipt"><svg class="icon" aria-hidden="true"><use href="#login-review"/></svg><span><strong>A moment to make sure.</strong><small>A human checkpoint before deployment.</small></span><span class="receipt-mark" aria-hidden="true">↗</span></div>
+      <div class="illustration-bottom"><span>REVIEWED SOURCE</span><span>YOUR INFRASTRUCTURE</span></div>
+    </div>
+    <div class="story-foot"><span>VISUAL BY DESIGN.</span><p>Your source. Your servers. Your call.</p></div>
+  </aside>
+  <aside class="paper-story" aria-labelledby="paper-title"><p class="paper-edition">COOKER FIELD NOTES <span>NO. 01</span></p><h2 id="paper-title">Good work.<br>Ready for<br><em>what’s next.</em></h2><p>A little clarity between your code<br>and the people who use it.</p><div class="paper-rule"></div><ol><li><span>01</span> See the source.</li><li><span>02</span> Understand the changes.</li><li><span>03</span> Choose when to ship.</li></ol><a href="docs.html">Find your way with the docs <span aria-hidden="true">↗</span></a></aside>
+  <aside class="workshop-story" aria-labelledby="workshop-title"><p class="eyebrow">A PLACE FOR YOUR NEXT RELEASE</p><h2 id="workshop-title">Bring the pieces.<br>See the whole.</h2><p>Build, review, and ship with a clearer view<br>of the work in between.</p><img src="assets/login-workshop-art.png" alt="Conceptual illustration of a small workshop: modular blocks pass through an arch to an inspection desk and a finished package." width="1536" height="1024"><span class="workshop-caption">A SMALL ILLUSTRATION OF A BIG IDEA: CLARITY.</span></aside>
+</main>
+
+<footer class="login-footer"><a href="login-ideas.html">View the design ideas <span aria-hidden="true">↗</span></a><div class="layout-picker" role="group" aria-label="Login layout"><span>Layout</span><button disabled type="button" data-layout-choice="split" aria-pressed="true">Split</button><button disabled type="button" data-layout-choice="focused" aria-pressed="false">Focused</button><button disabled type="button" data-layout-choice="paper" aria-pressed="false">Paper</button><button disabled type="button" data-layout-choice="workshop" aria-pressed="false">Workshop</button><button disabled type="button" data-layout-choice="console" aria-pressed="false">Console</button></div><a href="docs.html">Documentation <span aria-hidden="true">↗</span></a></footer>
+</body>
+</html>
