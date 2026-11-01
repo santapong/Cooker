@@ -1,135 +1,85 @@
-# Apps vs Pipelines vs Environments
+# Apps, pipelines and environments
 
-Cooker has three top-level user concepts. This page explains how they relate so you pick the right one for the job.
-
-## The three nouns
-
-| Noun | One-line definition | Source of truth |
-|---|---|---|
-| **Pipeline** | A DAG of stages, authored visually. Run on demand. | `model.Pipeline` |
-| **App** | A repo + build plan + deploy target. Clone -> Build -> Push -> Deploy at the click of a button. | `model.App` |
-| **Environment** | A named deploy destination (Dev / Staging / Prod) plus its variables and secrets. | `model.Environment` |
-
-## When to use which
-
-| You want to… | Use |
+| Concept | Purpose |
 |---|---|
-| Deploy a single repo on push to `main` | **App** with `autoDeploy=true` and a GitHub webhook. |
-| Run a build + multiple parallel test suites + manual prod approval | **Pipeline**. |
-| Share secrets across multiple Apps that deploy to the same cluster namespace | **Environment**. |
-| Configure who can approve promotions to production | **Environment**'s `PromotionPolicy`. |
-| Hand a non-engineer "click here to deploy" | **App**. |
+| **App** | A repository, build plan and compute target, with optional Environment and database bindings. The reviewed Compose flow pins the source commit. |
+| **Pipeline** | An explicitly authored DAG of build, test, push, deploy, approval or custom stages. |
+| **Environment** | Named variables, secrets, target settings and promotion policy that Apps or pipeline stages can reference. |
 
-## Apps in detail
+## Choose the right entry point
 
-An App is a higher-level shortcut around the Clone -> Build -> Push -> Deploy chain. The model is `model.App` (`backend/internal/model/app.go`):
+Use **Apps → New app** to import and review a Compose stack. Use its **Use a single
+Dockerfile** link for the simpler source layout. Use **Pipelines** when you need a
+custom stage graph, parallel tests or explicit approval stages.
 
-| Field | Purpose |
+A Compose App can contain several services. It uses one compute target and one
+replica per executable service; an external database binding can replace a local
+Compose database. This does not make the App a general infrastructure provisioner.
+
+## What a reviewed App saves
+
+| Field | Meaning |
 |---|---|
-| `name`, `description` | Identification. |
-| `githubRepo` | `owner/name`. Cloned over HTTPS (deploy-key override is a backlog item). |
-| `branch` | Default `main`. |
-| `buildPlan` | Optional override. Nil means "detect at deploy time" (`buildplan` package looks for `Dockerfile`, `docker-compose.yml`, or buildpack-compatible source). |
-| `deployTarget` | One of `kubernetes`, `cloud-run`, `ecs`, `fly`, `render`, `docker-host`. |
-| `environmentId` | Links to an [Environment](environments.md) for plainVars + secrets. |
-| `webhookSecret` | HMAC secret for the GitHub webhook (sealed with `Codec`). |
-| `autoDeploy` | When true, every push event matching `branch` triggers a deploy. |
-| `healthStatus` | Live health verdict from `AppHealthChecker` — `unknown` / `healthy` / `degraded` / `failed`. |
+| `githubRepo`, `branch` | Repository identity and the branch/tag used for inspection |
+| `buildPlan.commit` | Full 40-character Git SHA retained for deployment |
+| `buildPlan.installationId` | Approved GitHub App installation, when used |
+| `buildPlan.files` | Base Compose file followed by overrides in merge order |
+| `buildPlan.profiles`, `buildPlan.variables` | Selected profiles and explicit interpolation inputs |
+| `deployTarget.kind`, `deployTarget.prefix` | Compute target and scoped workload identity |
+| `deployTarget.externalServices` | Existing database labels, consumers and Environment-key bindings |
+| `environmentId` | Environment supplying variables and secrets |
+| `registryRef` | Image registry/repository prefix used for built images |
 
-Clicking **Deploy** in the UI calls `POST /api/v1/apps/:id/deploy`. The handler synthesises a run, kicks it off in a goroutine, and streams logs over WebSocket channel `app-run:<runId>`.
+See [the model](../../../backend/internal/model/app.go) for the complete schema.
+The preview masks configuration values and shows Dockerfile/context/target and
+service details. It performs no build or deployment.
 
-### Build plan auto-detection
+**Save app** persists the reviewed configuration. **Deploy** on the App page
+checks capabilities, retrieves the pinned source and executes the plan. Reopening
+keeps the saved SHA even when its branch moves. Use **Inspect latest branch
+revision** to review an update; saving a reviewed Compose App disables webhook
+auto-deploy. Legacy unpinned App webhook behavior is a separate flow.
 
-When `buildPlan` is nil, `internal/buildplan` inspects the cloned source and picks:
+The graph saved for deployment display has redacted values and is **review-only**.
+Use the App's Deploy action to run again; the displayed graph is not an executable
+pipeline template.
 
-| Detected | Plan |
-|---|---|
-| `Dockerfile` at root | `kind=dockerfile`, path=`Dockerfile` |
-| `docker-compose.yml` at root | `kind=compose`, path=`docker-compose.yml` |
-| Otherwise | `kind=buildpack` (Paketo buildpacks) |
+## Prefixes and external databases
 
-> **Partial.** The detector is not yet exposed in the New App wizard — operators can't see "we think your repo is a `dockerfile` build" before they click Deploy. Tracked as a W11 indie-persona gap.
+Use a prefix such as `shop-uat` to distinguish deployments. Prefixes accept 1–40
+lowercase letters, digits or hyphens, with a letter/digit at each end. Generated
+names are checked for collisions and target limits. Explicit prefixes are unique
+within a target scope; see the [architecture reference](../../reference/github-compose-architecture.md#identity-and-persistence).
 
-### Health checks
+For an external database, create an Environment key such as `CLOUD_DB_URL`, then
+bind the consumer's `DATABASE_URL` to that key. The binding overrides the local
+Compose value for that consumer and excludes the database service from execution.
+The external resource name is a label; it does not create connectivity,
+credentials, a database instance or a proxy.
 
-`AppHealthChecker` runs every `COOKER_APP_HEALTH_INTERVAL` (default 30s) and dispatches to a per-deploy-target `Prober`. The verdict goes into `App.HealthStatus`. Health writes use a dedicated `AppStore.UpdateHealth` method (not `Update`) so they don't bump `App.Version` and race with user edits.
+## Libraries and registries
 
-### App-run vs pipeline-run
+The Compose page has two saved-stack surfaces: browser-local file references and
+server-backed GitHub Apps. An image registry stores container images and is a
+separate system. Read [Compose library and registries](../guides/compose-library.md)
+for persistence, rename/forget and sharing behavior.
 
-Runs created via `POST /apps/:id/deploy` are stored under a synthetic pipeline ID `app-<appId>`. This means they don't appear in the Pipelines list. Intentional today; a proper "App runs" view is a follow-up. See [`docs/UAT.md`](../../guides/UAT.md#known-limitations-uat-compose).
+## Capability boundaries
 
-## Pipelines in detail
+The App flow supports Cooker-local Docker, Kubernetes, configured ECS Fargate and
+Cloud Run for their supported subsets. Source builds require Docker builder +
+Docker pusher and are currently dev/UAT-only. A registered adapter elsewhere in
+the backend is not evidence that the App workflow supports it.
 
-See [Pipelines](pipelines.md). The short version:
+The App page provides deployment/stage logs and on-demand runtime status. Automatic
+App health polling and cloud container log streaming are incomplete. Acceptance
+should verify application health and external database access from the deployed
+workload. See [setup and UAT](../../guides/GITHUB-COMPOSE-DEPLOYMENT.md).
 
-- Visual DAG authoring with arbitrary fan-out / fan-in.
-- Per-edge conditions (`success` / `failure` / `always`).
-- Environment swimlanes for stage-to-environment assignment.
-- Optimistic concurrency on update (`Pipeline.Version`).
+## Related guides
 
-A pipeline is the right tool when you need anything more complex than "build then deploy" — parallel test matrices, conditional cleanup, multi-stage approval flows.
-
-## Environments in detail
-
-See [Environments](environments.md). An Environment is a named deploy destination with variables and secrets:
-
-- `name` — `dev`, `staging`, `production`, or anything you choose.
-- `order` — promotion order (lower → upstream).
-- `target` — where to deploy (`type=cluster|namespace`, `clusterId`, `namespace`).
-- `plainVars` — non-sensitive map; visible to any authenticated user.
-- `secrets` — encrypted at rest via the configured [Secrets backend](../guides/secrets.md). Never serialised.
-- `promotion` — `strategy=auto|manual`, `requiredApprovers`, `autoPromoteOn=[…]`.
-
-An App or a Pipeline stage references an Environment to inherit its variables and secrets. Promotion between environments is configured here, not on the App or Pipeline.
-
-## The relationship in one diagram
-
-```text
-   ┌──────────────┐         ┌──────────────────┐
-   │     App      │────────►│  Environment     │
-   │ (one repo,   │  uses   │  (vars,          │
-   │  one target) │         │   secrets,       │
-   └──────┬───────┘         │   promotion)     │
-          │                 └────────┬─────────┘
-          │ synthesises              │
-          ▼                          │ referenced by
-   ┌──────────────┐                  │
-   │   Run        │                  │
-   │ (Clone→Build │                  │
-   │  →Push→Deploy)                  │
-   └──────────────┘                  │
-                                     │
-   ┌──────────────┐                  │
-   │   Pipeline   │──────────────────┘
-   │ (DAG of      │  stage.environmentId
-   │  stages)     │
-   └──────┬───────┘
-          │ runs
-          ▼
-   ┌──────────────┐
-   │     Run      │
-   └──────────────┘
-```
-
-## Common shapes
-
-### Indie / single repo
-
-One App per repo, `autoDeploy=true`, one Environment per target. No pipelines needed.
-
-### Small team / 5-10 services
-
-One App per service. Per-app Environments share secrets via `environmentId` reuse where appropriate (e.g. all apps point to `prod-environment` for production deploys).
-
-### Platform team / 25+ services
-
-A small Pipeline per shape ("Go service", "Node service", "static frontend"), with the App used only as a "Deploy" trigger. The Pipeline does the test-matrix work the App can't model on its own.
-
-> **Known gap.** Cooker is single-tenant. All Apps / Pipelines / Environments live in one shared list visible to every authenticated user (RBAC gates writes, not reads). For multi-team isolation, see roadmap `C1` (multi-tenancy ADR is pending) and `S26-05-09` in the [security review](../../audits/2026-05-security-review.md).
-
-## Cross-references
-
-- **[Pipelines](pipelines.md)** — DAG semantics.
-- **[Environments](environments.md)** — variables, secrets, promotion.
-- **[GitHub webhooks](../guides/github-webhooks.md)** — wire up auto-deploy.
-- **[First pipeline](../guides/first-pipeline.md)** — end-to-end walkthrough.
+- [Pipelines](pipelines.md): DAG semantics and execution.
+- [Environments](environments.md): variables, secrets and promotions.
+- [Secrets](../guides/secrets.md): backend configuration.
+- [GitHub webhooks](../guides/github-webhooks.md): unpinned/event-driven workflows;
+  reviewed Compose Apps remain manual.

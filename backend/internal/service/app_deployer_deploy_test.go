@@ -17,7 +17,7 @@ import (
 // fakeCloneDockerfile creates a temp dir containing a minimal Dockerfile
 // (so buildplan.Detect resolves BuildPlanDockerfile and the single-image
 // synthesizePipeline path runs -- no compose parsing, no k8s manifest,
-// since the test App's DeployTarget.Kind is left at its zero value).
+// with an explicit Kubernetes deploy target).
 // Returns a cloneFn closure plus an accessor for the dir it created, so
 // the test can assert the defer cleanup actually removed it.
 func fakeCloneDockerfile(t *testing.T) (fn func(ctx context.Context, opts github.CloneOptions) (string, error), dirOf func() string, calls func() int) {
@@ -58,7 +58,7 @@ func TestAppDeployer_Deploy_HappyPath(t *testing.T) {
 		Deploys:  deploys,
 		cloneFn:  cloneFn,
 	}
-	app := &model.App{ID: "app-1", Name: "widgets", GitHubRepo: "acme/widgets", Branch: "main"}
+	app := &model.App{ID: "app-1", Name: "widgets", GitHubRepo: "acme/widgets", Branch: "main", DeployTarget: model.DeployTarget{Kind: model.DeployTargetKubernetes}}
 
 	p, run, err := d.Deploy(context.Background(), app, "run-1", io.Discard)
 	if err != nil {
@@ -67,8 +67,8 @@ func TestAppDeployer_Deploy_HappyPath(t *testing.T) {
 	if p == nil || run == nil {
 		t.Fatal("expected non-nil pipeline and run")
 	}
-	if len(p.Stages) != 2 {
-		t.Errorf("expected 2 stages (build, push; no k8s deploy target), got %d", len(p.Stages))
+	if len(p.Stages) != 3 {
+		t.Errorf("expected 3 stages (build, push, deploy), got %d", len(p.Stages))
 	}
 	if run.Status != model.RunStatusSuccess {
 		t.Errorf("run status = %s, want success", run.Status)
@@ -106,7 +106,7 @@ func TestAppDeployer_Deploy_CloneFailure(t *testing.T) {
 			return "", wantErr
 		},
 	}
-	app := &model.App{ID: "app-1", Name: "widgets", GitHubRepo: "acme/widgets"}
+	app := &model.App{ID: "app-1", Name: "widgets", GitHubRepo: "acme/widgets", DeployTarget: model.DeployTarget{Kind: model.DeployTargetKubernetes}}
 
 	p, run, err := d.Deploy(context.Background(), app, "run-1", io.Discard)
 	if err == nil {
@@ -138,7 +138,7 @@ func TestAppDeployer_Deploy_ExecuteFailure(t *testing.T) {
 		Deploys:  deploys,
 		cloneFn:  cloneFn,
 	}
-	app := &model.App{ID: "app-1", Name: "widgets", GitHubRepo: "acme/widgets"}
+	app := &model.App{ID: "app-1", Name: "widgets", GitHubRepo: "acme/widgets", DeployTarget: model.DeployTarget{Kind: model.DeployTargetKubernetes}}
 
 	p, run, err := d.Deploy(context.Background(), app, "run-1", io.Discard)
 	if err == nil {

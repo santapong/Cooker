@@ -1,10 +1,8 @@
-// Stub — the previous design was removed for a full redesign (Phase 2).
-// Rebuild this screen fresh; plumbing (api/, stores/, hooks/) is intact.
+import { useParams } from 'react-router-dom';
+import RunView from '../components/run/RunView';
+
+/** A pipeline run in the porthole — see components/run/RunView. */
 export default function RunPage() {
-  return (
-    <main style={{ padding: 24 }}>
-      <h1>Run</h1>
-      <p>This screen is a placeholder pending redesign.</p>
-    </main>
-  );
+  const { id = '', runId = '' } = useParams<{ id: string; runId: string }>();
+  return <RunView pipelineId={id} runId={runId} heading={(p, r) => `Porthole · ${p.name} · run ${r.id.slice(0, 8)}`} />;
 }

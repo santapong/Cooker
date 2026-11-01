@@ -10,6 +10,9 @@ export interface Pipeline {
   variables: Record<string, string>;
   createdAt: string;
   updatedAt: string;
+  // Server-managed revision for optimistic concurrency on PUT; the store
+  // adopts the value the server returns after each save.
+  version?: number;
   // Per-pipeline run deadline override (Go duration, e.g. "45m");
   // empty/undefined uses the cluster default.
   runDeadline?: string;
@@ -52,6 +55,7 @@ export interface StageConfig {
   dockerfile?: string;
   context?: string;
   buildArgs?: Record<string, string>;
+  buildTarget?: string;
   tags?: string[];
   platforms?: string[];
   cache?: CacheSpec;
@@ -72,7 +76,10 @@ export interface StageConfig {
   retries?: number;
   retry?: RetryPolicy;
   // Compose deployment DAG provenance + per-service deploy runtime.
-  deployRuntime?: 'kubernetes' | 'docker' | 'compose';
+  deployRuntime?: 'kubernetes' | 'docker' | 'compose' | 'ecs' | 'cloud-run';
+  runtimeName?: string;
+  composeProject?: string;
+  reviewOnly?: boolean;
   composeServiceName?: string;
   composeBuildContext?: string;
   composeDockerfile?: string;
@@ -90,6 +97,8 @@ export interface PipelineRun {
   id: string;
   pipelineId: string;
   status: RunStatus;
+  createdAt?: string;
+  startedByEmail?: string;
   stageRuns: StageRun[];
   environmentStatuses: EnvironmentStatus[];
   variables: Record<string, string>;

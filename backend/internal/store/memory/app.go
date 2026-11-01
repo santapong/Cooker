@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
@@ -48,12 +49,15 @@ func (s *apps) GetByRepo(_ context.Context, repo, branch string) (*model.App, er
 	return nil, fmt.Errorf("app %s@%s: %w", repo, branch, store.ErrNotFound)
 }
 
-// normalizeAppCanary returns a (shallow-copied) App with its canary
+// normalizeAppCanary returns a deep-copied App with its canary
 // config normalised, so a stored-empty config reads back as an explicit
 // rolling default — matching the Postgres scanApp path. The copy keeps
 // the caller from mutating the stored pointer's CanaryConfig.
 func normalizeAppCanary(a *model.App) *model.App {
-	cp := *a
+	data, _ := json.Marshal(a)
+	var cp model.App
+	_ = json.Unmarshal(data, &cp)
+	cp.WebhookSecret = append([]byte(nil), a.WebhookSecret...)
 	cp.Canary = a.Canary.Normalize()
 	return &cp
 }
@@ -61,7 +65,13 @@ func normalizeAppCanary(a *model.App) *model.App {
 func (s *apps) Create(_ context.Context, a *model.App) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.m[a.ID] = a
+	if _, exists := s.m[a.ID]; exists {
+		return store.ErrConflict
+	}
+	if err := s.checkPrefix(a); err != nil {
+		return err
+	}
+	s.m[a.ID] = normalizeAppCanary(a)
 	return nil
 }
 
@@ -75,8 +85,24 @@ func (s *apps) Update(_ context.Context, a *model.App) error {
 	if cur.Version != a.Version {
 		return fmt.Errorf("app %s: %w", a.ID, store.ErrConflict)
 	}
+	if err := s.checkPrefix(a); err != nil {
+		return err
+	}
 	a.Version++
-	s.m[a.ID] = a
+	s.m[a.ID] = normalizeAppCanary(a)
+	return nil
+}
+
+// Called with mu held so two simultaneous creates cannot claim one prefix.
+func (s *apps) checkPrefix(a *model.App) error {
+	if a.DeployTarget.Prefix == "" {
+		return nil
+	}
+	for _, other := range s.m {
+		if other.ID != a.ID && other.DeployTarget.Prefix == a.DeployTarget.Prefix && model.DeploymentScope(other.DeployTarget) == model.DeploymentScope(a.DeployTarget) {
+			return fmt.Errorf("deployment prefix is already used on this target: %w", store.ErrConflict)
+		}
+	}
 	return nil
 }
 

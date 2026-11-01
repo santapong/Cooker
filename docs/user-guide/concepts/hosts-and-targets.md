@@ -4,35 +4,40 @@ Two different concepts. Both are about "where things run", but they live at diff
 
 ## Deploy targets
 
-A **deploy target** is the runtime an App deploys to. The model is `model.DeployTarget` (`backend/internal/model/app.go:52-58`); the kind is one of:
+A **deploy target** selects the App's compute runtime. The GitHub Compose import
+flow now dispatches explicitly to these targets:
 
-| Kind | Description | Status |
+| Kind | App fields | Current support |
 |---|---|---|
-| `kubernetes` | Apply manifests to a K8s cluster. | Stable |
-| `docker-host` | Deploy as a `docker run` on a managed Host. | Partial |
-| `cloud-run` | Deploy a service to Google Cloud Run. | Stable when configured |
-| `ecs` | Deploy a service to AWS ECS / Fargate. | Stable when configured |
-| `fly` | Deploy a Fly.io machine. | Stable when configured |
-| `render` | Trigger a deploy on a pre-created Render service. | Stable when configured |
+| `docker-host` | `prefix`; no `hostId` | Docker on the Cooker host. Compose uses project-scoped native Compose; a single Dockerfile uses Docker Run. |
+| `kubernetes` | `prefix`, `namespace` (default `default`) | Existing configured Kubernetes cluster, supported per-service manifests. |
+| `ecs` | `prefix` | Existing globally configured AWS ECS Fargate cluster/network/roles. |
+| `cloud-run` | `prefix` | Existing globally configured Google Cloud Run project and region. |
 
-Each cloud target self-registers at boot when its config block is non-empty. For example, the ECS target only registers when both `COOKER_DEPLOY_ECS_REGION` and `COOKER_DEPLOY_ECS_CLUSTER` are set.
+All source-build Apps require Docker builder + Docker pusher. The capability API
+and import wizard report unavailable targets and unsupported Compose features.
+Cloud region and resource names are derived from server target configuration and
+the reviewed prefix; per-app `region`/`service` overrides are rejected. Fly,
+Render, SSH and remote managed Docker hosts are not dispatched by this App flow.
+Their adapter or Host records do not establish App support.
 
-See [Reference: env-vars](../reference/env-vars.md#deploy-targets) for the full list of required variables per target.
+The local implementation fixes the `fb6faaa` baseline's cloud dispatch gap and
+Kubernetes fallback. Cloud execution has automated SDK/HTTP fixture coverage;
+live cloud acceptance remains pending. See the
+[GitHub Compose setup and UAT guide](../../guides/GITHUB-COMPOSE-DEPLOYMENT.md)
+for required configuration, exact limitations and acceptance steps.
 
-### Choosing a deploy target
+### Existing databases in another cloud
 
-Set `DeployTarget.Kind` on the App. The other fields depend on the kind:
+A stack uses one compute target. `externalServices` may replace a Compose database
+with an existing GCP Cloud SQL or external database binding. The binding names its
+consumers and maps application variables to keys in a linked Cooker Environment.
+These overrides take precedence over Compose connection literals. The database
+is omitted from build/deploy and retains its independent lifecycle.
 
-| Kind | Fields you set on the App |
-|---|---|
-| `kubernetes` | `namespace` (defaults to `default`). |
-| `docker-host` | `hostId` — references a managed [Host](#hosts) record. |
-| `cloud-run` | `region`, `service` (the Cloud Run service name). |
-| `ecs` | `service` (the ECS service name). |
-| `fly` | `region`. |
-| `render` | (no extra fields; the service is keyed by App name in the Render owner account). |
-
-> **Partial.** The frontend wizard for non-Kubernetes targets is rudimentary. Today most operators wire cloud targets by `PUT /api/v1/apps/:id` with a hand-crafted JSON body. Tracked under W11 indie/SaaS gaps.
+Cooker does not provision EC2 VMs, clusters, networking or managed databases, and
+does not create cross-cloud connectivity or proxy sidecars. ECS support here means
+Fargate containers. Workload-to-database connectivity requires live UAT.
 
 ## Hosts
 
@@ -54,7 +59,8 @@ A **Host** is a managed Docker daemon or Kubernetes cluster Cooker can dial. The
 | `direct` | Host is reachable on the cluster network. | Use TLS for any non-trivial deployment (`tcp://` over plaintext is dev-only). |
 | `tailnet` | Host is only reachable over a Tailscale tailnet Cooker joins via `tsnet`. | **Build-tagged.** Default builds do NOT include the tsnet transport; you need `-tags tsnet` (see [`docs/UAT.md`](../../guides/UAT.md#what-works-right-now)). |
 
-> **Partial.** The Hosts page in the frontend is not yet a menu item — the API works but the UI is incomplete. Test via:
+> Host management and App target dispatch are separate. Creating a Host record
+> does not make it selectable in the GitHub Compose flow. The API can be exercised via:
 >
 > ```bash
 > curl -X POST http://localhost:8080/api/v1/hosts \
@@ -81,7 +87,10 @@ A **Host** is a managed Docker daemon or Kubernetes cluster Cooker can dial. The
 - `Environment.Target.Type = "namespace"` + `Namespace=cooker-staging` deploys to that namespace in the running cluster.
 - `Environment.Target.Type = "cluster"` + `ClusterID=<id>` dials a separately-configured cluster (via `POST /api/v1/settings/clusters`).
 
-For non-K8s targets, the App's own `DeployTarget` overrides this. An App with `DeployTarget.Kind = cloud-run` ignores its Environment's K8s target fields.
+For App deployments, the reviewed App `DeployTarget` selects compute; the linked
+Environment supplies plain variables and secret values. Do not assume a generic
+pipeline Environment's cluster selection changes an App's globally configured
+cloud target.
 
 ## Cross-references
 

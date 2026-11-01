@@ -50,6 +50,8 @@ func New(project, region string) *Target {
 
 func (*Target) Kind() model.DeployTargetKind { return model.DeployTargetCloudRun }
 
+func (t *Target) Validate() error { return t.requireConfig() }
+
 func (t *Target) parent() string {
 	return fmt.Sprintf("projects/%s/locations/%s", t.Project, t.Region)
 }
@@ -112,7 +114,18 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 		Containers: []*runpb.Container{{
 			Image: spec.Image,
 			Env:   envVars,
+			Args:  spec.Command,
 		}},
+	}
+	if spec.Resources != nil {
+		limits := map[string]string{}
+		if spec.Resources.CPUs != "" {
+			limits["cpu"] = spec.Resources.CPUs
+		}
+		if spec.Resources.Memory != "" {
+			limits["memory"] = spec.Resources.Memory
+		}
+		template.Containers[0].Resources = &runpb.ResourceRequirements{Limits: limits}
 	}
 	if spec.Replicas > 0 {
 		template.Scaling = &runpb.RevisionScaling{MinInstanceCount: int32(spec.Replicas)}

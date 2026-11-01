@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"strconv"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -51,6 +53,50 @@ func New(region, cluster string) *Target {
 }
 
 func (*Target) Kind() model.DeployTargetKind { return model.DeployTargetECS }
+
+func (t *Target) Validate() error {
+	if err := t.requireConfig(); err != nil {
+		return err
+	}
+	if len(t.Subnets) == 0 || len(t.SecurityGroups) == 0 || t.ExecutionRole == "" {
+		return fmt.Errorf("ECS needs configured subnets, security groups and an execution role")
+	}
+	return nil
+}
+
+// TaskSize selects the smallest Linux Fargate task fitting requested limits.
+// Both preview and execution call this function so sizing is reviewable.
+func TaskSize(r *model.ResourceLimits) (int32, int32, error) {
+	cpu, memory := int32(256), int32(512)
+	if r != nil {
+		if r.NanoCPUs < 0 || r.MemoryBytes < 0 {
+			return 0, 0, fmt.Errorf("resource limits must be positive")
+		}
+		if r.NanoCPUs > 16e9 || r.MemoryBytes > 120*1024*1024*1024 {
+			return 0, 0, fmt.Errorf("requested resources exceed supported Fargate task sizes")
+		}
+		if r.NanoCPUs > 0 {
+			cpu = int32(math.Ceil(float64(r.NanoCPUs) / 1e9 * 1024))
+		}
+		if r.MemoryBytes > 0 {
+			memory = int32(math.Ceil(float64(r.MemoryBytes) / (1024 * 1024)))
+		}
+	}
+	for _, size := range []struct{ cpu, min, max, step int32 }{{256, 512, 2048, 512}, {512, 1024, 4096, 1024}, {1024, 2048, 8192, 1024}, {2048, 4096, 16384, 1024}, {4096, 8192, 30720, 1024}, {8192, 16384, 61440, 4096}, {16384, 32768, 122880, 8192}} {
+		if size.cpu < cpu || size.max < memory {
+			continue
+		}
+		m := size.min
+		for m < memory {
+			m += size.step
+		}
+		if size.cpu == 256 && m == 1536 {
+			m = 2048
+		}
+		return size.cpu, m, nil
+	}
+	return 0, 0, fmt.Errorf("requested resources exceed supported Fargate task sizes")
+}
 
 func (t *Target) requireConfig() error {
 	if t == nil || t.Region == "" || t.Cluster == "" {
@@ -101,12 +147,23 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 		})
 	}
 
+	cpu, memory, err := TaskSize(spec.Resources)
+	if err != nil {
+		return err
+	}
+	var health *ecstypes.HealthCheck
+	if h := spec.HealthCheck; h != nil {
+		if h.Interval < 5 || h.Interval > 300 || h.Timeout < 2 || h.Timeout > 60 || h.Retries < 1 || h.Retries > 10 || h.StartPeriod < 0 || h.StartPeriod > 300 {
+			return fmt.Errorf("healthcheck values exceed ECS limits")
+		}
+		health = &ecstypes.HealthCheck{Command: h.Command, Interval: aws.Int32(h.Interval), Timeout: aws.Int32(h.Timeout), Retries: aws.Int32(h.Retries), StartPeriod: aws.Int32(h.StartPeriod)}
+	}
 	td, err := c.RegisterTaskDefinition(ctx, &ecs.RegisterTaskDefinitionInput{
 		Family:                  aws.String(spec.AppID),
 		NetworkMode:             ecstypes.NetworkModeAwsvpc,
 		RequiresCompatibilities: []ecstypes.Compatibility{ecstypes.CompatibilityFargate},
-		Cpu:                     aws.String("256"),
-		Memory:                  aws.String("512"),
+		Cpu:                     aws.String(strconv.Itoa(int(cpu))),
+		Memory:                  aws.String(strconv.Itoa(int(memory))),
 		ExecutionRoleArn:        aws.String(t.ExecutionRole),
 		TaskRoleArn:             aws.String(t.TaskRole),
 		ContainerDefinitions: []ecstypes.ContainerDefinition{{
@@ -114,6 +171,8 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 			Image:        aws.String(spec.Image),
 			Essential:    aws.Bool(true),
 			Environment:  envVars,
+			Command:      spec.Command,
+			HealthCheck:  health,
 			PortMappings: portMappings,
 		}},
 	})
@@ -144,11 +203,12 @@ func (t *Target) Deploy(ctx context.Context, spec deploytarget.Spec) error {
 		return nil
 	}
 	_, err = c.CreateService(ctx, &ecs.CreateServiceInput{
-		Cluster:        aws.String(t.Cluster),
-		ServiceName:    aws.String(spec.AppID),
-		TaskDefinition: aws.String(tdArn),
-		DesiredCount:   aws.Int32(desired),
-		LaunchType:     ecstypes.LaunchTypeFargate,
+		Cluster:         aws.String(t.Cluster),
+		ServiceName:     aws.String(spec.AppID),
+		TaskDefinition:  aws.String(tdArn),
+		DesiredCount:    aws.Int32(desired),
+		LaunchType:      ecstypes.LaunchTypeFargate,
+		PlatformVersion: aws.String("LATEST"),
 		NetworkConfiguration: &ecstypes.NetworkConfiguration{
 			AwsvpcConfiguration: &ecstypes.AwsVpcConfiguration{
 				Subnets:        t.Subnets,
@@ -175,14 +235,48 @@ func (t *Target) Status(ctx context.Context, appID string) (deploytarget.Status,
 		Cluster:  aws.String(t.Cluster),
 		Services: []string{appID},
 	})
-	if err != nil || len(out.Services) == 0 {
+	if err != nil {
 		return deploytarget.Status{}, err
 	}
+	if len(out.Services) == 0 || len(out.Failures) > 0 {
+		return deploytarget.Status{}, fmt.Errorf("ECS service is unavailable")
+	}
 	svc := out.Services[0]
+	stable := svc.PendingCount == 0 && len(svc.Deployments) <= 1
+	for _, d := range svc.Deployments {
+		if d.RolloutState == ecstypes.DeploymentRolloutStateFailed {
+			return deploytarget.Status{}, fmt.Errorf("ECS rollout failed")
+		}
+		if d.RolloutState == ecstypes.DeploymentRolloutStateInProgress {
+			stable = false
+		}
+	}
 	return deploytarget.Status{
-		Healthy:  aws.ToInt32(&svc.RunningCount) >= aws.ToInt32(&svc.DesiredCount) && aws.ToInt32(&svc.DesiredCount) > 0,
+		Healthy:  stable && svc.RunningCount >= svc.DesiredCount && svc.DesiredCount > 0,
 		Replicas: int(svc.RunningCount),
 	}, nil
+}
+
+func (t *Target) VerifyImage(ctx context.Context, name, image string) error {
+	c, err := t.client(ctx)
+	if err != nil {
+		return err
+	}
+	res, err := c.DescribeServices(ctx, &ecs.DescribeServicesInput{Cluster: aws.String(t.Cluster), Services: []string{name}})
+	if err != nil {
+		return err
+	}
+	if len(res.Services) != 1 {
+		return fmt.Errorf("ECS service missing during image verification")
+	}
+	td, err := c.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{TaskDefinition: res.Services[0].TaskDefinition})
+	if err != nil {
+		return err
+	}
+	if td.TaskDefinition == nil || len(td.TaskDefinition.ContainerDefinitions) != 1 || aws.ToString(td.TaskDefinition.ContainerDefinitions[0].Image) != image {
+		return fmt.Errorf("ECS is not running the requested image revision")
+	}
+	return nil
 }
 
 func (t *Target) Logs(_ context.Context, _ string, _ io.Writer) error {

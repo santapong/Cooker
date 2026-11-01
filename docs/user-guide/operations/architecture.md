@@ -2,6 +2,15 @@
 
 A condensed map of the system, for people running Cooker. For the full architecture document, see [`docs/architecture.md`](../../reference/architecture.md).
 
+## Reviewed GitHub Compose Apps
+
+The current import/execution path has a separate [architecture reference](../../reference/github-compose-architecture.md)
+covering source pins, previews, prefixes, image handoff and external database
+bindings. Source builds are currently dev/UAT-only; live cloud acceptance remains
+pending. Registered pipeline adapters do not imply App support.
+
+![GitHub review, Docker image handoff, ECS Fargate and existing Cloud SQL](../../images/github-compose.svg)
+
 ## High-level
 
 ```text
@@ -57,7 +66,11 @@ The Cooker container image (`ghcr.io/santapong/cooker:<tag>`, once releases are 
 | Embedded Postgres migrations | Inside the binary (`//go:embed`) |
 | `kubectl` | `/usr/local/bin/kubectl` |
 | `git` | `/usr/bin/git` |
-| `docker` CLI | `/usr/local/bin/docker` |
+| `docker` CLI | `/usr/bin/docker` (Alpine package) |
+
+The bundled image installs Docker CLI but not the Compose v2 plugin. Supply that
+plugin in the backend environment for native Docker Compose App deployment and
+verify it with `docker compose version`.
 
 The binary serves both the API and the static frontend on port 8080. Static asset paths under `/assets` go to the bundle; the SPA fallback (`NoRoute`) serves `index.html` for everything else, which makes client-side routing (including `/callback`) work without server-side handlers.
 

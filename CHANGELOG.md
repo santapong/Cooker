@@ -7,7 +7,269 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added — reviewed GitHub Compose deployments (6 September 2026)
+
+- Five-step import flow: repository, Compose files, preview, destination and
+  review. Supports administrator-approved GitHub App installations, public repo
+  entry, recursive Compose discovery, ordered overrides, profiles and explicit
+  interpolation inputs.
+- Commit-pinned preview with Dockerfile/context/target details, service and build
+  dependencies, masked configuration, and target compatibility diagnostics.
+- Deployment prefixes and Environment-key bindings to existing Cloud SQL or
+  external databases. Bound database services are excluded from build/runtime.
+- Server-backed GitHub stack catalogue beside the browser-local Compose library.
+  Saved file references support naming, search, reopen and forget.
+- Distinct DAG symbols for stage types and external databases across editor,
+  preview and run views; responsive import review and keyboard focus handling.
+- PostgreSQL migration `027_app_prefix` enforces explicit prefix uniqueness per
+  target scope without changing legacy apps that have no explicit prefix.
+
+### Changed — explicit App deployment contracts
+
+- Preview and execution share the Compose loader. Reviewed Apps retain a full
+  commit SHA, use manual deployment and require reinspection for branch updates.
+- App execution dispatches explicitly to native Docker Compose, Kubernetes,
+  configured ECS Fargate or Cloud Run. Unavailable targets, no-op backends and
+  unsupported fields fail instead of silently using Kubernetes.
+- GitHub source builds require Docker builder + Docker pusher today. Production
+  validation forbids both; this source-build path remains a dev/UAT candidate.
+- ECS waits for service stability and verifies the deployed image. Docker Compose
+  uses project-scoped names, service DNS, named volumes and readiness waiting.
+- External database bindings override local Compose connection variables for the
+  selected consumers. They do not provision databases, credentials or networking.
+
+### Security — source and execution boundaries
+
+- GitHub checkout uses short-lived contents-read tokens scoped to an approved
+  installation and repository. Tokens stay out of checkout URLs and arguments.
+- Repository paths are checked through symlinks. Generated runtime Compose files
+  stay outside build contexts, use private permissions and are removed after use.
+- Persisted deployment graphs mask values and are review-only; rerun deployments
+  through the App so redacted data cannot become executable configuration.
+
+### Documentation — September 2026 refresh
+
+- Updated README, quickstart, product overview, App concepts and documentation
+  navigation; added Compose library and execution architecture references.
+- Added scalable stage/workflow SVGs and a source-linked architecture SVG with an
+  interactive HTML companion and regeneration instructions.
+- Corrected the default dev URL to port 8080, removed blanket production-readiness
+  claims, and documented source-build and infrastructure prerequisites.
+
+**Validation and release scope:** the implementation record includes 178 frontend
+unit tests, 32 browser checks, backend race tests and a disposable PostgreSQL
+migration/persistence check. It also records 31 Go lint findings in unchanged
+files. Live GitHub and AWS-to-GCP acceptance remain pending. No release, VM or
+Cloud SQL provisioning is implied. See the [setup/UAT guide](docs/guides/GITHUB-COMPOSE-DEPLOYMENT.md)
+and [verification record](docs/plans/2026-09-06-github-compose-deployment.md#verification-record).
+
+### Added — compose service edits persist to the file
+
+- `PUT /docker/compose/services/:name` now rewrites the service in the compose
+  file and returns the re-parsed graph. `internal/service/compose_edit.go`
+  edits the yaml.v3 node tree and re-encodes only that service, splicing it
+  into the original text: comments, blank lines, key order and every other
+  service stay byte-identical; `environment` keeps the file's list or mapping
+  style and key order (new keys append sorted); port mappings are written
+  double-quoted. The file is replaced
+  atomically (temp file + rename, mode preserved); a rejected request never
+  touches it. 404 for an unknown service, 400 for an empty patch or a bad
+  filename. The file is resolved through the same allowlist as parse.
+- **`COOKER_COMPOSE_DIR`** (default `.`) sets the only directory the compose
+  parse/edit endpoints touch (`handler.SetComposeBaseDir`).
+- Frontend sends `composePath` with the patch and adopts the returned graph;
+  the compose store remembers the path it parsed.
+
+### Changed — frontend redesign polish (toasts, compose editor, airlock checks)
+
+- **Toasts restyled** (`components/Toast.tsx` + `toast.css`): hull cards at the
+  bottom-right with a kind-coloured star dot and small-caps label (Note / Done /
+  Heads up / Error), 200 ms rise with an opacity-only substitute under reduced
+  motion and Calm, auto-dismiss paused while hovered or focused; errors persist
+  and announce as alerts.
+- **Compose service editor** (`instruments/ComposeInspector`): image, ports and
+  environment are editable — the three fields `PUT /docker/compose/services/:name`
+  accepts — with dirty tracking, Reset, inline validation of `KEY=value` lines and
+  an inline server error; group and resource limits are shown read-only. The store
+  mirrors an accepted patch into the loaded graph instead of re-parsing the file.
+  The initial backend persistence gap was closed by the Compose file-write change
+  recorded above.
+- **Airlock verified signed-out** via Playwright (`e2e/airlock.spec.ts`): sign-in
+  with both methods, sign-up via the card link, the protected-route bounce and
+  return after local sign-in, reduced-motion substitution of the card rise. axe
+  now also scans `/docker/compose`, `/signin` and `/signup`.
+- e2e fixtures gained `mockCompose` and `mockSignedOut`; `e2e/compose.spec.ts`
+  covers the editor round-trip, rejected patches and the toast motion branches.
+
+### Added — frontend redesign, P1 foundation (brand-recolored Porthole)
+
+- **Design tokens** (`frontend/src/styles/tokens.css`): greyscale hull + one
+  ember accent (`#E07A1F`), semantic star colours, ×1.25 type scale, 4px grid,
+  motion budgets. Dark only (light mode deferred). Spec + mockup committed under
+  `docs/plans/` with the 4 Sep 2026 palette decision recorded.
+- **Self-hosted fonts** — Space Grotesk, Inter variable, JetBrains Mono (latin
+  subsets, SIL OFL, licences vendored) under `frontend/src/assets/fonts/`;
+  served from `/assets/`, CSP unchanged, no CDN.
+- **App shell** — 64px instrument rail (15 routes in Build / Infrastructure /
+  Operate groups, lit ember dot on the active route), 48px top strip
+  (breadcrumb derived from the pathname, capability badges from
+  `GET /capabilities`, Calm-mode toggle, user + sign-out), skeleton route
+  fallback. Sign-in / sign-up stay outside the shell.
+- **Calm mode** (`uiStore.calmMode`, persisted) publishes `data-calm` on
+  `<html>`; `useMotionAllowed()` gates JS/WAAPI motion. The blanket
+  reduced-motion kill-switch in `index.css` is gone — every animation now
+  carries its own opacity-only substitute (WCAG 2.2.2 / 2.3.1 posture).
+- **Primitives** — `Caps`, `Hairline`, `Badge`, `Skeleton`; inline SVG icon set
+  (no icon dependency). Unit tests for rail mapping, breadcrumb, store
+  persistence (including pre-P1 blobs) and palette contrast (WCAG AA/AAA).
+
+### Added — frontend redesign, P2 porthole editor
+
+- **Porthole** (`components/porthole/`): the hull window with rim light and
+  HUD brackets, a seeded two-layer starfield (transform-only drift, sparse
+  9 s twinkle, static under reduced motion / Calm), `StarNode` (6px core +
+  halo sprite + small-caps label + mono sub-label, run-state colours ready
+  for P3) and `ConstellationEdge` (curved 1.5px line, condition label,
+  stroke-dashoffset draw-in). Scene entrance settles inside 600 ms: 60 ms
+  lead, 280 ms star pops on a `min(30ms, 240/N)` stagger, edges after.
+- **Pipeline editor** (`PipelineEditorPage` + `components/pipeline/`):
+  React Flow canvas seeded from the store and kept in sync both ways —
+  drag persists positions, delete keys remove stages/edges, edge click
+  cycles the condition, tray chips drag-drop or click-add stages, a right
+  inspector edits name / per-type config / timeout, HUD shows stage & edge
+  counts, version and an unsaved marker, with Validate (local DAG check
+  then server), Save (adopts the server version) and Run (saves first,
+  navigates to the run page). Drag settle and new-star pop-in are the only
+  JS-driven motion, gated by `useMotionAllowed`. Skeleton star chart after
+  120 ms; empty and error states with a primary action; focus lands on the
+  porthole heading after load.
+- Store: constellation edge type, `dirty`, `moveStage`, `updateStage`,
+  `addStage` returns the id, `savePipeline` adopts the server copy;
+  `Pipeline.version` typed. 18 new unit tests (starfield, choreography
+  budget, geometry, store contract).
+
+### Added — frontend redesign, P3 run telemetry
+
+- **Run view** (`components/run/RunView` behind `RunPage` and
+  `DeploymentPage`): the constellation lit by the run — stars coloured by
+  stage status with live durations, edges lit as light passes, a comet
+  riding the hot edge (SMIL `animateMotion`, gated by `useMotionAllowed`;
+  reduced motion / Calm keep the static bright stroke). HUD shows elapsed
+  time, stage progress, the run status badge, Cancel while live, Re-run
+  when terminal, and an Editor link.
+- **Telemetry console**: collapsible bottom panel (40 % of the porthole)
+  showing run-level transitions, or the selected stage's logs via the
+  existing `useStageLogs` stream (runtime logs for compose services on the
+  deployment page), following the tail until the reader scrolls up.
+- **Stage inspector**: timing, error, artifacts, outputs, and approval-gate
+  Approve / Reject with a note (polls gate state), plus runtime status for
+  compose services on the deployment page.
+- `useRun` hook: snapshot + `/ws/pipeline-run/:runId` status frames +
+  3 s polling until terminal; pure `runState` helpers (edge light, progress,
+  durations, telemetry lines, status badge variants) with unit tests.
+- Deferred to P5: environment promotion / approval-promotion UI and AI
+  triage (both existed in the pre-reset run page).
+
+### Added — frontend redesign, P4 star-chart lists
+
+- **StarChart** (`components/list/`): the list family from spec §5.A —
+  hairline rows, a 72×40 mini-constellation thumbnail drawn from the
+  pipeline's real stages and edges (stars coloured by the latest run),
+  status star, display-face name, mono meta, hover lift, skeleton, empty
+  and error states, focus on the heading.
+- **Nine pages on live data**: Pipelines (latest run per row, run links,
+  inline "New pipeline" → editor), Apps (latest deploy → thumbnail and
+  deployment link, health star, Open app), Environments, Hosts, Registry
+  (repositories + configured registries), Templates, Schedules (surfaces
+  "scheduler not configured"), Notifications, Audit (paged, status-coded).
+- **List → porthole continuity (rung 3)**: `usePortholeTransition` names the
+  clicked thumbnail and lets the View Transitions API morph it into the
+  porthole frame (320 ms); plain navigation without the API or on hidden
+  documents; not named under reduced motion / Calm (160 ms cross-fade).
+  Route chunks prefetch on hover so the morph lands on a real porthole.
+- Helpers with tests: `layoutMini`, `timeAgo`/`shortId`, `runChartStatus`;
+  `pipelineApi.listRuns` takes a page. Capsule button styles moved to the
+  global sheet so list pages get them without loading the porthole CSS.
+
+### Added — frontend redesign, P5a airlock + panels
+
+- **Airlock** (`components/airlock/`): a card floating over the starfield for
+  Sign in (SSO and/or local, driven by `GET /auth/methods`), Sign up (when the
+  server allows it) and the **New App wizard** — three steps (source, build,
+  run) with repository inspection, build plan and recipe choice, deploy target
+  (docker host / Kubernetes namespace / Cloud Run), environment and
+  auto-deploy, landing on the new app.
+- **App detail**: health, webhook, canary and drift badges; Deploy follows the
+  deploy record into the deployment porthole; deploy history with rollback;
+  webhook URL + secret; drift report; rollout strategy with canary
+  promote/abort; delete. Destructive actions use a two-step armed button
+  instead of a browser dialog.
+- **Settings**: single 640px column — interface (Calm mode, Simple/Pro),
+  secrets-backend probe, image registries, Kubernetes clusters, API tokens
+  (shown once on creation), license install/remove.
+- **Create / remove forms** on Environments (lanes, target, promotion policy,
+  variables), Hosts (docker, SSH-docker with key, Kubernetes, tailnet
+  reachability), Notifications (kind-specific config, event picks) and
+  Registry (credentials).
+- Primitives: `Field`, `TextInput`, `TextArea`, `Select`, `Check`, `Panel`,
+  `ConfirmButton`; form/panel/detail styles in the global sheet.
+
+### Added — frontend redesign, P5b instrument panels + analytics
+
+- **Instrument panels** (spec §5.C): Docker (images, containers with
+  stop/remove, networks and volumes with create/remove, gauge tiles),
+  Kubernetes (namespace picker, workloads with scale/restart, live refresh
+  from the watch socket, "cluster not reachable" panel with the hint),
+  Cloud (inventory + spend per provider, provider/type filters, refresh,
+  "inventory is off" panel). Compose parses a file on the build host and
+  shows its services as a constellation in the porthole with a service
+  inspector.
+- **Analytics** (spec §5.E): gauges for runs, success rate, median run and
+  stages; run duration over the last 30 runs (one ember series, hairline
+  axes, crosshair tooltip, failed runs marked red) and per-stage median
+  bars with a p95 tick; a table view of the same runs. Chart geometry
+  helpers unit-tested.
+- **Templates**: create (JSON schema validated client-side), enable/disable,
+  remove. **Schedules**: create (pipeline, cron, timezone), remove; the
+  scheduler-disabled error stays visible.
+- **Run page**: Promote panel with environment lanes — status per lane,
+  Promote here / Approve with confirmation; AI triage ("Explain this
+  failure") in the stage inspector when the capability is enabled.
+- Gauge primitive and chart styles in the global sheets.
+
+### Added — frontend redesign, P6 verification gate
+
+- **Playwright suite** (`frontend/e2e/`, `npm run test:e2e`) wired into the
+  CI frontend job against the production build served by `vite preview`,
+  every API call mocked from fixtures. It proves the motion system is not
+  harmful (spec §6): reduced-motion substitution (the porthole still opens by
+  opacity, nothing animates `transform`, entrances become fades, no comet,
+  opacity-only halo pulse), the flash ceiling (twinkle ≥ 7 s, no infinite
+  opacity loop above 3 Hz, halo ≥ 1 s), focus landing on the porthole heading
+  after the list → porthole transition, Calm mode stopping and restoring
+  ambient motion, `will-change` hygiene, and an axe-core scan of the list,
+  editor, run and settings pages with no serious/critical violations.
+  Open-time and CLS budgets live in a local-only `perf` project.
+- On failure CI uploads the Playwright HTML report as an artifact.
+
+### Fixed
+
+- **Tertiary ink contrast**: `--ink-3` was 3.3:1 on 12px small-caps labels,
+  meta text and hints (found by the new axe gate); it is now `#808079`,
+  4.9:1 on the app background and 4.7:1 on panels.
+- **OCI conformance workflow** — `go test` path updated to
+  `./internal/build/pusher/...` after the #153 package move (the step matched no
+  packages since 12 Jul), and `TestPushConformance` now sets the config before
+  appending layers and declares OCI media types. Previously `remote.Write`
+  uploaded only the config blob (the post-hoc `mutate.ConfigFile` wiped
+  `rootfs.diff_ids`) and the registry answered `MANIFEST_BLOB_UNKNOWN`, failing
+  every weekly run since at least 14 Jun.
+
+### Docs
+
+- GitHub Topics (20) and the About description defined
+  (`docs/marketing/research/channels/geo.md`); README Go badge → 1.25 to match
+  `go.mod`.
 
 ## [0.2.0] - 2026-07-13
 

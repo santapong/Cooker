@@ -53,18 +53,28 @@ func TestPushConformance(t *testing.T) {
 	tag := "test"
 	ref := fmt.Sprintf("%s/%s:%s", host, repo, tag)
 
-	layer := static.NewLayer([]byte("cooker-conformance-payload"), types.OCILayer)
-	img, err := mutate.AppendLayers(empty.Image, layer)
-	if err != nil {
-		t.Fatalf("mutate: %v", err)
-	}
-	img, err = mutate.ConfigFile(img, &v1.ConfigFile{
+	// Order matters: set the config BEFORE appending layers. mutate.ConfigFile
+	// replaces the whole config (including rootfs.diff_ids), and
+	// mutate.Image.Layers() enumerates layers via those diff_ids — a config
+	// applied after AppendLayers has none, so remote.Write uploaded only the
+	// config blob and the registry rejected the manifest with
+	// MANIFEST_BLOB_UNKNOWN (root cause of the weekly workflow failure).
+	img, err := mutate.ConfigFile(empty.Image, &v1.ConfigFile{
 		Architecture: "amd64",
 		OS:           "linux",
 	})
 	if err != nil {
 		t.Fatalf("config file: %v", err)
 	}
+	layer := static.NewLayer([]byte("cooker-conformance-payload"), types.OCILayer)
+	img, err = mutate.AppendLayers(img, layer)
+	if err != nil {
+		t.Fatalf("mutate: %v", err)
+	}
+	// empty.Image is Docker schema2 by default; TestManifestSpecConformance
+	// validates against the OCI image-spec, so declare OCI media types.
+	img = mutate.MediaType(img, types.OCIManifestSchema1)
+	img = mutate.ConfigMediaType(img, types.OCIConfigJSON)
 
 	dst, err := name.ParseReference(ref)
 	if err != nil {

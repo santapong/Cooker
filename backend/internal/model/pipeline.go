@@ -70,11 +70,12 @@ type Stage struct {
 // StageConfig holds type-specific configuration for a pipeline stage.
 type StageConfig struct {
 	// Build
-	Dockerfile string            `json:"dockerfile,omitempty"`
-	Context    string            `json:"context,omitempty"`
-	BuildArgs  map[string]string `json:"buildArgs,omitempty"`
-	Tags       []string          `json:"tags,omitempty"`
-	Platforms  []string          `json:"platforms,omitempty"` // Multi-arch OCI Image Index
+	Dockerfile  string            `json:"dockerfile,omitempty"`
+	Context     string            `json:"context,omitempty"`
+	BuildArgs   map[string]string `json:"buildArgs,omitempty"`
+	BuildTarget string            `json:"buildTarget,omitempty"`
+	Tags        []string          `json:"tags,omitempty"`
+	Platforms   []string          `json:"platforms,omitempty"` // Multi-arch OCI Image Index
 	// Cache configures build layer-cache reuse. Nil means no cache —
 	// every build is cold (the pre-cache behaviour). See
 	// docs/build-cache.md for per-builder semantics.
@@ -99,6 +100,11 @@ type StageConfig struct {
 	// service docker run), or "compose" (docker compose up). Empty
 	// preserves the legacy manifest/helm dispatch.
 	DeployRuntime string `json:"deployRuntime,omitempty"`
+	// RuntimeName is the scoped workload identity, distinct from its Compose key.
+	RuntimeName    string                `json:"runtimeName,omitempty"`
+	ComposeProject string                `json:"composeProject,omitempty"`
+	ReviewOnly     bool                  `json:"reviewOnly,omitempty"`
+	HealthCheck    *ContainerHealthCheck `json:"healthcheck,omitempty"`
 
 	// Compose provenance — set on stages synthesized from a compose
 	// service so the executor/runtime layer can correlate a stage back

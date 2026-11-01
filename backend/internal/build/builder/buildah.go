@@ -179,6 +179,9 @@ func (b *Buildah) buildJob(req Request) *batchv1.Job {
 	for k, v := range req.BuildArgs {
 		args = append(args, "--build-arg="+k+"="+v)
 	}
+	if req.Target != "" {
+		args = append(args, "--target="+req.Target)
+	}
 	if req.Cache.enabled() {
 		// Discrete argv entries through the same $@ mechanism as
 		// --build-arg: the script sets IFS=$'\n', so a single

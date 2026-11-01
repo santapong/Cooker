@@ -169,20 +169,97 @@ func (h *Handler) ParseComposeFile(c *gin.Context) {
 	c.JSON(http.StatusOK, graph)
 }
 
+// UpdateComposeService rewrites one service (image / ports / environment)
+// in a compose file inside composeBaseDir — the same allowlist
+// ParseComposeFile reads from — and returns the re-parsed graph. The file
+// is replaced atomically (temp file + rename) so a crash mid-write never
+// leaves a half-written stack behind. Fields absent from the body are left
+// untouched; an empty value removes the key.
 func (h *Handler) UpdateComposeService(c *gin.Context) {
 	name := c.Param("name")
 	var req struct {
-		Environment map[string]string `json:"environment"`
-		Ports       []string          `json:"ports"`
-		Image       string            `json:"image"`
+		ComposePath string             `json:"composePath"`
+		Image       *string            `json:"image"`
+		Ports       *[]string          `json:"ports"`
+		Environment *map[string]string `json:"environment"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Image == nil && req.Ports == nil && req.Environment == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "nothing to update: send image, ports or environment"})
+		return
+	}
+
+	resolved, err := h.resolveComposePath(req.ComposePath)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid compose filename"})
+		return
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot read compose file"})
+		return
+	}
+
+	out, err := service.PatchComposeService(data, name, service.ComposeServicePatch{Image: req.Image, Ports: req.Ports, Environment: req.Environment})
+	switch {
+	case errors.Is(err, service.ErrComposeServiceNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "service not found in compose file"})
+		return
+	case err != nil:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid YAML"})
+		return
+	}
+	if err := writeFileAtomic(resolved, out); err != nil {
+		// Do not echo the path or the OS error — both describe the base dir.
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "cannot write compose file"})
+		return
+	}
+	graph, err := service.ParseComposeGraph(out)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "compose file rewritten but no longer parses"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Service config updated",
 		"service": name,
+		"graph":   graph,
 	})
+}
+
+// writeFileAtomic replaces path with data via a temp file in the same
+// directory and a rename, keeping the original file mode.
+func writeFileAtomic(path string, data []byte) error {
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".cooker-compose-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/santapong/cooker/internal/deploy/deploytarget"
 	"io"
 	"os/exec"
 	"strings"
@@ -73,7 +74,27 @@ func isDocker(app *model.App) bool {
 
 // Status returns the live state of the named service for the app.
 func (r *RuntimeService) Status(ctx context.Context, app *model.App, serviceName string) (RuntimeStatus, error) {
-	name := sanitize(serviceName)
+	name := runtimeWorkloadName(app, serviceName)
+	for _, b := range app.DeployTarget.ExternalServices {
+		if b.Service == serviceName {
+			return RuntimeStatus{Runtime: "external", Ref: b.Resource, State: "external", Message: "Database lifecycle and health are managed by its provider"}, nil
+		}
+	}
+	if app.DeployTarget.Kind == model.DeployTargetECS || app.DeployTarget.Kind == model.DeployTargetCloudRun {
+		t, err := deploytarget.Lookup(app.DeployTarget.Kind)
+		if err != nil {
+			return RuntimeStatus{}, err
+		}
+		st, err := t.Status(ctx, name)
+		if err != nil {
+			return RuntimeStatus{}, err
+		}
+		state := "pending"
+		if st.Healthy {
+			state = "running"
+		}
+		return RuntimeStatus{Runtime: string(t.Kind()), Ref: name, State: state, Healthy: st.Healthy}, nil
+	}
 	if isDocker(app) {
 		return r.dockerStatus(ctx, name)
 	}
@@ -83,7 +104,19 @@ func (r *RuntimeService) Status(ctx context.Context, app *model.App, serviceName
 // Logs streams the named service's container/pod logs to out until the
 // context is cancelled or the stream ends.
 func (r *RuntimeService) Logs(ctx context.Context, app *model.App, serviceName string, out io.Writer) error {
-	name := sanitize(serviceName)
+	name := runtimeWorkloadName(app, serviceName)
+	for _, b := range app.DeployTarget.ExternalServices {
+		if b.Service == serviceName {
+			return fmt.Errorf("external database logs are available from its provider")
+		}
+	}
+	if app.DeployTarget.Kind == model.DeployTargetECS || app.DeployTarget.Kind == model.DeployTargetCloudRun {
+		t, err := deploytarget.Lookup(app.DeployTarget.Kind)
+		if err != nil {
+			return err
+		}
+		return t.Logs(ctx, name, out)
+	}
 	if isDocker(app) {
 		return runStream(ctx, out, r.dockerBin(), "logs", "--follow", "--tail", "200", name)
 	}
@@ -97,6 +130,19 @@ func (r *RuntimeService) Logs(ctx context.Context, app *model.App, serviceName s
 		args = append(args, "-n", ns)
 	}
 	return runStream(ctx, out, r.kubectlBin(), args...)
+}
+
+func runtimeWorkloadName(app *model.App, service string) string {
+	if app.BuildPlan != nil && app.BuildPlan.Kind != model.BuildPlanCompose {
+		return AppPrefix(app)
+	}
+	if app.DeployTarget.Kind == model.DeployTargetDockerHost && app.BuildPlan != nil && app.BuildPlan.Kind == model.BuildPlanCompose {
+		return AppPrefix(app) + "-" + service + "-1"
+	}
+	if app.DeployTarget.Prefix != "" {
+		return RuntimeServiceName(app, service)
+	}
+	return sanitize(service) // Compatibility for deployments made before prefixes.
 }
 
 func (r *RuntimeService) dockerStatus(ctx context.Context, name string) (RuntimeStatus, error) {

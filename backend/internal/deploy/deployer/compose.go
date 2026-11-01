@@ -13,12 +13,15 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"sync"
 )
 
 // Compose deploys a stack with `docker compose -p <project> up -d`.
 type Compose struct {
 	// Bin overrides the docker binary path. Empty means "docker" on PATH.
 	Bin string
+	// Serialize stack mutation: parallel DAG branches can share networks/volumes.
+	mu sync.Mutex
 }
 
 // NewCompose constructs a compose-up deployer.
@@ -54,7 +57,17 @@ func (c *Compose) Deploy(ctx context.Context, req Request) (Result, error) {
 		out = io.Discard
 	}
 
-	args := []string{"compose", "-p", project, "-f", req.ComposeFile, "up", "-d", "--remove-orphans"}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	args := []string{"compose", "-p", project, "-f", req.ComposeFile, "up", "-d"}
+	if req.ComposeService != "" {
+		args = append(args, "--no-build", "--no-deps", "--wait", "--wait-timeout", "300", req.ComposeService)
+	} else {
+		args = append(args, "--remove-orphans")
+	}
 	logf(out, "Running: docker %v\n", args)
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout = out

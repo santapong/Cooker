@@ -1,6 +1,6 @@
 import { get, post, put, del } from './client';
 import type { ImageInfo, ContainerInfo } from '../types/docker';
-import type { ComposeGraph, ComposeService } from '../types/compose';
+import type { ComposeGraph, ComposeServicePatch } from '../types/compose';
 import type { DockerNetwork, DockerVolume } from '../types/infra';
 
 export const dockerApi = {
@@ -18,8 +18,9 @@ export const dockerApi = {
 
   parseCompose: (composePath?: string) =>
     post<ComposeGraph>('/docker/compose/parse', composePath ? { composePath } : {}),
-  updateComposeService: (name: string, config: Partial<ComposeService>) =>
-    put<void>(`/docker/compose/services/${name}`, config),
+  /** Rewrites the service in `composePath` (inside the server's compose dir) and returns the re-parsed graph. */
+  updateComposeService: (name: string, patch: ComposeServicePatch, composePath?: string) =>
+    put<{ message: string; service: string; graph?: ComposeGraph }>(`/docker/compose/services/${encodeURIComponent(name)}`, composePath ? { ...patch, composePath } : patch),
 
   listNetworks: (hostId?: string) =>
     get<DockerNetwork[]>(`/docker/networks${hostId ? `?hostId=${encodeURIComponent(hostId)}` : ''}`),

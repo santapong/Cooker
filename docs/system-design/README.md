@@ -8,6 +8,17 @@ detail.
 > **New here?** Read [01-overview.md](01-overview.md) first — it explains what Cooker is and walks one
 > change end-to-end ("behind the scenes") from `git push` to production.
 
+## September 2026 App flow
+
+The current GitHub Compose import/execution path is documented in
+[GitHub Compose architecture](../reference/github-compose-architecture.md), with
+an [SVG map](../images/github-compose.svg) and [interactive viewer](../images/github-compose.html).
+It adds reviewed SHA pins, Compose overrides/profiles, prefixes and external
+bindings. Supported App targets differ from the full adapter catalogue in older
+chapters; use the [setup guide](../guides/GITHUB-COMPOSE-DEPLOYMENT.md) for current
+constraints. The source-build handoff is dev/UAT-only; live cloud acceptance is
+pending.
+
 ## What Cooker is
 
 Cooker is a web-based **CI/CD management tool** with a graph-based UI for visually building pipelines

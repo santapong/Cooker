@@ -1,0 +1,67 @@
+{
+  "checkedOn": "2026-09-07",
+  "implementationRevision": "6d6ca01255989af2f06f18b9f11bd8ae45f3e7df",
+  "diagramType": "architecture",
+  "generator": "Archify 2.17",
+  "specificationSha256": "099bf4ccbafe0ce884978bf13700c27152d88edf47a714d409f7ad6ca10708c4",
+  "artifactSha256": "7c80dd4bfe1c249e77fa9b7bdb9ddb5ed39e0be26ac569f8c905cec90f918e96",
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionErrors": 0,
+    "compositionWarnings": 0
+  },
+  "browserEvidence": {
+    "status": "pass",
+    "viewportContainment": [
+      {
+        "width": 1440,
+        "height": 900,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "width": 1600,
+        "height": 1000,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "width": 1920,
+        "height": 1080,
+        "overflowX": false,
+        "overflowY": false
+      },
+      {
+        "width": 2048,
+        "height": 1320,
+        "overflowX": false,
+        "overflowY": false
+      }
+    ],
+    "captureThemes": [
+      "light",
+      "dark"
+    ]
+  },
+  "visualReview": {
+    "status": "passed",
+    "scope": "HTML light at 1440x900 and dark at 2048x1320; all three standalone SVGs rendered and inspected"
+  },
+  "correctionRounds": 1,
+  "svgAssets": [
+    {
+      "file": "compose-workflow.svg",
+      "sha256": "150f1948142b24b1e64070b65c1151b91370554223ace42c00709280cbb92f3b"
+    },
+    {
+      "file": "github-compose.svg",
+      "sha256": "bbbe2197ee99c97c445432a43c3d0652b723138a63200820a0b5d55f65df1600"
+    },
+    {
+      "file": "stage-types.svg",
+      "sha256": "b473a17ef94a07ca7bbe47265ea03be61141581330b8a71023bd089ab0cc55fc"
+    }
+  ],
+  "scope": "Documentation artifact checks only; no live GitHub connection or cloud deployment."
+}

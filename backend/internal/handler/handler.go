@@ -18,6 +18,7 @@ import (
 	"github.com/santapong/cooker/internal/scheduler"
 	"github.com/santapong/cooker/internal/secrets"
 	"github.com/santapong/cooker/internal/service"
+	"github.com/santapong/cooker/internal/source/github"
 	"github.com/santapong/cooker/internal/store"
 	"github.com/santapong/cooker/internal/templates"
 )
@@ -117,7 +118,8 @@ type Handler struct {
 	Triage TriageRunner
 	// AppDetector backs POST /apps/detect-build (New-App wizard recipe
 	// suggestion). Set by server.New; nil returns 503.
-	AppDetector *service.AppDetector
+	AppDetector  *service.AppDetector
+	GitHubSource *github.AppClient
 	// Feedback relays in-app feedback to GitHub issues (pure relay —
 	// nothing is persisted). Set by server.New when
 	// COOKER_FEEDBACK_GITHUB_TOKEN is non-empty; nil keeps the route
@@ -178,7 +180,8 @@ type Handler struct {
 	// enabled=false rather than an error. Read-only — never mutates any
 	// cloud resource.
 	CloudInventory CloudInventoryService
-	// composeBaseDir is the only directory ParseComposeFile reads from.
+	// composeBaseDir is the only directory ParseComposeFile reads from
+	// and UpdateComposeService writes to (COOKER_COMPOSE_DIR).
 	// An authenticated caller can name a file inside it but never escape
 	// it. Defaults to "." (set by New); replaces the former package-level
 	// mutable global.
@@ -190,6 +193,14 @@ type Handler struct {
 // and no COOKER_SECRET_KEY set); the secret endpoints will return 503.
 func New(s *store.Store, codec *crypto.Codec, secs secrets.Manager) *Handler {
 	return &Handler{Store: s, Codec: codec, Secrets: secs, composeBaseDir: "."}
+}
+
+// SetComposeBaseDir points the compose read/write endpoints at dir
+// (COOKER_COMPOSE_DIR). An empty dir keeps the default ".".
+func (h *Handler) SetComposeBaseDir(dir string) {
+	if dir != "" {
+		h.composeBaseDir = dir
+	}
 }
 
 // loadRunForPipeline fetches a run by runId and verifies it belongs

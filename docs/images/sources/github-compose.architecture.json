@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Cooker \u00b7 GitHub to ECS with an external database",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/santapong/Cooker",
+      "revision": "6d6ca01255989af2f06f18b9f11bd8ae45f3e7df"
+    }
+  },
+  "components": [
+    {
+      "id": "repository",
+      "type": "external",
+      "label": "GitHub repository",
+      "sublabel": "Compose + Dockerfiles",
+      "pos": [
+        50,
+        100
+      ],
+      "size": [
+        190,
+        78
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/source/github/clone.go"
+        }
+      ]
+    },
+    {
+      "id": "review",
+      "type": "frontend",
+      "label": "Cooker review",
+      "sublabel": "Files \u00b7 prefix \u00b7 bindings",
+      "pos": [
+        405,
+        100
+      ],
+      "size": [
+        190,
+        78
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/pages/ComposeImportWizard.tsx"
+        }
+      ]
+    },
+    {
+      "id": "build",
+      "type": "backend",
+      "label": "Docker build",
+      "sublabel": "Pinned source checkout",
+      "pos": [
+        760,
+        100
+      ],
+      "size": [
+        190,
+        78
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/server/app_execution.go"
+        }
+      ]
+    },
+    {
+      "id": "registry",
+      "type": "external",
+      "label": "Image registry",
+      "sublabel": "Workload can pull images",
+      "pos": [
+        760,
+        380
+      ],
+      "size": [
+        190,
+        78
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/service/app_deployer.go"
+        }
+      ]
+    },
+    {
+      "id": "ecs",
+      "type": "cloud",
+      "label": "AWS ECS Fargate",
+      "sublabel": "Existing cluster + network",
+      "pos": [
+        405,
+        380
+      ],
+      "size": [
+        190,
+        78
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/deploy/deploytarget/ecs/ecs.go"
+        }
+      ]
+    },
+    {
+      "id": "database",
+      "type": "database",
+      "label": "GCP Cloud SQL",
+      "sublabel": "Existing database",
+      "pos": [
+        50,
+        380
+      ],
+      "size": [
+        190,
+        78
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/service/app_targets.go"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "repository",
+      "to": "review",
+      "label": "inspect SHA"
+    },
+    {
+      "from": "review",
+      "to": "build",
+      "label": "save + deploy",
+      "variant": "emphasis"
+    },
+    {
+      "from": "build",
+      "to": "registry",
+      "label": "push image",
+      "labelDy": 24
+    },
+    {
+      "from": "registry",
+      "to": "ecs",
+      "label": "image pull"
+    },
+    {
+      "from": "ecs",
+      "to": "database",
+      "label": "app connection",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "Review before execution",
+      "items": [
+        "Preview performs no build or deployment.",
+        "Save the commit, then deploy from the App page."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Operator-owned infrastructure",
+      "items": [
+        "Provide registry access, IAM, networking and DB credentials.",
+        "Live AWS-to-GCP acceptance is still pending."
+      ]
+    }
+  ]
+}

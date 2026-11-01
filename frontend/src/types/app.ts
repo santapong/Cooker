@@ -3,15 +3,52 @@ export interface AppBuildPlan {
   path?: string;
   args?: Record<string, string>;
   buildpacks?: string[];
+  commit?: string;
+  installationId?: number;
+  files?: string[];
+  profiles?: string[];
+  variables?: Record<string, string>;
 }
 
 export interface AppDeployTarget {
-  kind: 'docker-host' | 'kubernetes' | 'cloud-run';
+  kind: 'docker-host' | 'kubernetes' | 'cloud-run' | 'ecs';
   hostId?: string;
   namespace?: string;
   region?: string;
   service?: string;
+  prefix?: string;
+  externalServices?: ExternalServiceBinding[];
 }
+
+export interface ExternalServiceBinding {
+  service: string;
+  provider: 'gcp-cloud-sql' | 'external';
+  resource: string;
+  consumers: string[];
+  environment: Record<string, string>;
+}
+
+export interface RepositoryInspection {
+  commit: string;
+  candidates: { path: string; services: string[]; error?: string }[];
+  graph?: import('./compose').ComposeGraph;
+  buildFiles: { service: string; context: string; dockerfile: string; content: string }[];
+  diagnostics: { service?: string; field: string; message: string }[];
+  requiredVariables: string[];
+  profiles: string[];
+  yaml?: string;
+  workloads: Record<string, string>;
+  deployable: boolean;
+}
+
+export interface TargetCapability { kind: AppDeployTarget['kind']; available: boolean; reason?: string }
+export interface GitHubConnection {
+  configured: boolean;
+  installUrl: string;
+  installations: { id: number; account: { login: string } }[];
+  message?: string;
+}
+export interface GitHubRepository { full_name: string; default_branch: string; private: boolean }
 
 export type AppHealthStatus = 'unknown' | 'healthy' | 'degraded' | 'failed';
 
@@ -54,6 +91,7 @@ export interface AppCanary {
 }
 
 export interface AppModel {
+  version?: number;
   id: string;
   name: string;
   description?: string;
@@ -87,6 +125,8 @@ export interface AppModel {
 }
 
 export interface AppDeployResponse {
+  pipelineId?: string;
+  deploymentView?: string;
   appId: string;
   runId: string;
   channel: string;

@@ -1,0 +1,38 @@
+/* ── analytics charts: ember on hull-0, hairline axes only (spec §5.E) ── */
+.chart-figure { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.chart-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart-svg .axis { stroke: var(--line); stroke-width: 1; }
+.chart-svg .grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 4; }
+.chart-svg .tick { font-family: var(--font-mono); font-size: 10px; fill: var(--ink-3); }
+.chart-svg .series { fill: none; stroke: var(--ember); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-svg .mark { fill: var(--ember); stroke: var(--hull-0); stroke-width: 2; }
+.chart-svg .mark.is-fail { fill: var(--star-fail); }
+.chart-svg .mark.is-hover { r: 6; }
+.chart-svg .bar { fill: var(--ember); opacity: 0.85; }
+.chart-svg .bar-p95 { stroke: var(--ink-1); stroke-width: 2; }
+.chart-svg .hit { fill: transparent; }
+.chart-svg .label { font-family: var(--font-display); font-size: 11px; fill: var(--ink-2); letter-spacing: 0.06em; text-transform: uppercase; }
+.chart-svg .value { font-family: var(--font-mono); font-size: 11px; fill: var(--ink-2); }
+.chart-svg .crosshair { stroke: var(--line-strong); stroke-width: 1; }
+.chart-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-1);
+  background: rgba(11, 11, 12, 0.92);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-1);
+  white-space: nowrap;
+  transform: translate(-50%, calc(-100% - 10px));
+}
+.chart-tip .muted { color: var(--ink-3); }
+.chart-wrap { position: relative; }
+.chart-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.chart-table th { text-align: left; font-family: var(--font-display); font-weight: 500; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.chart-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); font-family: var(--font-mono); color: var(--ink-2); }
+.chart-legend { display: flex; gap: var(--sp-4); font-size: 12px; color: var(--ink-3); font-family: var(--font-mono); }
+.chart-legend span::before { content: ''; display: inline-block; width: 10px; height: 2px; background: var(--ember); margin-right: 6px; vertical-align: middle; }
+.chart-legend .p95::before { width: 2px; height: 10px; background: var(--ink-1); }

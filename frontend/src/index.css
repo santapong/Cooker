@@ -1,6 +1,15 @@
-/* Design reset (Phase 2): reduced to a minimal, neutral baseline. The
-   cosmic theme (keyframes, .cc-* helpers, React Flow overrides, dark
-   palette) was removed for a full redesign. Rebuild global styles here. */
+/* Global baseline — brand-recolored Porthole, dark only.
+   Tokens: styles/tokens.css. Fonts: styles/fonts.css. Primitives: styles/ui.css.
+   Shell layout: components/shell/shell.css.
+
+   Motion rule (spec §3): every animation carries its own reduced-motion
+   SUBSTITUTE (opacity-only) and a [data-calm="true"] branch. There is
+   deliberately NO blanket `animation-duration: 0.001ms` kill-switch here —
+   it would override every substitute and delete motion instead of
+   replacing it. */
+@import './styles/tokens.css';
+@import './styles/fonts.css';
+@import './styles/ui.css';
 
 html,
 body,
@@ -8,36 +17,79 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
-  font-family: system-ui, -apple-system, sans-serif;
-  font-size: 14px;
+}
+
+html {
+  background: var(--hull-0);
+}
+
+body {
+  background: var(--hull-0);
+  color: var(--ink-1);
+  font-family: var(--font-body);
+  font-size: var(--fs-2);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 * {
   box-sizing: border-box;
 }
 
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  color: var(--ink-1);
+}
+h1 { font-size: var(--fs-4); }
+h2 { font-size: var(--fs-3); }
+h3 { font-size: var(--fs-2); }
+
+p {
+  margin: 0 0 var(--sp-3);
+  color: var(--ink-2);
+}
+
 a {
-  color: inherit;
+  color: var(--ember);
   text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 button,
 input,
 textarea,
 select {
-  font-family: inherit;
+  font: inherit;
+  color: inherit;
+}
+
+code, kbd, pre, samp {
+  font-family: var(--font-mono);
+  font-size: 0.93em;
+}
+
+::selection {
+  background: rgba(224, 122, 31, 0.35);
+  color: var(--ink-1);
+}
+
+:focus-visible {
+  outline: var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
+  html {
+    scroll-behavior: auto;
   }
 }
