@@ -1,0 +1,1193 @@
+{
+  "schemaVersion": 1,
+  "program": "Cooker Vercel ecosystem delivery",
+  "date": "2026-10-25",
+  "objective": "Make Vercel projects and installed ecosystem dependencies understandable, then add confirmed resource bindings and controlled operations in accepted slices.",
+  "accountableRole": "Primary Cooker agent coordinates; user owns product/provider decisions.",
+  "capacity": {
+    "maximumActiveAgentsIncludingCoordinator": 4,
+    "workerSlots": 3,
+    "plannedDistinctFocusedAgents": 15,
+    "heavyExecutionPhases": 1,
+    "workerPolicy": "Initial15 focused workers plus3 resumed import/implementation/review roles, with reuse for bounded followups; maximum root+3. One heavy phase at a time; none admitted in this continuation.",
+    "actualDistinctFocusedAgents": 18,
+    "activeChildWorkersAtHandoff": 0
+  },
+  "tracking": "ClickUp Cooker list is canonical product execution board after verified readback; this JSON is the local source/evidence mirror and historical worker record, not a second product backlog.",
+  "workflow": [
+    "planned",
+    "ready",
+    "in_progress",
+    "review",
+    "locally_verified",
+    "live_acceptance_pending",
+    "done",
+    "blocked_external"
+  ],
+  "testPolicy": {
+    "documentation": "links/schema/source coverage only; no application reruns",
+    "minorPresentation": "targeted static checks or review only unless behavior changes",
+    "behaviorSecurityState": "one focused regression batch after coherent edits",
+    "integrationMilestone": "one affected backend/frontend batch plus one relevant end-to-end journey where inputs/capacity allow",
+    "rerunOnlyWhen": "code/test/input changed, failure, or unresolved concern; no per-edit full-suite loop",
+    "fullSuites": "major integration/release gates, not every move"
+  },
+  "scopePolicy": {
+    "firstSlice": "Read-only installed integration metadata and project access; never infer resource provisioning/use from installation access.",
+    "deferredActions": "Provider provisioning/billing, credentials, DNS and deployment actions use their exact scoped authority/inputs. Earlier explicit authorization persists; a plan alone does not add authority.",
+    "legacyPlan": "All45 packages/20 gates/12 invariants remain retained; ecosystem work extends/reorders delivery without false completion."
+  },
+  "tasks": [
+    {
+      "id": "ECO-01",
+      "title": "Vercel Marketplace API and installation scope",
+      "kind": "research",
+      "dependencies": [],
+      "agentRole": "ecosystem_01_marketplace",
+      "status": "done",
+      "acceptance": "Coordinator read sourced findings; capability/authorization limits preserved. Research-only Done, not product acceptance.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/research/01-marketplace.md"
+      ],
+      "startedAt": "2026-10-25T06:38:44.207884+00:00",
+      "owner": "ecosystem_01_marketplace",
+      "scope": "Own assigned report or explicitly delegated disjoint code files only; coordinator owns shared board and final integration.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-02",
+      "title": "Neon ownership, branches and credential boundaries",
+      "kind": "research",
+      "dependencies": [],
+      "agentRole": "ecosystem_02_neon",
+      "status": "done",
+      "acceptance": "Coordinator read sourced findings; capability/authorization limits preserved. Research-only Done, not product acceptance.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/research/02-neon.md"
+      ],
+      "startedAt": "2026-10-25T06:38:44.207916+00:00",
+      "owner": "ecosystem_02_neon",
+      "scope": "Own assigned report or explicitly delegated disjoint code files only; coordinator owns shared board and final integration.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-03",
+      "title": "Existing code seams and compatibility",
+      "kind": "research",
+      "dependencies": [],
+      "agentRole": "ecosystem_03_code_seams",
+      "status": "done",
+      "acceptance": "Coordinator read sourced findings; capability/authorization limits preserved. Research-only Done, not product acceptance.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/research/03-code-seams.md"
+      ],
+      "startedAt": "2026-10-25T06:38:44.207919+00:00",
+      "owner": "ecosystem_03_code_seams",
+      "scope": "Own assigned report or explicitly delegated disjoint code files only; coordinator owns shared board and final integration.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-04",
+      "title": "Upstash, Supabase and additional data-provider capabilities",
+      "kind": "research",
+      "dependencies": [
+        "ECO-01"
+      ],
+      "agentRole": "ecosystem_04_data_providers",
+      "status": "done",
+      "acceptance": "Coordinator read sourced findings; capability/authorization limits preserved. Research-only Done, not product acceptance.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/research/04-data-providers.md"
+      ],
+      "startedAt": null,
+      "owner": "ecosystem_04_data_providers",
+      "scope": "Own assigned report or explicitly delegated disjoint code files only; coordinator owns shared board and final integration.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-05",
+      "title": "Native Vercel, auth, CMS, observability and AI tools",
+      "kind": "research",
+      "dependencies": [
+        "ECO-01"
+      ],
+      "agentRole": "ecosystem_05_platform_tools",
+      "status": "done",
+      "acceptance": "Coordinator read sourced findings; capability/authorization limits preserved. Research-only Done, not product acceptance.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/research/05-platform-tools.md"
+      ],
+      "startedAt": null,
+      "owner": "ecosystem_05_platform_tools",
+      "scope": "Own assigned report or explicitly delegated disjoint code files only; coordinator owns shared board and final integration.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-06",
+      "title": "Delivery sequencing and risk-based test policy",
+      "kind": "planning",
+      "dependencies": [
+        "ECO-01",
+        "ECO-02",
+        "ECO-03"
+      ],
+      "agentRole": "ecosystem_06_delivery",
+      "status": "done",
+      "acceptance": "Coordinator read sourced findings; capability/authorization limits preserved. Research-only Done, not product acceptance.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/research/06-delivery-policy.md"
+      ],
+      "startedAt": null,
+      "owner": "ecosystem_06_delivery",
+      "scope": "Own assigned report or explicitly delegated disjoint code files only; coordinator owns shared board and final integration.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-07",
+      "title": "Safe optional integration-installation synchronization",
+      "kind": "implementation",
+      "dependencies": [
+        "ECO-01",
+        "ECO-02",
+        "ECO-03"
+      ],
+      "agentRole": "ecosystem_07_sync",
+      "status": "review",
+      "acceptance": "Coherent production change, then focused batch checks and independent review before local acceptance.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/implementation/07-sync.md"
+      ],
+      "startedAt": "2026-10-25T06:47:17.613311+00:00",
+      "owner": "ecosystem_07_sync",
+      "scope": "provider/vercel model/client/enrichment/service/memory + details.go cloneSnapshot field only + new production integrations files",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "workerDelivered": true,
+      "coordinatorReview": "Source inspected, independent static reviews complete; no executable acceptance yet.",
+      "acceptancePending": [
+        "Focused backend/frontend batch",
+        "Relevant browser/roles and actual PostgreSQL compatibility",
+        "Scoped current-account read"
+      ],
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-08",
+      "title": "Read-only catalog installation projection on existing detail endpoints",
+      "kind": "implementation",
+      "dependencies": [
+        "ECO-03",
+        "ECO-07"
+      ],
+      "agentRole": "ecosystem_08_catalog",
+      "status": "review",
+      "acceptance": "Coherent production change, then focused batch checks and independent review before local acceptance.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/implementation/08-catalog.md"
+      ],
+      "startedAt": "2026-10-25T06:47:17.613311+00:00",
+      "owner": "ecosystem_08_catalog",
+      "scope": "catalog model/service/new integration projection production files only",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "workerDelivered": true,
+      "coordinatorReview": "Source inspected, independent static reviews complete; no executable acceptance yet.",
+      "acceptancePending": [
+        "Focused backend/frontend batch",
+        "Relevant browser/roles and actual PostgreSQL compatibility",
+        "Scoped current-account read"
+      ],
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-09",
+      "title": "Workspace integration-access visibility",
+      "kind": "implementation",
+      "dependencies": [
+        "ECO-07",
+        "ECO-08"
+      ],
+      "agentRole": "ecosystem_09_workspace",
+      "status": "review",
+      "acceptance": "Reviewable coherent change with appropriate batch evidence; live provider acceptance separate.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/implementation/09-workspace.md"
+      ],
+      "startedAt": null,
+      "owner": "ecosystem_09_workspace",
+      "scope": "Shared integration types/IntegrationAccess plus existing synced App/Pipeline, Cloud and Settings components; no new API requests or CSS redesign.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "workerDelivered": true,
+      "coordinatorReview": "Source inspected, independent static reviews complete; no executable acceptance yet.",
+      "acceptancePending": [
+        "Focused backend/frontend batch",
+        "Relevant browser/roles and actual PostgreSQL compatibility",
+        "Scoped current-account read"
+      ],
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-10",
+      "title": "Focused backend behavior regressions",
+      "kind": "verification",
+      "dependencies": [
+        "ECO-07",
+        "ECO-08"
+      ],
+      "agentRole": "ecosystem_10_backend_checks",
+      "status": "blocked_external",
+      "acceptance": "Focused authored regression tests must execute in a capacity-qualified bounded runner; code authoring alone is not passing evidence.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/implementation/10-backend-checks.md",
+        "/mnt/data/cooker-ecosystem-20261025/verification/PREFLIGHT.json"
+      ],
+      "startedAt": null,
+      "owner": "primary_coordinator",
+      "scope": "Two new provider/catalog ecosystem test files; root added public-projection regression. Coordinator owns bounded execution.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "workerDelivered": true,
+      "implementationOwner": "ecosystem_10_backend_checks",
+      "blocker": "Workstation below RAM reserve; Pi lacks memory controller and has concurrent builds. No focused test/build executed.",
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-11",
+      "title": "Focused frontend regressions and compatibility",
+      "kind": "verification",
+      "dependencies": [
+        "ECO-09"
+      ],
+      "agentRole": "ecosystem_11_frontend_checks",
+      "status": "blocked_external",
+      "acceptance": "Focused authored regression tests must execute in a capacity-qualified bounded runner; code authoring alone is not passing evidence.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/implementation/11-frontend-checks.md",
+        "/mnt/data/cooker-ecosystem-20261025/verification/PREFLIGHT.json"
+      ],
+      "startedAt": null,
+      "owner": "primary_coordinator",
+      "scope": "IntegrationAccess.test.ts SSR cases; coordinator owns bounded unit/type/build/lint execution.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "workerDelivered": true,
+      "implementationOwner": "ecosystem_11_frontend_checks",
+      "blocker": "Workstation below RAM reserve; Pi lacks memory controller and has concurrent builds. No focused test/build executed.",
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-12",
+      "title": "Optimized ecosystem roadmap and architecture contracts",
+      "kind": "documentation",
+      "dependencies": [
+        "ECO-04",
+        "ECO-05",
+        "ECO-06"
+      ],
+      "agentRole": "ecosystem_12_plan",
+      "status": "done",
+      "acceptance": "Coordinator read both documents; local links, exact 45-package coverage and retained 20 gates/12 invariants checked. Documentation-only Done; no milestone/release closure.",
+      "evidence": [
+        "/mnt/data/company/apps/Cooker-backend/docs/plans/2026-10-25-vercel-ecosystem/PLAN.md",
+        "/mnt/data/company/apps/Cooker-backend/docs/plans/2026-10-25-vercel-ecosystem/CAPABILITIES.md",
+        "/mnt/data/cooker-ecosystem-20261025/verification/STATIC-CHECKS.json"
+      ],
+      "startedAt": null,
+      "owner": "ecosystem_12_plan",
+      "scope": "PLAN.md and CAPABILITIES.md; preserve all original acceptance definitions.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00",
+      "acceptedAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-13",
+      "title": "Independent privacy and authority review",
+      "kind": "review",
+      "dependencies": [
+        "ECO-07",
+        "ECO-08",
+        "ECO-10"
+      ],
+      "agentRole": "ecosystem_13_security",
+      "status": "done",
+      "acceptance": "Coordinator inspected finite independent source-review report and limits. Review deliverable only; execution-dependent product acceptance stays open.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/review/13-security.md"
+      ],
+      "startedAt": null,
+      "owner": "ecosystem_13_security",
+      "scope": "Assigned static review report only; finite findings and explicit execution gaps.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00",
+      "acceptedAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-14",
+      "title": "Snapshot, scope and synchronization compatibility review",
+      "kind": "review",
+      "dependencies": [
+        "ECO-07",
+        "ECO-08",
+        "ECO-10"
+      ],
+      "agentRole": "ecosystem_14_compatibility",
+      "status": "done",
+      "acceptance": "Coordinator inspected finite independent source-review report and limits. Review deliverable only; execution-dependent product acceptance stays open.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/review/14-compatibility.md"
+      ],
+      "startedAt": null,
+      "owner": "ecosystem_14_compatibility",
+      "scope": "Assigned static review report only; finite findings and explicit execution gaps.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00",
+      "acceptedAt": "2026-10-25T07:02:49.067201+00:00"
+    },
+    {
+      "id": "ECO-15",
+      "title": "Integrated product acceptance and handoff review",
+      "kind": "review",
+      "dependencies": [
+        "ECO-09",
+        "ECO-11",
+        "ECO-12",
+        "ECO-13",
+        "ECO-14"
+      ],
+      "agentRole": "ecosystem_15_acceptance",
+      "status": "done",
+      "acceptance": "Coordinator inspected finite independent source-review report and limits. Review deliverable only; execution-dependent product acceptance stays open.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/review/15-acceptance.md"
+      ],
+      "startedAt": null,
+      "owner": "ecosystem_15_acceptance",
+      "scope": "Assigned static review report only; finite findings and explicit execution gaps.",
+      "budget": {
+        "attempts": 1,
+        "diagnosisDrivenRevisions": 1,
+        "toolPolicy": "No worker tests/builds/services/provider/account calls; primary-source read-only research or assigned edits. Root batches checks once after coherent freeze.",
+        "timePolicy": "Finite assigned output; stop at missing authority or uncertain effects.",
+        "tokenOrMoneyBudget": "not specified; actual usage unknown"
+      },
+      "reviewOutcome": "One P2 public projection issue fixed; changed-source recheck closed source finding. Regression remains unexecuted.",
+      "lastReconciledAt": "2026-10-25T07:02:49.067201+00:00",
+      "acceptedAt": "2026-10-25T07:02:49.067201+00:00"
+    }
+  ],
+  "updatedAt": "2026-10-26T20:32:30.246244+00:00",
+  "modelPolicy": {
+    "requested": "inherit current authorized model/effort",
+    "observed": "inherited; exact model ID and usage not exposed",
+    "selection": "Tools/privacy/scope first, then capability; no provider/model switch assumed."
+  },
+  "milestones": [
+    {
+      "id": "M0",
+      "deliverable": "Coherent local source/input checkpoint",
+      "owner": "primary_coordinator",
+      "dependencies": [],
+      "status": "done",
+      "acceptance": "Explicit changed-file/build-input hashes and candidate base captured; no full-release freeze claim.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/verification/SOURCE-MANIFEST.json"
+      ],
+      "budget": "Small local metadata/hash reads only."
+    },
+    {
+      "id": "M1",
+      "deliverable": "Installation access visible in Apps, Pipelines, Cloud and Settings",
+      "owner": "primary_coordinator",
+      "dependencies": [
+        "M0",
+        "ECO-07",
+        "ECO-08",
+        "ECO-09",
+        "ECO-10",
+        "ECO-11"
+      ],
+      "status": "review",
+      "acceptance": "Frozen M1 contract with focused execution, persistence/UI compatibility and separately labelled current-account permissions/inventory.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/verification/FORMAT.json",
+        "/mnt/data/cooker-ecosystem-20261025/review/15-acceptance.md"
+      ],
+      "budget": "One serial affected backend batch and frontend batch after runner admission; relevant UAT separately bounded."
+    },
+    {
+      "id": "M2",
+      "deliverable": "Confirmed Neon resources and explicit project/environment bindings",
+      "owner": "primary_coordinator",
+      "dependencies": [
+        "M1"
+      ],
+      "status": "blocked_external",
+      "acceptance": "Supported customer API and exact caller authority established; identified resources and evidenced bindings, no installation-to-database inference.",
+      "blocker": "Secure separate Neon onboarding and metadata source exists, default38+88 passed. SQL/HTTP acceptance, current-account permission/metadata comparison, explicit binding implementation and frontend-owned acceptance remain open. Vercel Marketplace customer resource authority is not inferred.",
+      "evidence": [
+        "/mnt/data/cooker-ecosystem-20261025/research/02-neon.md"
+      ],
+      "budget": "Qualify read interface/authority first; no provisioning, SQL or broad enumeration by default."
+    },
+    {
+      "id": "M3",
+      "deliverable": "Adopt and update existing landing project without duplication",
+      "owner": "primary_coordinator",
+      "dependencies": [
+        "M0"
+      ],
+      "status": "in_progress",
+      "legacyPackages": [
+        "VRC-03",
+        "VRC-04"
+      ],
+      "acceptance": "Relevant execution/fencing/recovery contract plus same-project artifact and durable operation/deployment receipt; exact original package criteria retained.",
+      "evidence": [
+        "M3-A-CHECKPOINT.md",
+        "/mnt/data/cooker-ecosystem-20261025/resume/m3-a-implementation.md",
+        "/mnt/data/cooker-ecosystem-20261025/resume/m3-a-review.md",
+        "/mnt/data/cooker-ecosystem-20261025/resume/m3-a-frontend.md",
+        "/mnt/data/cooker-ecosystem-20261025/resume/SOURCE-MANIFEST.json"
+      ],
+      "budget": "One scoped implementation slice after M1 local verification; deployment is a separate authorized operation. A static landing does not depend on M2.",
+      "acceptancePending": [
+        "M3-A focused execution and migration acceptance",
+        "M3-B separate update queue and existing-project deployment",
+        "Exact live project/production/alias result and uncertainty recovery"
+      ]
+    },
+    {
+      "id": "M4",
+      "deliverable": "Independently accepted Vercel stage, logs, lifecycle, protected config and onboarding",
+      "owner": "primary_coordinator",
+      "dependencies": [
+        "M3"
+      ],
+      "status": "planned",
+      "acceptance": "Enable each original package only against scoped authority/version/recovery and target behavior evidence.",
+      "evidence": [],
+      "budget": "One capability at a time; grouped affected tests, no broad suite per edit."
+    },
+    {
+      "id": "M5",
+      "deliverable": "Upstash, Blob/Global Config and demand-driven ecosystem expansion",
+      "owner": "primary_coordinator",
+      "dependencies": [
+        "M1"
+      ],
+      "status": "planned",
+      "acceptance": "Provider-specific identity/account/authority/binding contract and concrete application need before implementation; original other-provider/domain/tunnel scope preserved.",
+      "evidence": [],
+      "budget": "Select one next adapter; no bulk installation, provisioning or all-provider implementation."
+    }
+  ],
+  "currentPull": {
+    "owner": "primary_coordinator",
+    "task": "OutstandingSQL16/HTTP6 acceptance; finite runner campaigns stopped",
+    "state": "blocked",
+    "executionBlocker": "SQL temporary-container-root lifecycle guard; HTTP counter-age5.239758s>5 during dependencies",
+    "runbook": "RESOURCE-TRACKING.md",
+    "evidence": "/mnt/data/cooker-ecosystem-20261026/neon-connections/http-run/native-du/attempt-1/OUTCOME.json",
+    "pendingAcceptance": "Reviewed new execution method required before outstanding SQL/HTTP; M1/M3/live/bindings/frontend/release gates remain"
+  },
+  "verification": {
+    "sourceFormatting": "M1 thirteen Go files and M3-A twelve Go files passed bounded formatter/parse phases; no compilation",
+    "focusedBackend": "FullM1/adoption/update-review batch not_run; separateNeon fixture pass recorded in focusedNeon",
+    "frontendUnitTypeBuildLint": "not_run",
+    "browserRolesThemes": "not_run",
+    "postgresRestartCompatibility": "not_run",
+    "currentProviderAccount": "not_checked",
+    "release": "not_accepted",
+    "typescriptSyntax": "18 affected TS/TSX files parsed, zero syntax diagnostics; no semantic type check",
+    "focusedNeon": {
+      "state": "passed_current_default_package",
+      "topLevelPassed": 38,
+      "subtestsPassed": 88,
+      "failed": 0,
+      "skipped": 0,
+      "architecture": "arm64",
+      "go": "1.25.14",
+      "CGO_ENABLED": "0",
+      "race": "not_run",
+      "evidence": "/mnt/data/cooker-ecosystem-20261026/neon-connections/postgres-run/full-after-qualification/default-accepted.json",
+      "wrapper": "FAILEDafterpackagepass onmonitoringdeadline, separatelyretained+independentclean",
+      "SQLHTTP": "SQL16 andHTTP6 NOT_RUN after retained finite runner failures"
+    },
+    "focusedNeonPrior9": {
+      "state": "passed_scoped",
+      "topLevelPassed": 9,
+      "subtestsPassed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "architecture": "arm64",
+      "go": "1.25.14",
+      "race": "not_run",
+      "evidence": "/mnt/data/cooker-ecosystem-20261026/OUTCOME.json"
+    },
+    "broaderNeonPostgres": {
+      "state": "SQL_campaign_stopped_before_SQL_tests",
+      "attempts": [
+        "/mnt/data/cooker-ecosystem-20261026/neon-connections/postgres-run/attempt-1/OUTCOME.json",
+        "/mnt/data/cooker-ecosystem-20261026/neon-connections/postgres-run/attempt-2/OUTCOME.json"
+      ],
+      "tests": "Current default38+88sub PASSED; SQL3+keyrotation13 NOT_RUN",
+      "cleanup": "All named SQL resources/temp/root/stage absent, lane released; prior failures retained",
+      "next": "No additional retry of this SQL Docker runner campaign; a lifecycle-safe execution method must be reviewed before SQL acceptance",
+      "latestAttempt": "/mnt/data/cooker-ecosystem-20261026/neon-connections/postgres-run/full-after-qualification/sql-only/attempt-2/OUTCOME.json"
+    },
+    "executorQualification": {
+      "state": "passed_scoped",
+      "scope": "PinnedGoVersion/concurrentattach-inspect/ownedteardown only; no dependencies/tests/PG",
+      "manifest": "f0512a6fb5764ab59d2b643f473895a6918d9a167b9c520a60dac64c70622875",
+      "evidence": "/mnt/data/cooker-ecosystem-20261026/neon-connections/postgres-run/qualification-accepted.json",
+      "hardCaps": "CPU1/RAM2GiB/swap0/PIDs256 declared total; actual controller/watch/version cgroups retained; PGnotstarted",
+      "priorFailures": "Both initialattempts retained; no causalclaimTasks16wasactualtrigger"
+    },
+    "focusedNeonPrior34": {
+      "state": "passed_prior_scoped_source",
+      "topLevelPassed": 34,
+      "subtestsPassed": 83,
+      "failed": 0,
+      "skipped": 0,
+      "architecture": "arm64",
+      "go": "1.25.14",
+      "race": "not_run",
+      "evidence": "/mnt/data/cooker-ecosystem-20261026/neon-connections/UNIT-OUTCOME.json",
+      "currentSource": "Superseded for current default package by actual38+88sub pass; prior34 evidence remains scoped to its source."
+    },
+    "neonHTTP": {
+      "state": "campaign_stopped_before_HTTP_tests",
+      "expectedTests": 6,
+      "executed": 0,
+      "evidence": "/mnt/data/cooker-ecosystem-20261026/neon-connections/http-run/native-du/attempt-1/OUTCOME.json",
+      "reason": "Second trial disk counter age5.239758s exceeded5s during dependencies; first failure retained",
+      "cleanup": "All owned units/cgroups/temp/root absent, lane released, corehealthy",
+      "next": "Campaign stopped; reviewed execution method and actual dependency-accounting qualification required, no unchanged retry"
+    }
+  },
+  "legacyScope": {
+    "requirements": "/mnt/data/cooker-roadmap-20261002/roadmap-audit/requirements.json",
+    "packages": 45,
+    "gates": 20,
+    "invariants": 12,
+    "recordedPackageAndGateCompletion": "not_proven",
+    "policy": "No original acceptance/status replaced by this overlay; use the original definitions."
+  },
+  "productBoard": {
+    "provider": "ClickUp",
+    "account": "Primary",
+    "listId": "1100540000004771",
+    "url": "https://app.clickup.com/90181387221/v/l/li/1100540000004771",
+    "retainedParentId": "z8xxqwb4f9",
+    "verifiedAt": "2026-10-25T07:56:04.998908+00:00",
+    "verification": "/mnt/data/cooker-ecosystem-20261025/resume/clickup-acceptance.json",
+    "tasks": [
+      {
+        "stableId": "CAT-01",
+        "taskId": "z8xxqwcd5y",
+        "name": "[CAT-01] Classify ordinary projects separately from unavailable multi-service metadata",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd5y",
+        "status": "backlog"
+      },
+      {
+        "stableId": "CAT-02",
+        "taskId": "z8xxqwcd5z",
+        "name": "[CAT-02] Enrich aliases for the exact current production deployment",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd5z",
+        "status": "backlog"
+      },
+      {
+        "stableId": "CAT-03",
+        "taskId": "z8xxqwcd60",
+        "name": "[CAT-03] Reconcile selected inventory and navigation",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd60",
+        "status": "backlog"
+      },
+      {
+        "stableId": "CAT-04",
+        "taskId": "z8xxqwcd61",
+        "name": "[CAT-04] Complete actual workspace acceptance",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd61",
+        "status": "backlog"
+      },
+      {
+        "stableId": "CAT-05",
+        "taskId": "z8xxqwcd62",
+        "name": "[CAT-05] Expose coverage and operational limitations",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd62",
+        "status": "backlog"
+      },
+      {
+        "stableId": "AUTH-01",
+        "taskId": "z8xxqwcd63",
+        "name": "[AUTH-01] Register GitHub and Google sign-in providers",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd63",
+        "status": "backlog"
+      },
+      {
+        "stableId": "AUTH-02",
+        "taskId": "z8xxqwcd64",
+        "name": "[AUTH-02] Configure the Keycloak sign-in broker",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd64",
+        "status": "backlog"
+      },
+      {
+        "stableId": "AUTH-03",
+        "taskId": "z8xxqwcd65",
+        "name": "[AUTH-03] Verify sign-in, roles and account recovery",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd65",
+        "status": "backlog"
+      },
+      {
+        "stableId": "AUTH-04",
+        "taskId": "z8xxqwcd66",
+        "name": "[AUTH-04] Document and verify sign-in activation and rollback",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd66",
+        "status": "backlog"
+      },
+      {
+        "stableId": "GIT-01",
+        "taskId": "z8xxqwcd67",
+        "name": "[GIT-01] Hosted GitHub acceptance using one permitted disposable private repository",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd67",
+        "status": "backlog"
+      },
+      {
+        "stableId": "GIT-02",
+        "taskId": "z8xxqwcd68",
+        "name": "[GIT-02] Real GitLab acceptance; retain Gitea regression",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd68",
+        "status": "backlog"
+      },
+      {
+        "stableId": "GIT-03",
+        "taskId": "z8xxqwcd69",
+        "name": "[GIT-03] Bind authored DAGs to Git rules",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd69",
+        "status": "backlog"
+      },
+      {
+        "stableId": "GIT-04",
+        "taskId": "z8xxqwcd6a",
+        "name": "[GIT-04] Complete delivery/decision UI",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6a",
+        "status": "backlog"
+      },
+      {
+        "stableId": "GIT-05",
+        "taskId": "z8xxqwcd6b",
+        "name": "[GIT-05] Source credential rotation and missed-event recovery",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6b",
+        "status": "backlog"
+      },
+      {
+        "stableId": "SEC-01",
+        "taskId": "z8xxqwcd6c",
+        "name": "[SEC-01] Improve ordinary/secret editing and service bindings",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6c",
+        "status": "backlog"
+      },
+      {
+        "stableId": "SEC-02",
+        "taskId": "z8xxqwcd6d",
+        "name": "[SEC-02] Pin external-secret versions",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6d",
+        "status": "backlog"
+      },
+      {
+        "stableId": "SEC-03",
+        "taskId": "z8xxqwcd6e",
+        "name": "[SEC-03] Add an encryption-key rotation procedure/tool",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6e",
+        "status": "backlog"
+      },
+      {
+        "stableId": "SEC-04",
+        "taskId": "z8xxqwcd6f",
+        "name": "[SEC-04] Scope registry authority to each App and native Pipeline",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6f",
+        "status": "backlog"
+      },
+      {
+        "stableId": "SEC-05",
+        "taskId": "z8xxqwcd6g",
+        "name": "[SEC-05] Verify redaction at every output boundary",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6g",
+        "status": "backlog"
+      },
+      {
+        "stableId": "LOG-01",
+        "taskId": "z8xxqwcd6h",
+        "name": "[LOG-01] Docker replica, time-range, bounded search and redacted download controls",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6h",
+        "status": "backlog"
+      },
+      {
+        "stableId": "LOG-02",
+        "taskId": "z8xxqwcd6j",
+        "name": "[LOG-02] Immutable Kubernetes log sessions",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6j",
+        "status": "backlog"
+      },
+      {
+        "stableId": "REL-01",
+        "taskId": "z8xxqwcd6k",
+        "name": "[REL-01] Extend queue crash/cancellation boundaries",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6k",
+        "status": "backlog"
+      },
+      {
+        "stableId": "REL-02",
+        "taskId": "z8xxqwcd6m",
+        "name": "[REL-02] Close scheduler admission crash windows and define notification delivery",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6m",
+        "status": "backlog"
+      },
+      {
+        "stableId": "REL-03",
+        "taskId": "z8xxqwcd6n",
+        "name": "[REL-03] Older-schema upgrade/restore and capacity checks",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6n",
+        "status": "backlog"
+      },
+      {
+        "stableId": "VRC-01",
+        "taskId": "z8xxqwcd6p",
+        "name": "[VRC-01] Connect Vercel through registered integration authorization",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6p",
+        "status": "backlog"
+      },
+      {
+        "stableId": "VRC-02",
+        "taskId": "z8xxqwcd6q",
+        "name": "[VRC-02] Refresh Vercel inventory from authenticated events",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6q",
+        "status": "backlog"
+      },
+      {
+        "stableId": "VRC-03",
+        "taskId": "z8xxqwcd6r",
+        "name": "[VRC-03] Update the existing Cooker landing project",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6r",
+        "status": "backlog"
+      },
+      {
+        "stableId": "VRC-04",
+        "taskId": "z8xxqwcd6t",
+        "name": "[VRC-04] Introduce explicit deployment bindings for adopted projects",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6t",
+        "status": "blocked"
+      },
+      {
+        "stableId": "VRC-05",
+        "taskId": "z8xxqwcd6u",
+        "name": "[VRC-05] Implement a bounded Vercel deployment stage",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6u",
+        "status": "backlog"
+      },
+      {
+        "stableId": "VRC-06",
+        "taskId": "z8xxqwcd6v",
+        "name": "[VRC-06] Add provider inspection/log adapter where supported",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6v",
+        "status": "backlog"
+      },
+      {
+        "stableId": "VRC-07",
+        "taskId": "z8xxqwcd6w",
+        "name": "[VRC-07] Promote/rollback supported provider releases",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6w",
+        "status": "backlog"
+      },
+      {
+        "stableId": "VRC-08",
+        "taskId": "z8xxqwcd6x",
+        "name": "[VRC-08] Add separately permitted provider environment editing",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6x",
+        "status": "backlog"
+      },
+      {
+        "stableId": "LIFE-01",
+        "taskId": "z8xxqwcd6y",
+        "name": "[LIFE-01] Dispatch approved promotion and observe the result",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6y",
+        "status": "backlog"
+      },
+      {
+        "stableId": "LIFE-02",
+        "taskId": "z8xxqwcd6z",
+        "name": "[LIFE-02] Roll back to a known prior application release",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd6z",
+        "status": "backlog"
+      },
+      {
+        "stableId": "LIFE-03",
+        "taskId": "z8xxqwcd70",
+        "name": "[LIFE-03] Control gradual traffic where the provider supports it",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd70",
+        "status": "backlog"
+      },
+      {
+        "stableId": "DOM-01",
+        "taskId": "z8xxqwcd71",
+        "name": "[DOM-01] Bind custom domains to exact services and releases",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd71",
+        "status": "backlog"
+      },
+      {
+        "stableId": "DOM-02",
+        "taskId": "z8xxqwcd72",
+        "name": "[DOM-02] Provide collision-safe operator subdomains",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd72",
+        "status": "backlog"
+      },
+      {
+        "stableId": "TUN-01",
+        "taskId": "z8xxqwcd73",
+        "name": "[TUN-01] Connect approved services through persistent Cloudflare Tunnel",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd73",
+        "status": "backlog"
+      },
+      {
+        "stableId": "TUN-02",
+        "taskId": "z8xxqwcd74",
+        "name": "[TUN-02] Offer temporary development tunnel addresses",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd74",
+        "status": "backlog"
+      },
+      {
+        "stableId": "AWS-01",
+        "taskId": "z8xxqwcd75",
+        "name": "[AWS-01] Import selected ECS and Fargate services",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd75",
+        "status": "backlog"
+      },
+      {
+        "stableId": "AWS-02",
+        "taskId": "z8xxqwcd76",
+        "name": "[AWS-02] Deploy, inspect and diagnose ECS releases",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd76",
+        "status": "backlog"
+      },
+      {
+        "stableId": "AWS-03",
+        "taskId": "z8xxqwcd77",
+        "name": "[AWS-03] Reconcile and recover failed ECS rollouts",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd77",
+        "status": "backlog"
+      },
+      {
+        "stableId": "GCP-01",
+        "taskId": "z8xxqwcd78",
+        "name": "[GCP-01] Import selected Cloud Run services and revisions",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd78",
+        "status": "backlog"
+      },
+      {
+        "stableId": "GCP-02",
+        "taskId": "z8xxqwcd79",
+        "name": "[GCP-02] Deploy, inspect and diagnose Cloud Run revisions",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd79",
+        "status": "backlog"
+      },
+      {
+        "stableId": "GCP-03",
+        "taskId": "z8xxqwcd7a",
+        "name": "[GCP-03] Migrate and roll back Cloud Run traffic",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd7a",
+        "status": "backlog"
+      },
+      {
+        "stableId": "ECO-M1",
+        "taskId": "z8xxqwcd7b",
+        "name": "[ECO-M1] Show installed Vercel integrations and allowed project access",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd7b",
+        "status": "blocked"
+      },
+      {
+        "stableId": "ECO-M2-01",
+        "taskId": "z8xxqwcd7c",
+        "name": "[ECO-M2-01] Read confirmed Neon resource metadata with explicit provider authority",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd7c",
+        "status": "blocked",
+        "latestScopedReadback": "2026-10-26T20:32:30.246244+00:00",
+        "latestEvidence": "/mnt/data/cooker-ecosystem-20261026/neon-connections/CLICKUP-CONTINUATION-RESULT.json"
+      },
+      {
+        "stableId": "ECO-M2-02",
+        "taskId": "z8xxqwcd7d",
+        "name": "[ECO-M2-02] Show explicit Neon resource and project/environment bindings",
+        "parentId": "z8xxqwb4f9",
+        "listId": "1100540000004771",
+        "url": "https://app.clickup.com/t/z8xxqwcd7d",
+        "status": "blocked"
+      }
+    ],
+    "statusPolicy": "Verified remote status is authoritative. Local statuses below describe source checkpoints or worker outputs only.",
+    "dependencies": [
+      {
+        "task": "ECO-M2-01",
+        "waitingOn": "ECO-M1"
+      },
+      {
+        "task": "ECO-M2-02",
+        "waitingOn": "ECO-M1"
+      },
+      {
+        "task": "ECO-M2-02",
+        "waitingOn": "ECO-M2-01"
+      },
+      {
+        "task": "VRC-03",
+        "waitingOn": "VRC-04"
+      }
+    ],
+    "scopedReconciliation": {
+      "verifiedAt": "2026-10-26T20:32:30.246244+00:00",
+      "taskIds": [
+        "z8xxqwcd7c"
+      ],
+      "evidence": "/mnt/data/cooker-ecosystem-20261026/neon-connections/CLICKUP-CONTINUATION-RESULT.json",
+      "status": "NeonBlocked for remaining execution/live/full criteria; currentdefault38+88 acceptedscoped",
+      "protectedFields": "Freshget-update-readback; name/parent/list/criteria/owners/dates/estimates/dependencies/customfields/checklists retained",
+      "full48InventoryRechecked": false
+    }
+  },
+  "continuation": {
+    "authorization": "25 October user selected Primary, approved Cooker list+48 roadmap IDs/titles, and requested remaining implementation. Existing project restored and moved; older closed cycle retained.",
+    "workers": [
+      {
+        "role": "resume_m3_contract",
+        "deliverable": "Safe static read, adoption service/stores/migration040 and fixture source",
+        "state": "review",
+        "evidence": "/mnt/data/cooker-ecosystem-20261025/resume/m3-a-implementation.md"
+      },
+      {
+        "role": "resume_clickup_map",
+        "deliverable": "Offline48-task map and M3-A frontend/API/guard source",
+        "state": "review",
+        "evidence": "/mnt/data/cooker-ecosystem-20261025/resume/m3-a-frontend.md"
+      },
+      {
+        "role": "resume_adoption_review",
+        "deliverable": "Finite independent backend/store/HTTP source review",
+        "state": "done",
+        "evidence": "/mnt/data/cooker-ecosystem-20261025/resume/m3-a-review.md"
+      }
+    ],
+    "implementation": "M3-A source, HTTP and Cloud UI integrated and source-reviewed; formatter and TypeScript parser passed. No update queue/provider writes; executable acceptance pending.",
+    "verification": "Current38+88 scoped pass; SQL16/HTTP6 NOT_RUN after finite stopped campaigns, independent cleanup retained. No full product acceptance.",
+    "neonSource": {
+      "state": "PreparedsecureNeonbackend; default38+88 passed; SQL/HTTP acceptance blocked by finite runner outcomes",
+      "source": "backend/internal/provider/neon",
+      "testDeclarations": 38,
+      "executed": true,
+      "activation": "Sourcebootwiringonly; noowneractivation, credentialchange, liveprovider/resourcebinding",
+      "evidence": "/mnt/data/cooker-ecosystem-20261025/resource-followup/neon-source.md",
+      "review": "/mnt/data/cooker-ecosystem-20261025/resource-followup/neon-review.md",
+      "executedScope": "Current38top-level+88subtests,0fail/skip,packageexit0; wrapperfailedafterward, SQL/HTTP/live/racepending",
+      "verificationEvidence": "/mnt/data/cooker-ecosystem-20261026/neon-connections/postgres-run/full-after-qualification/default-accepted.json",
+      "httpNextInputs": "/mnt/data/cooker-ecosystem-20261026/neon-connections/http-run/native-du/HANDOFF.json"
+    },
+    "backendFrontendOwnership": {
+      "date": "2026-10-27",
+      "backendOwner": "this chat",
+      "frontendOwner": "separate owner session",
+      "palette": "unchanged per owner",
+      "identity": "authorized separate identity refinement; old ReadyBlock baseline not a veto",
+      "handoff": "BACKEND-FRONTEND-HANDOFF.md"
+    }
+  },
+  "resourceWatch": {
+    "automationId": "cooker-resource-check",
+    "kind": "heartbeat",
+    "status": "PAUSED",
+    "intervalMinutes": 15,
+    "statePath": "/mnt/data/cooker-ecosystem-20261025/resource-followup/state.json",
+    "workflow": "RESOURCE-TRACKING.md",
+    "authority": "User explicitly stopped automatic wake-up messages; do not reactivate without a new explicit request.",
+    "quietWhileUnchanged": true,
+    "noNewPermission": "No service/boot/provider/deployment/credential/paid action authority added.",
+    "policy": "Paused by explicit owner correction. No scheduled messages or automatic reactivation; inspect resources during user-requested work and maintain existing ClickUp stages."
+  }
+}

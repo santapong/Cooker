@@ -1,0 +1,165 @@
+{
+  "reviewDate": "2026-10-25",
+  "repository": "https://github.com/santapong/Cooker",
+  "checkout": "/mnt/data/company/apps/Cooker-backend",
+  "baseRevision": "949d4a964abec603c9b0b82f6f8d8b7f9f23d73e",
+  "scope": "Inspected pending candidate source, not a published revision or current installation.",
+  "evidence": [
+    {
+      "component": "workspace",
+      "path": "frontend/src/main.tsx",
+      "line": 8,
+      "label": "React entry point",
+      "sha256": "60884d3cd5c160d5c61a8d33c74db8dc48aca90cabd39ea651ac331df51177e2"
+    },
+    {
+      "component": "workspace",
+      "path": "frontend/src/api/client.ts",
+      "line": 24,
+      "label": "Authenticated API client",
+      "sha256": "eb7c58d6b49bfa0df812e3f27c3cb772c6f47fc0e6dab7aa18311e910116c9d9"
+    },
+    {
+      "component": "cooker",
+      "path": "backend/internal/server/server.go",
+      "line": 912,
+      "label": "Embedded background loops",
+      "sha256": "b6c66b19655f346d75e7f6a6777a04e53c0500f2be5411e6238ede242485ff54"
+    },
+    {
+      "component": "cooker",
+      "path": "backend/internal/server/router.go",
+      "line": 478,
+      "label": "Served SPA and API",
+      "sha256": "62a55907a457c4fd114606f2b0edf50c439e91f7d77b1e119ce341e4f35dfbdf"
+    },
+    {
+      "component": "state",
+      "path": "backend/internal/server/jobqueue_boot.go",
+      "line": 57,
+      "label": "PostgreSQL job queue",
+      "sha256": "5af139b8d1a3b797f8bd659903ebb3376fcd81fb5a8d285ae5fda0dffcde1674"
+    },
+    {
+      "component": "state",
+      "path": "backend/internal/store/postgres/store.go",
+      "line": 92,
+      "label": "Persistent domain stores",
+      "sha256": "bbc6b8b2f8e72a70b97fa0af97a0ae8bc670bb350334643a55783460c743c66e"
+    },
+    {
+      "component": "identity",
+      "path": "backend/internal/server/auth_methods.go",
+      "line": 13,
+      "label": "Available identity methods",
+      "sha256": "efb14f1107663e7f8830667003d9876904b415134397ad71c342ec0d8b98f7cf"
+    },
+    {
+      "component": "identity",
+      "path": "docs/user-guide/operations/social-sign-in.md",
+      "line": 79,
+      "label": "Broker callback contract",
+      "sha256": "600c58f016062a7da20926764996732f205a2a4a69a8763f48295a00062d65f6"
+    },
+    {
+      "component": "git_hosts",
+      "path": "backend/internal/handler/source_webhook.go",
+      "line": 30,
+      "label": "Authenticated webhook ingress",
+      "sha256": "025c046b028d65a300c2ba209e75ea1f3463d4160db35b9c1ed6d26445c9dc72"
+    },
+    {
+      "component": "git_hosts",
+      "path": "backend/internal/service/source_access.go",
+      "line": 23,
+      "label": "Provider source adapters",
+      "sha256": "f3bc45a7741f24db0a37b0c7dd38187e6107ab3ae0574fea88432113dad06d0a"
+    },
+    {
+      "component": "secret_stores",
+      "path": "backend/internal/server/factories.go",
+      "line": 118,
+      "label": "Selected secrets manager",
+      "sha256": "bb9ea3053d19eec6430adb58f8f5e6a325f22b1465992341c70b6c87ce55a855"
+    },
+    {
+      "component": "secret_stores",
+      "path": "backend/internal/secrets/versions.go",
+      "line": 13,
+      "label": "Immutable version references",
+      "sha256": "a0f8c3f3d7d87b381e14535768558b07b73acda0480617f5a05e9b30895a5343"
+    },
+    {
+      "component": "vercel",
+      "path": "backend/internal/provider/vercel/service.go",
+      "line": 54,
+      "label": "Scoped provider connection",
+      "sha256": "9dcd7ed141fc1ffa8671e69cae1ac470718b805f5ca59b46f5cf4b38a1ff1155"
+    },
+    {
+      "component": "vercel",
+      "path": "backend/internal/provider/vercel/publication.go",
+      "line": 40,
+      "label": "Dedicated landing publication",
+      "sha256": "738921a345b34c53d89f0934a305b5648369d20433713690d17931ec9800b6df"
+    },
+    {
+      "component": "build_infra",
+      "path": "backend/internal/server/factories.go",
+      "line": 39,
+      "label": "Builder and pusher adapters",
+      "sha256": "bb9ea3053d19eec6430adb58f8f5e6a325f22b1465992341c70b6c87ce55a855"
+    },
+    {
+      "component": "build_infra",
+      "path": "backend/internal/server/app_execution.go",
+      "line": 23,
+      "label": "App build transport support",
+      "sha256": "cf38af565db769b95e315ae55a74379ea53157b18ac52ffc72b4974e2868d3ee"
+    },
+    {
+      "component": "runtime_targets",
+      "path": "backend/internal/service/app_deployer.go",
+      "line": 1073,
+      "label": "Supported App destinations",
+      "sha256": "509a4bc4eede5dd2708eef114b35f5639aa2b1f5823a4637c7ad96454eaf7315"
+    },
+    {
+      "component": "runtime_targets",
+      "path": "backend/internal/service/pipeline_source.go",
+      "line": 97,
+      "label": "Source-bound native Docker scope",
+      "sha256": "ce12a8bdd28313f4bca4a786231cd5c5eae9842eb7984cb004e19b662c8de485"
+    }
+  ],
+  "formalEvidenceBoundary": "Archify pinned-revision evidence resolves Git objects, not uncommitted candidate bytes. Original metadata validation correctly rejected a current line beyond its base commit. The diagram therefore omits a false pinned Git declaration; this separately checked working-tree manifest binds current source bytes/lines.",
+  "semanticSimplifications": [
+    {
+      "action": "grouped",
+      "elements": "API, jobs workers, scheduler, catalog, sync, executor and log hub",
+      "result": "One Cooker process; component detail in companion document."
+    },
+    {
+      "action": "grouped",
+      "elements": "BuildKit and OCI registry",
+      "result": "External build infrastructure category, not one implied process."
+    },
+    {
+      "action": "grouped",
+      "elements": "Docker/Compose, Kubernetes, ECS,CloudRun",
+      "result": "Runtime category; adapter and execution-path limits in companion document."
+    },
+    {
+      "action": "omitted_from_overview",
+      "elements": "Optional Redis and metrics/tracing sinks",
+      "reason": "Explained in card and companion component/deployment views; not required on core deploy path."
+    },
+    {
+      "action": "omitted_from_overview",
+      "elements": "Reverse Git provider API/checkout calls",
+      "reason": "The detailed deployment sequence shows fetch/verification explicitly; the overview emphasizes inbound event flow."
+    }
+  ],
+  "runtimeAcceptanceClaim": false,
+  "wordingRefinement": "V2 uses Verified webhooks so provider-specific authentication is not incorrectly claimed to be universal request signing."
+}

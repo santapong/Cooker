@@ -1,6 +1,6 @@
 # Pipelines
 
-A pipeline in Cooker is a **DAG** (directed acyclic graph) of stages. Stages are the work units; edges are the dependency arrows. The graph editor in the browser is a 1:1 rendering of this model — what you see is what the executor runs.
+A pipeline in Cooker is a **DAG** (directed acyclic graph) of stages. Stages are the work units; edges are the dependency arrows. The editor shows the saved definition. Accepted runs keep their own inputs; when a pipeline was edited later, the current run view labels definition drift rather than claiming to reconstruct its old graph. Synced Vercel flows are separate read-only provider explanations.
 
 ## Mental model
 
@@ -105,3 +105,6 @@ This is intentional — pipelines are atomic documents. See [`docs/architecture.
 - **[Runs](runs.md)** — lifecycle, statuses, logs, artifacts.
 - **[Environments](environments.md)** — how swimlanes map to deploy targets.
 - **[Your first pipeline](../guides/first-pipeline.md)** — walkthrough.
+
+
+Connected source, typed branch/tag rules and scoped registry selection are covered in [Native Git pipelines](../guides/native-git-pipelines.md). These candidate controls remain subject to their local/live acceptance gates.

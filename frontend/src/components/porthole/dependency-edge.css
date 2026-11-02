@@ -1,0 +1,13 @@
+/* Opt-in dependency rendering; existing run/Compose edges remain untouched. */
+.pipeline-dependency { color: var(--ink-3); }
+.pipeline-dependency.is-selected { color: var(--ember); }
+.pipeline-dependency marker path { fill: currentColor; }
+.pipeline-dependency-line { fill: none; stroke: currentColor; stroke-width: 2; }
+.pipeline-dependency-failure:not(.is-selected) { color: var(--star-fail, #f29c91); }
+.pipeline-dependency-always .pipeline-dependency-line { stroke-dasharray: 6 5; }
+.pipeline-dependency-hit { fill: none; stroke: transparent; stroke-width: 24; cursor: pointer; }
+.pipeline-dependency-leader { fill: none; stroke: currentColor; stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.pipeline-dependency-number { position: absolute; pointer-events: all; transform-origin: center; display: grid; place-items: center; width: 44px; height: 44px; border: 0; padding: 0; background: transparent; color: var(--ink-1); cursor: pointer; }
+.pipeline-dependency-number span { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--ink-3); border-radius: 50%; background: var(--hull-1); font: 600 12px var(--font-mono); box-shadow: 0 0 0 3px var(--hull-0, #0b0b0c); }
+.pipeline-dependency-number:hover span, .pipeline-dependency-number[aria-pressed=true] span { color: var(--ember); border-color: var(--ember); }
+.pipeline-dependency-number:focus-visible { outline: var(--focus); outline-offset: 0; border-radius: 50%; }

@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/santapong/cooker/internal/jobqueue"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/service"
 )
@@ -68,5 +71,51 @@ func TestAppDeploymentViewIsAvailableDuringCheckoutAndFailure(t *testing.T) {
 	run, err = h.Store.Runs.Get(context.Background(), res.RunID)
 	if err != nil || run.Status != model.RunStatusFailed || run.Error == "" || run.PipelineID != res.PipelineID {
 		t.Fatalf("failed checkout left an unusable run: %+v %v", run, err)
+	}
+}
+
+func TestAppCapabilitiesDistinguishRuntimeFromSourceBuild(t *testing.T) {
+	h := newTestHandler(t)
+	r := gin.New()
+	r.GET("/capabilities", h.AppDeploymentCapabilities)
+	read := func() []service.TargetCapability {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest("GET", "/capabilities", nil))
+		var body struct {
+			Targets []service.TargetCapability `json:"targets"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Targets
+	}
+	for _, c := range read() {
+		if c.Available || c.SourceBuild.Available {
+			t.Fatal("nil deployer advertised execution")
+		}
+	}
+	h.AppDeployer = &service.AppDeployer{CheckExecution: func(_ *model.App, build bool) error {
+		if build {
+			return fmt.Errorf("no compatible builder")
+		}
+		return nil
+	}}
+	for _, c := range read() {
+		if c.Kind == model.DeployTargetDockerHost {
+			if !c.Available || c.SourceBuild.Available || c.SourceBuild.Reason != "no compatible builder" || c.ServiceLogs.Available {
+				t.Fatalf("misleading capabilities: %+v", c)
+			}
+		}
+	}
+	h.Runtime = &service.RuntimeService{Store: h.Store}
+	h.Jobs = jobqueue.NewMemory()
+	for _, c := range read() {
+		if c.Kind == model.DeployTargetKubernetes && (c.ServiceLogs.Available || !strings.Contains(c.ServiceLogs.Reason, "immutable pod session")) {
+			t.Fatalf("unavailable Kubernetes log sessions advertised: %+v", c)
+		}
+		if c.Kind == model.DeployTargetDockerHost && !c.ServiceLogs.Available {
+			t.Fatalf("configured Docker log sessions missing: %+v", c)
+		}
 	}
 }

@@ -41,10 +41,11 @@ type pipelineMetadata struct {
 // JSON tags via sigs.k8s.io/yaml, so the YAML shape automatically
 // mirrors the API JSON — no second set of struct tags to drift.
 type pipelineSpec struct {
-	Stages      []model.Stage     `json:"stages"`
-	Edges       []model.Edge      `json:"edges"`
-	Variables   map[string]string `json:"variables,omitempty"`
-	RunDeadline string            `json:"runDeadline,omitempty"`
+	Stages      []model.Stage               `json:"stages"`
+	Edges       []model.Edge                `json:"edges"`
+	Variables   map[string]string           `json:"variables,omitempty"`
+	RunDeadline string                      `json:"runDeadline,omitempty"`
+	Source      *model.PipelineSourceConfig `json:"source,omitempty"`
 }
 
 // pipelineDocument is the full on-disk envelope: apiVersion + kind +
@@ -80,6 +81,7 @@ func ExportPipelineYAML(p *model.Pipeline) ([]byte, error) {
 			Edges:       p.Edges,
 			Variables:   p.Variables,
 			RunDeadline: p.RunDeadline,
+			Source:      p.Source,
 		},
 	}
 	// Normalise nil slices to empty so the spec always renders the
@@ -138,6 +140,7 @@ func ImportPipelineYAML(data []byte) (*model.Pipeline, error) {
 		Edges:       doc.Spec.Edges,
 		Variables:   doc.Spec.Variables,
 		RunDeadline: doc.Spec.RunDeadline,
+		Source:      doc.Spec.Source,
 	}
 	return p, nil
 }

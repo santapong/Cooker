@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ const appDetectTimeout = 30 * time.Second
 type AppDetector struct {
 	cloneFn        func(ctx context.Context, opts github.CloneOptions) (string, error)
 	CheckExecution func(*model.App, bool) error
+	SourceCheckout func(context.Context, *model.App, string, io.Writer) (string, error)
 }
 
 // NewAppDetector returns a detector backed by the real GitHub clone.

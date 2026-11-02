@@ -125,14 +125,17 @@ func TestPoolHandlerPanicRecovered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// After the first panic the worker should reschedule and the
-	// second attempt should succeed.
+	// A panic cannot establish whether external work completed.
+	// Keep the job blocked instead of repeating the side effect.
 	if !waitForCondition(t, 2*time.Second, func() bool {
 		j, err := store.Get(ctx, job.ID)
-		return err == nil && j.Status == StatusSucceeded
+		return err == nil && j.Status == StatusNeedsAttention
 	}) {
 		j, _ := store.Get(ctx, job.ID)
 		t.Fatalf("panic-then-recover: final=%+v ran=%d", j, atomic.LoadInt32(&ran))
+	}
+	if got := atomic.LoadInt32(&ran); got != 1 {
+		t.Fatalf("panic replayed external work %d times", got)
 	}
 	cancel()
 	<-done

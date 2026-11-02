@@ -36,6 +36,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
     headers,
   });
+  if (options?.signal?.aborted) throw new DOMException('Request canceled', 'AbortError');
 
   if (res.status === 401) {
     triggerSignIn();
@@ -51,6 +52,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       .clone()
       .json()
       .catch(() => null);
+    if (options?.signal?.aborted) throw new DOMException('Request canceled', 'AbortError');
     if (body?.error === 'mfa_required' && Array.isArray(body.acr_values) && body.acr_values.length > 0) {
       triggerSignIn({ acrValues: body.acr_values.join(' ') });
       throw new Error('MFA required');
@@ -62,11 +64,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new ApiError(res.status, error.error || `Request failed: ${res.status}`);
   }
 
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
-export function get<T>(path: string): Promise<T> {
-  return request<T>(path);
+export function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return request<T>(path, { signal });
 }
 
 /** Optional paging for list endpoints (?limit=&offset=). Backend
@@ -155,16 +158,25 @@ export function postText<T>(path: string, body: string, contentType = 'applicati
   );
 }
 
-export function post<T>(path: string, body?: unknown): Promise<T> {
+export function post<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   return request<T>(path, {
     method: 'POST',
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
 }
 
-export function put<T>(path: string, body: unknown): Promise<T> {
+export function put<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   return request<T>(path, {
     method: 'PUT',
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+export function patch<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'PATCH',
     body: JSON.stringify(body),
   });
 }

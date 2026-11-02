@@ -1,5 +1,6 @@
 // Package auth provides SSO authentication via OpenID Connect (OIDC) with OAuth 2.0 PKCE flow.
-// Supports identity providers: Keycloak, Okta, Azure AD, Google, GitHub.
+// Supports OIDC identity providers such as Keycloak, Okta and Azure AD.
+// GitHub and Google social sign-in can be brokered through Keycloak.
 package auth
 
 import (

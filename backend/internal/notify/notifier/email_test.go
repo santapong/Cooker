@@ -68,13 +68,14 @@ func TestEmailNotifierMissingFieldsError(t *testing.T) {
 	}
 }
 
-func TestEmailNotifierPropagatesSenderError(t *testing.T) {
+func TestEmailNotifierReturnsSafeUncertainty(t *testing.T) {
 	cfgJSON, _ := json.Marshal(EmailConfig{Host: "s", From: "x@y", To: []string{"a@y"}})
 	want := errors.New("smtp: nope")
 	fake := &fakeSender{err: want}
 	n := NewEmailNotifier().WithSender(fake)
 	err := n.Send(context.Background(), Target{ID: "e1", Kind: "email", Config: cfgJSON}, Event{Type: EventRunFailed})
-	if !errors.Is(err, want) {
-		t.Fatalf("want %v, got %v", want, err)
+	var failure *SendFailure
+	if !errors.As(err, &failure) || !failure.Uncertain || strings.Contains(err.Error(), "nope") {
+		t.Fatalf("want safe uncertain send, got %v", err)
 	}
 }

@@ -93,6 +93,22 @@ describe('validateDAG', () => {
     expect(errors).toContain('Pipeline contains a cycle');
   });
 
+  it.each([
+    ['missing', 'a', 'Edge references unknown source: missing'],
+    ['a', 'missing', 'Edge references unknown target: missing'],
+  ])('does not invent a cycle for %s → %s', (source, target, message) => {
+    expect(validateDAG([makeStage('a')], [{ id: 'bad', source, target }])).toEqual([message]);
+  });
+
+  it('reports a real cycle even when another edge has missing endpoints', () => {
+    const errors = validateDAG([makeStage('a'), makeStage('b')], [
+      { id: 'ab', source: 'a', target: 'b' },
+      { id: 'ba', source: 'b', target: 'a' },
+      { id: 'bad', source: 'missing', target: 'a' },
+    ]);
+    expect(errors).toEqual(['Edge references unknown source: missing', 'Pipeline contains a cycle']);
+  });
+
   it('validates diamond DAG structure', () => {
     const stages = [
       makeStage('build'),

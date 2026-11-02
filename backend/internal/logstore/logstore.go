@@ -4,10 +4,8 @@
 // client can be told the stream was truncated rather than going silent.
 //
 // Part A, Phases 1-2 of docs/proposals/execution-observability-redesign-2026.md.
-// Only the in-memory backend ships here: postgres/redis are future,
-// multi-replica concerns and are explicitly out of scope. The Store
-// interface mirrors the existing strategy/backend split so a durable
-// backend can be slotted in later without touching the service or server.
+// Memory is useful for disposable single-process installations; Postgres
+// persists redacted history and allocates cursors across worker restarts.
 package logstore
 
 import (
@@ -41,6 +39,44 @@ type Store interface {
 	// returns everything retained. Implementations MUST NOT return a
 	// slice that aliases internal state.
 	Read(ctx context.Context, runID, stageID string, since int) ([]Entry, error)
+}
+
+// SequencedStore allocates the next cursor atomically. Writers must use the
+// returned entry for live frames so replay and streaming share one identity.
+type SequencedStore interface {
+	Store
+	AppendNext(ctx context.Context, runID, stageID string, e Entry) (Entry, error)
+}
+
+// HistoryStore also reports an expired/trimmed tail when no entries remain.
+// Latest is the last persisted cursor, including entries pruned by retention.
+type HistoryStore interface {
+	Store
+	History(ctx context.Context, runID, stageID string, since int) (entries []Entry, latest int, err error)
+}
+
+// Limits bounds retained line bytes and stream count. Metadata adds fixed
+// overhead per entry; each empty line is charged one byte in byte accounting.
+type Limits struct {
+	MaxBytesPerStage int
+	MaxStreams       int
+	Retention        time.Duration
+}
+
+// A byte cap alone does not bound row/index overhead for tiny lines.
+const maxEntriesPerStage = 4096
+
+func (l Limits) defaults() Limits {
+	if l.MaxBytesPerStage < 1 {
+		l.MaxBytesPerStage = defaultMaxBytesPerStage
+	}
+	if l.MaxStreams < 1 {
+		l.MaxStreams = defaultMaxStreams
+	}
+	if l.Retention <= 0 {
+		l.Retention = 7 * 24 * time.Hour
+	}
+	return l
 }
 
 // wireFrame is the canonical on-the-wire shape of a streamed log line.

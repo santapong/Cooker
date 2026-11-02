@@ -5,10 +5,18 @@ The September 2026 GitHub Compose and frontend changes are implemented on
 pending; older design chapters and proposals may describe a different baseline.
 Start with the current guides below, then use the deeper references.
 
+The isolated backend automation candidate adds durable deployment and reviewed
+Git triggers. Its [capability guide](backend/README.md), [operator migration
+guide](backend/operator-guide.md), and [verification record](plans/2026-09-28-backend-implementation.md)
+take precedence for this branch. They distinguish tested local behavior from
+unfinished hosted-provider, domain and cloud releases.
+
 ![Repository → Compose files → Preview → Destination → Review](images/compose-workflow.svg)
 
 | You want to… | Start here |
 |---|---|
+| Inspect Neon connection setup, safe resource metadata and current acceptance | [Neon backend guide](backend/neon-connections.md) and [backend/frontend API handoff](plans/2026-10-25-vercel-ecosystem/BACKEND-FRONTEND-HANDOFF.md) |
+| Plan the remaining Cooker features and release order | [Full feature roadmap](plans/2026-10-03-feature-roadmap-guide.md) — all 45 work packages, delivery order and acceptance; [next engineering batch](plans/2026-10-03-roadmap-next-batch.md); [technical contracts](plans/2026-10-02-consolidated-feature-roadmap.md) |
 | Try the current UI locally | [Quickstart](user-guide/getting-started/quickstart.md) |
 | Import and review a GitHub Compose stack | [GitHub Compose deployment](guides/GITHUB-COMPOSE-DEPLOYMENT.md) |
 | Understand file libraries, shared stacks and image registries | [Compose library and registries](user-guide/guides/compose-library.md) |

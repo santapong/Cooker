@@ -24,17 +24,19 @@ func NewAppDeployStore(db *sql.DB) *AppDeployStore {
 }
 
 func (s *AppDeployStore) Create(ctx context.Context, d *model.AppDeploy) error {
-	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO app_deploys
+	return withRunClaim(ctx, s.db, d.RunID, func(writer claimWriter) error {
+		err := writer.QueryRowContext(ctx,
+			`INSERT INTO app_deploys
 		   (id, app_id, run_id, pipeline_id, image_ref, digest, status, kind)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		 RETURNING created_at`,
-		d.ID, d.AppID, d.RunID, d.PipelineID, d.ImageRef, d.Digest,
-		string(d.Status), string(d.Kind)).Scan(&d.CreatedAt)
-	if err != nil {
-		return fmt.Errorf("creating app deploy: %w", err)
-	}
-	return nil
+			d.ID, d.AppID, d.RunID, d.PipelineID, d.ImageRef, d.Digest,
+			string(d.Status), string(d.Kind)).Scan(&d.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("creating app deploy: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *AppDeployStore) ListByApp(ctx context.Context, appID string, limit int) ([]*model.AppDeploy, error) {

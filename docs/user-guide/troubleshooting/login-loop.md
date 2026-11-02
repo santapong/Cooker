@@ -1,5 +1,13 @@
 # Sign-in loop
 
+## Local email/password sign-in keeps returning to the app
+
+If `/signin` bounces to `/apps` before you enter credentials and the app's API calls return 401, the frontend may have been built in development auth mode. Set `VITE_LOCAL_AUTH_ENABLED=true` at frontend build time whenever the backend uses `COOKER_LOCAL_AUTH_ENABLED=true`, and rebuild the bundle or image. For local-only authentication, leave `VITE_OIDC_ENABLED=false`; no OIDC issuer or client ID is required. Do not disable backend authentication to compensate for the mismatched bundle.
+
+The combined Docker image accepts `--build-arg VITE_LOCAL_AUTH_ENABLED=true`; UAT Compose reads this variable from its build environment. Setting it only on an already built running container cannot change the frontend bundle. See [frontend authentication modes](../../../frontend/AUTHENTICATION.md).
+
+## OIDC sign-in returns to the identity provider
+
 You click "Sign in", land on the IdP, sign in successfully, get redirected back to Cooker, and immediately get redirected to the IdP again. Loop.
 
 This is the most common Cooker auth issue and almost always one of four root causes.
@@ -102,7 +110,7 @@ Common cause: the IdP doesn't issue refresh tokens unless you request `offline_a
 
 ## Last resort
 
-Sign in with dev mode disabled (`COOKER_OIDC_ENABLED=false`, `COOKER_LOCAL_AUTH_ENABLED=false`) and access the API directly:
+Check the public authentication-methods endpoint without disabling authentication:
 
 ```sh
 kubectl -n cooker port-forward deploy/cooker 8080:8080

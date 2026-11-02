@@ -36,6 +36,7 @@ describe('pipelineStore (porthole contract)', () => {
   beforeEach(() => {
     updateMock.mockReset();
     getMock.mockReset();
+    usePipelineStore.getState().clearDrafts();
     usePipelineStore.setState({ pipeline: null, nodes: [], edges: [], selectedNodeId: null, dirty: false });
     usePipelineStore.getState().setPipeline(structuredClone(BASE));
   });
@@ -98,12 +99,63 @@ describe('pipelineStore (porthole contract)', () => {
     expect(usePipelineStore.getState().dirty).toBe(false);
   });
 
-  it('loadPipeline resets selection and dirty', async () => {
+  it('navigation back to a pipeline preserves its draft and resets selection', async () => {
     usePipelineStore.getState().setSelectedNode('build');
     usePipelineStore.getState().updateStageConfig('build', { context: 'x' });
     getMock.mockResolvedValue(structuredClone(BASE));
     await usePipelineStore.getState().loadPipeline('p1');
     expect(usePipelineStore.getState().selectedNodeId).toBeNull();
+    expect(usePipelineStore.getState().dirty).toBe(true);
+    expect(usePipelineStore.getState().pipeline?.stages[0].config.context).toBe('x');
+    expect(getMock).not.toHaveBeenCalled();
+  });
+
+  it('retains source and registry edits when a concurrent save is rejected', async () => {
+    const source = { connectionId: 'git1', repository: 'team/app', fullRef: 'refs/tags/v1.0.0' };
+    const nodes = usePipelineStore.getState().nodes;
+    usePipelineStore.getState().setSource(source);
+    source.fullRef = 'refs/heads/unreviewed';
+    expect(usePipelineStore.getState().nodes).toBe(nodes);
+    usePipelineStore.getState().updateStageConfig('build', { registryConnectionIds: ['reg1'] });
+    updateMock.mockRejectedValue(new Error('409: pipeline was changed'));
+    await expect(usePipelineStore.getState().savePipeline()).rejects.toThrow('409');
+    const state = usePipelineStore.getState();
+    expect(state.dirty).toBe(true);
+    expect(state.pipeline?.source?.fullRef).toBe('refs/tags/v1.0.0');
+    expect(state.pipeline?.stages[0].config.registryConnectionIds).toEqual(['reg1']);
+  });
+
+  it('saves explicit source removal and adopts the new server version', async () => {
+    usePipelineStore.getState().setPipeline({ ...structuredClone(BASE), version: 6, source: { connectionId: 'git1', repository: 'team/app', fullRef: 'refs/heads/main' } });
+    usePipelineStore.getState().setSource(null);
+    updateMock.mockImplementation(async (_id: string, input: Pipeline) => ({ ...input, version: 7 }));
+    await usePipelineStore.getState().savePipeline();
+    expect(updateMock).toHaveBeenCalledWith('p1', expect.objectContaining({ version: 6, source: null }));
+    expect(usePipelineStore.getState().pipeline?.version).toBe(7);
     expect(usePipelineStore.getState().dirty).toBe(false);
+  });
+
+  it('keeps newer edits made while save is in flight with the accepted server version', async () => {
+    let accept!: (pipeline: Pipeline) => void;
+    updateMock.mockImplementation(() => new Promise<Pipeline>((resolve) => { accept = resolve; }));
+    usePipelineStore.getState().setSource({ connectionId: 'git1', repository: 'team/app', fullRef: 'refs/heads/main' });
+    const accepted = structuredClone(usePipelineStore.getState().pipeline!);
+    const saving = usePipelineStore.getState().savePipeline();
+    usePipelineStore.getState().updateStageConfig('build', { registryConnectionIds: ['reg-later'] });
+    accept({ ...accepted, version: 8 });
+    await saving;
+    expect(usePipelineStore.getState().pipeline?.stages[0].config.registryConnectionIds).toEqual(['reg-later']);
+    expect(usePipelineStore.getState().pipeline?.version).toBe(8);
+    expect(usePipelineStore.getState().dirty).toBe(true);
+  });
+
+  it('does not replace a newly loaded pipeline when an earlier save completes', async () => {
+    let accept!: (pipeline: Pipeline) => void;
+    updateMock.mockImplementation(() => new Promise<Pipeline>((resolve) => { accept = resolve; }));
+    const saving = usePipelineStore.getState().savePipeline();
+    usePipelineStore.getState().setPipeline({ ...structuredClone(BASE), id: 'p2' });
+    accept({ ...structuredClone(BASE), version: 8 });
+    await saving;
+    expect(usePipelineStore.getState().pipeline?.id).toBe('p2');
   });
 });

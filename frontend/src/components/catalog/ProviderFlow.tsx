@@ -1,0 +1,19 @@
+import { useId, useState } from 'react';
+import type { CatalogDeployment, CatalogPipeline } from '../../types/catalog';
+import { deploymentLabel } from '../../utils/catalog';
+import { DeploymentLinks, DeploymentMetadata } from './CatalogShared';
+export default function ProviderFlow({ pipeline, deployment }: { pipeline: CatalogPipeline; deployment?: CatalogDeployment }) {
+  const [view, setView] = useState<'flow' | 'list'>('flow');
+  const [connection, setConnection] = useState<'source' | 'destination'>('source');
+  const id = useId();
+  const source = deployment?.sourceLabel || (deployment?.gitCommitSHA || deployment?.gitBranch ? 'Git source reported by Vercel' : 'Source not reported');
+  const hash = deployment?.artifactSha256;
+  const sourceKnown = !!(hash || deployment?.gitCommitSHA || deployment?.gitBranch || (deployment?.sourceLabel && !['Source not reported', 'Source unavailable'].includes(deployment.sourceLabel)));
+  const sourceExplanation = sourceKnown
+    ? 'Source used by → Vercel deployment: the provider records this repository revision or uploaded bundle as deployment input.'
+    : deployment
+      ? 'Source relationship unknown: the available record does not identify this deployment’s source. The source step shows where reported input would appear.'
+      : 'Source relationship unknown: no deployment record is available, so its input cannot be established.';
+  const steps = <><li><strong>Source</strong><p>{source}</p>{hash ? <p className="catalog-hash">Uploaded bundle SHA-256 <code>{hash}</code></p> : <p>{deployment?.gitBranch || 'Branch not reported'}{deployment?.gitCommitSHA ? ' · ' + deployment.gitCommitSHA.slice(0, 12) : ''}</p>}</li><li><strong>Vercel deployment</strong><p>{deploymentLabel(deployment?.status)}</p><p>{deployment?.id || 'No deployment record'}</p></li><li><strong>Destination</strong><p>Vercel · {deployment?.environment || 'Environment unclassified'}</p><p>{deployment?.status?.toLowerCase() === 'ready' ? 'Provider reports ready. Application health has not been checked.' : 'A destination does not establish a successful deployment.'}</p></li></>;
+  return <section className="panel catalog-flow-panel" aria-labelledby={id + '-title'}><div className="workspace-section-head"><h2 id={id + '-title'}>{pipeline.provider} deployment flow</h2><span className="badge">Read-only</span></div><p>These arrows explain provider relationships; missing source evidence is marked unknown. They are not Cooker execution dependencies, tests, or approval gates.</p><div className="catalog-flow-tabs" role="group" aria-label="Flow display"><button className="hud-btn" aria-pressed={view === 'flow'} onClick={() => setView('flow')}>Flow</button><button className="hud-btn" aria-pressed={view === 'list'} onClick={() => setView('list')}>Step list</button></div><div className={'catalog-flow-view ' + (view === 'list' ? 'is-list' : '')}><ol className="catalog-flow-nodes">{steps}</ol><div className="catalog-flow-connections"><button aria-describedby={id + '-explanation'} aria-pressed={connection === 'source'} onClick={() => setConnection('source')}>1 · {sourceKnown ? 'Source used by deployment →' : 'Source relationship unknown →'}</button><button aria-describedby={id + '-explanation'} aria-pressed={connection === 'destination'} onClick={() => setConnection('destination')}>2 · Deployment targets destination →</button></div></div><p id={id + '-explanation'} className="catalog-connection-explanation" role="status">{connection === 'source' ? sourceExplanation : 'Deployment targets → destination: production or preview describes where Vercel routes this deployment. Only confirmed production aliases are listed; a URL may still be protected.'}</p>{deployment && <><DeploymentMetadata deployment={deployment} /><DeploymentLinks deployment={deployment} /></>}</section>;
+}

@@ -33,6 +33,7 @@ const (
 	EventRunCancelled    EventType = "run.cancelled"
 	EventDeploySucceeded EventType = "deploy.succeeded"
 	EventDeployFailed    EventType = "deploy.failed"
+	EventDeployCancelled EventType = "deploy.cancelled"
 	EventBuildFailed     EventType = "build.failed"
 	// Canary rollout transitions (OR-1). Promoted/aborted are state
 	// changes an operator acts on; failed is the couldn't-establish
@@ -48,6 +49,8 @@ const (
 // queue-payload shape simple, and channels that need richer markup
 // (Slack blocks, Discord embeds) derive it from these fields.
 type Event struct {
+	ID           string    `json:"id,omitempty"`
+	CanaryID     string    `json:"canaryId,omitempty"`
 	Type         EventType `json:"type"`
 	PipelineID   string    `json:"pipelineId,omitempty"`
 	PipelineName string    `json:"pipelineName,omitempty"`
@@ -130,6 +133,7 @@ func (r *Registry) Lookup(kind string) Notifier {
 type Dispatcher struct {
 	store    TargetStore
 	registry *Registry
+	Outbox   *Outbox
 	// SendTimeout caps each individual Notifier.Send call. Zero
 	// disables the timeout (Send sees the parent ctx unchanged).
 	SendTimeout time.Duration
@@ -153,6 +157,16 @@ func NewDispatcher(store TargetStore, reg *Registry) *Dispatcher {
 // matched, which is also a success — silent is a valid notifier
 // state).
 func (d *Dispatcher) Dispatch(ctx context.Context, event Event) error {
+	if d.Outbox != nil {
+		return d.Outbox.Accept(ctx, event)
+	}
+	// Process-local development mode is intentionally best-effort, but uses
+	// the same safe payload boundary as the persistent delivery path.
+	var safeErr error
+	event, safeErr = SafeEvent(event)
+	if safeErr != nil {
+		return safeErr
+	}
 	targets, err := d.store.ListEnabled(ctx)
 	if err != nil {
 		return err
@@ -181,10 +195,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, event Event) error {
 				sendCtx, cancel = context.WithTimeout(ctx, d.SendTimeout)
 				defer cancel()
 			}
-			if err := n.Send(sendCtx, t, event); err != nil {
-				slog.Warn("notifier: send failed", "kind", t.Kind, "target", t.ID, "err", err)
+			if err := boundedSend(sendCtx, n, t, event); err != nil {
+				failure := safeFailure(err)
+				slog.Warn("notifier: send failed", "kind", t.Kind, "target", t.ID, "code", failure.Code)
 				observability.IncNotifierSent(t.Kind, false)
-				errCh <- err
+				errCh <- failure
 				return
 			}
 			observability.IncNotifierSent(t.Kind, true)

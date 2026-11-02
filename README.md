@@ -20,6 +20,8 @@ Build container images, inspect the deployment graph, and ship to a configured r
 
 > **Current status:** the GitHub Compose workflow and frontend improvements are on `develop`, ready for UAT. Human acceptance and live GitHub/cloud acceptance remain pending. These changes are **unreleased**; see the [implementation evidence](docs/plans/2026-09-06-github-compose-deployment.md#verification-record).
 
+> **Backend candidate in this branch (28 September):** durable App jobs, reviewed branch/tag rules, encrypted Git connections, service configuration permissions, durable redacted stage logs, and BuildKit/Crane image publication are implemented for local acceptance. Real Docker/n8n and private Gitea tests have run. The full backend roadmap and hosted/cloud release gates remain open. Start with the [capability guide](docs/backend/README.md), [migration instructions](docs/backend/operator-guide.md), and [current evidence](docs/plans/2026-09-28-backend-implementation.md).
+
 ## Two ways to work
 
 | Workflow | Use it for |
@@ -37,7 +39,7 @@ The Porthole interface gives each stage type a distinct symbol. Shape identifies
 4. **Destination:** choose a prefix, image registry and configured compute target. Optionally bind a Compose database to an existing external database through a Cooker Environment.
 5. **Review:** check workload names and diagnostics, then **Save app**. Start execution with **Deploy** on the App page.
 
-The saved plan pins a full Git commit SHA. Branch updates require an explicit new inspection and review; reviewed Compose apps use manual deployment. Preview does not build or deploy anything.
+The saved plan pins a full Git commit SHA. Manual deployment remains the default. In this backend candidate, an administrator can explicitly enable a reviewed branch/tag rule; deployment configuration changes require renewed review. Preview does not build or deploy anything.
 
 ![GitHub source is reviewed in Cooker, built with Docker, pushed to an image registry and deployed to existing ECS Fargate infrastructure; the application connects to an existing GCP Cloud SQL database](docs/images/github-compose.svg)
 
@@ -85,7 +87,7 @@ make uat-up
 
 The UAT stack includes a local registry and k3s. It requires host Docker access and registry configuration. GitHub App access and cloud destinations require additional operator setup.
 
-**Current source-build constraint:** GitHub App builds require `COOKER_BUILDER=docker` and `COOKER_PUSHER=docker`. Production-mode validation rejects both backends, so this source-build path is currently for dev/UAT. Do not disable production safeguards to treat it as a production-ready path. Separately configured pipeline builders have different capabilities.
+**Source-build setup in this candidate:** Apps support `COOKER_BUILDER=buildkit` with `COOKER_PUSHER=crane` through a verified OCI artifact handoff. Configure an isolated BuildKit daemon; production TCP endpoints require mutual TLS. The Docker/Docker pair remains development-only. See the [configuration and acceptance limits](docs/backend/buildkit-handoff.md). Full production application acceptance remains pending.
 
 ### Host Cooker
 

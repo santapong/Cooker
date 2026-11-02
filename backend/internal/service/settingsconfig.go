@@ -10,6 +10,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/santapong/cooker/internal/build/registryauth"
 	"time"
 
 	"github.com/santapong/cooker/internal/model"
@@ -63,33 +65,99 @@ func registryKeyRef(id string) string { return "registry:" + id }
 // supplied password into secrets.Manager and stamping the ref onto the
 // record. The password bytes never live on the struct after this call.
 func (s *RegistryConfigService) CreateRegistry(ctx context.Context, r *model.RegistryConfig, password []byte) error {
+	if s.Store == nil || s.Store.Registries == nil || r == nil || !secrets.ValidSegment(r.ID) || r.PasswordRef != "" || len(password) > 65536 || !model.ValidRegistryIDs(r.AllowedAppIDs, 256) || !model.ValidRegistryIDs(r.AllowedPipelineIDs, 256) {
+		return model.ErrInvalidRegistryAuthority
+	}
+	_, _, err := registryauth.Endpoint(r.URL)
+	if err != nil || len(r.Username) > 256 {
+		return model.ErrInvalidRegistryAuthority
+	}
+	for _, ch := range r.Username {
+		if ch < 33 || ch > 126 {
+			return model.ErrInvalidRegistryAuthority
+		}
+	}
+	var credentialEnv, credentialKey string
 	if len(password) > 0 {
 		if s.Secrets == nil {
 			return ErrConfigSecretsUnavailable
 		}
-		if r.ID == "" {
-			return fmt.Errorf("settingsconfig: registry ID required before storing password")
+		if !generationBoundManager(s.Secrets) {
+			if _, ok := s.Secrets.(secrets.VersionedManager); !ok {
+				return ErrRegistryCredentialUnavailable
+			}
 		}
-		if err := s.ensureScopeEnv(ctx, registrySecretsEnvID, "_registries (internal)"); err != nil {
-			return err
+		r.PasswordRef = "registry:v2:" + uuid.New().String()
+		credentialEnv, credentialKey, _, _ = RegistryCredentialScope(r.PasswordRef, r.ID)
+		if err := s.ensureScopeEnv(ctx, credentialEnv, credentialEnv); err != nil {
+			r.PasswordRef = ""
+			return ErrRegistryCredentialUnavailable
 		}
-		if err := s.Secrets.Put(ctx, registrySecretsEnvID, registryPasswordKey+"."+r.ID, password); err != nil {
-			return fmt.Errorf("settingsconfig: store registry password: %w", err)
+		if err := s.Secrets.Put(ctx, credentialEnv, credentialKey, password); err != nil {
+			r.PasswordRef = ""
+			return ErrRegistryCredentialUnavailable
 		}
-		r.PasswordRef = registryKeyRef(r.ID)
+		if !generationBoundManager(s.Secrets) {
+			ref, err := secrets.PinVersion(ctx, s.Secrets, credentialEnv, credentialKey)
+			if err != nil || ref.Validate() != nil || ref.Scope.EnvironmentID != credentialEnv || ref.Scope.Key != credentialKey {
+				_ = s.Secrets.Delete(ctx, credentialEnv, credentialKey)
+				r.PasswordRef = ""
+				return ErrRegistryCredentialUnavailable
+			}
+		}
 	}
-	return s.Store.Registries.Create(ctx, r)
+	if err := s.Store.Registries.Create(ctx, r); err != nil {
+		if credentialEnv != "" {
+			_ = s.Secrets.Delete(ctx, credentialEnv, credentialKey)
+		}
+		r.PasswordRef = ""
+		if errors.Is(err, store.ErrConflict) {
+			return store.ErrConflict
+		}
+		return ErrRegistryCredentialUnavailable
+	}
+	return nil
+}
+
+// UpdateRegistryGrants is called only by an admin Settings route. Expected
+// generation prevents stale pages from silently restoring revoked authority.
+func (s *RegistryConfigService) UpdateRegistryGrants(ctx context.Context, id string, version int64, apps, pipelines []string) (*model.RegistryConfig, error) {
+	if !secrets.ValidSegment(id) || version < 1 || !model.ValidRegistryIDs(apps, 256) || !model.ValidRegistryIDs(pipelines, 256) {
+		return nil, model.ErrInvalidRegistryAuthority
+	}
+	if s.Store == nil {
+		return nil, ErrRegistryCredentialUnavailable
+	}
+	grants, ok := s.Store.Registries.(store.RegistryGrantStore)
+	if !ok {
+		return nil, ErrRegistryCredentialUnavailable
+	}
+	r, err := grants.UpdateGrants(ctx, id, version, apps, pipelines)
+	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	if err != nil {
+		return nil, ErrRegistryCredentialUnavailable
+	}
+	return r, nil
 }
 
 // DeleteRegistry removes the registry and (best-effort) its stored
 // password. A secrets-delete failure does not fail the row delete; an
 // orphan secret entry can be reaped manually. Mirrors HostService.DeleteHost.
 func (s *RegistryConfigService) DeleteRegistry(ctx context.Context, id string) error {
+	r, err := s.Store.Registries.Get(ctx, id)
+	if err != nil {
+		return err
+	}
 	if err := s.Store.Registries.Delete(ctx, id); err != nil {
 		return err
 	}
-	if s.Secrets != nil {
-		_ = s.Secrets.Delete(ctx, registrySecretsEnvID, registryPasswordKey+"."+id)
+	if s.Secrets != nil && r.PasswordRef != "" {
+		env, key, legacy, e := RegistryCredentialScope(r.PasswordRef, id)
+		if e == nil && (!legacy || generationBoundManager(s.Secrets)) {
+			_ = s.Secrets.Delete(ctx, env, key)
+		}
 	}
 	return nil
 }

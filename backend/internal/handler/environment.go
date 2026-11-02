@@ -1,9 +1,10 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/secrets"
 	"github.com/santapong/cooker/internal/service"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // ListEnvironments returns all environments with secrets redacted so
@@ -28,8 +30,30 @@ import (
 func (h *Handler) ListEnvironments(c *gin.Context) {
 	limit := intQuery(c, "limit", listDefaultLimit, 1, listMaxLimit)
 	offset := intQuery(c, "offset", 0, 0, 1<<30)
-	envs, err := h.Store.Environments.List(c.Request.Context(), limit, offset)
-	if abortStoreErr(c, err, "environments not found") {
+	var envs []*model.Environment
+	var err error
+	if public, ok := h.Store.Environments.(store.PublicEnvironmentLister); ok {
+		envs, err = public.ListPublic(c.Request.Context(), limit, offset)
+	} else {
+		// Compatibility for custom stores: filter before applying pagination.
+		var all []*model.Environment
+		all, err = h.Store.Environments.List(c.Request.Context(), 0, 0)
+		for _, e := range all {
+			if e != nil && !model.IsRegistryCredentialEnvironment(e) {
+				envs = append(envs, e)
+			}
+		}
+		if offset >= len(envs) {
+			envs = nil
+		} else {
+			envs = envs[offset:]
+			if len(envs) > limit {
+				envs = envs[:limit]
+			}
+		}
+	}
+	if err != nil {
+		abortEnvironmentError(c, err)
 		return
 	}
 	out := make([]*model.Environment, 0, len(envs))
@@ -42,16 +66,24 @@ func (h *Handler) ListEnvironments(c *gin.Context) {
 func (h *Handler) CreateEnvironment(c *gin.Context) {
 	var env model.Environment
 	if err := c.ShouldBindJSON(&env); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid environment configuration"})
 		return
 	}
 	env.Secrets = nil
+	env.SecretKeys = nil
+	// Creation starts the server-assigned generation; client versions are not
+	// admission evidence. PostgreSQL's default is also 1.
+	env.Version = 1
 	env.ID = uuid.New().String()
+	if model.IsRegistryCredentialEnvironment(&env) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "environment name is reserved for credentials"})
+		return
+	}
 	env.CreatedAt = time.Now()
 	env.NormalisePlainVars()
 
 	if err := h.Store.Environments.Create(c.Request.Context(), &env); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "environment configuration unavailable"})
 		return
 	}
 	c.JSON(http.StatusCreated, env.Redact())
@@ -59,34 +91,46 @@ func (h *Handler) CreateEnvironment(c *gin.Context) {
 
 func (h *Handler) UpdateEnvironment(c *gin.Context) {
 	id := c.Param("id")
-	existing, err := h.Store.Environments.Get(c.Request.Context(), id)
-	if abortStoreErr(c, err, "environment not found") {
+	existing, ok := h.publicEnvironment(c, id)
+	if !ok {
 		return
 	}
 
 	var env model.Environment
 	if err := c.ShouldBindJSON(&env); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid environment configuration"})
 		return
 	}
 	env.ID = id
+	if model.IsRegistryCredentialEnvironment(&env) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "environment name is reserved for credentials"})
+		return
+	}
 	env.CreatedAt = existing.CreatedAt
 	env.Secrets = existing.Secrets
+	env.SecretKeys = nil
 	env.NormalisePlainVars()
-
-	if err := h.Store.Environments.Update(c.Request.Context(), &env); err != nil {
-		if abortStoreErr(c, err, "environment not found") {
+	for key := range env.PlainVars {
+		if _, exists := existing.Secrets[key]; exists {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "a key cannot be both configuration and secret"})
 			return
 		}
+	}
+
+	if err := h.Store.Environments.Update(c.Request.Context(), &env); err != nil {
+		abortEnvironmentError(c, err)
+		return
 	}
 	c.JSON(http.StatusOK, env.Redact())
 }
 
 func (h *Handler) DeleteEnvironment(c *gin.Context) {
+	if _, ok := h.publicEnvironment(c, c.Param("id")); !ok {
+		return
+	}
 	if err := h.Store.Environments.Delete(c.Request.Context(), c.Param("id")); err != nil {
-		if abortStoreErr(c, err, "environment not found") {
-			return
-		}
+		abortEnvironmentError(c, err)
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "environment deleted"})
 }
@@ -118,20 +162,35 @@ func (h *Handler) PutSecret(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Value string `json:"value" binding:"required"`
+		Value   string          `json:"value" binding:"required"`
+		Version json.RawMessage `json:"version"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "a nonempty secret value and valid optional version are required"})
 		return
 	}
-	if _, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id")); abortStoreErr(c, err, "environment not found") {
+	version, provided, valid := secretBodyGeneration(req.Version)
+	if !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "version must be a nonnegative integer"})
 		return
 	}
-	if err := h.Secrets.Put(c.Request.Context(), c.Param("id"), c.Param("key"), []byte(req.Value)); err != nil {
-		// BC-H4: don't leak backend URLs/ARNs/paths via the error message;
-		// log server-side and return a generic message (mirrors RevealSecret).
-		slog.Warn("handler: PutSecret: backend error", "env", c.Param("id"), "key", c.Param("key"), "err", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "secret backend error"})
+	if _, ok := h.publicEnvironment(c, c.Param("id")); !ok {
+		return
+	}
+	if provided {
+		editor, ok := h.Secrets.(secrets.ConditionalEditor)
+		if !ok {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "conditional secret editing is not supported by this backend"})
+			return
+		}
+		generation, err := editor.PutAtGeneration(c.Request.Context(), c.Param("id"), c.Param("key"), []byte(req.Value), version)
+		if abortSecretEdit(c, err) {
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "status": "stored", "generation": generation})
+		return
+	}
+	if abortSecretEdit(c, h.Secrets.Put(c.Request.Context(), c.Param("id"), c.Param("key"), []byte(req.Value))) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "status": "stored"})
@@ -151,7 +210,7 @@ func (h *Handler) RevealSecret(c *gin.Context) {
 	// shouldn't be holding a copy of the plaintext value.
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private")
 	c.Header("Pragma", "no-cache")
-	if _, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id")); abortStoreErr(c, err, "environment not found") {
+	if _, ok := h.publicEnvironment(c, c.Param("id")); !ok {
 		return
 	}
 	value, err := h.Secrets.Get(c.Request.Context(), c.Param("id"), c.Param("key"))
@@ -199,7 +258,7 @@ func (h *Handler) PromoteSecrets(c *gin.Context) {
 		Keys            []string `json:"keys"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid secret promotion request"})
 		return
 	}
 	from := c.Param("id")
@@ -207,10 +266,10 @@ func (h *Handler) PromoteSecrets(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "source and target environments must differ"})
 		return
 	}
-	if _, err := h.Store.Environments.Get(c.Request.Context(), from); abortStoreErr(c, err, "source environment not found") {
+	if _, ok := h.publicEnvironment(c, from); !ok {
 		return
 	}
-	if _, err := h.Store.Environments.Get(c.Request.Context(), req.ToEnvironmentID); abortStoreErr(c, err, "target environment not found") {
+	if _, ok := h.publicEnvironment(c, req.ToEnvironmentID); !ok {
 		return
 	}
 	promoter, ok := h.Secrets.(secrets.Promoter)
@@ -220,10 +279,10 @@ func (h *Handler) PromoteSecrets(c *gin.Context) {
 	}
 	if err := promoter.Promote(c.Request.Context(), from, req.ToEnvironmentID, req.Keys); err != nil {
 		if errors.Is(err, secrets.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "environment or secret not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "secret backend unavailable"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -244,17 +303,100 @@ func (h *Handler) DeleteSecret(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
 		return
 	}
-	if _, err := h.Store.Environments.Get(c.Request.Context(), c.Param("id")); abortStoreErr(c, err, "environment not found") {
+	if _, ok := h.publicEnvironment(c, c.Param("id")); !ok {
 		return
 	}
-	if err := h.Secrets.Delete(c.Request.Context(), c.Param("id"), c.Param("key")); err != nil {
-		// BC-H4: don't leak backend URLs/ARNs/paths via the error message;
-		// log server-side and return a generic message (mirrors RevealSecret).
-		slog.Warn("handler: DeleteSecret: backend error", "env", c.Param("id"), "key", c.Param("key"), "err", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "secret backend error"})
+	version, provided, valid := secretQueryGeneration(c)
+	if !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "version must be a nonnegative integer"})
+		return
+	}
+	if provided {
+		editor, ok := h.Secrets.(secrets.ConditionalEditor)
+		if !ok {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "conditional secret editing is not supported by this backend"})
+			return
+		}
+		generation, err := editor.DeleteAtGeneration(c.Request.Context(), c.Param("id"), c.Param("key"), version)
+		if abortSecretEdit(c, err) {
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "status": "deleted", "generation": generation})
+		return
+	}
+	if abortSecretEdit(c, h.Secrets.Delete(c.Request.Context(), c.Param("id"), c.Param("key"))) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"key": c.Param("key"), "status": "deleted"})
+}
+
+// Credential-only environments are managed through their registry connection,
+// never general environment read/edit/reveal/promotion controls.
+func (h *Handler) publicEnvironment(c *gin.Context, id string) (*model.Environment, bool) {
+	if model.IsRegistryCredentialEnvironmentID(id) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "environment not found"})
+		return nil, false
+	}
+	env, err := h.Store.Environments.Get(c.Request.Context(), id)
+	if err != nil {
+		abortEnvironmentError(c, err)
+		return nil, false
+	}
+	if env == nil || model.IsRegistryCredentialEnvironment(env) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "environment not found"})
+		return nil, false
+	}
+	return env, true
+}
+
+func abortEnvironmentError(c *gin.Context, err error) {
+	if errors.Is(err, store.ErrNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "environment not found"})
+	} else if errors.Is(err, store.ErrConflict) {
+		c.JSON(http.StatusConflict, gin.H{"error": "version conflict; refetch and retry"})
+	} else {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "environment configuration unavailable"})
+	}
+}
+
+func abortSecretEdit(c *gin.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case errors.Is(err, secrets.ErrGenerationConflict), errors.Is(err, store.ErrConflict):
+		c.JSON(http.StatusConflict, gin.H{"error": "environment generation changed; refresh before editing"})
+	case errors.Is(err, secrets.ErrNotFound), errors.Is(err, store.ErrNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "environment or secret not found"})
+	case errors.Is(err, secrets.ErrKeyCollision):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "a key cannot be both configuration and secret"})
+	default:
+		// Do not emit arbitrary provider/store errors to responses or logs.
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "secret backend unavailable"})
+	}
+	return true
+}
+
+func secretBodyGeneration(raw json.RawMessage) (version int, provided, valid bool) {
+	if len(raw) == 0 {
+		return 0, false, true
+	}
+	if string(raw) == "null" || json.Unmarshal(raw, &version) != nil || version < 0 {
+		return 0, true, false
+	}
+	return version, true, true
+}
+
+func secretQueryGeneration(c *gin.Context) (version int, provided, valid bool) {
+	values, provided := c.Request.URL.Query()["version"]
+	if !provided {
+		return 0, false, true
+	}
+	if len(values) != 1 || values[0] == "" {
+		return 0, true, false
+	}
+	version, err := strconv.Atoi(values[0])
+	return version, true, err == nil && version >= 0
 }
 
 // PromoteRun records a promotion of a pipeline run to a target

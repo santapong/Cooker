@@ -48,11 +48,22 @@ export interface RegistryConfig {
   id: string;
   name: string;
   url: string;
+  /** Server generation for optimistic grant edits. Absent on older backends. */
+  version?: number;
+  /** Administrator grants, separate from an app/stage's requested selection. */
+  allowedAppIds?: string[];
+  allowedPipelineIds?: string[];
   username?: string;
   /** True when a password/token is stored on the backend; the password itself is never returned. */
   hasPassword?: boolean;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface RegistryGrantUpdate {
+  version: number;
+  allowedAppIds: string[];
+  allowedPipelineIds: string[];
 }
 
 export interface ClusterConfig {

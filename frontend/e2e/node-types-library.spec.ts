@@ -9,13 +9,14 @@ test('all six stage types remain identifiable in editor and run views', async ({
   for (const route of ['/pipelines/gates/edit', '/pipelines/gates/runs/r1']) {
     await page.goto(route);
     await expect(page.locator('.stage-symbol')).not.toHaveCount(0);
+    const nodeSelector = route.endsWith('/edit') ? '.pipeline-stage-card' : '.star';
     for (const stage of TYPED_PIPELINE.stages) {
-      const node = page.locator('.star[data-stage-type="' + stage.type + '"]');
+      const node = page.locator(nodeSelector + '[data-stage-type="' + stage.type + '"]');
       await expect(node.locator('.stage-kind')).toHaveText(new RegExp(stage.type, 'i'));
       await expect(node.locator('.lbl')).toHaveText(stage.name);
       await expect(node.locator('.stage-symbol')).toBeVisible();
     }
-    expect(new Set(await page.locator('.star .stage-symbol').evaluateAll((icons) => icons.map((icon) => icon.innerHTML))).size).toBe(6);
+    expect(new Set(await page.locator(nodeSelector + ' .stage-symbol').evaluateAll((icons) => icons.map((icon) => icon.innerHTML))).size).toBe(6);
     await expect.poll(() => page.locator('.react-flow__edges > *').count()).toBeGreaterThan(0);
     await settleEntrances(page);
     await page.screenshot({ path: testInfo.outputPath(route.endsWith('edit') ? 'typed-editor.png' : 'typed-run.png') });

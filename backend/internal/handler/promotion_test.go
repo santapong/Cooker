@@ -145,9 +145,9 @@ func TestApprove_AdminAllowed(t *testing.T) {
 	}
 }
 
-// TestPromote_AutoStrategyDeploysImmediately covers the auto
-// short-circuit path through the handler.
-func TestPromote_AutoStrategyDeploysImmediately(t *testing.T) {
+// TestPromote_AutoStrategyApprovesWithoutDeploying covers the approval
+// path without claiming an external deployment.
+func TestPromote_AutoStrategyApprovesWithoutDeploying(t *testing.T) {
 	h := seedPromotionFixture(t, &model.Environment{
 		ID: "dev", Promotion: model.PromotionPolicy{Strategy: "auto"},
 	})
@@ -162,8 +162,8 @@ func TestPromote_AutoStrategyDeploysImmediately(t *testing.T) {
 	}
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	if body["status"] != string(model.PromotionDeployed) {
-		t.Errorf("auto promotion should be deployed immediately, got %v", body["status"])
+	if body["status"] != string(model.PromotionApproved) {
+		t.Errorf("auto promotion should be approved without deployment, got %v", body["status"])
 	}
 }
 

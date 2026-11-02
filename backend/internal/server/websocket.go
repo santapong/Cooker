@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"github.com/santapong/cooker/internal/logstore"
@@ -30,6 +31,10 @@ type Client struct {
 	conn    *websocket.Conn
 	send    chan []byte
 	channel string
+	// Empty native nonce channels are removed when their sole client leaves.
+	privateChannel bool
+	// cancelProducer belongs to this connection, not the HTTP handler.
+	cancelProducer context.CancelFunc
 	// closeOnce guards close(send) so it can fire from at most one
 	// path (broadcast-backpressure or unregister) without panicking.
 	closeOnce sync.Once
@@ -47,7 +52,16 @@ type Client struct {
 // unregister from readPump/writePump exit) — sync.Once ensures
 // only one wins.
 func (c *Client) closeSend() {
-	c.closeOnce.Do(func() { close(c.send) })
+	c.closeOnce.Do(func() {
+		c.stopProducer()
+		close(c.send)
+	})
+}
+
+func (c *Client) stopProducer() {
+	if c.cancelProducer != nil {
+		c.cancelProducer()
+	}
 }
 
 // WebSocketHub manages all WebSocket connections and message broadcasting.
@@ -60,6 +74,11 @@ type WebSocketHub struct {
 	backend    HubBackend
 	register   chan *Client
 	unregister chan *Client
+	done       chan struct{}
+	closeOnce  sync.Once
+	closeErr   error
+	// Serialize publication with backend shutdown, including late writers.
+	publishMu sync.Mutex
 	// logStore, when set, supplies the per-stage backlog replayed on
 	// connect by HandleStageLogs (?since=<seq>). nil disables replay so
 	// the handler degrades to live-only streaming (back-compat).
@@ -102,6 +121,7 @@ func NewWebSocketHubWithBackend(allowedOrigins []string, backend HubBackend) *We
 		backend:    backend,
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		done:       make(chan struct{}),
 	}
 }
 
@@ -116,11 +136,22 @@ func (h *WebSocketHub) SetLogStore(s logstore.Store) {
 // Run processes WebSocket hub events. Reads broadcasts from the
 // backend's Subscribe channel (memory or Redis).
 func (h *WebSocketHub) Run() {
+	defer h.Close()
 	inbox := h.backend.Subscribe()
 	for {
 		select {
+		case <-h.done:
+			return
 		case client := <-h.register:
 			h.mu.Lock()
+			select {
+			case <-h.done:
+				client.closeSend()
+				_ = client.conn.Close()
+				h.mu.Unlock()
+				continue
+			default:
+			}
 			if _, ok := h.clients[client.channel]; !ok {
 				h.clients[client.channel] = make(map[*Client]bool)
 			}
@@ -133,6 +164,9 @@ func (h *WebSocketHub) Run() {
 				if _, exists := clients[client]; exists {
 					delete(clients, client)
 					client.closeSend()
+					if client.privateChannel && len(clients) == 0 {
+						delete(h.clients, client.channel)
+					}
 				}
 			}
 			h.mu.Unlock()
@@ -169,6 +203,9 @@ func (h *WebSocketHub) Run() {
 						// unset so a normal disconnect stays silent.
 						client.truncated.Store(true)
 						client.closeSend()
+						if client.privateChannel && len(clients) == 0 {
+							delete(h.clients, msg.Channel)
+						}
 					}
 				}
 				h.mu.Unlock()
@@ -180,8 +217,23 @@ func (h *WebSocketHub) Run() {
 // Broadcast sends a message to all clients on a channel across every
 // replica, depending on the configured backend.
 func (h *WebSocketHub) Broadcast(channel string, data []byte) {
+	h.broadcast(channel, data, false)
+}
+
+func (h *WebSocketHub) broadcast(channel string, data []byte, safeDiagnostics bool) {
+	h.publishMu.Lock()
+	defer h.publishMu.Unlock()
+	select {
+	case <-h.done:
+		return
+	default:
+	}
 	if err := h.backend.Publish(BroadcastMessage{Channel: channel, Data: data}); err != nil {
-		slog.Warn("ws hub: publish failed", "err", err, "channel", channel)
+		if safeDiagnostics {
+			slog.Warn("native runtime logs publication unavailable")
+		} else {
+			slog.Warn("ws hub: publish failed", "err", err, "channel", channel)
+		}
 	}
 }
 
@@ -192,7 +244,22 @@ func (h *WebSocketHub) Close() error {
 	if h == nil || h.backend == nil {
 		return nil
 	}
-	return h.backend.Close()
+	h.closeOnce.Do(func() {
+		close(h.done)
+		h.mu.Lock()
+		for channel, clients := range h.clients {
+			for client := range clients {
+				client.closeSend()
+				_ = client.conn.Close()
+			}
+			delete(h.clients, channel)
+		}
+		h.mu.Unlock()
+		h.publishMu.Lock()
+		h.closeErr = h.backend.Close()
+		h.publishMu.Unlock()
+	})
+	return h.closeErr
 }
 
 // HandlePipelineRun handles WebSocket connections for pipeline run updates.
@@ -214,29 +281,63 @@ func (h *WebSocketHub) HandleKubeWatch(w http.ResponseWriter, r *http.Request, n
 // HandleRuntimeLogs upgrades the connection, subscribes it to the
 // runtime-logs channel for (appID, serviceID), and starts a producer
 // goroutine that tails the live container/pod logs into the hub. The
-// producer is bound to the request context, so it stops when the
-// client disconnects. `produce` is the RuntimeService.Logs call wired
+// producer preserves request values but owns the connection lifecycle: HTTP
+// handler return must not cancel it. Disconnect, hub shutdown and backpressure
+// cancellation stop it. `produce` is the RuntimeService.Logs call wired
 // by the handler; it receives an io.Writer that broadcasts each line.
 func (h *WebSocketHub) HandleRuntimeLogs(w http.ResponseWriter, r *http.Request, appID, serviceID string, produce func(ctx context.Context, out io.Writer) error) {
 	channel := "runtime-logs:" + appID + ":" + serviceID
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	h.handleRuntimeLogConnection(w, r, channel, produce, false, func(err error) {
+		slog.Warn("runtime logs producer ended", "app", appID, "service", serviceID, "err", err)
+	})
+}
+
+func nativeRuntimeConnectionChannel(base string) (string, error) {
+	nonce, err := uuid.NewRandom()
 	if err != nil {
-		slog.Warn("websocket upgrade failed", "err", err)
+		return "", err
+	}
+	// The service base is an injective base64 tuple; UUID contains no colon.
+	return base + ":connection:" + nonce.String(), nil
+}
+
+func (h *WebSocketHub) handleNativeRuntimeLogs(w http.ResponseWriter, r *http.Request, base string, produce func(context.Context, io.Writer) error) {
+	channel, err := nativeRuntimeConnectionChannel(base)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":"runtime log session unavailable"}`)
 		return
 	}
-	client := &Client{hub: h, conn: conn, send: make(chan []byte, 256), channel: channel}
-	h.register <- client
+	h.handleRuntimeLogConnection(w, r, channel, produce, true, func(error) {
+		slog.Warn("native runtime logs producer ended")
+	})
+}
+
+// App and native streams share the proven connection-owned lifecycle. Native
+// streams have a private channel per connection and fixed diagnostic text.
+func (h *WebSocketHub) handleRuntimeLogConnection(w http.ResponseWriter, r *http.Request, channel string, produce func(context.Context, io.Writer) error, safeDiagnostics bool, ended func(error)) {
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		if safeDiagnostics {
+			slog.Warn("native runtime logs upgrade refused")
+		} else {
+			slog.Warn("websocket upgrade failed", "err", err)
+		}
+		return
+	}
+	ctx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+	client := &Client{hub: h, conn: conn, send: make(chan []byte, 256), channel: channel, cancelProducer: cancel, privateChannel: safeDiagnostics}
+	if !h.registerClient(client) {
+		return
+	}
 	go client.writePump()
 	go client.readPump()
-
-	// Producer: tail logs into the hub on this channel until the client
-	// (request context) goes away. Runs in its own goroutine so the
-	// handler returns and the WS pumps stay live.
 	go func() {
-		ctx := r.Context()
-		writer := &hubLineWriter{hub: h, channel: channel}
-		if perr := produce(ctx, writer); perr != nil {
-			slog.Warn("runtime logs producer ended", "app", appID, "service", serviceID, "err", perr)
+		defer cancel()
+		writer := &hubLineWriter{hub: h, channel: channel, safeDiagnostics: safeDiagnostics}
+		if err := produce(ctx, writer); err != nil {
+			ended(err)
 		}
 	}()
 }
@@ -245,15 +346,16 @@ func (h *WebSocketHub) HandleRuntimeLogs(w http.ResponseWriter, r *http.Request,
 // one Write == one broadcast. Used to fan runtime log output to WS
 // subscribers.
 type hubLineWriter struct {
-	hub     *WebSocketHub
-	channel string
+	hub             *WebSocketHub
+	channel         string
+	safeDiagnostics bool
 }
 
 func (w *hubLineWriter) Write(p []byte) (int, error) {
 	// Copy: Broadcast may retain the slice past this call.
 	b := make([]byte, len(p))
 	copy(b, p)
-	w.hub.Broadcast(w.channel, b)
+	w.hub.broadcast(w.channel, b, w.safeDiagnostics)
 	return len(p), nil
 }
 
@@ -271,15 +373,36 @@ func (h *WebSocketHub) handleConnection(w http.ResponseWriter, r *http.Request, 
 		channel: channel,
 	}
 
-	h.register <- client
+	if !h.registerClient(client) {
+		return
+	}
 
 	go client.writePump()
 	go client.readPump()
 }
 
+func (h *WebSocketHub) registerClient(client *Client) bool {
+	select {
+	case h.register <- client:
+		return true
+	case <-h.done:
+		client.closeSend()
+		_ = client.conn.Close()
+		return false
+	}
+}
+
+func (h *WebSocketHub) unregisterClient(client *Client) {
+	select {
+	case h.unregister <- client:
+	case <-h.done:
+	}
+}
+
 func (c *Client) readPump() {
 	defer func() {
-		c.hub.unregister <- c
+		c.stopProducer()
+		c.hub.unregisterClient(c)
 		c.conn.Close()
 	}()
 	// Stalled / silent connections (Slow-Loris pattern) can pin a
@@ -302,6 +425,7 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(wsPingPeriod)
 	defer func() {
 		ticker.Stop()
+		c.stopProducer()
 		c.conn.Close()
 	}()
 	for {

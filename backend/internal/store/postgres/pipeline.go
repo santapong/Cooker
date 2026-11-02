@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/lib/pq"
 
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/store"
@@ -25,7 +26,7 @@ func NewPipelineStore(db *sql.DB) *PipelineStore {
 // limit <= 0 contract shared with RunStore.List).
 func (s *PipelineStore) List(ctx context.Context, limit, offset int) ([]*model.Pipeline, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, description, stages, edges, variables, created_at, updated_at, version, run_deadline
+		`SELECT id, name, description, stages, edges, variables, source, created_at, updated_at, version, run_deadline
 		   FROM pipelines ORDER BY updated_at DESC LIMIT $1 OFFSET $2`,
 		limitArg(limit), clampOffset(offset))
 	if err != nil {
@@ -46,7 +47,7 @@ func (s *PipelineStore) List(ctx context.Context, limit, offset int) ([]*model.P
 
 func (s *PipelineStore) Get(ctx context.Context, id string) (*model.Pipeline, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, name, description, stages, edges, variables, created_at, updated_at, version, run_deadline FROM pipelines WHERE id = $1`, id)
+		`SELECT id, name, description, stages, edges, variables, source, created_at, updated_at, version, run_deadline FROM pipelines WHERE id = $1`, id)
 	p, err := scanPipeline(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("pipeline %s: %w", id, store.ErrNotFound)
@@ -63,15 +64,23 @@ func (s *PipelineStore) Create(ctx context.Context, p *model.Pipeline) error {
 	if err != nil {
 		return fmt.Errorf("marshal edges: %w", err)
 	}
+	sourceJSON, err := json.Marshal(p.Source)
+	if err != nil {
+		return fmt.Errorf("marshal source: %w", err)
+	}
 	varsJSON, err := json.Marshal(p.Variables)
 	if err != nil {
 		return fmt.Errorf("marshal variables: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO pipelines (id, name, description, stages, edges, variables, created_at, updated_at, run_deadline)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		p.ID, p.Name, p.Description, stagesJSON, edgesJSON, varsJSON, p.CreatedAt, p.UpdatedAt, p.RunDeadline)
+		`INSERT INTO pipelines (id, name, description, stages, edges, variables, source, created_at, updated_at, run_deadline)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		p.ID, p.Name, p.Description, stagesJSON, edgesJSON, varsJSON, sourceJSON, p.CreatedAt, p.UpdatedAt, p.RunDeadline)
 	if err != nil {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return store.ErrConflict
+		}
 		return fmt.Errorf("creating pipeline: %w", err)
 	}
 	return nil
@@ -86,6 +95,10 @@ func (s *PipelineStore) Update(ctx context.Context, p *model.Pipeline) error {
 	if err != nil {
 		return fmt.Errorf("marshal edges: %w", err)
 	}
+	sourceJSON, err := json.Marshal(p.Source)
+	if err != nil {
+		return fmt.Errorf("marshal source: %w", err)
+	}
 	varsJSON, err := json.Marshal(p.Variables)
 	if err != nil {
 		return fmt.Errorf("marshal variables: %w", err)
@@ -95,9 +108,9 @@ func (s *PipelineStore) Update(ctx context.Context, p *model.Pipeline) error {
 	// doesn't exist (ErrNotFound) or another writer raced (ErrConflict);
 	// the SELECT below disambiguates.
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE pipelines SET name=$2, description=$3, stages=$4, edges=$5, variables=$6, updated_at=$7, run_deadline=$8, version=version+1
+		`UPDATE pipelines SET name=$2, description=$3, stages=$4, edges=$5, variables=$6, updated_at=$7, run_deadline=$8, source=$10, version=version+1
 		 WHERE id=$1 AND version=$9`,
-		p.ID, p.Name, p.Description, stagesJSON, edgesJSON, varsJSON, p.UpdatedAt, p.RunDeadline, p.Version)
+		p.ID, p.Name, p.Description, stagesJSON, edgesJSON, varsJSON, p.UpdatedAt, p.RunDeadline, p.Version, sourceJSON)
 	if err != nil {
 		return fmt.Errorf("updating pipeline: %w", err)
 	}
@@ -131,8 +144,8 @@ type scannable interface {
 
 func scanPipeline(row scannable) (*model.Pipeline, error) {
 	p := &model.Pipeline{}
-	var stagesJSON, edgesJSON, varsJSON []byte
-	if err := row.Scan(&p.ID, &p.Name, &p.Description, &stagesJSON, &edgesJSON, &varsJSON, &p.CreatedAt, &p.UpdatedAt, &p.Version, &p.RunDeadline); err != nil {
+	var stagesJSON, edgesJSON, varsJSON, sourceJSON []byte
+	if err := row.Scan(&p.ID, &p.Name, &p.Description, &stagesJSON, &edgesJSON, &varsJSON, &sourceJSON, &p.CreatedAt, &p.UpdatedAt, &p.Version, &p.RunDeadline); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(stagesJSON, &p.Stages); err != nil {
@@ -143,6 +156,11 @@ func scanPipeline(row scannable) (*model.Pipeline, error) {
 	}
 	if err := json.Unmarshal(varsJSON, &p.Variables); err != nil {
 		return nil, fmt.Errorf("unmarshal variables: %w", err)
+	}
+	if len(sourceJSON) > 0 {
+		if err := json.Unmarshal(sourceJSON, &p.Source); err != nil {
+			return nil, fmt.Errorf("unmarshal source: %w", err)
+		}
 	}
 	return p, nil
 }

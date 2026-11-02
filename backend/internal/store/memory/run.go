@@ -43,16 +43,11 @@ func (s *runs) List(_ context.Context, pipelineID string, limit, offset int) ([]
 	// still see full logs.
 	out := make([]*model.PipelineRun, len(matched))
 	for i, r := range matched {
-		cp := *r
-		if len(r.StageRuns) > 0 {
-			srs := make([]model.StageRun, len(r.StageRuns))
-			copy(srs, r.StageRuns)
-			for j := range srs {
-				srs[j].Logs = ""
-			}
-			cp.StageRuns = srs
+		cp := r.Clone()
+		for j := range cp.StageRuns {
+			cp.StageRuns[j].Logs = ""
 		}
-		out[i] = &cp
+		out[i] = cp
 	}
 	return out, nil
 }
@@ -64,13 +59,9 @@ func (s *runs) Get(_ context.Context, id string) (*model.PipelineRun, error) {
 	if !ok {
 		return nil, fmt.Errorf("run %s: %w", id, store.ErrNotFound)
 	}
-	// Return a shallow copy so the caller cannot race the heartbeat ticker
-	// or the executor, both of which mutate the stored pointer concurrently
-	// (DA-H1). The executor replaces StageRuns, EnvironmentStatuses, and
-	// Variables slices wholesale, so a shallow copy of those slice headers
-	// is sufficient — concurrent writes land on a different slice.
-	cp := *r
-	return &cp, nil
+	// Callers may continue mutating an attempt after its queue claim expires.
+	// A deep copy prevents that mutation from bypassing fenced Update methods.
+	return r.Clone(), nil
 }
 
 // GetSummary mirrors Get with per-stage Logs stripped (parity with the
@@ -91,67 +82,91 @@ func (s *runs) GetSummary(ctx context.Context, id string) (*model.PipelineRun, e
 
 // UpdateProgress writes only StageRuns (logs stripped), mirroring the
 // postgres single-column flush.
-func (s *runs) UpdateProgress(_ context.Context, id string, stageRuns []model.StageRun) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	r, ok := s.m[id]
-	if !ok {
-		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
-	}
-	stripped := make([]model.StageRun, len(stageRuns))
-	copy(stripped, stageRuns)
-	for i := range stripped {
-		stripped[i].Logs = ""
-	}
-	r.StageRuns = stripped
-	return nil
+func (s *runs) UpdateProgress(ctx context.Context, id string, stageRuns []model.StageRun) error {
+	return store.GuardRunWrite(ctx, func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		r, ok := s.m[id]
+		if !ok {
+			return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+		}
+		stripped := (&model.PipelineRun{StageRuns: stageRuns}).Clone().StageRuns
+		for i := range stripped {
+			stripped[i].Logs = ""
+		}
+		r.StageRuns = stripped
+		return nil
+
+	})
 }
 
 func (s *runs) Create(_ context.Context, r *model.PipelineRun) error {
+	if r.Source.Validate() != nil {
+		return model.ErrInvalidRunSource
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.m[r.ID]; exists {
+		return store.ErrConflict
+	}
 	if r.CreatedAt.IsZero() {
 		r.CreatedAt = time.Now()
 	}
-	s.m[r.ID] = r
+	s.m[r.ID] = r.Clone()
 	return nil
 }
 
-func (s *runs) Update(_ context.Context, r *model.PipelineRun) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.m[r.ID]; !ok {
-		return fmt.Errorf("run %s: %w", r.ID, store.ErrNotFound)
-	}
-	s.m[r.ID] = r
-	return nil
+func (s *runs) Update(ctx context.Context, r *model.PipelineRun) error {
+	return store.GuardRunWrite(ctx, func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		previous, ok := s.m[r.ID]
+		if !ok {
+			return fmt.Errorf("run %s: %w", r.ID, store.ErrNotFound)
+		}
+		source, err := model.MergeRunSource(previous.Source, r.Source)
+		if err != nil {
+			return store.ErrConflict
+		}
+		cp := r.Clone()
+		cp.Source = source
+		s.m[r.ID] = cp
+		return nil
+
+	})
 }
 
-func (s *runs) UpdateStatus(_ context.Context, id string, status model.RunStatus, finishedAt *time.Time, errMsg string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	r, ok := s.m[id]
-	if !ok {
-		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
-	}
-	// Mutate only the lifecycle fields in place (mirrors UpdateHeartbeat's
-	// targeted style); leaves StageRuns / HeartbeatAt untouched.
-	r.Status = status
-	r.FinishedAt = finishedAt
-	r.Error = errMsg
-	return nil
+func (s *runs) UpdateStatus(ctx context.Context, id string, status model.RunStatus, finishedAt *time.Time, errMsg string) error {
+	return store.GuardRunWrite(ctx, func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		r, ok := s.m[id]
+		if !ok {
+			return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+		}
+		// Mutate only the lifecycle fields in place (mirrors UpdateHeartbeat's
+		// targeted style); leaves StageRuns / HeartbeatAt untouched.
+		r.Status = status
+		r.FinishedAt = finishedAt
+		r.Error = errMsg
+		return nil
+
+	})
 }
 
-func (s *runs) UpdateHeartbeat(_ context.Context, id string, ts time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	r, ok := s.m[id]
-	if !ok {
-		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
-	}
-	t := ts
-	r.HeartbeatAt = &t
-	return nil
+func (s *runs) UpdateHeartbeat(ctx context.Context, id string, ts time.Time) error {
+	return store.GuardRunWrite(ctx, func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		r, ok := s.m[id]
+		if !ok {
+			return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+		}
+		t := ts
+		r.HeartbeatAt = &t
+		return nil
+
+	})
 }
 
 func (s *runs) SweepOrphans(_ context.Context, threshold time.Duration) (int, error) {

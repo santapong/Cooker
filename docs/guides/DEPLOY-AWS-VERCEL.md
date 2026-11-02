@@ -91,7 +91,7 @@ cannot be used on previews:
 
 So:
 
-- **Previews** run `VITE_OIDC_ENABLED=false` and use Cooker's **local
+- **Previews** run `VITE_OIDC_ENABLED=false`, `VITE_LOCAL_AUTH_ENABLED=true` and use Cooker's **local
   email+password auth** against the shared UAT backend, which sets
   `COOKER_ALLOWED_ORIGINS=*` — **legal only in `COOKER_ENV=uat`** (a wildcard
   origin is rejected at boot under `production`).
@@ -104,6 +104,7 @@ So:
 |---|---|---|
 | `VITE_API_BASE_URL` | `https://uat-api.<domain>` | `https://uat-api.<domain>` |
 | `VITE_OIDC_ENABLED` | `true` | `false` |
+| `VITE_LOCAL_AUTH_ENABLED` | `true` if local login is also enabled | `true` |
 | `VITE_OIDC_AUTHORITY` | UAT IdP issuer | _(unset)_ |
 | `VITE_OIDC_CLIENT_ID` | client id for the fixed domain | _(unset)_ |
 | `VITE_OIDC_REDIRECT_URI` | `https://<fixed-domain>/auth/callback` | _(unset)_ |

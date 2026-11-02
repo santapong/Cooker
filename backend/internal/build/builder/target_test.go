@@ -12,16 +12,27 @@ func TestDockerBuildUsesContextRelativeDockerfileAndTarget(t *testing.T) {
 	root := t.TempDir()
 	bin := filepath.Join(root, "docker-test")
 	output := filepath.Join(root, "arguments")
+	contextDir := filepath.Join(root, "repo", "api")
+	dockerfileDir := filepath.Join(root, "repo", "docker")
+	if err := os.MkdirAll(contextDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dockerfileDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dockerfileDir, "api.Dockerfile"), []byte("FROM scratch\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("COOKER_TEST_ARGUMENTS", output)
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nif [ \"$1\" = build ]; then printf '%s\\n' \"$@\" > \"$COOKER_TEST_ARGUMENTS\"; else printf 'sha256:fake\\n'; fi\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	_, err := (&DockerSock{Bin: bin}).Build(context.Background(), Request{ContextDir: "/repo/api", Dockerfile: "../docker/api.Dockerfile", Target: "runtime", Tags: []string{"registry.example.com/shop-api:1"}})
+	_, err := (&DockerSock{Bin: bin}).Build(context.Background(), Request{ContextDir: contextDir, Dockerfile: "../docker/api.Dockerfile", Target: "runtime", Tags: []string{"registry.example.com/shop-api:1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(output)
-	if !strings.Contains(string(data), "-f\n/repo/docker/api.Dockerfile") || !strings.Contains(string(data), "--target\nruntime") {
+	if !strings.Contains(string(data), "-f\n"+filepath.Join(dockerfileDir, "api.Dockerfile")) || !strings.Contains(string(data), "--target\nruntime") {
 		t.Fatalf("incorrect build arguments: %s", data)
 	}
 	opt := solveOptions(Request{ContextDir: "/repo/api", Dockerfile: "../docker/api.Dockerfile", Target: "runtime"})

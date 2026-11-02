@@ -1,10 +1,29 @@
 package service
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/santapong/cooker/internal/model"
 )
+
+func TestValidatePipelineDAG_MissingEndpointsAndCyclesAreIndependent(t *testing.T) {
+	for _, cycle := range []bool{false, true} {
+		p := &model.Pipeline{Stages: []model.Stage{{ID: "a"}, {ID: "b"}}, Edges: []model.Edge{
+			{Source: "a", Target: "b"}, {Source: "missing", Target: "a"}, {Source: "b", Target: "gone"},
+		}}
+		if cycle {
+			p.Edges = append(p.Edges, model.Edge{Source: "b", Target: "a"})
+		}
+		errs := ValidatePipelineDAG(p)
+		if !slices.Contains(errs, "edge references unknown source: missing") || !slices.Contains(errs, "edge references unknown target: gone") {
+			t.Fatalf("missing endpoint diagnostics: %v", errs)
+		}
+		if got := slices.Contains(errs, "DAG contains a cycle"); got != cycle {
+			t.Fatalf("cycle=%v diagnostics=%v", cycle, errs)
+		}
+	}
+}
 
 func TestValidatePipelineDAG_Valid(t *testing.T) {
 	p := &model.Pipeline{

@@ -1,0 +1,35 @@
+{
+  "source": "Cooker-landing/website/dist-landing",
+  "build": "Cooker-landing/website/build_landing.py",
+  "scope": "landing-only",
+  "files": {
+    "index.html": {
+      "bytes": 23129,
+      "sha256": "1503c9fffd597553e9d5d373dfc88e9c31abe20450cee4ec8feec9c4a73d4170"
+    },
+    "styles.css": {
+      "bytes": 29217,
+      "sha256": "5c3fe2ea684bbe321ac103fdd91e47955d97b1b39a776e3c4c1bd6445b96dfe2"
+    },
+    "main.js": {
+      "bytes": 6287,
+      "sha256": "cbd6506117ec559375ed67f042e011a5f9cadf7257dc8a8e3ea11b381d6aca39"
+    },
+    "assets/tokens.css": {
+      "bytes": 1782,
+      "sha256": "288aac0b70ae38e25504daa0979e227f22f5772450d7824d12a31281cfbda28f"
+    },
+    "assets/cooker-theme.css": {
+      "bytes": 1712,
+      "sha256": "0ad46a6f8ebd31cf4e84fafd4bc5a31667a03676dec8d9c7f62e2f14d9e226df"
+    },
+    "assets/favicon.svg": {
+      "bytes": 438,
+      "sha256": "f3c17774568957a9d5c9e2b06a9279e343c3d7f9928cd8efb8460bb93a2132dd"
+    },
+    "assets/cooker-open-workbench-v1.png": {
+      "bytes": 1302927,
+      "sha256": "8f1969573e044ae68aa4efb48c1e52cd1e0a2a803809bab10e5e177971de9ac9"
+    }
+  }
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,8 +19,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/santapong/cooker/internal/auth"
+	"github.com/santapong/cooker/internal/jobqueue"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/service"
+	"github.com/santapong/cooker/internal/store"
 	"github.com/santapong/cooker/internal/validate"
 )
 
@@ -44,6 +48,9 @@ func validatePipelineInput(p *model.Pipeline) error {
 		return err
 	}
 	if err := validate.RunDeadline(p.RunDeadline); err != nil {
+		return err
+	}
+	if err := service.ValidatePipelineSource(p); err != nil {
 		return err
 	}
 	for i, s := range p.Stages {
@@ -105,6 +112,10 @@ func (h *Handler) createPipeline(c *gin.Context, p *model.Pipeline) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := service.ValidatePipelineRuntimeEnvironments(c.Request.Context(), h.Store.Environments, p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	if dagErrs := service.ValidatePipelineDAG(p); len(dagErrs) > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"valid": false, "errors": dagErrs})
@@ -117,7 +128,9 @@ func (h *Handler) createPipeline(c *gin.Context, p *model.Pipeline) {
 	p.UpdatedAt = now
 	// Server owns the optimistic-concurrency token; a YAML/JSON body
 	// must not be able to seed it.
-	p.Version = 0
+	// PostgreSQL's initial version is one; return the same token that both
+	// stores persist so a newly created definition can be conditionally edited.
+	p.Version = 1
 
 	p.SetDefaults()
 
@@ -238,12 +251,34 @@ func (h *Handler) UpdatePipeline(c *gin.Context) {
 		return
 	}
 
-	var p model.Pipeline
-	if err := c.ShouldBindJSON(&p); err != nil {
+	var input struct {
+		model.Pipeline
+		Version json.RawMessage `json:"version"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	p := input.Pipeline
+	// An explicit version, including zero, is the editor's precondition.
+	// Omitted versions retain the legacy update contract; malformed/null
+	// versions must not silently downgrade a conditional edit to that path.
+	if len(input.Version) != 0 {
+		var submitted int
+		if strings.TrimSpace(string(input.Version)) == "null" || json.Unmarshal(input.Version, &submitted) != nil || submitted < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pipeline version"})
+			return
+		}
+		if submitted != existing.Version {
+			abortStoreErr(c, store.ErrConflict, "pipeline not found")
+			return
+		}
+	}
 	if err := validatePipelineInput(&p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := service.ValidatePipelineRuntimeEnvironments(c.Request.Context(), h.Store.Environments, &p); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -251,9 +286,8 @@ func (h *Handler) UpdatePipeline(c *gin.Context) {
 	p.ID = id
 	p.CreatedAt = existing.CreatedAt
 	p.UpdatedAt = time.Now()
-	// BC-H2: use the server-fetched version for the OCC WHERE clause so
-	// the client cannot bypass the stale-check by supplying an arbitrary
-	// version field. ErrConflict → 409 is handled by abortStoreErr.
+	// Preserve the database CAS after the submitted-version check: another
+	// writer can still win between this read and Update. ErrConflict is 409.
 	p.Version = existing.Version
 
 	if err := h.Store.Pipelines.Update(c.Request.Context(), &p); err != nil {
@@ -308,6 +342,10 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 	if abortStoreErr(c, err, "pipeline not found") {
 		return
 	}
+	if p.Source != nil && h.Enqueuer == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "source-bound pipelines require durable admission"})
+		return
+	}
 
 	run := &model.PipelineRun{
 		ID:         uuid.New().String(),
@@ -343,26 +381,47 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 		})
 	}
 
-	if err := h.Store.Runs.Create(c.Request.Context(), run); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Durable path (Phase-1 / A1): enqueue and return 202. The worker
-	// pool picks up the job via Dequeue + NOTIFY and runs the
-	// executor via service.JobQueueRunner. Enabled by setting
-	// COOKER_JOBQUEUE_ENABLED=true at boot.
+	// Accept durable work before creating its queryable run view. The queue
+	// holds the complete immutable definition and actor, allowing a worker or
+	// recovery to recreate the view if this process stops between the writes.
 	if h.Enqueuer != nil {
-		if err := h.Enqueuer.EnqueueRun(c.Request.Context(), p.ID, run.ID); err != nil {
-			// Don't fail the request: the run row exists and the
-			// orphan sweep will recover it on the next boot if no
-			// worker ever picks it up. The handler returns 202 so
-			// the client polls / streams status and observes the
-			// outcome via the existing run-detail endpoint.
-			slog.Warn("RunPipeline: enqueue failed",
-				"run", run.ID, "pipeline", p.ID, "err", err)
+		planned, ok := h.Enqueuer.(interface {
+			EnqueuePlannedRun(context.Context, *model.Pipeline, *model.PipelineRun) error
+		})
+		if !ok {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "durable pipeline admission is unavailable"})
+			return
+		}
+		run.CreatedAt = time.Now().UTC()
+		if err := planned.EnqueuePlannedRun(c.Request.Context(), p, run); err != nil {
+			slog.Warn("RunPipeline: enqueue failed", "run", run.ID, "err", err)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "deployment could not be queued", "runId": run.ID})
+			return
+		}
+		viewCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 5*time.Second)
+		defer cancel()
+		if snapshots, ok := h.Enqueuer.(interface {
+			AcceptedRunSnapshot(context.Context, string) (*model.PipelineRun, error)
+		}); ok {
+			accepted, snapshotErr := snapshots.AcceptedRunSnapshot(viewCtx, run.ID)
+			if snapshotErr == nil && accepted != nil && accepted.ID == run.ID && accepted.PipelineID == p.ID && accepted.PipelineVersion == p.Version && accepted.StartedByUserSub == run.StartedByUserSub && accepted.StartedByTokenHash == run.StartedByTokenHash {
+				run = accepted.Clone()
+			} else {
+				// Acceptance is already durable; an unavailable query projection
+				// must not turn the result into an enqueue failure or select a new ref.
+				slog.Warn("RunPipeline: accepted source view awaits recovery", "run", run.ID)
+			}
+		}
+		if err := h.Store.Runs.Create(viewCtx, run); err != nil && !errors.Is(err, store.ErrConflict) {
+			// Acceptance already committed. Reporting failure here could cause
+			// the caller to submit duplicate work; the worker repairs this view.
+			slog.Warn("RunPipeline: accepted run view awaits recovery", "run", run.ID, "err", err)
 		}
 		c.JSON(http.StatusAccepted, run)
+		return
+	}
+	if err := h.Store.Runs.Create(c.Request.Context(), run); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -393,7 +452,7 @@ func (h *Handler) RunPipeline(c *gin.Context) {
 				return err
 			}
 			// Emit the terminal-run event. The inline path owns this;
-			// the queue path emits from JobQueueRunner instead. A run
+			// the queue path emits after durable completion instead. A run
 			// takes exactly one path, so this never double-sends.
 			service.NotifyRunOutcome(h.Dispatcher, p, run, execErr)
 			return execErr
@@ -469,6 +528,39 @@ func (h *Handler) CancelPipelineRun(c *gin.Context) {
 	run, ok := h.loadRunForPipeline(c, c.Param("runId"), c.Param("id"))
 	if !ok {
 		return
+	}
+	if leases, ok := h.Jobs.(jobqueue.LeaseStore); ok {
+		atomic, supportsAtomic := h.Jobs.(interface{ AtomicLifecycle() bool })
+		if !supportsAtomic || !atomic.AtomicLifecycle() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "atomic cancellation is unavailable"})
+			return
+		}
+
+		for _, id := range []string{"run:" + run.ID, "app-run:" + run.ID} {
+			job, err := h.Jobs.Get(c.Request.Context(), id)
+			if errors.Is(err, jobqueue.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cannot verify queued execution"})
+				return
+			}
+			status, err := leases.Cancel(c.Request.Context(), job.ID)
+			if err != nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cannot request cancellation"})
+				return
+			}
+			if status == jobqueue.StatusSucceeded || status == jobqueue.StatusFailed {
+				c.JSON(http.StatusConflict, gin.H{"error": "deployment already finished"})
+				return
+			}
+			runStatus, message := model.RunStatusNeedsAttention, "cancellation requested; inspect external work before resolving the deployment"
+			if status == jobqueue.StatusCancelled {
+				runStatus, message = model.RunStatusCancelled, "cancelled before execution"
+			}
+			c.JSON(http.StatusAccepted, gin.H{"message": message, "runId": run.ID, "jobId": job.ID, "status": runStatus})
+			return
+		}
 	}
 	// Status-only write: UpdateStatus touches just status/finished_at/error,
 	// so it neither re-marshals the run's JSONB blobs (F18) nor overwrites

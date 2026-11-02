@@ -109,11 +109,15 @@ func TestRuntimeService_Logs_BinaryNotFound(t *testing.T) {
 	r := &RuntimeService{DockerBin: "cooker-definitely-not-a-real-binary-xyz"}
 	var out bytes.Buffer
 	err := r.Logs(context.Background(), runtimeTestDockerApp(), "web", &out)
-	if err != nil {
-		t.Fatalf("Logs on a missing binary should return nil (message written to out), got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("missing adapter must report unavailable, got: %v", err)
 	}
-	if !strings.Contains(out.String(), "not found") {
-		t.Errorf("out = %q, want a \"not found\" message", out.String())
+}
+
+func TestRuntimeService_LogsProcessFailurePropagates(t *testing.T) {
+	r := &RuntimeService{DockerBin: "false"}
+	if err := r.Logs(context.Background(), runtimeTestDockerApp(), "web", &bytes.Buffer{}); err == nil {
+		t.Fatal("nonzero runtime process exit was swallowed")
 	}
 }
 

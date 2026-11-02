@@ -150,7 +150,7 @@ func TestStageApprovalStore_UpdateStatus(t *testing.T) {
 func TestStageApprovalStore_GetReturnsCopy(t *testing.T) {
 	st := New()
 	ctx := context.Background()
-	g := &model.StageApproval{ID: "gate-1", RunID: "r", StageID: "s", Status: model.StageApprovalAwaiting}
+	g := &model.StageApproval{ID: "gate-1", RunID: "r", StageID: "s", Status: model.StageApprovalAwaiting, RequiredApprovers: 2}
 	if err := st.StageApprovals.CreateGate(ctx, g); err != nil {
 		t.Fatal(err)
 	}
@@ -170,5 +170,35 @@ func TestStageApprovalStore_GetReturnsCopy(t *testing.T) {
 	}
 	if len(again.Votes) > 0 && again.Votes[0].ApproverSub != "sub-a" {
 		t.Errorf("stored vote mutated to %s", again.Votes[0].ApproverSub)
+	}
+}
+
+func TestStageApprovalStoreLegacyQuorumKeepsUnknownResolver(t *testing.T) {
+	for _, subject := range []string{"first", "new-caller"} {
+		t.Run(subject, func(t *testing.T) {
+			ctx := context.Background()
+			base := New().StageApprovals
+			gate := &model.StageApproval{ID: "legacy", RunID: "owned-run", StageID: "review", Status: model.StageApprovalAwaiting, RequiredApprovers: 2}
+			if err := base.CreateGate(ctx, gate); err != nil {
+				t.Fatal(err)
+			}
+			// Reconstruct an older persisted awaiting gate after its final vote,
+			// rather than entering through the fixed atomic AddVote path.
+			internal := base.(*stageApprovals)
+			internal.mu.Lock()
+			internal.votes[gate.ID] = []model.StageApprovalVote{
+				{ID: "old-first", StageApprovalID: gate.ID, ApproverSub: "first", ApproverEmail: "first@example.invalid"},
+				{ID: "old-final", StageApprovalID: gate.ID, ApproverSub: "final", ApproverEmail: "final@example.invalid"},
+			}
+			internal.mu.Unlock()
+			added, count, err := base.AddVote(ctx, &model.StageApprovalVote{ID: "retry", StageApprovalID: gate.ID, ApproverSub: subject, ApproverEmail: "caller@example.invalid"})
+			if err != nil || added || count != 2 {
+				t.Fatalf("legacy discovery admitted another vote: added=%v count=%d err=%v", added, count, err)
+			}
+			resolved, err := base.GetGate(ctx, gate.RunID, gate.StageID)
+			if err != nil || resolved.Status != model.StageApprovalApproved || resolved.ResolvedBy != "" || resolved.ResolvedAt == nil || resolved.ApprovalCount() != 2 || resolved.Votes[0].ID != "old-first" || resolved.Votes[1].ID != "old-final" {
+				t.Fatalf("legacy resolution changed its votes or invented a resolver: %+v err=%v", resolved, err)
+			}
+		})
 	}
 }

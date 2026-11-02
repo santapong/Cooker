@@ -25,6 +25,9 @@ export function validateDAG(stages: Stage[], edges: PipelineEdge[]): string[] {
   }
 
   for (const edge of edges) {
+    // Missing endpoints are diagnosed above. They must not create phantom
+    // nodes or block valid nodes during cycle detection.
+    if (!stageIds.has(edge.source) || !stageIds.has(edge.target)) continue;
     adj.get(edge.source)?.push(edge.target);
     inDegree.set(edge.target, (inDegree.get(edge.target) || 0) + 1);
   }

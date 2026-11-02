@@ -228,12 +228,9 @@ func TestJobQueueRunner_Handle_RunUpdateFailure(t *testing.T) {
 	r := NewJobQueueRunner(st, NewExecutor(), nil)
 	job := &jobqueue.Job{Payload: mustPayload(t, "pipe-1", "run-1")}
 
-	// Per the documented contract (jobqueue_runner.go: "Persist failure
-	// is logged but doesn't override the executor error"), Handle must
-	// still return nil here because Execute succeeded -- only execErr
-	// surfaces to the job framework, never the Update error.
-	if err := r.Handle(ctx, job); err != nil {
-		t.Fatalf("Handle should swallow the Update error, got: %v", err)
+	// A successful external effect without durable outcome is ambiguous.
+	if err := r.Handle(ctx, job); !errors.Is(err, jobqueue.ErrOutcomeUnknown) {
+		t.Fatalf("expected reconciliation after Update failure, got: %v", err)
 	}
 
 	// The decorator swallowed the real Update call, so the underlying

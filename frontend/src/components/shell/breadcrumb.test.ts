@@ -2,8 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { buildBreadcrumb } from './breadcrumb';
 
 describe('buildBreadcrumb', () => {
-  it('root is Apps', () => {
-    expect(buildBreadcrumb('/')).toEqual([{ label: 'Apps' }]);
+  it('root is the workspace overview', () => {
+    expect(buildBreadcrumb('/')).toEqual([{ label: 'Overview' }]);
+  });
+
+  it('catalog routes do not invent editable provider breadcrumb links', () => {
+    expect(buildBreadcrumb('/apps/synced/vapp_one')).toEqual([{ label: 'Apps', to: '/apps' }, { label: 'Synced app' }]);
+    expect(buildBreadcrumb('/pipelines/synced/vflow_one')).toEqual([{ label: 'Pipelines', to: '/pipelines' }, { label: 'Provider flow' }]);
+    expect(buildBreadcrumb('/services')).toEqual([{ label: 'Services' }]);
   });
 
   it('section pages are a single unlinked crumb', () => {

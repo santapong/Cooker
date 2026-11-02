@@ -10,6 +10,15 @@ import (
 )
 
 func (c *Config) Validate() error {
+	if c.SecretCipherFormat != "" && c.SecretCipherFormat != "legacy" && c.SecretCipherFormat != "tagged-v1" {
+		return errors.New("config: COOKER_SECRET_CIPHER_FORMAT must be legacy or tagged-v1")
+	}
+	if err := c.validateSocialSignIn(); err != nil {
+		return err
+	}
+	if err := c.validateBuildKit(); err != nil {
+		return err
+	}
 	// AI triage is env-independent: enabling it without a key is a
 	// misconfiguration in dev and prod alike — the route would 502 on
 	// every click. Fail at boot instead.
@@ -185,6 +194,31 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// Social buttons delegate to a deliberately configured identity broker. A
+// provider name alone must never enable an incomplete or arbitrary auth path.
+func (c *Config) validateSocialSignIn() error {
+	if c.OIDC.Broker != "" && c.OIDC.Broker != "keycloak" {
+		return fmt.Errorf("config: COOKER_OIDC_BROKER supports keycloak or an empty value")
+	}
+	if len(c.OIDC.SocialProviders) == 0 {
+		return nil
+	}
+	if !c.OIDC.Enabled || c.OIDC.Broker != "keycloak" || strings.TrimSpace(c.OIDC.IssuerURL) == "" || strings.TrimSpace(c.OIDC.ClientID) == "" {
+		return fmt.Errorf("config: social sign-in requires OIDC enabled, the keycloak broker, issuer URL and client ID")
+	}
+	seen := make(map[string]bool)
+	for _, provider := range c.OIDC.SocialProviders {
+		if provider != "github" && provider != "google" {
+			return fmt.Errorf("config: COOKER_OIDC_SOCIAL_PROVIDERS supports only github and google")
+		}
+		if seen[provider] {
+			return fmt.Errorf("config: COOKER_OIDC_SOCIAL_PROVIDERS contains a duplicate provider")
+		}
+		seen[provider] = true
+	}
+	return nil
+}
+
 // SSHHostLister is the minimal store surface ValidateSSHHosts needs.
 // Implemented by store.Store via st.Hosts.List, but kept narrow here
 // to avoid importing the store package (and creating an import cycle).
@@ -229,4 +263,30 @@ func (c *Config) ValidateSSHHosts(ctx context.Context, lister SSHHostLister) err
 	}
 	return errors.New("config: SSH hosts with sshStrictHostKey=false are forbidden in production: " +
 		strings.Join(names, ", "))
+}
+
+func (c *Config) validateBuildKit() error {
+	if c.BuilderBackend != "buildkit" {
+		return nil
+	}
+	if c.BuildKit.Address == "" {
+		return fmt.Errorf("config: COOKER_BUILDER=buildkit requires COOKER_BUILDKIT_ADDR")
+	}
+	u, err := url.Parse(c.BuildKit.Address)
+	if err != nil || (u.Scheme != "unix" && u.Scheme != "tcp") || (u.Scheme == "tcp" && u.Host == "") || (u.Scheme == "unix" && u.Path == "") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("config: COOKER_BUILDKIT_ADDR must be a unix:// socket or tcp:// endpoint")
+	}
+	if (c.BuildKit.TLSCert == "") != (c.BuildKit.TLSKey == "") {
+		return fmt.Errorf("config: BuildKit TLS certificate and key must be configured together")
+	}
+	if c.BuildKit.TLSCert != "" && c.BuildKit.TLSCA == "" {
+		return fmt.Errorf("config: BuildKit client TLS requires COOKER_BUILDKIT_TLS_CA")
+	}
+	if c.Env.IsProduction() && u.Scheme == "tcp" && (c.BuildKit.TLSCA == "" || c.BuildKit.TLSCert == "") {
+		return fmt.Errorf("config: production BuildKit TCP endpoints require mutual TLS (COOKER_BUILDKIT_TLS_CA, _TLS_CERT, _TLS_KEY)")
+	}
+	if c.PusherBackend != "crane" {
+		return fmt.Errorf("config: COOKER_BUILDER=buildkit requires COOKER_PUSHER=crane for OCI artifact handoff")
+	}
+	return nil
 }

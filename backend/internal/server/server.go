@@ -23,12 +23,14 @@ import (
 	"github.com/santapong/cooker/internal/idempotency"
 	"github.com/santapong/cooker/internal/kube"
 	"github.com/santapong/cooker/internal/license"
-	"github.com/santapong/cooker/internal/logstore"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/observability"
+	"github.com/santapong/cooker/internal/provider/vercel"
 	"github.com/santapong/cooker/internal/service"
+	"github.com/santapong/cooker/internal/source/connection"
 	"github.com/santapong/cooker/internal/source/github"
 	"github.com/santapong/cooker/internal/store"
+	storepg "github.com/santapong/cooker/internal/store/postgres"
 	"github.com/santapong/cooker/internal/triage"
 )
 
@@ -48,16 +50,20 @@ type Server struct {
 	idempotency   idempotency.Store
 	jobQueue      *jobQueueDeps
 	scheduler     *schedulerDeps
+	notifier      *notifierDeps
 	governance    *governance.Client
 	// templatesDB is the dedicated *sql.DB opened by bootTemplates
 	// when the jobqueue is off; nil when templates share the
 	// jobqueue's pool or when the templates feature is disabled.
 	// Closed in Server.Close after the WS hub.
 	templatesDB      *struct{ closer func() error }
+	vercelDB         *struct{ closer func() error }
 	healthCancel     context.CancelFunc
 	healthDone       chan struct{}
 	auditSweepCancel context.CancelFunc
 	auditSweepDone   chan struct{}
+	closeLogStore    func()
+	closeVercel      func()
 	// rateLimiter is the in-memory per-user limiter created by
 	// registerRoutes; held here so Close() can stop its gc goroutine
 	// (BC-H1). nil when the redis backend or disabled limiter is used.
@@ -118,6 +124,15 @@ func New(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		st.Close()
 		return nil, fmt.Errorf("crypto: %w", err)
+	}
+
+	switch cfg.SecretCipherFormat {
+	case "", "legacy":
+	case "tagged-v1":
+		codec = codec.WithVersionedWrites()
+	default:
+		st.Close()
+		return nil, errors.New("unsupported COOKER_SECRET_CIPHER_FORMAT")
 	}
 
 	secMgr, err := selectSecretsManager(cfg, st, codec)
@@ -188,9 +203,14 @@ func New(cfg *config.Config) (*Server, error) {
 	// Per-stage log history for replay-on-connect (execution-observability
 	// redesign Part A). Single instance shared by the hub (serves the
 	// backlog on WS connect) and the executor (appends stamped lines).
-	// Defaults to the in-memory backend; single-replica only, like the
-	// in-memory WS hub and rate limiter.
-	logStore := logstore.FromEnv()
+	// PostgreSQL installations retain history across worker restarts;
+	// disposable memory installations keep the bounded in-process store.
+	logStore, closeLogStore, err := bootLogStore(ctx, cfg.DatabaseURL)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("log history: %w", err)
+	}
+	cleanups = append(cleanups, closeLogStore)
 	wsHub.SetLogStore(logStore)
 
 	var wsTickets ticketStore
@@ -234,7 +254,7 @@ func New(cfg *config.Config) (*Server, error) {
 			"events are capped at ~10k and lost on restart — set DATABASE_URL for a durable trail")
 	}
 
-	bld, err := selectBuilder(cfg.BuilderBackend, cfg.Kubernetes)
+	bld, err := selectBuilder(cfg.BuilderBackend, cfg.Kubernetes, cfg.BuildKit)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("builder: %w", err)
@@ -297,8 +317,11 @@ func New(cfg *config.Config) (*Server, error) {
 		IngressClass: cfg.Proxy.IngressClass,
 		Network:      cfg.Proxy.Network,
 	}
+	registryAuthority := service.NewRegistryAuthorityService(st, secMgr)
 	exec := service.NewExecutor(
+		service.WithEnvironmentResolver(&service.AppEnvResolver{Environments: st.Environments, Secrets: secMgr}),
 		service.WithBuilder(bld),
+		service.WithRegistryAuthority(registryAuthority),
 		service.WithPusher(selectPusher(cfg.PusherBackend)),
 		service.WithDeployer(deploy),
 		// Docker-host per-service deploy runtimes (compose deployment DAGs
@@ -490,6 +513,9 @@ func New(cfg *config.Config) (*Server, error) {
 	// deployed compose service. CLI-backed (docker/kubectl); harmless
 	// when those binaries are absent (returns "not found").
 	h.Runtime = service.NewRuntimeService(cfg.Kubernetes.Namespace)
+	h.Runtime.Store = st
+	h.Runtime.SecretGenerationBound = cfg.SecretsBackend == "database"
+	h.Runtime.Kubeconfig = cfg.Kubernetes.Kubeconfig
 	// Kube backs the read-only Kubernetes list/inspect endpoints. Built
 	// from the SAME kubeconfig source as the ClientGo deployer
 	// (cfg.Kubernetes.Kubeconfig; empty => in-cluster) so reads target
@@ -535,7 +561,7 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, err
 	}
 
-	jobDeps, err := bootJobQueue(ctx, cfg, st, exec, notifDeps.Dispatcher)
+	jobDeps, err := bootJobQueue(ctx, cfg, st, exec, notifDeps.Dispatcher, appDeployer)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("jobqueue boot: %w", err)
@@ -543,10 +569,107 @@ func New(cfg *config.Config) (*Server, error) {
 	cleanups = append(cleanups, jobDeps.closeAll)
 	if jobDeps.Enqueuer != nil {
 		h.Enqueuer = jobDeps.Enqueuer
+		h.AppDeployQueue = jobDeps.AppQueue
+		h.Jobs = jobDeps.Store
+		h.SourceConnections = &connection.Service{Store: &connection.Postgres{DB: jobDeps.DB}, Codec: codec}
+		sourceAccess := &service.SourceAccess{Connections: h.SourceConnections, GitHub: source}
+		h.SourceConnections.TokenProbe = sourceAccess.CheckCredentialReplacement
+		triggers := &service.TriggerService{Store: storepg.NewTriggerStore(jobDeps.DB)}
+		native, err := wireNativeSourceAutomation(st, h.SourceConnections, sourceAccess, jobDeps, triggers, govClient)
+		if err != nil {
+			cleanup()
+			return nil, fmt.Errorf("native source boot: %w", err)
+		}
+		if err := wireRegistryExecution(jobDeps, registryAuthority, triggers); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("registry execution boot: %w", err)
+		}
+		appDeployer.SourceCheckout = sourceAccess.Checkout
+		h.AppDetector.SourceCheckout = sourceAccess.Checkout
+		if jobDeps.AppQueue != nil {
+			jobDeps.AppQueue.ResolveSource = sourceAccess.ResolveApp
+			jobDeps.AppQueue.RequireImagePins = true
+			jobDeps.AppQueue.RequireSecretPins = true
+			jobDeps.AppQueue.PrepareImages = func(ctx context.Context, plan *service.AppDeployPlan) (*service.AppImageResolution, error) {
+				if plan == nil || plan.App == nil {
+					return nil, fmt.Errorf("accepted app image plan is unavailable")
+				}
+				resolver, err := registryAuthority.Resolver(ctx, model.RegistrySubject{Kind: "app", ID: plan.App.ID}, plan.Registry, "")
+				if err != nil {
+					return nil, err
+				}
+				return appDeployer.PrepareImages(ctx, plan, service.RegistryImageResolver(resolver))
+			}
+			automation := &service.Automation{Triggers: triggers, Native: native, Connections: h.SourceConnections, Store: st, Queue: jobDeps.AppQueue, Source: sourceAccess, Inspect: h.AppDetector.InspectAutomation, ResolveEnvironment: appDeployer.EnvResolver.Resolve, RequireRegistryPreflight: true,
+				RegistryPreflight: func(ctx context.Context, app *model.App) error {
+					return service.CheckAppRegistryPreflight(ctx, registryAuthority, app)
+				},
+			}
+			automation.Authorize = func(ctx context.Context, r *model.TriggerRule, app *model.App) error {
+				if !r.Enabled {
+					return fmt.Errorf("rule is disabled")
+				}
+				if r.ActorSubject != "cooker:trigger:"+r.ID || len(r.ActorGroups) > 0 {
+					return fmt.Errorf("invalid automation actor")
+				}
+				if govClient.Enabled() {
+					if !govClient.DelegationEnabled() {
+						return fmt.Errorf("governance delegation is required for automation")
+					}
+					if app.EnvironmentID == "" {
+						return fmt.Errorf("governed automation requires an environment")
+					}
+					env, err := st.Environments.Get(ctx, app.EnvironmentID)
+					if err != nil {
+						return err
+					}
+					decision, err := govClient.AuthorizeOnBehalf(ctx, governance.PreresolvedActor{Kind: "service", ID: r.ActorSubject}, strings.ToLower("Deploy "+app.Name), strings.ToLower(env.Name), r.ID)
+					if err != nil || !decision.Allowed() {
+						return fmt.Errorf("automation authorization denied")
+					}
+				}
+				return nil
+			}
+			h.Automation = automation
+			jobDeps.AppQueue.ValidateTrigger = automation.ValidateQueued
+		}
+	}
+	vercelSvc, vercelOwnedDB, err := bootVercel(ctx, cfg, codec, jobDeps)
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("vercel boot: %w", err)
+	}
+	h.Vercel = vercelSvc
+	h.Neon = bootNeon(codec, jobDeps, vercelOwnedDB)
+	if vercelSvc != nil && jobDeps != nil && jobDeps.Registry != nil {
+		h.VercelPublisher = &vercel.Publisher{DB: jobDeps.DB, Service: vercelSvc, Jobs: jobDeps.Store, API: vercel.NewClient()}
+		jobDeps.Registry.Register(vercel.JobKindStatic, h.VercelPublisher.Handle)
+		if jobDeps.DB != nil {
+			h.VercelAdoptions = &vercel.LandingAdoptionService{
+				Service: vercelSvc, Store: &vercel.PostgresLandingAdoptions{DB: jobDeps.DB},
+				Projects: vercel.NewClient(), Publications: h.VercelPublisher,
+			}
+			readClient := vercel.NewClient()
+			h.VercelUpdateReviews = &vercel.LandingUpdateReviewService{
+				Service: vercelSvc, Adoptions: h.VercelAdoptions.Store,
+				Store:    &vercel.PostgresLandingUpdateReviews{DB: jobDeps.DB},
+				Projects: readClient, Deployments: readClient, Aliases: readClient,
+				Publications: h.VercelPublisher,
+			}
+		}
+	}
+	var vercelDBCloser *struct{ closer func() error }
+	if vercelOwnedDB != nil {
+		db := vercelOwnedDB
+		vercelDBCloser = &struct{ closer func() error }{closer: db.Close}
+		cleanups = append(cleanups, func() { _ = db.Close() })
 	}
 	// Notification targets are always available (memory or Postgres),
 	// independent of the job queue.
 	h.NotificationTargets = notifDeps.TargetStore
+	if notifDeps.Outbox != nil {
+		h.NotificationDeliveries = notifDeps.Outbox
+	}
 	h.Dispatcher = notifDeps.Dispatcher
 
 	schedDeps, err := bootScheduler(ctx, cfg, jobDeps)
@@ -577,6 +700,22 @@ func New(cfg *config.Config) (*Server, error) {
 		cleanups = append(cleanups, func() { _ = db.Close() })
 	}
 
+	var closeVercel func()
+	if h.Vercel != nil {
+		vercelCtx, vercelCancel := context.WithCancel(context.Background())
+		vercelDone := make(chan struct{})
+		go func() { defer close(vercelDone); h.Vercel.Run(vercelCtx) }()
+		closeVercel = func() {
+			vercelCancel()
+			select {
+			case <-vercelDone:
+			case <-time.After(6 * time.Second):
+				slog.Warn("shutdown: vercel sync drain timed out")
+			}
+		}
+		cleanups = append(cleanups, closeVercel)
+	}
+
 	sweepCtx, sweepCancel := context.WithTimeout(ctx, 5*time.Second)
 	if n, err := st.Runs.SweepOrphans(sweepCtx, orphanThreshold); err != nil {
 		slog.Warn("orphan sweep failed", "err", err)
@@ -594,6 +733,8 @@ func New(cfg *config.Config) (*Server, error) {
 		healthDone = make(chan struct{})
 		checker := service.NewAppHealthChecker(st.Apps,
 			service.WithAppHealthInterval(cfg.AppHealthInterval),
+			service.WithProber(model.DeployTargetDockerHost, h.Runtime),
+			service.WithProber(model.DeployTargetKubernetes, h.Runtime),
 		)
 		go func() {
 			defer close(healthDone)
@@ -739,12 +880,16 @@ func New(cfg *config.Config) (*Server, error) {
 		idempotency:      idem,
 		jobQueue:         jobDeps,
 		scheduler:        schedDeps,
+		notifier:         notifDeps,
 		governance:       govClient,
 		templatesDB:      templatesDBCloser,
+		vercelDB:         vercelDBCloser,
 		healthCancel:     healthCancel,
 		healthDone:       healthDone,
 		auditSweepCancel: auditSweepCancel,
 		auditSweepDone:   auditSweepDone,
+		closeLogStore:    closeLogStore,
+		closeVercel:      closeVercel,
 	}
 
 	router.Use(securityHeadersMiddleware())
@@ -771,6 +916,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	registerDeployTargets(cfg.DeployTargets)
 	s.registerRoutes()
+	notifDeps.start()
 	go wsHub.Run()
 	return s, nil
 }
@@ -787,6 +933,11 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 		}()
 	}
 
+	var automationDone chan struct{}
+	if s.handler != nil && s.handler.Automation != nil {
+		automationDone = make(chan struct{})
+		go func() { defer close(automationDone); s.handler.Automation.Run(ctx) }()
+	}
 	var schedDone chan struct{}
 	if s.scheduler != nil && s.scheduler.Runner != nil {
 		schedDone = make(chan struct{})
@@ -874,6 +1025,16 @@ func (s *Server) RunContext(ctx context.Context, addr string) error {
 			}
 			t.Stop()
 		}
+		if automationDone != nil {
+			select {
+			case <-automationDone:
+			case <-time.After(5 * time.Second):
+				slog.Warn("shutdown: automation preparation drain timed out")
+			}
+		}
+		if s.closeVercel != nil {
+			s.closeVercel()
+		}
 		if schedDone != nil {
 			t := time.NewTimer(5 * time.Second)
 			select {
@@ -924,6 +1085,9 @@ func (s *Server) Close() error {
 	if s.auditSweepCancel != nil {
 		s.auditSweepCancel()
 	}
+	if s.closeVercel != nil {
+		s.closeVercel()
+	}
 	// BC-H1: stop the rate-limiter gc goroutine.
 	if s.rateLimiter != nil {
 		s.rateLimiter.Close()
@@ -951,8 +1115,17 @@ func (s *Server) Close() error {
 	if s.jobQueue != nil {
 		s.jobQueue.closeAll()
 	}
+	if s.notifier != nil {
+		s.notifier.closeAll()
+	}
+	if s.closeLogStore != nil {
+		s.closeLogStore()
+	}
 	if s.templatesDB != nil && s.templatesDB.closer != nil {
 		_ = s.templatesDB.closer()
+	}
+	if s.vercelDB != nil && s.vercelDB.closer != nil {
+		_ = s.vercelDB.closer()
 	}
 	if s.store == nil {
 		return nil

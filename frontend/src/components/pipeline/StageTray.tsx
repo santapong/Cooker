@@ -24,16 +24,16 @@ export default function StageTray({ onAdd }: Props) {
     e.dataTransfer.effectAllowed = 'move';
   };
   return (
-    <div className="tray" role="toolbar" aria-label="Add stage">
+    <div className="pipeline-stage-tray" role="toolbar" aria-label="Add stage">
       {STAGE_TYPES.map((s) => (
         <button
           key={s.type}
           type="button"
-          className="chip"
+          className="pipeline-stage-chip"
           draggable
           onDragStart={onDragStart(s.type)}
           onClick={() => onAdd(s.type)}
-          title={`Add a ${s.label} stage — drag onto the porthole or click`}
+          title={`Add a ${s.label} stage — drag onto the DAG or click`}
         >
           <StageSymbol kind={s.type} /> {s.label}
         </button>

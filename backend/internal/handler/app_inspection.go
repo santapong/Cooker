@@ -13,12 +13,38 @@ import (
 
 func (h *Handler) AppDeploymentCapabilities(c *gin.Context) {
 	caps := service.AppTargetCapabilities()
-	if h.AppDeployer != nil && h.AppDeployer.CheckExecution != nil {
-		for i := range caps {
-			if err := h.AppDeployer.CheckExecution(&model.App{DeployTarget: model.DeployTarget{Kind: caps[i].Kind}}, false); err != nil {
+	for i := range caps {
+		cap := &caps[i]
+		app := &model.App{DeployTarget: model.DeployTarget{Kind: cap.Kind}}
+		if h.AppDeployer == nil {
+			cap.Available = false
+			cap.Reason = "app deployer is not configured"
+		} else if err := h.AppDeployer.CheckRegistryDeployment(app); err != nil {
+			cap.Available = false
+			cap.Reason = err.Error()
+		} else if h.AppDeployer.CheckExecution != nil {
+			if err := h.AppDeployer.CheckExecution(app, false); err != nil {
 				caps[i].Available = false
 				caps[i].Reason = err.Error()
 			}
+		}
+		cap.SourceBuild.Reason = "source build preflight is not configured"
+		if !cap.Available {
+			cap.SourceBuild.Reason = cap.Reason
+		}
+		if h.AppDeployer != nil && h.AppDeployer.CheckExecution != nil && cap.Available {
+			if err := h.AppDeployer.CheckExecution(app, true); err != nil {
+				cap.SourceBuild.Reason = err.Error()
+			} else {
+				cap.SourceBuild = service.CapabilityState{Available: true}
+			}
+		}
+		cap.ServiceLogs.Reason = "runtime log adapter is not configured for this target"
+		if cap.Kind == model.DeployTargetKubernetes {
+			cap.ServiceLogs.Reason = "Kubernetes logs require an immutable pod session adapter; service-name streaming is disabled"
+		}
+		if h.Runtime != nil && h.Runtime.Store != nil && h.Jobs != nil && cap.Available && cap.Kind == model.DeployTargetDockerHost {
+			cap.ServiceLogs = service.CapabilityState{Available: true}
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"targets": caps})
@@ -37,7 +63,7 @@ func (h *Handler) InspectAppRepository(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid inspection request"})
 		return
 	}
-	if err := validate.GitHubRepo(app.GitHubRepo); err != nil {
+	if err := validateAppRepository(&app); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -49,25 +75,35 @@ func (h *Handler) InspectAppRepository(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := h.prepareAppSource(c, &app); err != nil {
+		c.JSON(422, gin.H{"error": err.Error()})
+		return
+	}
 	// Inspection only exposes configured key names; values are masked by the
 	// service before it returns. Use the same resolver as App deployment.
 	env := map[string]string{}
+	inspectCtx := service.WithLogSecrets(c.Request.Context(), nil)
 	if app.EnvironmentID != "" {
 		if h.AppDeployer == nil || h.AppDeployer.EnvResolver == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "environment resolution is not configured"})
 			return
 		}
 		var err error
-		env, err = h.AppDeployer.EnvResolver.Resolve(c.Request.Context(), &app)
+		env, err = h.AppDeployer.EnvResolver.Resolve(inspectCtx, &app)
 		if err != nil {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "cannot resolve selected environment"})
 			return
 		}
 	}
-	result, err := h.AppDetector.Inspect(c.Request.Context(), &app, env)
+	result, err := h.AppDetector.Inspect(inspectCtx, &app, env)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
+	}
+	if app.BuildPlan != nil {
+		result.SourceConnectionID = app.BuildPlan.SourceConnectionID
+		result.SourceRepositoryID = app.BuildPlan.SourceRepositoryID
+		result.SourceConnectionVersion = app.BuildPlan.SourceConnectionVersion
 	}
 	c.JSON(http.StatusOK, result)
 }

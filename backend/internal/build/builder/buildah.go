@@ -95,6 +95,9 @@ func (b *Buildah) Build(ctx context.Context, req Request) (Result, error) {
 	if err := validateRequest(req); err != nil {
 		return Result{}, err
 	}
+	if req.RegistryAuth != nil {
+		return Result{}, fmt.Errorf("%w: buildah scoped registry transport is unsupported", ErrUnavailable)
+	}
 	if b == nil || b.client == nil {
 		return Result{}, fmt.Errorf("%w: buildah client not configured", ErrUnavailable)
 	}

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/uuid"
 
 	"github.com/santapong/cooker/internal/build/buildplan"
@@ -67,8 +68,9 @@ type AppDeployer struct {
 	Proxy ProxyConfig
 	// Apps, when non-nil, persists the computed DeployedURL after a
 	// successful deploy (best-effort, like Deploys/Notifier).
-	Apps   store.AppStore
-	Source *github.AppClient
+	Apps           store.AppStore
+	Source         *github.AppClient
+	SourceCheckout func(context.Context, *model.App, string, io.Writer) (string, error)
 	// Persist the synthesized graph before execution so deployment views can
 	// render it while stages run. It is also retained on execution failure.
 	SavePipeline   func(context.Context, *model.Pipeline) error
@@ -133,8 +135,8 @@ func (d *AppDeployer) recordDeploy(ctx context.Context, rec *model.AppDeploy) {
 }
 
 // deployRecordFromRun derives the history row for a finished deploy.
-// Single-image path: image_ref is the synthesized tag; digest comes
-// from the build stage's artifacts when the builder reported one.
+// Single-image history prefers the verified immutable push output; rollback
+// refs retain their digest even when no build stage ran.
 // Compose path (multi-image): refs stay empty — not rollback-eligible.
 func deployRecordFromRun(app *model.App, p *model.Pipeline, run *model.PipelineRun, imageRef string, kind model.AppDeployKind) *model.AppDeploy {
 	rec := &model.AppDeploy{
@@ -157,7 +159,30 @@ func deployRecordFromRun(app *model.App, p *model.Pipeline, run *model.PipelineR
 			}
 		}
 	}
+	if imageRef != "" {
+		if pinned, err := pushedImageFromRun(run); err == nil {
+			rec.ImageRef = pinned
+		}
+		if pinned, err := name.NewDigest(rec.ImageRef); err == nil {
+			rec.Digest = pinned.DigestStr()
+		}
+	}
 	return rec
+}
+
+func pushedImageFromRun(run *model.PipelineRun) (string, error) {
+	if run != nil {
+		for _, stage := range run.StageRuns {
+			if stage.StageID != "push" || stage.Status != model.RunStatusSuccess {
+				continue
+			}
+			ref := stage.Outputs["image"]
+			if pinned, err := name.NewDigest(ref); err == nil && pinned.DigestStr() == stage.Outputs["digest"] {
+				return pinned.Name(), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("build/push did not produce a verified immutable image reference")
 }
 
 // Deploy runs Clone → Build → Push → Deploy for app. It returns the
@@ -172,9 +197,17 @@ func deployRecordFromRun(app *model.App, p *model.Pipeline, run *model.PipelineR
 // it aligns with the stub run row the caller created and the
 // app-run:<runID> WebSocket channel. An empty runID falls back to a
 // fresh UUID (used by callers without a coordinator/stub row).
-func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, logW io.Writer) (*model.Pipeline, *model.PipelineRun, error) {
+func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, logW io.Writer) (pipeline *model.Pipeline, result *model.PipelineRun, deployErr error) {
 	if err := ValidateAppDeployment(app); err != nil {
 		return nil, nil, err
+	}
+	if err := d.CheckRegistryDeployment(app); err != nil {
+		return nil, nil, err
+	}
+	var registryErr error
+	ctx, registryErr = d.prepareRegistryContext(ctx, app)
+	if registryErr != nil {
+		return nil, nil, registryErr
 	}
 	if err := CheckAppTarget(app); err != nil {
 		return nil, nil, err
@@ -193,16 +226,25 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 	// front so a broken link fails the deploy loudly instead of
 	// shipping a workload with missing config. Values are never
 	// logged — only the key count.
-	appEnv, err := d.EnvResolver.Resolve(ctx, app)
+	resolvedEnv, err := d.EnvResolver.ResolveDetailed(ctx, app)
 	if err != nil {
 		return nil, nil, err
 	}
+	ctx = WithLogSecrets(ctx, resolvedEnv.SecretValues)
+	if err := validateDockerfileBuildValues(ctx, app); err != nil {
+		return nil, nil, err
+	}
+	protectedLog := NewSecretLogWriter(ctx, logW)
+	defer func() { _ = protectedLog.Close() }() // Log delivery remains best-effort.
+	logW = protectedLog
+	defer func() { deployErr = redactLogError(ctx, deployErr) }()
+	appEnv := resolvedEnv.Values
 	if len(appEnv) > 0 {
 		fmt.Fprintf(logW, "[env] injecting %d var(s) from environment %s\n", len(appEnv), app.EnvironmentID)
 	}
 	opts := synthOpts{appEnv: appEnv, proxy: d.Proxy}
 
-	fmt.Fprintf(logW, "[clone] github.com/%s @ %s\n", app.GitHubRepo, app.Branch)
+	fmt.Fprintf(logW, "[clone] repository %s @ %s\n", app.GitHubRepo, app.Branch)
 	cloneOpts := github.CloneOptions{
 		Repo:      app.GitHubRepo,
 		Branch:    app.Branch,
@@ -213,7 +255,15 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 		cloneOpts.Commit = app.BuildPlan.Commit
 		cloneOpts.InstallationID = app.BuildPlan.InstallationID
 	}
-	workdir, err := d.clone(ctx, cloneOpts)
+	if commit, ok := ctx.Value(sourceCommitKey{}).(string); ok && commit != "" {
+		cloneOpts.Commit = commit
+	}
+	var workdir string
+	if d.SourceCheckout != nil && app.BuildPlan != nil && app.BuildPlan.SourceConnectionID != "" {
+		workdir, err = d.SourceCheckout(ctx, app, cloneOpts.Commit, logW)
+	} else {
+		workdir, err = d.clone(ctx, cloneOpts)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("clone: %w", err)
 	}
@@ -264,6 +314,9 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 		if len(resolved.Diagnostics) > 0 {
 			return nil, nil, fmt.Errorf("compose deployment needs review: %s", resolved.Diagnostics[0].Message)
 		}
+		if err := applyAppImageResolution(ctx, plan.Kind, resolved); err != nil {
+			return nil, nil, err
+		}
 		graph := resolved.Graph
 		if app.DeployTarget.Kind == model.DeployTargetDockerHost {
 			opts.composeFile, err = writeRuntimeCompose(resolved, app, workdir, registry, ts, opts)
@@ -283,6 +336,9 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 			return nil, nil, synthErr
 		}
 	} else {
+		if err := applyAppImageResolution(ctx, plan.Kind, nil); err != nil {
+			return nil, nil, err
+		}
 		if plan.Kind == model.BuildPlanBuildpack {
 			return nil, nil, fmt.Errorf("app buildpack execution is not implemented; select a Dockerfile or Compose file")
 		}
@@ -301,6 +357,11 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 	// Use a unique graph for every app deployment, including Dockerfile apps.
 	p.ID = ComposePipelineID(runID, app.ID, ts)
 	run.PipelineID = p.ID
+	for i := range p.Stages {
+		if p.Stages[i].Type == model.StageTypeDeploy {
+			p.Stages[i].EnvironmentID = app.EnvironmentID
+		}
+	}
 	if d.CheckExecution != nil {
 		hasBuild := false
 		for _, s := range p.Stages {
@@ -312,16 +373,21 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 			return nil, nil, err
 		}
 	}
+	if actor, ok := ctx.Value(deployActorKey{}).(*model.PipelineRun); ok {
+		run.StartedByUserSub, run.StartedByEmail = actor.StartedByUserSub, actor.StartedByEmail
+		run.StartedByGroups, run.StartedByTokenHash = actor.StartedByGroups, actor.StartedByTokenHash
+	}
 	if d.SavePipeline != nil {
 		if err := d.SavePipeline(ctx, DeploymentViewPipeline(p)); err != nil {
 			return p, nil, fmt.Errorf("save deployment graph: %w", err)
 		}
 	}
 	if d.SaveRun != nil {
-		run.Status = model.RunStatusRunning
+		visible := run.Clone()
+		visible.Status = model.RunStatusRunning
 		now := time.Now()
-		run.StartedAt = &now
-		if err := d.SaveRun(ctx, run); err != nil {
+		visible.StartedAt = &now
+		if err := d.SaveRun(ctx, visible); err != nil {
 			return p, nil, fmt.Errorf("save deployment run: %w", err)
 		}
 	}
@@ -342,11 +408,15 @@ func (d *AppDeployer) Deploy(ctx context.Context, app *model.App, runID string, 
 	}
 	if _, err := d.Executor.Execute(ctx, p, run); err != nil {
 		d.recordDeploy(ctx, deployRecordFromRun(app, p, run, historyRef, model.AppDeployKindDeploy))
-		NotifyDeployOutcome(d.Notifier, app, run.ID, err.Error(), false, false)
+		if _, queued := store.RunClaimFromContext(ctx); !queued {
+			NotifyDeployOutcome(d.Notifier, app, run.ID, err.Error(), false, false)
+		}
 		return p, run, fmt.Errorf("execute: %w", err)
 	}
 	d.recordDeploy(ctx, deployRecordFromRun(app, p, run, historyRef, model.AppDeployKindDeploy))
-	NotifyDeployOutcome(d.Notifier, app, run.ID, run.Error, run.Status == model.RunStatusSuccess, false)
+	if _, queued := store.RunClaimFromContext(ctx); !queued {
+		NotifyDeployOutcome(d.Notifier, app, run.ID, run.Error, run.Status == model.RunStatusSuccess, false)
+	}
 	if run.Status == model.RunStatusSuccess {
 		d.persistDeployedURL(ctx, app, p, logW)
 	}
@@ -426,6 +496,17 @@ func firstHostPort(ports []string) string {
 // source history row. The synthesized run uses runID so it aligns
 // with the caller's stub row and the app-run:<runID> WS channel.
 func (d *AppDeployer) DeployImage(ctx context.Context, app *model.App, imageRef, runID string, logW io.Writer) (*model.Pipeline, *model.PipelineRun, error) {
+	if app == nil {
+		return nil, nil, model.ErrInvalidRegistryAuthority
+	}
+	if err := d.CheckRegistryDeployment(app); err != nil {
+		return nil, nil, err
+	}
+	var registryErr error
+	ctx, registryErr = d.prepareRegistryContext(ctx, app)
+	if registryErr != nil {
+		return nil, nil, registryErr
+	}
 	if app.DeployTarget.Kind != model.DeployTargetKubernetes {
 		return nil, nil, fmt.Errorf("rollback: deploy target %q not supported (kubernetes only)", app.DeployTarget.Kind)
 	}
@@ -493,18 +574,54 @@ func (d *AppDeployer) DeployImage(ctx context.Context, app *model.App, imageRef,
 // runID aligns the synthesized run with the caller's stub row and the
 // app-run:<runID> WS channel, exactly like Deploy.
 func (d *AppDeployer) BuildAndPushImage(ctx context.Context, app *model.App, runID string, logW io.Writer) (imageRef string, p *model.Pipeline, run *model.PipelineRun, err error) {
+	if err := ValidateAppDeployment(app); err != nil {
+		return "", nil, nil, err
+	}
+	ctx, err = d.prepareRegistryContext(ctx, app)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if d.CheckExecution != nil {
+		if err := d.CheckExecution(app, true); err != nil {
+			return "", nil, nil, err
+		}
+	}
 	if app.GitHubRepo == "" {
 		return "", nil, nil, fmt.Errorf("app %s: GitHubRepo is empty", app.ID)
 	}
+	var runtimeSecretValues []string
+	if usesDockerfileEnvironment(app.BuildPlan) {
+		resolved, resolveErr := d.EnvResolver.ResolveDetailed(ctx, app)
+		if resolveErr != nil {
+			return "", nil, nil, resolveErr
+		}
+		runtimeSecretValues = resolved.SecretValues
+	}
+	ctx = WithLogSecrets(ctx, runtimeSecretValues)
+	if err := validateDockerfileBuildValues(ctx, app); err != nil {
+		return "", nil, nil, err
+	}
 	logW = fanOut(logW, d.LogSink)
+	protectedLog := NewSecretLogWriter(ctx, logW)
+	defer func() { _ = protectedLog.Close() }() // Log delivery remains best-effort.
+	logW = protectedLog
+	defer func() { err = redactLogError(ctx, err) }()
 
-	fmt.Fprintf(logW, "[clone] github.com/%s @ %s\n", app.GitHubRepo, app.Branch)
-	workdir, cloneErr := github.Clone(ctx, github.CloneOptions{
-		Repo:      app.GitHubRepo,
-		Branch:    app.Branch,
-		Depth:     1,
-		LogWriter: logW,
-	})
+	fmt.Fprintf(logW, "[clone] repository %s @ %s\n", app.GitHubRepo, app.Branch)
+	cloneOpts := github.CloneOptions{Repo: app.GitHubRepo, Branch: app.Branch, Depth: 1, LogWriter: logW}
+	if app.BuildPlan != nil {
+		cloneOpts.Commit, cloneOpts.InstallationID = app.BuildPlan.Commit, app.BuildPlan.InstallationID
+	}
+	if commit, ok := ctx.Value(sourceCommitKey{}).(string); ok && commit != "" {
+		cloneOpts.Commit = commit
+	}
+	var workdir string
+	var cloneErr error
+	if d.SourceCheckout != nil && app.BuildPlan != nil && app.BuildPlan.SourceConnectionID != "" {
+		workdir, cloneErr = d.SourceCheckout(ctx, app, cloneOpts.Commit, logW)
+	} else {
+		workdir, cloneErr = d.clone(ctx, cloneOpts)
+	}
 	if cloneErr != nil {
 		return "", nil, nil, fmt.Errorf("clone: %w", cloneErr)
 	}
@@ -514,13 +631,19 @@ func (d *AppDeployer) BuildAndPushImage(ctx context.Context, app *model.App, run
 		}
 	}()
 
+	if cloneOpts.Commit != "" {
+		actual, headErr := github.HeadCommit(ctx, workdir)
+		if headErr != nil || actual != cloneOpts.Commit {
+			return "", nil, nil, fmt.Errorf("cloned source does not match selected commit")
+		}
+	}
 	plan := app.BuildPlan
 	if plan == nil {
 		plan = buildplan.Detect(workdir)
 		fmt.Fprintf(logW, "[plan] detected kind=%s path=%s\n", plan.Kind, plan.Path)
 	}
-	if plan.Kind == model.BuildPlanCompose {
-		return "", nil, nil, fmt.Errorf("canary build: compose apps are not supported (single-image only)")
+	if plan.Kind != model.BuildPlanDockerfile {
+		return "", nil, nil, fmt.Errorf("canary build: only a single Dockerfile image is supported")
 	}
 
 	registry := app.RegistryRef
@@ -541,8 +664,12 @@ func (d *AppDeployer) BuildAndPushImage(ctx context.Context, app *model.App, run
 	if _, execErr := d.Executor.Execute(ctx, p, run); execErr != nil {
 		return "", p, run, fmt.Errorf("execute build/push: %w", execErr)
 	}
-	fmt.Fprintf(logW, "[built] image=%s run=%s status=%s\n", tag, run.ID, run.Status)
-	return tag, p, run, nil
+	pinned, pinErr := pushedImageFromRun(run)
+	if pinErr != nil {
+		return "", p, run, pinErr
+	}
+	fmt.Fprintf(logW, "[built] image=%s run=%s status=%s\n", pinned, run.ID, run.Status)
+	return pinned, p, run, nil
 }
 
 // stripDeployStage returns the pipeline/run with any deploy stage (and
@@ -591,6 +718,17 @@ type synthOpts struct {
 
 // synthesizePipeline builds Build → Push → Deploy after checkout completes.
 func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag string, cache *model.CacheSpec, opts synthOpts) (*model.Pipeline, *model.PipelineRun) {
+	if usesDockerfileEnvironment(plan) {
+		// Deploy/PrepareImages validate existence before source effects. Keep this
+		// projection defensive: callers cannot accidentally inject an extra key.
+		selected := map[string]string{}
+		for _, key := range plan.ServiceEnvironment[DockerfileRuntimeService] {
+			if value, present := opts.appEnv[key]; present {
+				selected[key] = value
+			}
+		}
+		opts.appEnv = selected
+	}
 	dockerfile := "Dockerfile"
 	var buildArgs map[string]string
 	if plan != nil {
@@ -630,19 +768,21 @@ func synthesizePipeline(app *model.App, plan *model.BuildPlan, workdir, tag stri
 	}
 	if app.DeployTarget.Kind == model.DeployTargetKubernetes {
 		proxyHost := opts.proxy.hostFor(AppPrefix(app))
-		manifest := defaultKubernetesManifest(app, tag, opts.appEnv, proxyHost, opts.proxy.IngressClass)
+		manifest := defaultKubernetesManifest(app, "${stages.push.image}", opts.appEnv, proxyHost, opts.proxy.IngressClass)
 		stages = append(stages, model.Stage{
 			ID: "deploy", Name: "Deploy", Type: model.StageTypeDeploy,
 			Config: model.StageConfig{
-				Namespace:    app.DeployTarget.Namespace,
-				ManifestPath: manifest,
-				Env:          mergeEnv(opts.appEnv, nil),
-				ProxyHost:    proxyHost,
+				Namespace:     app.DeployTarget.Namespace,
+				ManifestPath:  manifest,
+				DeployRuntime: string(deployRuntimeKubernetes),
+				RuntimeName:   AppPrefix(app),
+				Env:           mergeEnv(opts.appEnv, nil),
+				ProxyHost:     proxyHost,
 			},
 		})
 		edges = append(edges, model.Edge{ID: "e2", Source: "push", Target: "deploy"})
 	} else {
-		stages = append(stages, model.Stage{ID: "deploy", Name: "Deploy", Type: model.StageTypeDeploy, Config: model.StageConfig{DeployRuntime: string(deployRuntimeFor(app.DeployTarget.Kind)), RuntimeName: AppPrefix(app), Image: tag, Env: mergeEnv(opts.appEnv, nil)}})
+		stages = append(stages, model.Stage{ID: "deploy", Name: "Deploy", Type: model.StageTypeDeploy, Config: model.StageConfig{DeployRuntime: string(deployRuntimeFor(app.DeployTarget.Kind)), RuntimeName: AppPrefix(app), Image: "${stages.push.image}", Env: mergeEnv(opts.appEnv, nil)}})
 		edges = append(edges, model.Edge{ID: "e2", Source: "push", Target: "deploy"})
 	}
 
@@ -768,7 +908,7 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 			continue
 		}
 		hasBuild := svc.Build != nil
-		deployImage := svc.Image // image-only services deploy as-is
+		deployImage := svc.Image // durable App admission has replaced image-only tags with digests
 
 		if hasBuild {
 			bctx := "."
@@ -820,11 +960,19 @@ func synthesizePipelineFromCompose(app *model.App, graph *model.ComposeGraph, wo
 			edges = append(edges, model.Edge{ID: edgeID(), Source: buildID, Target: pushID})
 		}
 
+		if hasBuild {
+			deployImage = "${stages.push-" + slug + ".image}"
+		}
+
 		deployID := "deploy-" + slug
 		deployStageID[svc.Name] = deployID
-		// Merged runtime env: the App's linked Environment (PlainVars +
-		// Secrets) under the compose-literal environment (compose wins).
-		svcEnv := mergeEnv(opts.appEnv, svc.Environment)
+		// Only reviewed linked keys reach a service when explicit scope is
+		// enabled. Compose literals keep their existing override precedence.
+		selectedEnv, err := serviceEnvironment(app.BuildPlan, svc.Name, opts.appEnv)
+		if err != nil {
+			return nil, nil, err
+		}
+		svcEnv := mergeEnv(selectedEnv, svc.Environment)
 		proxyHost := opts.proxy.hostFor(RuntimeServiceName(app, svc.Name))
 		deployCfg := model.StageConfig{
 			Command:            svc.CommandArgs,

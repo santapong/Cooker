@@ -14,10 +14,12 @@ test.describe('airlock — signed-out session', () => {
     await expect(card.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
     await expect(card.getByRole('button', { name: 'Continue with single sign-on' })).toBeVisible();
     await expect(card.getByLabel('Email')).toBeVisible();
-    await expect(card.getByLabel('Password')).toBeVisible();
+    await expect(card.getByLabel('Password', { exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: 'Sign in' })).toBeVisible();
     await expect(card.getByRole('link', { name: 'Create an account' })).toHaveAttribute('href', '/signup');
-    await expect(page.locator('.airlock .starfield')).toHaveCount(1);
+    await expect(page.getByText('Example pipeline', { exact: true })).toBeVisible();
+    await expect(page.locator('.auth-pipeline-step')).toHaveCount(3);
+    await expect(page.locator('.airlock .starfield')).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath('signin.png') });
     await testInfo.attach('signin', { path: testInfo.outputPath('signin.png'), contentType: 'image/png' });
   });
@@ -29,7 +31,7 @@ test.describe('airlock — signed-out session', () => {
     await expect(page).toHaveURL(/\/signup$/);
     const card = page.locator('.airlock-card');
     await expect(card.getByRole('heading', { level: 1, name: 'Create an account' })).toBeVisible();
-    await expect(card.getByLabel('Confirm password')).toBeVisible();
+    await expect(card.getByLabel('Confirm password', { exact: true })).toBeVisible();
     expect(await card.evaluate((el) => getComputedStyle(el).animationName)).toBe('airlock-in');
     await page.screenshot({ path: testInfo.outputPath('signup.png') });
     await testInfo.attach('signup', { path: testInfo.outputPath('signup.png'), contentType: 'image/png' });
@@ -45,7 +47,7 @@ test.describe('airlock — signed-out session', () => {
     await page.goto('/pipelines');
     await expect(page).toHaveURL(/\/signin$/);
     await page.getByLabel('Email').fill('e2e@cooker.local');
-    await page.getByLabel('Password').fill('correct horse');
+    await page.getByLabel('Password', { exact: true }).fill('correct horse');
     await page.getByRole('button', { name: 'Sign in' }).click();
     await expect(page).toHaveURL(/\/pipelines$/);
     await expect(page.locator('a.chart-name').first()).toBeVisible();

@@ -153,12 +153,21 @@ jobs:
         env:
           CI: "1"
         run: npm run test:e2e
+      - name: E2E (Docker log snapshot controls)
+        working-directory: frontend
+        env:
+          CI: "1"
+        # Separate local-auth build and output preserve the ordinary fixture
+        # bundle/report. These tests use owned API fixtures, not Docker/cloud.
+        run: npm run test:e2e:runtime-logs
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report
-          path: frontend/playwright-report/
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/runtime-logs/
           if-no-files-found: ignore
           retention-days: 7
 

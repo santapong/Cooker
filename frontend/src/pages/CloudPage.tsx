@@ -6,6 +6,7 @@ import Gauge from '../components/instruments/Gauge';
 import { Actions } from '../components/ui/form';
 import { ChartRows, type ChartRow } from '../components/list/StarChart';
 import { timeAgo } from '../utils/time';
+import VercelDeployments from '../components/cloud/VercelDeployments';
 
 const PROVIDERS: ProviderFilter[] = ['all', 'aws', 'gcp'];
 const TYPES: TypeFilter[] = ['all', 'compute', 'cluster', 'registry'];
@@ -17,7 +18,7 @@ function resourceStatus(r: CloudResource): 'ok' | 'idle' | 'warn' {
   return 'idle';
 }
 
-/** Cloud — read-only inventory and month-to-date spend across configured AWS / GCP accounts. */
+/** Cloud — connected deployment history plus optional infrastructure inventory. */
 export default function CloudPage() {
   const inventory = useCloudStore((s) => s.inventory);
   const loading = useCloudStore((s) => s.loading);
@@ -49,7 +50,7 @@ export default function CloudPage() {
       <header className="detail-head">
         <div className="grow">
           <h1>Cloud</h1>
-          <p>Read-only inventory and month-to-date spend for the accounts this server is configured for.</p>
+          <p>Deployment history, infrastructure inventory and spend for your connected accounts.</p>
         </div>
         <Actions>
           <button type="button" className="hud-btn" onClick={() => void refresh()} disabled={refreshing || !inventory?.enabled}>
@@ -57,6 +58,7 @@ export default function CloudPage() {
           </button>
         </Actions>
       </header>
+      <VercelDeployments />
       {error && (
         <div className="form-error" role="alert">
           {error}

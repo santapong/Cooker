@@ -161,7 +161,9 @@ export function useStageLogs({
       // refills from its replay store.
       if (isControlFrame(data)) {
         setStreamTruncated(true);
-        void connect();
+        // Retention and storage outages survive reconnects; retrying here
+        // would create an endless socket loop with an unchanged history gap.
+        if (data.control === 'stream-truncated') void connect();
         return;
       }
 

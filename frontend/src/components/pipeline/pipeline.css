@@ -1,0 +1,83 @@
+/* Cooker's authored DAG surface. Scope all rules to this editor. */
+.pipeline-editor { min-width: 0; width: 100%; padding: 28px; overflow: auto; color: var(--ink-1); }
+.pipeline-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+.pipeline-editor .hud-title { font-size: clamp(24px, 3vw, 34px); font-weight: 600; letter-spacing: -.035em; margin: 0 0 10px; outline: none; overflow-wrap: anywhere; }
+.pipeline-editor .hud-title:focus-visible { outline: var(--focus); }
+.pipeline-editor p { font-size: 13px; line-height: 1.7; color: var(--ink-3); margin: 0 0 14px; }
+.pipeline-editor .pipeline-eyebrow { font: 10px var(--font-mono); letter-spacing: .1em; color: var(--ember); margin-bottom: 12px; }
+.pipeline-page-actions { display: flex; gap: 8px; flex-wrap: wrap; flex: none; }
+.pipeline-source-binding { margin-bottom: 20px; padding: 0 18px 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--hull-1); }
+.pipeline-source-binding summary { min-height: 48px; padding: 16px 0; cursor: pointer; font-size: 13px; overflow-wrap: anywhere; }
+.pipeline-source-binding fieldset { border: 0; min-width: 0; padding: 0; }
+.pipeline-source-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px; }
+.pipeline-source-binding .field { margin-bottom: 16px; min-width: 0; }
+.pipeline-editor .hud-btn { min-height: 44px; }
+.pipeline-unsaved { color: var(--ember); }
+.pipeline-reading-guide { display: flex; align-items: center; gap: 18px; border: 1px solid var(--line); background: var(--hull-1); border-radius: 12px; padding: 18px; margin-bottom: 22px; }
+.pipeline-reading-guide > span { flex: none; font: 600 15px var(--font-mono); color: var(--ember); }
+.pipeline-reading-guide strong { font-size: 14px; }
+.pipeline-reading-guide p { margin: 4px 0 0; }
+.pipeline-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+.pipeline-board { min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--hull-1); }
+.pipeline-toolbar { padding: 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; border-bottom: 1px solid var(--line); }
+.pipeline-toolbar [role=group] { display: flex; align-items: center; gap: 3px; }
+.pipeline-toolbar [role=group]:last-child { margin-left: auto; }
+.pipeline-toolbar button, .pipeline-stage-chip { min-width: 44px; min-height: 44px; padding: 8px 12px; border: 1px solid transparent; border-radius: 6px; color: var(--ink-2); background: transparent; font: 12px var(--font-body); cursor: pointer; }
+.pipeline-toolbar button:hover, .pipeline-toolbar button[aria-pressed=true] { border-color: var(--line); color: var(--ink-1); background: var(--hull-0); }
+.pipeline-toolbar [role=group] > span { min-width: 44px; font: 11px var(--font-mono); text-align: center; color: var(--ink-3); }
+.pipeline-find { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-3); }
+.pipeline-editor select { max-width: 100%; min-width: 0; min-height: 44px; padding: 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--hull-0); color: var(--ink-1); font: 12px var(--font-body); }
+.pipeline-find select { max-width: 180px; }
+.pipeline-map { position: relative; height: clamp(400px, 59vh, 620px); background-color: var(--hull-0, #0b0b0c); background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 20px 20px; }
+.pipeline-map .react-flow__node { padding: 0; border: 0; background: transparent; border-radius: 10px; }
+.pipeline-map .react-flow__node:focus-visible { outline: var(--focus); outline-offset: 5px; }
+.pipeline-stage-card { box-sizing: border-box; position: relative; width: 204px; padding: 16px 18px; border: 1px solid var(--ink-3); border-radius: 10px; background: var(--hull-1, #141416); color: var(--ink-1); box-shadow: 0 5px 16px #0002; }
+.pipeline-stage-card.is-selected { border: 2px solid var(--ember); padding: 15px 17px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--ember) 12%, transparent); }
+.pipeline-stage-kind { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-3); }
+.pipeline-stage-kind svg { color: var(--ember); flex: none; }
+.pipeline-stage-card .lbl { display: block; position: static; margin: 12px 0 6px; font-size: 14px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pipeline-stage-wait { display: block; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
+.pipeline-map .pipeline-port { opacity: 1; width: 8px; height: 8px; min-width: 8px; min-height: 8px; border: 1px solid var(--ink-3); border-radius: 50%; background: var(--hull-0); }
+.pipeline-map .pipeline-port-new { border-color: var(--ember); background: var(--ember); width: 10px; height: 10px; }
+.pipeline-legend { padding: 14px 16px; margin: 0 !important; border-top: 1px solid var(--line); font-size: 11px !important; }
+.pipeline-legend b { color: var(--ink-1); margin-right: 10px; white-space: nowrap; }
+.pipeline-stage-tray { display: flex; flex-wrap: wrap; gap: 5px; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--hull-0); }
+.pipeline-stage-chip { display: inline-flex; align-items: center; gap: 8px; cursor: grab; }
+.pipeline-stage-chip:hover { background: var(--hull-1); color: var(--ember); }
+.pipeline-editor .pipeline-feedback { padding: 12px 16px; margin: 0; border-top: 1px solid var(--line); color: var(--ember); }
+.pipeline-empty { position: absolute; inset: 44% 20px auto; text-align: center; pointer-events: none; }
+.pipeline-directory { padding: 0 16px; border-top: 1px solid var(--line); }
+.pipeline-directory summary, .pipeline-edit-settings summary { min-height: 48px; padding: 16px 0; cursor: pointer; font-size: 13px; font-weight: 600; }
+.pipeline-directory ol, .pipeline-prerequisites, .pipeline-step-list, .pipeline-step-list ul { list-style: none; padding: 0; margin: 0; }
+.pipeline-directory li button, .pipeline-prerequisites button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: var(--hull-0); color: var(--ink-2); padding: 10px; margin-bottom: 8px; font: 12px/1.6 var(--font-body); cursor: pointer; }
+.pipeline-directory li button:hover, .pipeline-directory li button[aria-pressed=true], .pipeline-prerequisites button:hover { border-color: var(--ember); color: var(--ink-1); }
+.pipeline-number { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border: 1px solid var(--ink-3); border-radius: 50%; color: var(--ember); font: 12px var(--font-mono); }
+.pipeline-inspector { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--hull-1); }
+.pipeline-inspector-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.pipeline-inspector h2 { font-size: 18px; line-height: 1.5; margin: 0 0 14px; overflow-wrap: anywhere; }
+.pipeline-inspector h3 { font-size: 13px; line-height: 1.5; margin: 20px 0 8px; }
+.pipeline-inspector-heading h2 { margin: 0; font-size: 14px; }
+.pipeline-inspector-heading > button { margin-left: auto; min-width: 44px; min-height: 44px; font-size: 22px; background: transparent; color: var(--ink-3); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.pipeline-editor .pipeline-rule { font-size: 16px; color: var(--ink-1); line-height: 1.8; }
+.pipeline-dependency-story { padding-left: 14px; margin: 24px 0; border-left: 2px solid var(--ember); }
+.pipeline-dependency-story dt { color: var(--ink-3); font-size: 11px; }
+.pipeline-dependency-story dd { margin: 0 0 16px; }
+.pipeline-dependency-story button, .pipeline-text-action { min-height: 44px; border: 0; background: transparent; color: var(--ember); font-size: 13px; text-align: left; padding: 7px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 4px; }
+.pipeline-why { padding: 14px; background: color-mix(in srgb, var(--ember) 7%, var(--hull-0)); border-radius: 8px; font-size: 12px; }
+.pipeline-why p { margin: 6px 0 0; font-size: 12px; }
+.pipeline-edit-settings { margin-top: 20px; border-top: 1px solid var(--line); }
+.pipeline-edit-settings fieldset { border: 0; padding: 0; min-width: 0; margin: 0; }
+.pipeline-edit-settings label { display: flex; flex-direction: column; gap: 8px; font-size: 12px; margin-bottom: 16px; }
+.pipeline-edit-settings input, .pipeline-edit-settings textarea { width: 100%; min-width: 0; }
+.pipeline-edit-settings .mono { overflow-wrap: anywhere; font-size: 11px; margin-top: 18px; }
+.pipeline-edit-settings .hud-btn { margin-bottom: 12px; }
+.pipeline-remove { min-height: 44px; margin-top: 12px; padding: 8px 0; background: transparent; color: var(--star-fail, #f29c91); border: 0; font-size: 12px; cursor: pointer; }
+.pipeline-step-list { padding: 16px; max-height: 620px; overflow: auto; }
+.pipeline-step-list > li { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 12px; background: var(--hull-0); }
+.pipeline-list-stage { display: flex; flex-direction: column; gap: 6px; width: 100%; min-height: 44px; padding: 5px 0; text-align: left; background: transparent; border: 0; color: var(--ink-1); cursor: pointer; }
+.pipeline-list-stage strong { font-size: 14px; }
+.pipeline-list-stage span { font-size: 12px; color: var(--ink-3); }
+.pipeline-list-stage[aria-pressed=true] strong { color: var(--ember); }
+.pipeline-step-list li li button { width: 100%; min-height: 44px; text-align: left; color: var(--ink-2); background: var(--hull-1); border: 1px solid var(--line); border-radius: 6px; padding: 9px; margin-top: 8px; font: 12px/1.6 var(--font-body); cursor: pointer; }
+@media(max-width:1440px) { .pipeline-workspace { grid-template-columns: minmax(0, 1fr); } .pipeline-inspector { max-width: none; } }
+@media(max-width:700px) { .pipeline-editor { padding: 16px; } .pipeline-page-heading { align-items: start; flex-direction: column; gap: 12px; } .pipeline-page-actions { width: 100%; } .pipeline-reading-guide { align-items: start; padding: 14px; gap: 12px; } .pipeline-toolbar { gap: 7px; } .pipeline-toolbar [role=group]:last-child { margin-left: 0; } .pipeline-find { width: 100%; order: 3; } .pipeline-find select { flex: 1; max-width: none; } .pipeline-map { height: 480px; } .pipeline-stage-chip { padding: 8px; } }

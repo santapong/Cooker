@@ -18,6 +18,7 @@ import (
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/source/github"
+	"github.com/santapong/cooker/internal/store"
 	"github.com/santapong/cooker/internal/validate"
 )
 
@@ -29,7 +30,7 @@ func validateAppInput(a *model.App) error {
 	if err := validate.Description("description", a.Description); err != nil {
 		return err
 	}
-	if err := validate.GitHubRepo(a.GitHubRepo); err != nil {
+	if err := validateAppRepository(a); err != nil {
 		return err
 	}
 	if err := validate.GitRefName("branch", a.Branch); err != nil {
@@ -113,6 +114,14 @@ func (h *Handler) CreateApp(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := service.ValidateRuntimeEnvironmentBinding(c.Request.Context(), h.Store.Environments, a.EnvironmentID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.prepareAppSource(c, &a); err != nil {
+		c.JSON(422, gin.H{"error": err.Error()})
+		return
+	}
 	if a.Branch == "" {
 		a.Branch = "main"
 	}
@@ -126,6 +135,9 @@ func (h *Handler) CreateApp(c *gin.Context) {
 	a.ID = uuid.New().String()
 	now := time.Now()
 	a.CreatedAt, a.UpdatedAt = now, now
+	// PostgreSQL starts App definitions at one. Return the same server-owned
+	// token for both stores so this response can authorize the first edit.
+	a.Version = 1
 	if abortStoreErr(c, h.Store.Apps.Create(c.Request.Context(), &a), "app not found") {
 		return
 	}
@@ -145,6 +157,14 @@ func (h *Handler) UpdateApp(c *gin.Context) {
 	}
 	if err := validateAppInput(&a); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := service.ValidateRuntimeEnvironmentBinding(c.Request.Context(), h.Store.Environments, a.EnvironmentID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.prepareAppSource(c, &a); err != nil {
+		c.JSON(422, gin.H{"error": err.Error()})
 		return
 	}
 	a.ID = id
@@ -247,11 +267,31 @@ func (h *Handler) DeployApp(c *gin.Context) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
 	}
+	if err := h.AppDeployer.CheckRegistryDeployment(a); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		return
+	}
 	if h.AppDeployer.CheckExecution != nil {
 		if err := h.AppDeployer.CheckExecution(a, false); err != nil {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 			return
 		}
+	}
+	if h.AppDeployQueue != nil {
+		actor := &model.PipelineRun{}
+		if u := auth.GetUser(c); u != nil {
+			actor.StartedByUserSub, actor.StartedByEmail = u.Subject, u.Email
+			actor.StartedByGroups = append([]string(nil), u.Groups...)
+		}
+		receipt, err := h.AppDeployQueue.Enqueue(c.Request.Context(), a, "", actor)
+		if err != nil {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{"appId": a.ID, "runId": receipt.RunID, "jobId": receipt.JobID, "pipelineId": receipt.PipelineID, "planDigest": receipt.PlanDigest, "commit": receipt.Commit,
+			"status": "pending", "strategy": "rolling", "repo": a.GitHubRepo, "branch": a.Branch, "channel": "app-run:" + receipt.RunID, "stream": "/ws/app-run/" + receipt.RunID,
+			"deploymentView": "/apps/" + a.ID + "/deployments/" + receipt.PipelineID + "/" + receipt.RunID})
+		return
 	}
 	runID := uuid.New().String()
 	channel := "app-run:" + runID
@@ -499,85 +539,11 @@ func (h *Handler) GitHubWebhook(c *gin.Context) {
 	h.triggerWebhookDeploy(c, app, "github", branch, ev.After)
 }
 
-// triggerWebhookDeploy starts a real deploy for a signature-verified
-// push to a matching branch of an auto-deploy app. It converges onto
-// the exact path the manual "Deploy" button uses (DeployApp): a stub
-// run row is created before Spawn (F-07: so the coordinator's first
-// heartbeat lands and the orphan sweep can reap a crashed run), then
-// the deploy executes in a coordinator-owned goroutine via
-// runAppDeployCtx → AppDeployer.Deploy. Because the AppDeployer is
-// configured with the AppDeploys store, the terminal run is recorded
-// in app_deploys (migration 018) exactly like a manual deploy.
-//
-// The deploy is attributed to the webhook via the run's StartedByEmail
-// ("webhook:<source>", e.g. "webhook:github"); StartedByUserSub is left
-// empty, which the deploy-stage governance hook reads as "no human
-// actor to gate" — matching the manual DeployApp stub, which also omits
-// it. Orchestration lives here in the handler's service-adjacent helper
-// rather than being duplicated in each provider's webhook; the response
-// is the same 202 the webhooks have always returned, so the
-// idempotency middleware (keyed on X-GitHub-Delivery etc.) keeps
-// replaying it on redelivery and no double-deploy occurs.
-//
-// source is the provider slug ("github", "gitlab", "gitea",
-// "bitbucket"). commit may be empty (Bitbucket Server push payloads
-// don't always carry a top-level SHA); it's echoed in the response for
-// operator triage only and never drives the deploy.
+// triggerWebhookDeploy retains the old receiver URLs as an explicit migration
+// boundary. Legacy per-App hooks have no approved machine actor or immutable
+// deployment envelope, so they cannot start unattended work.
 func (h *Handler) triggerWebhookDeploy(c *gin.Context, app *model.App, source, branch, commit string) {
-	if h.AppDeployer == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "app deployer not configured"})
-		return
-	}
-
-	runID := uuid.New().String()
-	channel := "app-run:" + runID
-
-	// Stub run row before Spawn — identical F-07 rationale as DeployApp
-	// and RollbackApp. Attribute the run to the webhook so deploy history
-	// and any audit view can tell auto-deploys from manual clicks.
-	if h.Runs != nil && h.Store != nil {
-		now := time.Now()
-		stub := &model.PipelineRun{
-			ID:             runID,
-			PipelineID:     app.ID,
-			Status:         model.RunStatusRunning,
-			StartedAt:      &now,
-			StartedByEmail: "webhook:" + source,
-		}
-		if createErr := h.Store.Runs.Create(c.Request.Context(), stub); createErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "create run: " + createErr.Error()})
-			return
-		}
-	}
-
-	if h.Runs != nil {
-		if err := h.Runs.Spawn(context.Background(), runID, func(ctx context.Context) error {
-			h.runAppDeployCtx(ctx, app, runID, channel)
-			return nil
-		}); err != nil {
-			abortRunCapacity(c, err)
-			return
-		}
-	} else {
-		go h.runAppDeploy(app, runID, channel)
-	}
-
-	resp := gin.H{
-		"appId":   app.ID,
-		"runId":   runID,
-		"branch":  branch,
-		"channel": channel,
-		"status":  "running",
-		"stream":  "/ws/app-run/" + runID,
-		// Same deterministic compose-deploy ID DeployApp returns, so the
-		// deployment view can load the grouped DAG (harmless for non-compose).
-		"pipelineId":     service.ComposePipelineID(runID, app.ID, 0),
-		"deploymentView": "/apps/" + app.ID + "/deployments/" + service.ComposePipelineID(runID, app.ID, 0) + "/" + runID,
-	}
-	if commit != "" {
-		resp["commit"] = commit
-	}
-	c.JSON(http.StatusAccepted, resp)
+	c.JSON(http.StatusConflict, gin.H{"error": "This legacy webhook requires migration to a source connection and reviewed trigger rule", "code": "source_connection_required", "appId": app.ID})
 }
 
 // DetectAppBuild shallow-clones a repo the user is about to import and
@@ -621,7 +587,7 @@ func (h *Handler) DetectAppBuild(c *gin.Context) {
 // newest-first (roadmap M3).
 func (h *Handler) ListAppDeploys(c *gin.Context) {
 	a, err := h.Store.Apps.Get(c.Request.Context(), c.Param("id"))
-	if abortStoreErr(c, err, "app not found") {
+	if abortAppHistoryReadErr(c, err, "app not found") {
 		return
 	}
 	if h.Store.AppDeploys == nil {
@@ -638,14 +604,29 @@ func (h *Handler) ListAppDeploys(c *gin.Context) {
 		limit = 100
 	}
 	deploys, err := h.Store.AppDeploys.ListByApp(c.Request.Context(), a.ID, limit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if abortAppHistoryReadErr(c, err, "deploy history not found") {
 		return
 	}
 	if deploys == nil {
 		deploys = []*model.AppDeploy{}
 	}
 	c.JSON(http.StatusOK, gin.H{"deploys": deploys})
+}
+
+// Storage diagnostics can contain connection details or private paths. Keep
+// known response semantics while exposing only a fixed history-read summary.
+func abortAppHistoryReadErr(c *gin.Context, err error, notFound string) bool {
+	if err == nil {
+		return false
+	}
+	status, message := http.StatusInternalServerError, "deployment history is unavailable"
+	if errors.Is(err, store.ErrNotFound) {
+		status, message = http.StatusNotFound, notFound
+	} else if errors.Is(err, store.ErrConflict) {
+		status, message = http.StatusConflict, "version conflict; refetch and retry"
+	}
+	c.JSON(status, gin.H{"error": message})
+	return true
 }
 
 // resolveRollbackTarget picks the history row a rollback re-deploys.
@@ -656,7 +637,7 @@ func (h *Handler) ListAppDeploys(c *gin.Context) {
 func (h *Handler) resolveRollbackTarget(c *gin.Context, appID, deployID string) (*model.AppDeploy, bool) {
 	if deployID != "" {
 		d, err := h.Store.AppDeploys.Get(c.Request.Context(), deployID)
-		if abortStoreErr(c, err, "deploy not found") {
+		if abortAppHistoryReadErr(c, err, "deploy not found") {
 			return nil, false
 		}
 		if d.AppID != appID {
@@ -670,8 +651,7 @@ func (h *Handler) resolveRollbackTarget(c *gin.Context, appID, deployID string) 
 		return d, true
 	}
 	history, err := h.Store.AppDeploys.ListByApp(c.Request.Context(), appID, 50)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if abortAppHistoryReadErr(c, err, "deploy history not found") {
 		return nil, false
 	}
 	var candidates []*model.AppDeploy
@@ -692,7 +672,7 @@ func (h *Handler) resolveRollbackTarget(c *gin.Context, appID, deployID string) 
 // and single-image (non-compose) history rows.
 func (h *Handler) RollbackApp(c *gin.Context) {
 	a, err := h.Store.Apps.Get(c.Request.Context(), c.Param("id"))
-	if abortStoreErr(c, err, "app not found") {
+	if abortAppHistoryReadErr(c, err, "app not found") {
 		return
 	}
 	if h.AppDeployer == nil || h.Store.AppDeploys == nil {
@@ -701,6 +681,10 @@ func (h *Handler) RollbackApp(c *gin.Context) {
 	}
 	if a.DeployTarget.Kind != model.DeployTargetKubernetes {
 		c.JSON(http.StatusConflict, gin.H{"error": "rollback supports kubernetes deploy targets only"})
+		return
+	}
+	if err := h.AppDeployer.CheckRegistryDeployment(a); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
 	}
 

@@ -34,6 +34,7 @@ type stream struct {
 	key     string
 	entries []Entry
 	bytes   int
+	lastSeq int
 	elem    *list.Element
 }
 
@@ -70,10 +71,26 @@ func streamKey(runID, stageID string) string {
 // stream-count cap is exceeded. Always returns nil — the in-memory
 // backend cannot fail — but keeps the error return to satisfy Store.
 func (m *Memory) Append(_ context.Context, runID, stageID string, e Entry) error {
-	key := streamKey(runID, stageID)
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.appendLocked(runID, stageID, e)
+	return nil
+}
+
+func (m *Memory) AppendNext(_ context.Context, runID, stageID string, e Entry) (Entry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e.Seq = 1
+	if s := m.streams[streamKey(runID, stageID)]; s != nil {
+		e.Seq = s.lastSeq + 1
+	}
+	e.Line = boundedLine(e.Line, m.maxBytesPerStage)
+	m.appendLocked(runID, stageID, e)
+	return e, nil
+}
+
+func (m *Memory) appendLocked(runID, stageID string, e Entry) {
+	key := streamKey(runID, stageID)
 
 	s, ok := m.streams[key]
 	if !ok {
@@ -85,14 +102,15 @@ func (m *Memory) Append(_ context.Context, runID, stageID string, e Entry) error
 		m.lru.MoveToBack(s.elem)
 	}
 
+	e.Line = boundedLine(e.Line, m.maxBytesPerStage)
 	s.entries = append(s.entries, e)
-	s.bytes += len(e.Line)
+	s.lastSeq = max(s.lastSeq, e.Seq)
+	s.bytes += max(len(e.Line), 1)
 
 	// Ring buffer: drop oldest entries until we're back under the cap.
-	// Guard against an empty slice so a single line larger than the cap
-	// still survives (dropping it would lose the only content).
-	for s.bytes > m.maxBytesPerStage && len(s.entries) > 1 {
-		s.bytes -= len(s.entries[0].Line)
+	// Oversize lines have already been truncated to the byte cap.
+	for (s.bytes > m.maxBytesPerStage && len(s.entries) > 1) || len(s.entries) > maxEntriesPerStage {
+		s.bytes -= max(len(s.entries[0].Line), 1)
 		s.entries = s.entries[1:]
 	}
 
@@ -107,13 +125,17 @@ func (m *Memory) Append(_ context.Context, runID, stageID string, e Entry) error
 		delete(m.streams, victim.key)
 	}
 
-	return nil
 }
 
 // Read returns a copy of the entries with Seq > since, ascending. The
 // returned slice never aliases internal state, so the hub can range over
 // it without holding the lock and the executor can keep appending.
 func (m *Memory) Read(_ context.Context, runID, stageID string, since int) ([]Entry, error) {
+	entries, _, err := m.History(context.Background(), runID, stageID, since)
+	return entries, err
+}
+
+func (m *Memory) History(_ context.Context, runID, stageID string, since int) ([]Entry, int, error) {
 	key := streamKey(runID, stageID)
 
 	m.mu.Lock()
@@ -121,7 +143,7 @@ func (m *Memory) Read(_ context.Context, runID, stageID string, since int) ([]En
 
 	s, ok := m.streams[key]
 	if !ok || len(s.entries) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 
 	// entries are appended in Seq order, so a single linear scan that
@@ -134,9 +156,9 @@ func (m *Memory) Read(_ context.Context, runID, stageID string, since int) ([]En
 		}
 	}
 	if len(out) == 0 {
-		return nil, nil
+		return nil, s.lastSeq, nil
 	}
-	return out, nil
+	return out, s.lastSeq, nil
 }
 
 // Default caps for the memory backend. 1 MiB per stage matches the

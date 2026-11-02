@@ -14,7 +14,7 @@ const CAPABILITY_LABELS: { key: 'cloudInventory' | 'aiTriage' | 'feedback'; labe
 ];
 
 /** 48px top strip — breadcrumb, capability badges, Calm toggle, user. */
-export default function TopStrip() {
+export default function TopStrip({ onOpenNavigation, onSearch }: { onOpenNavigation: () => void; onSearch: () => void }) {
   const { pathname } = useLocation();
   const crumbs = useMemo(() => buildBreadcrumb(pathname), [pathname]);
   const { user, logout } = useAuth();
@@ -27,6 +27,8 @@ export default function TopStrip() {
 
   const calm = useUIStore((s) => s.calmMode);
   const toggleCalm = useUIStore((s) => s.toggleCalmMode);
+  const theme = useUIStore((s) => s.themeMode);
+  const setTheme = useUIStore((s) => s.setThemeMode);
 
   const enabled = capabilities
     ? CAPABILITY_LABELS.filter((c) => capabilities[c.key])
@@ -34,6 +36,7 @@ export default function TopStrip() {
 
   return (
     <header className="strip">
+      <button type="button" className="strip-iconbtn mobile-navigation" aria-label="Open workspace navigation" onClick={onOpenNavigation}>☰</button>
       <nav className="strip-crumbs" aria-label="Breadcrumb">
         <ol>
           {crumbs.map((crumb, i) => {
@@ -62,6 +65,8 @@ export default function TopStrip() {
       </nav>
 
       <span className="strip-spacer" />
+      <button type="button" className="strip-iconbtn" aria-label="Search pages" onClick={onSearch}>⌕</button>
+      <button type="button" className="strip-iconbtn" aria-label={theme === 'dark' ? 'Use light theme' : 'Use dark theme'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☼' : '◐'}</button>
 
       {enabled.length > 0 && (
         <div className="strip-caps" aria-label="Enabled capabilities">

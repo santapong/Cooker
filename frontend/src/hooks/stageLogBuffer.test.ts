@@ -40,6 +40,8 @@ describe('frame type guards', () => {
 
   it('isControlFrame accepts the truncation signal only', () => {
     expect(isControlFrame({ control: 'stream-truncated' })).toBe(true);
+    expect(isControlFrame({ control: 'history-truncated' })).toBe(true);
+    expect(isControlFrame({ control: 'history-unavailable' })).toBe(true);
     expect(isControlFrame(frame(1, 'a'))).toBe(false);
     expect(isControlFrame(null)).toBe(false);
   });

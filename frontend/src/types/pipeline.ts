@@ -1,5 +1,22 @@
+import type { RuntimeReceipt } from './nativeRuntime';
+
 export type StageType = 'build' | 'test' | 'deploy' | 'push' | 'approval' | 'custom';
-export type RunStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'skipped';
+export type RunStatus = 'pending' | 'running' | 'needs_attention' | 'success' | 'failed' | 'cancelled' | 'skipped';
+
+export interface PipelineSourceConfig {
+  connectionId: string;
+  repository: string;
+  fullRef: string;
+}
+
+export interface PipelineRunSource {
+  source: { connectionId: string; provider: 'github' | 'gitlab' | 'gitea'; host: string; repositoryId: string; repository: string };
+  fullRef: string;
+  commitSha: string;
+  objectSha?: string;
+  sourcePlanDigest: string;
+  checkedOutAt?: string;
+}
 
 export interface Pipeline {
   id: string;
@@ -16,6 +33,7 @@ export interface Pipeline {
   // Per-pipeline run deadline override (Go duration, e.g. "45m");
   // empty/undefined uses the cluster default.
   runDeadline?: string;
+  source?: PipelineSourceConfig | null;
 }
 
 export interface Stage {
@@ -51,6 +69,9 @@ export interface CacheSpec {
 }
 
 export interface StageConfig {
+  secretRefs?: string[];
+  env?: Record<string, string>;
+  registryConnectionIds?: string[];
   // Build
   dockerfile?: string;
   context?: string;
@@ -83,6 +104,7 @@ export interface StageConfig {
   composeServiceName?: string;
   composeBuildContext?: string;
   composeDockerfile?: string;
+  composePorts?: string[];
   resources?: ResourceLimits;
 }
 
@@ -105,6 +127,8 @@ export interface PipelineRun {
   startedAt?: string;
   finishedAt?: string;
   error?: string;
+  pipelineVersion?: number;
+  source?: PipelineRunSource | null;
 }
 
 export interface StageRun {
@@ -117,6 +141,8 @@ export interface StageRun {
   artifacts?: Artifact[];
   /** inter-stage outputs; consumed downstream via ${stages.<id>.<key>} */
   outputs?: Record<string, string>;
+  runtimeReceipt?: RuntimeReceipt;
+  runtimeBindingWarning?: string;
 }
 
 export interface Artifact {

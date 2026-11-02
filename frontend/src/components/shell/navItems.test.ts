@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { activeNavId, NAV_GROUPS, NAV_ITEMS } from './navItems';
+import { activeNavId, navItemVisible, NAV_GROUPS, NAV_ITEMS } from './navItems';
 
 describe('NAV_ITEMS table', () => {
+  it('preserves catalog reads while restricting management navigation', () => {
+    const templates = NAV_ITEMS.find((item) => item.id === 'templates')!;
+    const audit = NAV_ITEMS.find((item) => item.id === 'audit')!;
+    expect(navItemVisible(templates, ['viewer'])).toBe(true);
+    expect(navItemVisible(audit, ['viewer'])).toBe(false);
+    expect(navItemVisible(audit, ['admin'])).toBe(true);
+  });
   it('has unique ids and every item belongs to a declared group', () => {
     const ids = NAV_ITEMS.map((i) => i.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -16,7 +23,13 @@ describe('NAV_ITEMS table', () => {
 
 describe('activeNavId', () => {
   it.each([
-    ['/', 'apps'],
+    ['/', 'overview'],
+    ['/overview', 'overview'],
+    ['/runs', 'runs'],
+    ['/services', 'services'],
+    ['/apps/synced/vapp_one', 'apps'],
+    ['/pipelines/synced/vflow_one', 'pipelines'],
+    ['/docs', 'docs'],
     ['/apps', 'apps'],
     ['/apps/new', 'apps'],
     ['/apps/a1b2', 'apps'],

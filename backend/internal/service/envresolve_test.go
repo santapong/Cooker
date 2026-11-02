@@ -84,6 +84,52 @@ func TestAppEnvResolver_NilSafety(t *testing.T) {
 	}
 }
 
+func TestAppEnvResolver_DetailedSeparatesSecretValues(t *testing.T) {
+	st := memory.New()
+	ctx := context.Background()
+	if err := st.Environments.Create(ctx, &model.Environment{ID: "e", Name: "test", PlainVars: map[string]string{"DB_NAME": "public"}}); err != nil {
+		t.Fatal(err)
+	}
+	r := &AppEnvResolver{Environments: st.Environments, Secrets: &fakeSecrets{data: map[string]map[string][]byte{"e": {"PASSWORD": []byte("private")}}}}
+	got, err := r.ResolveDetailed(ctx, &model.App{EnvironmentID: "e"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.SecretValues) != 1 || got.SecretValues[0] != "private" || got.Values["DB_NAME"] != "public" {
+		t.Fatal("plain configuration and secret metadata were mixed")
+	}
+}
+
+type rotatingSecrets struct {
+	*fakeSecrets
+	rotate func()
+}
+
+func (r *rotatingSecrets) Get(ctx context.Context, envID, key string) ([]byte, error) {
+	r.rotate()
+	return r.fakeSecrets.Get(ctx, envID, key)
+}
+
+func TestAppEnvResolverRejectsVersionDriftDuringResolution(t *testing.T) {
+	st := memory.New()
+	ctx := context.Background()
+	env := &model.Environment{ID: "e", Name: "test"}
+	if err := st.Environments.Create(ctx, env); err != nil {
+		t.Fatal(err)
+	}
+	r := &AppEnvResolver{Environments: st.Environments, Secrets: &rotatingSecrets{fakeSecrets: &fakeSecrets{data: map[string]map[string][]byte{"e": {"TOKEN": []byte("private")}}}, rotate: func() {
+		if err := st.Environments.Update(ctx, env); err != nil {
+			t.Fatal(err)
+		}
+	}}}
+	if _, err := r.ResolveDetailed(WithEnvironmentVersion(ctx, "e", env.Version), &model.App{EnvironmentID: "e"}); err == nil || !strings.Contains(err.Error(), "changed while resolving") {
+		t.Fatalf("mixed-generation configuration accepted: %v", err)
+	}
+	if _, err := r.ResolveDetailed(WithEnvironmentVersion(ctx, "e", 99), &model.App{EnvironmentID: "e"}); err == nil || !strings.Contains(err.Error(), "changed after queueing") {
+		t.Fatalf("wrong expected generation accepted: %v", err)
+	}
+}
+
 func TestSynthesizePipeline_InjectsEnvAndIngress(t *testing.T) {
 	app := &model.App{
 		ID: "a1", Name: "My App",

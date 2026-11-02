@@ -16,6 +16,11 @@ type RegistryConfig struct {
 	Name     string `json:"name"`
 	URL      string `json:"url"`
 	Username string `json:"username,omitempty"`
+	// Version is a durable generation, including delete/recreate. Grants are
+	// administered separately from an operator's requested build connections.
+	Version            int64    `json:"version"`
+	AllowedAppIDs      []string `json:"allowedAppIds,omitempty"`
+	AllowedPipelineIDs []string `json:"allowedPipelineIds,omitempty"`
 
 	// PasswordRef names a secrets.Manager URI holding the registry
 	// password/token. The secret bytes never travel on this struct —
@@ -40,9 +45,20 @@ type RegistryConfigResponse struct {
 // PasswordRef is dropped (it is already json:"-" so this is
 // belt-and-suspenders); only the existence flag travels.
 func (r *RegistryConfig) Redact() *RegistryConfigResponse {
-	cp := *r
+	cp := *r.Clone()
 	cp.PasswordRef = ""
 	return &RegistryConfigResponse{RegistryConfig: &cp, HasPassword: r.PasswordRef != ""}
+}
+
+// Clone prevents callers and client responses from editing stored grants.
+func (r *RegistryConfig) Clone() *RegistryConfig {
+	if r == nil {
+		return nil
+	}
+	cp := *r
+	cp.AllowedAppIDs = append([]string(nil), r.AllowedAppIDs...)
+	cp.AllowedPipelineIDs = append([]string(nil), r.AllowedPipelineIDs...)
+	return &cp
 }
 
 // ClusterConfig is a saved Kubernetes cluster connection the operator

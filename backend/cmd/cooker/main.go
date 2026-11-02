@@ -26,6 +26,7 @@ import (
 	"syscall"
 
 	"github.com/santapong/cooker/internal/config"
+	"github.com/santapong/cooker/internal/keyrotation"
 	"github.com/santapong/cooker/internal/server"
 	"github.com/santapong/cooker/internal/store/postgres"
 )
@@ -44,6 +45,12 @@ var (
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	if len(os.Args) > 1 && os.Args[1] == "key-rotation" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+		code := keyrotation.RunCommand(ctx, os.Args[2:], os.Stdin, os.Stdout)
+		stop()
+		os.Exit(code)
+	}
 
 	// Subcommand dispatch. `cooker migrate up` applies embedded
 	// migrations and exits without starting the server, so operators

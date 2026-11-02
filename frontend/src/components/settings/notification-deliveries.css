@@ -1,0 +1,9 @@
+.notification-history { display: grid; gap: 12px; }
+.notification-history p { margin: 0; }
+.notification-history form { display: grid; gap: 12px; }
+.notification-delivery { border-top: 1px solid var(--line); padding-top: 16px; display: grid; gap: 8px; }
+.notification-history details { min-width: 0; }
+.notification-history summary { cursor: pointer; }
+.notification-history details p { margin-top: 8px; }
+.notification-history code { overflow-wrap: anywhere; }
+.notification-warning { color: var(--ink-2); }

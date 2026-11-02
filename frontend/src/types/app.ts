@@ -1,5 +1,10 @@
 export interface AppBuildPlan {
   kind: 'dockerfile' | 'compose' | 'buildpack';
+  environmentScope?: 'service' | '';
+  serviceEnvironment?: Record<string, string[]>;
+  sourceConnectionId?: string;
+  sourceRepositoryId?: string;
+  sourceConnectionVersion?: number;
   path?: string;
   args?: Record<string, string>;
   buildpacks?: string[];
@@ -8,6 +13,7 @@ export interface AppBuildPlan {
   files?: string[];
   profiles?: string[];
   variables?: Record<string, string>;
+  registryConnectionIds?: string[];
 }
 
 export interface AppDeployTarget {
@@ -29,6 +35,9 @@ export interface ExternalServiceBinding {
 }
 
 export interface RepositoryInspection {
+  sourceConnectionId?: string;
+  sourceRepositoryId?: string;
+  sourceConnectionVersion?: number;
   commit: string;
   candidates: { path: string; services: string[]; error?: string }[];
   graph?: import('./compose').ComposeGraph;
@@ -150,7 +159,7 @@ export interface AppDeployRecord {
   imageRef?: string;
   digest?: string;
   status: string;
-  kind: 'deploy' | 'rollback';
+  kind: 'deploy' | 'rollback' | 'rejected';
   createdAt: string;
 }
 

@@ -9,7 +9,7 @@ import { API_ORIGIN } from './origin';
 const API_BASE = `${API_ORIGIN}/api/v1`;
 
 export interface AuthMethods {
-  oidc: { enabled: boolean };
+  oidc: { enabled: boolean; broker?: string; socialProviders?: string[] };
   local: { enabled: boolean; allowSignup: boolean };
 }
 
@@ -44,13 +44,13 @@ export const authApi = {
   methods: async (): Promise<AuthMethods> => {
     const res = await fetch(`${API_BASE}/auth/methods`);
     if (!res.ok) {
-      // Capability probe shouldn't block sign-in — assume the
-      // pessimistic "OIDC only, no local" if the endpoint is
-      // missing (e.g. older backend). Frontend hides what it can't
-      // use; SSO button stays.
-      return { oidc: { enabled: true }, local: { enabled: false, allowSignup: false } };
+      throw new Error('Sign-in methods are unavailable. Please try again.');
     }
-    return res.json();
+    const result: AuthMethods = await res.json();
+    if (typeof result?.oidc?.enabled !== 'boolean' || typeof result?.local?.enabled !== 'boolean' || typeof result?.local?.allowSignup !== 'boolean') {
+      throw new Error('This server returned invalid sign-in methods.');
+    }
+    return result;
   },
 
   signin: (email: string, password: string): Promise<TokenResponse> =>

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 )
 
@@ -62,21 +63,61 @@ func (c *Compose) Deploy(ctx context.Context, req Request) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	args := []string{"compose", "-p", project, "-f", req.ComposeFile, "up", "-d"}
-	if req.ComposeService != "" {
-		args = append(args, "--no-build", "--no-deps", "--wait", "--wait-timeout", "300", req.ComposeService)
-	} else {
-		args = append(args, "--remove-orphans")
+	base := []string{"compose", "-p", project, "-f", req.ComposeFile}
+	if req.ComposeOverrideFile != "" {
+		base = append(base, "-f", req.ComposeOverrideFile)
 	}
-	logf(out, "Running: docker %v\n", args)
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Stdout = out
-	cmd.Stderr = out
-	if err := cmd.Run(); err != nil {
-		return Result{}, fmt.Errorf("docker compose up (project %s): %w", project, err)
-	}
-	logf(out, "Compose stack %s is up\n", project)
-	return Result{AppliedResources: []string{"compose/" + project}}, nil
+	var result Result
+	err := withRegistryDockerEnvironment(ctx, req, func(env []string) error {
+		if req.RegistryAuth != nil {
+			inspectArgs := append(append([]string(nil), base...), "config", "--images")
+			if req.ComposeService != "" {
+				inspectArgs = append(inspectArgs, req.ComposeService)
+			}
+			inspect := exec.CommandContext(ctx, bin, inspectArgs...)
+			inspect.Env = env
+			images := &boundedRuntimeImages{}
+			inspect.Stdout = images
+			if err := inspect.Run(); err != nil {
+				return fmt.Errorf("reviewed runtime images are unavailable")
+			}
+			seen := map[string]bool{}
+			for _, image := range strings.Fields(images.String()) {
+				if seen[image] {
+					continue
+				}
+				seen[image] = true
+				if len(seen) > 256 {
+					return fmt.Errorf("too many runtime images")
+				}
+				if err := prepareDockerRuntimeImage(ctx, bin, image, env, out); err != nil {
+					return err
+				}
+			}
+			if len(seen) == 0 {
+				return fmt.Errorf("reviewed runtime images are unavailable")
+			}
+		}
+		args := append([]string(nil), base...)
+		args = append(args, "up", "-d")
+		if req.ComposeService != "" {
+			args = append(args, "--no-build", "--no-deps", "--wait", "--wait-timeout", "300", req.ComposeService)
+		} else {
+			args = append(args, "--remove-orphans")
+		}
+		logf(out, "Running: docker %v\n", args)
+		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd.Env = env
+		cmd.Stdout = out
+		cmd.Stderr = out
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("docker compose up (project %s): %w", project, err)
+		}
+		logf(out, "Compose stack %s is up\n", project)
+		result = Result{AppliedResources: []string{"compose/" + project}}
+		return nil
+	})
+	return result, err
 }
 
 var _ Deployer = (*Compose)(nil)

@@ -19,6 +19,10 @@ func TestIsRedacted(t *testing.T) {
 	}{
 		{"/api/v1/environments/:id/secrets/:key", true},
 		{"/api/v1/apps/:id/webhook", true},
+		{"/api/v1/admin/integrations/vercel/connections", true},
+		{"/api/v1/admin/integrations/neon/connections", true},
+		{"/api/v1/admin/integrations/neon/connections/:id", true},
+		{"/api/v1/admin/integrations/vercel/connections/:id", true},
 		{"/api/v1/pipelines/:id/run", false},
 		{"", false},
 	}

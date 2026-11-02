@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Node, Edge, XYPosition } from '@xyflow/react';
-import type { Pipeline, Stage, StageType, StageConfig, PipelineEdge } from '../types/pipeline';
+import type { Pipeline, PipelineSourceConfig, Stage, StageType, StageConfig, PipelineEdge } from '../types/pipeline';
 import { pipelineApi } from '../api/pipelines';
 
 interface PipelineStore {
@@ -11,6 +11,8 @@ interface PipelineStore {
   /** True when the in-memory pipeline differs from what the server last returned. */
   dirty: boolean;
 
+  clearDrafts: () => void;
+  discardDraft: (id: string) => Promise<void>;
   loadPipeline: (id: string) => Promise<void>;
   savePipeline: () => Promise<void>;
   setPipeline: (pipeline: Pipeline) => void;
@@ -28,11 +30,15 @@ interface PipelineStore {
   setNodes: (nodes: Node[]) => void;
   setEdges: (edges: Edge[]) => void;
   setRunDeadline: (runDeadline: string) => void;
+  setSource: (source: PipelineSourceConfig | null) => void;
   cycleEdgeCondition: (id: string) => void;
   validate: () => Promise<{ valid: boolean; errors: string[] }>;
 }
 
 let stageCounter = 0;
+let loadSequence = 0;
+let draftSession = 0;
+const pipelineDrafts = new Map<string, Pipeline>();
 
 function stagesToNodes(stages: Stage[]): Node[] {
   return stages.map((stage) => ({
@@ -62,15 +68,33 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
   selectedNodeId: null,
   dirty: false,
 
+  clearDrafts: () => {
+    draftSession++;
+    loadSequence++;
+    pipelineDrafts.clear();
+    set({ pipeline: null, nodes: [], edges: [], selectedNodeId: null, dirty: false });
+  },
+  discardDraft: async (id: string) => {
+    const sequence = ++loadSequence;
+    const draft = get().pipeline;
+    const saved = await pipelineApi.get(id);
+    if (sequence !== loadSequence || get().pipeline !== draft || draft?.id !== id || saved.id !== id) return;
+    pipelineDrafts.delete(id);
+    set({ pipeline: saved, nodes: stagesToNodes(saved.stages), edges: edgesToFlowEdges(saved.edges), selectedNodeId: null, dirty: false });
+  },
+
   loadPipeline: async (id: string) => {
+    const sequence = ++loadSequence;
+    const current = get();
+    if (current.pipeline && current.dirty) pipelineDrafts.set(current.pipeline.id, current.pipeline);
+    const draft = pipelineDrafts.get(id);
+    if (draft) {
+      set({ pipeline: draft, nodes: stagesToNodes(draft.stages), edges: edgesToFlowEdges(draft.edges), selectedNodeId: null, dirty: true });
+      return;
+    }
     const pipeline = await pipelineApi.get(id);
-    set({
-      pipeline,
-      nodes: stagesToNodes(pipeline.stages),
-      edges: edgesToFlowEdges(pipeline.edges),
-      selectedNodeId: null,
-      dirty: false,
-    });
+    if (sequence !== loadSequence) return;
+    set({ pipeline, nodes: stagesToNodes(pipeline.stages), edges: edgesToFlowEdges(pipeline.edges), selectedNodeId: null, dirty: false });
   },
 
   savePipeline: async () => {
@@ -79,11 +103,25 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
     // The server bumps `version` (optimistic concurrency) — keep its copy so
     // the next save carries the right version. Nodes/edges are left alone:
     // positions already match and regenerating them would churn the canvas.
+    const session = draftSession;
     const saved = await pipelineApi.update(pipeline.id, pipeline);
-    set({ pipeline: saved, dirty: false });
+    if (session !== draftSession) return;
+    const latest = get().pipeline;
+    // Preserve edits made while the request was in flight, and never replace
+    // a different pipeline loaded by navigation during that request.
+    if (latest?.id !== pipeline.id) {
+      const cached = pipelineDrafts.get(pipeline.id);
+      if (cached === pipeline) pipelineDrafts.delete(pipeline.id);
+      else if (cached) pipelineDrafts.set(pipeline.id, { ...cached, version: saved.version });
+      return;
+    }
+    pipelineDrafts.delete(pipeline.id);
+    set(latest === pipeline ? { pipeline: saved, dirty: false } : { pipeline: { ...latest, version: saved.version }, dirty: true });
   },
 
   setPipeline: (pipeline: Pipeline) => {
+    loadSequence++;
+    pipelineDrafts.delete(pipeline.id);
     set({
       pipeline,
       nodes: stagesToNodes(pipeline.stages),
@@ -232,6 +270,13 @@ export const usePipelineStore = create<PipelineStore>((set, get) => ({
     const { pipeline } = get();
     if (!pipeline) return;
     set({ pipeline: { ...pipeline, runDeadline: runDeadline || undefined }, dirty: true });
+  },
+
+  setSource: (source: PipelineSourceConfig | null) => {
+    const { pipeline } = get();
+    if (!pipeline) return;
+    // A null explicitly removes a binding on PUT. Canvas positions stay intact.
+    set({ pipeline: { ...pipeline, source: source ? { ...source } : null }, dirty: true });
   },
 
   cycleEdgeCondition: (id: string) => {

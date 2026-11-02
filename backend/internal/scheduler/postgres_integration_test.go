@@ -16,6 +16,8 @@ package scheduler_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -23,13 +25,16 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/santapong/cooker/internal/jobqueue"
+	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/scheduler"
 	"github.com/santapong/cooker/internal/service"
+	"github.com/santapong/cooker/internal/store/memory"
 )
 
 const liveSchema = `
 DROP TABLE IF EXISTS jobs CASCADE;
 DROP TABLE IF EXISTS schedules CASCADE;
+DROP TABLE IF EXISTS schedule_occurrences;
 
 CREATE TABLE jobs (
     id              TEXT PRIMARY KEY,
@@ -57,6 +62,7 @@ CREATE INDEX jobs_running_concurrency_idx ON jobs (concurrency_key)
 
 CREATE TABLE schedules (
     id           TEXT PRIMARY KEY,
+    version      INTEGER NOT NULL DEFAULT 1,
     pipeline_id  TEXT NOT NULL,
     name         TEXT NOT NULL DEFAULT '',
     cron_expr    TEXT NOT NULL,
@@ -69,7 +75,25 @@ CREATE TABLE schedules (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX schedules_due_idx ON schedules (next_run_at) WHERE enabled = TRUE;
+CREATE TABLE schedule_occurrences (
+    schedule_id TEXT NOT NULL, scheduled_for TIMESTAMPTZ NOT NULL,
+    schedule_version INTEGER NOT NULL, pipeline_id TEXT NOT NULL,
+    cron_expr TEXT NOT NULL, timezone TEXT NOT NULL, run_id TEXT NOT NULL UNIQUE,
+    job_id TEXT NOT NULL UNIQUE, admitted_at TIMESTAMPTZ NOT NULL,
+    next_run_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(schedule_id, scheduled_for)
+);
 `
+
+func liveEnqueuer(t *testing.T, db *sql.DB, pipelineID string) *service.JobQueueEnqueuer {
+	t.Helper()
+	jq := jobqueue.NewPostgres(db)
+	jq.OnEnqueue = scheduler.SyncOccurrenceAdmission
+	pipelines := memory.New().Pipelines
+	if err := pipelines.Create(context.Background(), &model.Pipeline{ID: pipelineID, Name: "scheduled", Stages: []model.Stage{}, Edges: []model.Edge{}}); err != nil {
+		t.Fatal(err)
+	}
+	return service.NewJobQueueEnqueuer(jq, pipelines)
+}
 
 func dialLiveScheduler(t *testing.T) *sql.DB {
 	t.Helper()
@@ -84,11 +108,31 @@ func dialLiveScheduler(t *testing.T) *sql.DB {
 	if err := db.PingContext(context.Background()); err != nil {
 		t.Fatalf("ping: %v", err)
 	}
-	if _, err := db.Exec(liveSchema); err != nil {
+	// Each test owns a fresh schema. Do not recreate shared installation tables.
+	schema := fmt.Sprintf("cooker_scheduler_%x", time.Now().UnixNano())
+	if _, err := db.Exec(`CREATE SCHEMA ` + schema); err != nil {
+		t.Fatalf("create isolated schema: %v", err)
+	}
+	u, err := url.Parse(dsn)
+	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
+		t.Fatal("scheduler fixture requires a PostgreSQL URL")
+	}
+	query := u.Query()
+	query.Set("search_path", schema)
+	u.RawQuery = query.Encode()
+	scoped, err := sql.Open("postgres", u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = scoped.Close()
+		_, _ = db.Exec(`DROP SCHEMA ` + schema + ` CASCADE`)
+		_ = db.Close()
+	})
+	if _, err := scoped.Exec(liveSchema); err != nil {
 		t.Fatalf("create schemas: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
+	return scoped
 }
 
 // TestLive_SchedulerEnqueuesDueRow inserts a due schedule, runs the
@@ -98,8 +142,7 @@ func dialLiveScheduler(t *testing.T) *sql.DB {
 func TestLive_SchedulerEnqueuesDueRow(t *testing.T) {
 	db := dialLiveScheduler(t)
 	store := scheduler.NewPostgresStore(db)
-	jq := jobqueue.NewPostgres(db)
-	enq := service.NewJobQueueEnqueuer(jq)
+	enq := liveEnqueuer(t, db, "00000000-0000-0000-0000-000000000001")
 
 	// A due schedule one minute in the past, hourly cron.
 	now := time.Now().UTC()
@@ -129,6 +172,7 @@ func TestLive_SchedulerEnqueuesDueRow(t *testing.T) {
 	defer cancel()
 	done := make(chan struct{})
 	go func() { defer close(done); _ = runner.Run(ctx) }()
+	t.Cleanup(func() { cancel(); <-done })
 
 	deadline := time.Now().Add(4 * time.Second)
 	var jobs int
@@ -166,8 +210,7 @@ func TestLive_SchedulerEnqueuesDueRow(t *testing.T) {
 func TestLive_SchedulerLeaderElection(t *testing.T) {
 	db := dialLiveScheduler(t)
 	store := scheduler.NewPostgresStore(db)
-	jq := jobqueue.NewPostgres(db)
-	enq := service.NewJobQueueEnqueuer(jq)
+	enq := liveEnqueuer(t, db, "00000000-0000-0000-0000-000000000002")
 
 	if err := store.Create(context.Background(), scheduler.Schedule{
 		ID:         "sch-leader",
@@ -203,6 +246,7 @@ func TestLive_SchedulerLeaderElection(t *testing.T) {
 	// Give runner1 a head start so it definitely wins the advisory lock.
 	time.Sleep(150 * time.Millisecond)
 	go func() { defer close(done2); _ = runner2.Run(ctx) }()
+	t.Cleanup(func() { cancel(); <-done1; <-done2 })
 
 	// Wait until at least one job has been enqueued — that's the
 	// leader doing its work. If both runners were firing concurrently

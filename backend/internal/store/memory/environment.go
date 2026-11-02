@@ -15,14 +15,30 @@ type environments struct {
 	m  map[string]*model.Environment
 }
 
-func (s *environments) List(_ context.Context, limit, offset int) ([]*model.Environment, error) {
+func (s *environments) List(ctx context.Context, limit, offset int) ([]*model.Environment, error) {
+	return s.list(ctx, limit, offset, false)
+}
+
+func (s *environments) ListPublic(ctx context.Context, limit, offset int) ([]*model.Environment, error) {
+	return s.list(ctx, limit, offset, true)
+}
+
+func (s *environments) list(_ context.Context, limit, offset int, public bool) ([]*model.Environment, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]*model.Environment, 0, len(s.m))
 	for _, e := range s.m {
+		if public && model.IsRegistryCredentialEnvironment(e) {
+			continue
+		}
 		out = append(out, e)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Order < out[j].Order })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Order == out[j].Order {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Order < out[j].Order
+	})
 	return paginate(out, limit, offset), nil
 }
 

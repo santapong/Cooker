@@ -128,13 +128,19 @@ func TestCloneCredentialIsMemoryOnlyAndPinReachesGit(t *testing.T) {
 	t.Setenv("COOKER_TEST_ARGS", argsFile)
 	t.Setenv("COOKER_TEST_AUTH", envFile)
 	bin := filepath.Join(root, "git-test")
-	script := `#!/bin/sh
-printf '%s\n' "$@" >> "$COOKER_TEST_ARGS"
+	script := fmt.Sprintf(`#!/bin/sh
+COOKER_TEST_ARGS=%q
+COOKER_TEST_AUTH=%q
+printf '%%s\n' "$@" >> "$COOKER_TEST_ARGS"
 if [ "$1" = clone ] || [ "$3" = fetch ]; then
-  case "$GIT_CONFIG_VALUE_1" in 'Authorization: Basic '*) printf 'scoped\n' >> "$COOKER_TEST_AUTH";; *) exit 10;; esac
+  env | /bin/grep -q '^GIT_CONFIG_VALUE_[0-9]*=Authorization: Basic ' || exit 10
+  printf 'scoped\n' >> "$COOKER_TEST_AUTH"
+fi
+if [ "$3" = rev-parse ]; then
+  printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
 fi
 exit 0
-`
+`, argsFile, envFile)
 	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +163,7 @@ exit 0
 		}
 	}
 	joined := strings.Join(cloneEnvironment(""), "\n")
-	if strings.Contains(joined, "inherited-header") || !strings.Contains(joined, "GIT_TERMINAL_PROMPT=0") {
+	if strings.Contains(joined, "inherited-header") || strings.Contains(joined, "COOKER_TEST_") || !strings.Contains(joined, "GIT_TERMINAL_PROMPT=0") {
 		t.Fatal("clone inherited credentials or permits prompting")
 	}
 }

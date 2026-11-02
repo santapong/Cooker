@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -39,16 +40,19 @@ type BuildFilePreview struct {
 	Content    string `json:"content"`
 }
 type RepositoryInspection struct {
-	Commit            string              `json:"commit"`
-	Candidates        []ComposeCandidate  `json:"candidates"`
-	Graph             *model.ComposeGraph `json:"graph,omitempty"`
-	BuildFiles        []BuildFilePreview  `json:"buildFiles"`
-	Diagnostics       []PlanDiagnostic    `json:"diagnostics"`
-	RequiredVariables []string            `json:"requiredVariables"`
-	Profiles          []string            `json:"profiles"`
-	YAML              string              `json:"yaml,omitempty"`
-	Workloads         map[string]string   `json:"workloads"`
-	Deployable        bool                `json:"deployable"`
+	SourceConnectionID      string              `json:"sourceConnectionId,omitempty"`
+	SourceRepositoryID      string              `json:"sourceRepositoryId,omitempty"`
+	SourceConnectionVersion int                 `json:"sourceConnectionVersion,omitempty"`
+	Commit                  string              `json:"commit"`
+	Candidates              []ComposeCandidate  `json:"candidates"`
+	Graph                   *model.ComposeGraph `json:"graph,omitempty"`
+	BuildFiles              []BuildFilePreview  `json:"buildFiles"`
+	Diagnostics             []PlanDiagnostic    `json:"diagnostics"`
+	RequiredVariables       []string            `json:"requiredVariables"`
+	Profiles                []string            `json:"profiles"`
+	YAML                    string              `json:"yaml,omitempty"`
+	Workloads               map[string]string   `json:"workloads"`
+	Deployable              bool                `json:"deployable"`
 }
 
 func safeRelativePath(p string) bool {
@@ -154,7 +158,13 @@ func (d *AppDetector) Inspect(ctx context.Context, app *model.App, env map[strin
 		opts.Commit = app.BuildPlan.Commit
 		opts.InstallationID = app.BuildPlan.InstallationID
 	}
-	root, err := d.cloneFn(ctx, opts)
+	var root string
+	var err error
+	if d.SourceCheckout != nil && app.BuildPlan != nil && app.BuildPlan.SourceConnectionID != "" {
+		root, err = d.SourceCheckout(ctx, app, opts.Commit, io.Discard)
+	} else {
+		root, err = d.cloneFn(ctx, opts)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -217,6 +227,7 @@ func (d *AppDetector) Inspect(ctx context.Context, app *model.App, env map[strin
 }
 
 type resolvedCompose struct {
+	InputFiles        []string
 	Project           *ct.Project
 	Graph             *model.ComposeGraph
 	BuildFiles        []BuildFilePreview
@@ -258,6 +269,9 @@ func loadRepositoryCompose(ctx context.Context, root string, app *model.App, env
 		if err := yaml.Unmarshal(data, &raw); err != nil {
 			return nil, fmt.Errorf("invalid YAML in %s", file)
 		}
+		if err := validateRawScopedCompose(ctx, app, env, raw); err != nil {
+			return nil, err
+		}
 		if _, ok := raw["include"]; ok {
 			return nil, fmt.Errorf("%s: include is not supported; select local files as ordered overrides", file)
 		}
@@ -281,6 +295,7 @@ func loadRepositoryCompose(ctx context.Context, root string, app *model.App, env
 				values[name] = "COOKER_UNSET_" + name
 			}
 		}
+		result.InputFiles = append(result.InputFiles, path)
 		configs = append(configs, ct.ConfigFile{Filename: path, Content: data})
 	}
 	for name := range variables {
@@ -324,6 +339,7 @@ func loadRepositoryCompose(ctx context.Context, root string, app *model.App, env
 			if _, err := readSourceFile(path); err != nil {
 				return nil, fmt.Errorf("service %s: cannot load env_file", name)
 			}
+			result.InputFiles = append(result.InputFiles, path)
 			s.EnvFiles[i].Path = path
 		}
 		project.Services[name] = s
@@ -479,6 +495,10 @@ func loadRepositoryCompose(ctx context.Context, root string, app *model.App, env
 	if err := bindExternalServices(graph, app, env); err != nil {
 		result.Diagnostics = append(result.Diagnostics, PlanDiagnostic{Field: "externalServices", Message: err.Error()})
 	}
+	result.Graph, result.Project = graph, project
+	if err := validateResolvedEnvironmentScope(ctx, app, result, env); err != nil {
+		return nil, err
+	}
 	// A safe, portable summary of exactly the runtime inputs Cooker understands.
 	previewData, _ := json.Marshal(graph)
 	var safe model.ComposeGraph
@@ -611,6 +631,9 @@ func bindExternalServices(graph *model.ComposeGraph, app *model.App, env map[str
 			}
 			consumers[name] = true
 			for target, source := range binding.Environment {
+				if usesServiceEnvironment(app.BuildPlan) && !allowsEnvironmentKey(app.BuildPlan, name, source) {
+					return fmt.Errorf("external binding key %s is outside service %s runtime scope", source, name)
+				}
 				value, ok := env[source]
 				if !ok || value == "" {
 					return fmt.Errorf("environment key %s is required for %s", source, binding.Service)

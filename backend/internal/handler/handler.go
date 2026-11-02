@@ -12,12 +12,16 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/santapong/cooker/internal/crypto"
+	"github.com/santapong/cooker/internal/jobqueue"
 	"github.com/santapong/cooker/internal/kube"
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/notify/notifier"
+	"github.com/santapong/cooker/internal/provider/neon"
+	"github.com/santapong/cooker/internal/provider/vercel"
 	"github.com/santapong/cooker/internal/scheduler"
 	"github.com/santapong/cooker/internal/secrets"
 	"github.com/santapong/cooker/internal/service"
+	"github.com/santapong/cooker/internal/source/connection"
 	"github.com/santapong/cooker/internal/source/github"
 	"github.com/santapong/cooker/internal/store"
 	"github.com/santapong/cooker/internal/templates"
@@ -103,8 +107,10 @@ type Handler struct {
 	// MFAACRValues mirrors COOKER_OIDC_MFA_ACR_VALUES. The token-delete
 	// handler uses it to step-up-gate an admin deleting ANOTHER user's
 	// token (own-token deletes are exempt). Empty disables the gate.
-	MFAACRValues []string
-	AppDeployer  *service.AppDeployer
+	MFAACRValues   []string
+	AppDeployer    *service.AppDeployer
+	AppDeployQueue *service.AppDeployQueue
+	Jobs           jobqueue.Store
 	// Canary orchestrates canary deployments (OR-1): the weighted split,
 	// the live AppCanary state, and promote/abort. Set by server.New when
 	// the configured deployer can split traffic (a WeightedDeployer);
@@ -118,8 +124,15 @@ type Handler struct {
 	Triage TriageRunner
 	// AppDetector backs POST /apps/detect-build (New-App wizard recipe
 	// suggestion). Set by server.New; nil returns 503.
-	AppDetector  *service.AppDetector
-	GitHubSource *github.AppClient
+	AppDetector         *service.AppDetector
+	GitHubSource        *github.AppClient
+	SourceConnections   *connection.Service
+	Vercel              *vercel.Service
+	VercelPublisher     *vercel.Publisher
+	VercelAdoptions     *vercel.LandingAdoptionService
+	VercelUpdateReviews *vercel.LandingUpdateReviewService
+	Neon                *neon.ConnectionService
+	Automation          *service.Automation
 	// Feedback relays in-app feedback to GitHub issues (pure relay —
 	// nothing is persisted). Set by server.New when
 	// COOKER_FEEDBACK_GITHUB_TOKEN is non-empty; nil keeps the route
@@ -157,7 +170,8 @@ type Handler struct {
 	// nil returns 503 from the /admin/notification-targets endpoints.
 	// Always set by server.New (memory or Postgres) so the admin API
 	// works on a default install.
-	NotificationTargets notifier.TargetStore
+	NotificationTargets    notifier.TargetStore
+	NotificationDeliveries notifier.DeliveryReader
 	// Dispatcher fires notification events. Used by the inline run
 	// path (RunPipeline) so a run that runs without the job queue
 	// still notifies. nil = no notifications. Set by server.New.

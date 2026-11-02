@@ -5,7 +5,7 @@ import { mockApi, mockCompose, mockSignedOut } from './fixtures/api';
 
 const ROUTES: { path: string; ready: string; setup?: (page: Page) => Promise<void> }[] = [
   { path: '/pipelines', ready: 'a.chart-name' },
-  { path: '/pipelines/gates/edit', ready: '.star' },
+  { path: '/pipelines/gates/edit', ready: '.pipeline-stage-card' },
   { path: '/pipelines/gates/runs/r1', ready: '.star' },
   { path: '/docker/compose', ready: '.star', setup: mockCompose },
   { path: '/settings', ready: '.section' },

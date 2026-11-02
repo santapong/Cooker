@@ -1,0 +1,19 @@
+.environment-editor, .environment-binding { min-width: 0; }
+.environment-editor h3 { margin: 0 0 14px; }
+.environment-editor fieldset { min-width: 0; border: 0; padding: 0; }
+.environment-editor .input { max-width: 100%; }
+.environment-key-picker { border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin: 16px 0; min-width: 0; }
+.environment-key-picker legend { font-size: 13px; padding: 0 6px; }
+.environment-key-row { padding: 8px 0; overflow-wrap: anywhere; }
+.environment-key-row code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.environment-key-add { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.environment-key-add .field { min-width: 0; flex: 1 1 200px; }
+.environment-key-add .hud-btn { margin-bottom: 18px; }
+.environment-secret-list { display: flex; flex-direction: column; gap: 10px; margin: 16px 0; }
+.environment-secret-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.environment-secret-row code { overflow-wrap: anywhere; }
+.environment-secret-row .hud-btn { margin-left: auto; }
+.environment-saved-config { font: 12px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; }
+.environment-binding-service { margin-top: 16px; }
+.environment-binding-service h4 { font-size: 14px; }
+@media (max-width: 600px) { .environment-editor .panel-grid { grid-template-columns: minmax(0, 1fr); } }

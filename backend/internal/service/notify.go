@@ -33,23 +33,20 @@ func NotifyRunOutcome(disp *notifier.Dispatcher, p *model.Pipeline, run *model.P
 		return
 	}
 	event := notifier.Event{
-		PipelineID:   p.ID,
-		PipelineName: p.Name,
-		RunID:        run.ID,
-		Status:       string(run.Status),
-		Timestamp:    time.Now().UTC(),
+		PipelineID: p.ID,
+		RunID:      run.ID,
+		Status:     string(run.Status),
+		Timestamp:  time.Now().UTC(),
 	}
 	switch {
 	case execErr != nil:
 		event.Type = notifier.EventRunFailed
-		event.Error = execErr.Error()
 	case run.Status == model.RunStatusCancelled:
 		event.Type = notifier.EventRunCancelled
 	case run.Status == model.RunStatusSuccess:
 		event.Type = notifier.EventRunSucceeded
 	case run.Status == model.RunStatusFailed:
 		event.Type = notifier.EventRunFailed
-		event.Error = run.Error
 	default:
 		return
 	}
@@ -65,12 +62,9 @@ func NotifyDeployOutcome(disp *notifier.Dispatcher, app *model.App, runID, errMs
 		return
 	}
 	event := notifier.Event{
-		AppID:       app.ID,
-		AppName:     app.Name,
-		Environment: app.DeployTarget.Namespace,
-		RunID:       runID,
-		Error:       errMsg,
-		Timestamp:   time.Now().UTC(),
+		AppID:     app.ID,
+		RunID:     runID,
+		Timestamp: time.Now().UTC(),
 	}
 	switch {
 	case success:
@@ -90,24 +84,23 @@ func NotifyCanary(disp *notifier.Dispatcher, app *model.App, c *model.AppCanary,
 		return
 	}
 	dispatch(disp, notifier.Event{
-		Type:        t,
-		AppID:       app.ID,
-		AppName:     app.Name,
-		Environment: app.DeployTarget.Namespace,
-		RunID:       c.RunID,
-		Status:      string(c.Status),
-		Error:       errMsg,
-		Timestamp:   time.Now().UTC(),
+		Type:      t,
+		CanaryID:  c.ID,
+		AppID:     app.ID,
+		RunID:     c.RunID,
+		Status:    string(c.Status),
+		Timestamp: time.Now().UTC(),
 	}, "app", app.ID)
 }
 
 // dispatch fans the event out on its own bounded context and logs
 // (never propagates) channel failures — notifications are
-// best-effort by design.
+// independent of deployment success. Persistent dispatch accepts into the
+// outbox; terminal native jobs also have a reconciliation/retention repair.
 func dispatch(disp *notifier.Dispatcher, event notifier.Event, idKey, id string) {
 	ctx, cancel := notifyCtx()
 	defer cancel()
 	if err := disp.Dispatch(ctx, event); err != nil {
-		slog.Warn("notifier: dispatch failed", "event", string(event.Type), idKey, id, "err", err)
+		slog.Warn("notifier: event acceptance unavailable; inspect notification delivery history", "event", string(event.Type), idKey, id)
 	}
 }

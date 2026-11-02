@@ -74,6 +74,7 @@ change requires a redeploy.
 |---|---|---|
 | `VITE_API_BASE_URL` | `https://uat-api.<domain>` | `https://uat-api.<domain>` (same shared backend) |
 | `VITE_OIDC_ENABLED` | `true` | `false` |
+| `VITE_LOCAL_AUTH_ENABLED` | `true` if local login is also enabled | `true` |
 | `VITE_OIDC_AUTHORITY` | `<issuer URL of the UAT IdP>` | _(unset — OIDC off on previews)_ |
 | `VITE_OIDC_CLIENT_ID` | `<client id registered for the fixed UAT domain>` | _(unset)_ |
 | `VITE_OIDC_REDIRECT_URI` | `https://<fixed-uat-domain>/auth/callback` | _(unset)_ |
@@ -99,7 +100,7 @@ because:
   retrieved 2026-06-11). The old "register `https://*.vercel.app/*`" trick
   no longer authorizes arbitrary preview hosts.
 
-So previews run with `VITE_OIDC_ENABLED=false` and use Cooker's **local
+So previews run with `VITE_OIDC_ENABLED=false`, `VITE_LOCAL_AUTH_ENABLED=true` and use Cooker's **local
 email+password auth** against the shared UAT backend. That is legal in
 `COOKER_ENV=uat` with `COOKER_ALLOWED_ORIGINS=*` (a wildcard CORS origin
 is permitted in `uat`, never in `production`). The **fixed** UAT domain
@@ -116,7 +117,7 @@ is permitted in `uat`, never in `production`). The **fixed** UAT domain
    The wildcard origin lets any per-PR Vercel preview hostname call the
    shared backend. **Only legal in `uat`** — `Config.Validate` rejects a
    wildcard origin under `COOKER_ENV=production`.
-2. Vercel **Preview** env: `VITE_OIDC_ENABLED=false`, `VITE_API_BASE_URL`
+2. Vercel **Preview** env: `VITE_OIDC_ENABLED=false`, `VITE_LOCAL_AUTH_ENABLED=true`, `VITE_API_BASE_URL`
    pointing at the shared backend. Testers sign in with a local UAT account.
 3. Vercel **Production** env (the fixed UAT domain): `VITE_OIDC_ENABLED=true`
    with the OIDC vars above; the backend's registered redirect URI is the

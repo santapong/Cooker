@@ -1,0 +1,13 @@
+.registry-selection { border: 1px solid var(--line); padding: 16px; margin: 0; display: grid; gap: 12px; min-width: 0; }
+.registry-selection legend { color: var(--ink-1); font-weight: 600; padding: 0 6px; }
+.registry-help { color: var(--ink-2); font-size: 13px; line-height: 1.6; margin: 0; overflow-wrap: anywhere; }
+.registry-selection .check, .registry-grants .check { min-height: 44px; align-items: flex-start; padding: 10px 0; }
+.registry-selection .check input, .registry-grants .check input { margin-top: 3px; flex-shrink: 0; }
+.registry-unavailable { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; color: var(--ink-2); overflow-wrap: anywhere; }
+.registry-grants { display: grid; gap: 16px; margin-top: 20px; }
+.registry-grants fieldset { display: grid; gap: 4px; min-width: 0; border: 1px solid var(--line); padding: 12px; }
+.registry-grants legend { color: var(--ink-2); padding: 0 6px; }
+.registry-grants .registry-targets { max-height: 280px; overflow-y: auto; display: grid; padding: 4px; }
+.registry-grants .check span { overflow-wrap: anywhere; }
+.registry-grants .form-actions { flex-wrap: wrap; }
+.registry-controls { display: flex; gap: 8px; flex-wrap: wrap; }

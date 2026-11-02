@@ -22,10 +22,33 @@ func NewEnvironmentStore(db *sql.DB) *EnvironmentStore {
 }
 
 func (s *EnvironmentStore) List(ctx context.Context, limit, offset int) ([]*model.Environment, error) {
+	return s.list(ctx, limit, offset, false)
+}
+
+func (s *EnvironmentStore) ListPublic(ctx context.Context, limit, offset int) ([]*model.Environment, error) {
+	return s.list(ctx, limit, offset, true)
+}
+
+func (s *EnvironmentStore) list(ctx context.Context, limit, offset int, public bool) ([]*model.Environment, error) {
+	where := ""
+	args:=[]any{limitArg(limit),clampOffset(offset)}
+	if public {
+		// Match strings.TrimSpace in the shared model predicate, including
+		// Unicode whitespace; ordinary SQL btrim would miss friendly aliases.
+		const whitespace="\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+		args=append(args,whitespace)
+		// Reserved tokens use ASCII letters. Go additionally maps dotted
+		// uppercase I to i; SQL lower depends on lc_ctype (notably C).
+		// Translate these spellings explicitly before pagination.
+		where = ` WHERE translate(btrim(id,$3),'ABCDEFGHIJKLMNOPQRSTUVWXYZİ','abcdefghijklmnopqrstuvwxyzi') <> '_registries'
+			AND left(translate(btrim(id,$3),'ABCDEFGHIJKLMNOPQRSTUVWXYZİ','abcdefghijklmnopqrstuvwxyzi'), 9) <> 'registry_'
+			AND translate(btrim(name,$3),'ABCDEFGHIJKLMNOPQRSTUVWXYZİ','abcdefghijklmnopqrstuvwxyzi') NOT IN ('_registries', '_registries (internal)')
+			AND left(translate(btrim(name,$3),'ABCDEFGHIJKLMNOPQRSTUVWXYZİ','abcdefghijklmnopqrstuvwxyzi'), 9) <> 'registry_'`
+	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, name, sort_order, target, promotion, variables, secrets, created_at, version
-		   FROM environments ORDER BY sort_order ASC LIMIT $1 OFFSET $2`,
-		limitArg(limit), clampOffset(offset))
+		   FROM environments`+where+` ORDER BY sort_order ASC, id ASC LIMIT $1 OFFSET $2`,
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing environments: %w", err)
 	}

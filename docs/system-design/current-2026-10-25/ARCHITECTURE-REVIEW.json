@@ -1,0 +1,80 @@
+{
+  "reviewDate": "2026-10-25",
+  "diagram_type": "architecture",
+  "scope": "Current pending source architecture; no application/provider/release acceptance claim.",
+  "guide": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/README.md",
+  "output": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/system-overview.html",
+  "specification_sha256": "10622c0f531e59dc824918d0722e9e25d69729fd71e863495830a27610964490",
+  "artifact_sha256": "9943d72588188bbefcae37323a5d7015a32dd5d04997020e86b361024722bec1",
+  "validation": "9/9 showcase;0errors;0warnings",
+  "workingTreeEvidenceReferences": 18,
+  "localGuideLinksChecked": 27,
+  "mermaidViews": 5,
+  "browser_evidence": "not_run_resource_preflight",
+  "visual_review": {
+    "staticLightPreview": "passed: final exact PNG inspected; all labels/arrows/boxes visible; no overlap or clipping observed",
+    "interactiveViewer": "not run; no browser containment/interaction claim",
+    "darkTheme": "not visually inspected"
+  },
+  "staticDerivative": {
+    "path": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/system-overview.png",
+    "sha256": "f06944998e519fbcea21c1b031757fff74560433f8a1087d69733872597afcb2",
+    "nativeViewerExport": false,
+    "geometryPreserved": true,
+    "bodyFontRestored": true
+  },
+  "evidenceBoundary": "Formal Git-revision validation rejected current line478 against base router411lines. Correctly bind current working-tree bytes separately; no fabricated commit or false release citation.",
+  "independentSemanticReview": "Pass after correcting supported App destinations evidence pointer from buildpack refusal342 to runtime switch1073.",
+  "resourceReview": {
+    "staticRendererEffective": {
+      "cpu": "50000 100000",
+      "memory": "536870912",
+      "swap": "0",
+      "pids": "32"
+    },
+    "rendererUnitGone": true,
+    "peakUsage": "not sampled for the subsecond render; enforcement inspected, no stress qualification claim",
+    "browser": "Deferred after local reserved RAM headroom failed; Pi read-only check found no memory controller and68.1C temperature. No Pi execution or service changes."
+  },
+  "authoredCorrections": {
+    "staticGeometry": "Endpoint sides, two label positions, one label clearance and right-column width; error count decreased tozero.",
+    "staticPaint": "Body font inheritance restored in derivative; trusted viewer geometry and HTML unchanged.",
+    "semantic": "Final new specification uses Verified webhooks, covering provider-specific authentication without a universal signing claim."
+  },
+  "handoffUI": "HTML and guide open requests queued by app; not claimed visible already.",
+  "artifacts": [
+    {
+      "path": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/README.md",
+      "sha256": "8a04b20d101405c6ba8c96fd8af8ae63822d6b6234c8d1a8c417512d4eadd8d3"
+    },
+    {
+      "path": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/SOURCE-REVIEW.json",
+      "sha256": "ab1de6e2f89490551713cdb954a1a8e6ba4188c625332ca1a4c7e08aa7786e1f"
+    },
+    {
+      "path": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/system-overview-v2.architecture.json",
+      "sha256": "10622c0f531e59dc824918d0722e9e25d69729fd71e863495830a27610964490"
+    },
+    {
+      "path": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/system-overview.html",
+      "sha256": "9943d72588188bbefcae37323a5d7015a32dd5d04997020e86b361024722bec1"
+    },
+    {
+      "path": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/system-overview.png",
+      "sha256": "f06944998e519fbcea21c1b031757fff74560433f8a1087d69733872597afcb2"
+    },
+    {
+      "path": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/system-overview.delivery.json",
+      "sha256": "41c3d50ce24ceaa2ec70afff8886676c489f3b90ac095c2028e455a836e06f3a"
+    },
+    {
+      "path": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/static-render-receipt.json",
+      "sha256": "6a57295f59a2b44a1e37d197c29f38418db24a0ab13f6147cb0acbbd805bc617"
+    },
+    {
+      "path": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/static-render-executor.json",
+      "sha256": "58e44fe9cfb414151c38617632739efe0b1e8309e24c4e2db80c3a568ea413bb"
+    }
+  ],
+  "learningLimit": "Late final-validation enrollment; no causal quality/resource benefit measured."
+}

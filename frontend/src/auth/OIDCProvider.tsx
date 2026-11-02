@@ -10,6 +10,7 @@ import {
 import { UserManager, WebStorageStateStore, type User as OidcUser } from 'oidc-client-ts';
 import { pushToast } from '../stores/toastStore';
 import { authApi, type AuthUser } from '../api/auth';
+import { redirectToSocialProvider, type SocialProvider } from './socialSignIn';
 
 interface User {
   sub: string;
@@ -25,6 +26,7 @@ interface AuthContextType {
   isLoading: boolean;
   /** Trigger an OIDC sign-in redirect. No-op if OIDC is disabled. */
   login: () => void;
+  signinSocial: (provider: SocialProvider, returnTo?: string) => Promise<void>;
   /** Sign in with email + password against the local backend. Throws on failure. */
   signinLocal: (email: string, password: string) => Promise<void>;
   /** Sign up with email + password against the local backend. Throws on failure. */
@@ -37,6 +39,7 @@ const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   isLoading: true,
   login: () => {},
+  signinSocial: async () => { throw new Error('Sign-in is unavailable.'); },
   signinLocal: async () => {},
   signupLocal: async () => {},
   logout: () => {},
@@ -47,6 +50,8 @@ export function useAuth() {
 }
 
 const oidcEnabled = import.meta.env.VITE_OIDC_ENABLED === 'true';
+const localAuthEnabled = import.meta.env.VITE_LOCAL_AUTH_ENABLED === 'true';
+const interactiveAuth = oidcEnabled || localAuthEnabled;
 
 const DEV_USER: User = {
   sub: 'dev-user',
@@ -67,10 +72,10 @@ export function getUserManager(): UserManager | null {
   const authority = import.meta.env.VITE_OIDC_AUTHORITY;
   const clientId = import.meta.env.VITE_OIDC_CLIENT_ID;
   const redirectUri =
-    import.meta.env.VITE_OIDC_REDIRECT_URI ?? `${window.location.origin}/callback`;
+    import.meta.env.VITE_OIDC_REDIRECT_URI || `${window.location.origin}/callback`;
   const postLogoutRedirectUri =
-    import.meta.env.VITE_OIDC_POST_LOGOUT_REDIRECT_URI ?? window.location.origin;
-  const scope = import.meta.env.VITE_OIDC_SCOPE ?? 'openid profile email groups';
+    import.meta.env.VITE_OIDC_POST_LOGOUT_REDIRECT_URI || window.location.origin;
+  const scope = import.meta.env.VITE_OIDC_SCOPE || 'openid profile email groups';
 
   if (!authority || !clientId) {
     throw new Error(
@@ -183,7 +188,11 @@ function persistLocalToken(token: string | null): void {
 }
 
 export function OIDCProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(oidcEnabled ? null : DEV_USER);
+  // An authenticated backend needs a signed-out first render even when it
+  // uses local email/password instead of OIDC. Otherwise /signin immediately
+  // redirects the synthetic dev user into protected pages, whose 401s loop
+  // back here. The dev identity is only for builds with both methods disabled.
+  const [user, setUser] = useState<User | null>(interactiveAuth ? null : DEV_USER);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const manager = useMemo(() => (oidcEnabled ? getUserManager() : null), []);
@@ -194,7 +203,9 @@ export function OIDCProvider({ children }: { children: ReactNode }) {
     const stored = loadStoredLocalToken();
     if (!stored) {
       if (!oidcEnabled) {
-        // Dev mode: no OIDC, no local token — keep DEV_USER and stop loading.
+        // No OIDC lookup is pending. Local-only mode remains signed out;
+        // the explicit development configuration keeps its synthetic user.
+        setUser(interactiveAuth ? null : DEV_USER);
         setIsLoading(false);
       }
       return;
@@ -302,6 +313,12 @@ export function OIDCProvider({ children }: { children: ReactNode }) {
     setUser(fromAuthUser(res.user));
   }, []);
 
+  const signinSocial = useCallback(async (provider: SocialProvider, returnTo?: string) => {
+    // Recheck current server configuration before leaving the page.
+    const methods = await authApi.methods();
+    await redirectToSocialProvider(manager, methods, provider, returnTo);
+  }, [manager]);
+
   const signupLocal = useCallback(async (email: string, password: string, name?: string) => {
     const res = await authApi.signup(email, password, name);
     persistLocalToken(res.token);
@@ -327,6 +344,7 @@ export function OIDCProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         login,
+        signinSocial,
         signinLocal,
         signupLocal,
         logout,

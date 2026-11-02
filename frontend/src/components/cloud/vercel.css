@@ -1,0 +1,22 @@
+.vercel-stack { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.vercel-card { border: 1px solid var(--line); border-radius: var(--radius-1); padding: var(--sp-4); min-width: 0; }
+.vercel-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; }
+.vercel-heading h3 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.vercel-meta { color: var(--ink-3); font-size: 12px; overflow-wrap: anywhere; }
+.vercel-projects { display: grid; gap: 10px; max-height: 260px; overflow: auto; padding: 8px 0; }
+.vercel-projects .check { overflow-wrap: anywhere; }
+.vercel-filters { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.vercel-filters > .field { flex: 1 1 180px; }
+.vercel-history { display: grid; gap: var(--sp-3); list-style: none; margin: 0; padding: 0; }
+.vercel-history .vercel-card { display: grid; gap: 10px; }
+.vercel-history a { overflow-wrap: anywhere; }
+.vercel-hint { font-size: 12px; color: var(--ink-3); line-height: 1.6; }
+.vercel-inline-link { text-decoration: underline; text-underline-offset: 3px; }
+.vercel-review-details { display: grid; grid-template-columns: minmax(90px, 150px) minmax(0, 1fr); gap: 10px 16px; margin: 0; font-size: 13px; }
+.vercel-review-details dt { color: var(--ink-3); }
+.vercel-review-details dd { margin: 0; overflow-wrap: anywhere; }
+.vercel-publish-action { height: auto; min-height: 32px; max-width: 100%; padding: 6px 12px; justify-content: center; text-align: center; line-height: 1.5; }
+@media (max-width: 540px) {
+  .vercel-review-details { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .vercel-review-details dd { margin-bottom: 8px; }
+}

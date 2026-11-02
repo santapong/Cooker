@@ -7,6 +7,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
+
+	"github.com/santapong/cooker/internal/build/registryauth"
 )
 
 // ErrUnavailable is returned when the deployment backend is not
@@ -56,6 +59,10 @@ type Request struct {
 	// manifests, or .image.repository/tag keys in Helm values. For
 	// KindDockerRun it is the image to run.
 	Image string
+	// Accepted registry evidence is scoped to this request. A nonnil resolver
+	// also isolates anonymous access from host Docker/keychain credentials.
+	RegistryAuth  registryauth.Resolver
+	RegistryHosts []string
 	// Name is the container/service name for KindDockerRun / KindCompose.
 	Name string
 	// Ports are container ports to publish for KindDockerRun ("p:p").
@@ -75,6 +82,8 @@ type Request struct {
 	Network string
 	// ComposeFile is the path to the compose file for KindCompose.
 	ComposeFile string
+	// ComposeOverrideFile is a trusted per-stage image override, never a user-supplied path.
+	ComposeOverrideFile string
 	// ComposeService selects a reviewed service from the normalized project.
 	ComposeService string
 	// LogWriter, when non-nil, receives a stream of human-readable
@@ -98,6 +107,28 @@ type Result struct {
 	// executor's derived baseline (the executor sets resources from
 	// AppliedResources; an adapter may add or override keys here).
 	Outputs map[string]string
+	// RuntimeReceipt is optional trusted execution metadata for one Docker
+	// start. Capture unavailability must not turn a successful apply into an
+	// operation failure. The executor validates and copies it before persistence.
+	RuntimeReceipt        *RuntimeReceipt
+	RuntimeBindingWarning string
+}
+
+// RuntimeBindingUnavailable is the only receipt-capture warning emitted here.
+const RuntimeBindingUnavailable = "runtime_receipt_unavailable"
+
+// RuntimeReceipt keeps the adapter independent of the persistence model.
+// Only the selected Docker adapter can produce this from actual start/inspect.
+type RuntimeReceipt struct {
+	Version        int
+	Runtime        string
+	RunID          string
+	StageID        string
+	ContainerID    string
+	Name           string
+	ImageReference string
+	ImageID        string
+	CapturedAt     time.Time
 }
 
 // Deployer applies workloads to a target (Kubernetes cluster, Docker

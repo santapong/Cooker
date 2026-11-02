@@ -33,6 +33,12 @@ const NotificationTargetsPage = lazy(() => import('./pages/NotificationTargetsPa
 const TemplatesGalleryPage = lazy(() => import('./pages/TemplatesGalleryPage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 const AuditLogPage = lazy(() => import('./pages/AuditLogPage'))
+const OverviewPage = lazy(() => import('./pages/OverviewPage'))
+const RunsPage = lazy(() => import('./pages/RunsPage'))
+const GuidePage = lazy(() => import('./pages/GuidePage'))
+const ServicesPage = lazy(() => import('./pages/ServicesPage'))
+const SyncedAppPage = lazy(() => import('./pages/SyncedAppPage'))
+const SyncedPipelinePage = lazy(() => import('./pages/SyncedPipelinePage'))
 
 // Redesign P1 (docs/plans/2026-07-cosmic-frontend-redesign.md §8): the
 // AppShell (instrument rail + top strip) wraps every protected route.
@@ -57,8 +63,14 @@ export default function App() {
                     <Route path="/pipelines/:id/runs/:runId" element={<RunPage />} />
                     <Route path="/apps/:appId/deployments/:pipelineId/:runId" element={<DeploymentPage />} />
                     <Route path="/apps/new" element={<NewAppWizard />} />
-                    <Route path="/" element={<AppsPage />} />
+                    <Route path="/" element={<OverviewPage />} />
+                    <Route path="/overview" element={<OverviewPage />} />
+                    <Route path="/runs" element={<RunsPage />} />
+                    <Route path="/docs" element={<GuidePage />} />
                     <Route path="/apps" element={<AppsPage />} />
+                    <Route path="/apps/synced/:catalogId" element={<SyncedAppPage />} />
+                    <Route path="/pipelines/synced/:catalogId" element={<SyncedPipelinePage />} />
+                    <Route path="/services" element={<ServicesPage />} />
                     <Route path="/apps/:id" element={<AppDetailPage />} />
                     <Route path="/pipelines" element={<PipelinesPage />} />
                     <Route path="/docker" element={<DockerPage />} />

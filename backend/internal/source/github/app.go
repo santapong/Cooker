@@ -23,6 +23,7 @@ import (
 // installations explicitly allowed by the server administrator can be used.
 // Tokens are short lived, scoped to repository contents, and never sent to UI.
 type AppClient struct {
+	AccessToken     string // ephemeral connection credential; never serialized
 	AppID           string
 	Slug            string
 	Key             *rsa.PrivateKey
@@ -145,7 +146,9 @@ func (c *AppClient) request(ctx context.Context, method, path, token string, bod
 	if client == nil {
 		client = &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
-	res, err := client.Do(req)
+	safeClient := *client
+	safeClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	res, err := safeClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("GitHub request failed; check connectivity")
 	}

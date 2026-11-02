@@ -26,6 +26,7 @@ func (h *Handler) GetCapabilities(c *gin.Context) {
 		"aiTriage":       h.Triage != nil,
 		"cloudInventory": h.CloudInventory != nil && h.CloudInventory.Enabled(),
 		"feedback":       h.Feedback != nil,
+		"neonMetadata":   h.Neon != nil,
 	})
 }
 

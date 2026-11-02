@@ -5,7 +5,7 @@ const AMBIENT = ['drift1', 'drift2', 'twinkle'];
 
 test.describe('Calm mode — the WCAG 2.2.2 pause control', () => {
   test('stops ambient motion, persists, and restores it when switched off', async ({ page }) => {
-    await gotoEditor(page);
+    await gotoRun(page);
     const before = (await runningAnimations(page)).map((a) => a.name);
     for (const n of AMBIENT) expect(before, 'ambient motion runs before Calm').toContain(n);
 

@@ -5,12 +5,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/service"
 )
 
 // testSecretsRequest is the optional JSON body of POST
 // /settings/secrets/test. Omitting environmentId probes against the
-// first environment in the store.
+// first public workload environment in the store.
 type testSecretsRequest struct {
 	EnvironmentID string `json:"environmentId,omitempty"`
 }
@@ -39,11 +40,21 @@ func (h *Handler) TestSecretsBackend(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if len(envs) == 0 {
+		for _, env := range envs {
+			if env != nil && !model.IsRegistryCredentialEnvironment(env) {
+				envID = env.ID
+				break
+			}
+		}
+		if envID == "" {
 			c.JSON(http.StatusConflict, gin.H{"error": "no environments to probe against — create one or pass environmentId"})
 			return
 		}
-		envID = envs[0].ID
+	}
+	// Probe only an existing public scope. The same lookup rejects friendly-name
+	// aliases before CheckSecrets can issue any provider request.
+	if _, ok := h.publicEnvironment(c, envID); !ok {
+		return
 	}
 	c.JSON(http.StatusOK, service.CheckSecrets(c.Request.Context(), h.Secrets, h.SecretsBackend, envID))
 }

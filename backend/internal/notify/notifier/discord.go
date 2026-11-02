@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"time"
 )
@@ -68,10 +66,10 @@ func colorForEvent(t EventType) int {
 func (d *DiscordNotifier) Send(ctx context.Context, target Target, event Event) error {
 	var cfg DiscordConfig
 	if err := target.DecodeConfig(&cfg); err != nil {
-		return fmt.Errorf("discord: decode config: %w", err)
+		return invalidConfig()
 	}
 	if cfg.WebhookURL == "" {
-		return fmt.Errorf("discord: target %s missing webhookUrl", target.ID)
+		return invalidConfig()
 	}
 	payload := discordPayload{
 		Username:  cfg.Username,
@@ -86,21 +84,20 @@ func (d *DiscordNotifier) Send(ctx context.Context, target Target, event Event) 
 	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("discord: marshal payload: %w", err)
+		return invalidConfig()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.WebhookURL, bytes.NewReader(buf))
 	if err != nil {
-		return fmt.Errorf("discord: build request: %w", err)
+		return invalidConfig()
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := d.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("discord: post: %w", err)
+		return uncertainSend()
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("discord: status %d: %s", resp.StatusCode, string(b))
+		return receiverFailure(resp.StatusCode)
 	}
 	return nil
 }

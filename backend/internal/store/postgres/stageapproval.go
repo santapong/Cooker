@@ -51,7 +51,7 @@ func (s *StageApprovalStore) CreateGate(ctx context.Context, g *model.StageAppro
 // same consistent snapshot, so a concurrent AddVote cannot produce a
 // count that disagrees with the vote list.
 func (s *StageApprovalStore) GetGate(ctx context.Context, runID, stageID string) (*model.StageApproval, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return nil, fmt.Errorf("getting gate: begin tx: %w", err)
 	}
@@ -81,7 +81,14 @@ func (s *StageApprovalStore) GetGate(ctx context.Context, runID, stageID string)
 // fetched in a single batched query (DA-H3 fix) rather than one query
 // per gate, to avoid the N+1 pattern.
 func (s *StageApprovalStore) ListGates(ctx context.Context, runID string) ([]*model.StageApproval, error) {
-	rows, err := s.db.QueryContext(ctx,
+	// Keep the rows and batched votes in one snapshot. Otherwise a final vote
+	// could commit between the reads and display awaiting with complete quorum.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return nil, fmt.Errorf("listing gates: begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // read-only transaction
+	rows, err := tx.QueryContext(ctx,
 		`SELECT id, run_id, stage_id, status, required_approvers, resolved_by,
 		        resolved_at, created_at, updated_at
 		   FROM stage_approvals WHERE run_id = $1
@@ -104,12 +111,15 @@ func (s *StageApprovalStore) ListGates(ctx context.Context, runID string) ([]*mo
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	if len(ids) == 0 {
 		return out, nil
 	}
 
 	// Fetch all votes for this run's gates in one query (DA-H3).
-	voteMap, err := s.listVotesBatch(ctx, ids)
+	voteMap, err := listVotesBatchTx(ctx, tx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -120,34 +130,102 @@ func (s *StageApprovalStore) ListGates(ctx context.Context, runID string) ([]*mo
 }
 
 func (s *StageApprovalStore) UpdateGateStatus(ctx context.Context, id string, status model.StageApprovalStatus, resolvedBy string, resolvedAt *time.Time) error {
+	if status != model.StageApprovalApproved && status != model.StageApprovalRejected {
+		return fmt.Errorf("stage approval %s: %w", id, store.ErrConflict)
+	}
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE stage_approvals
 		    SET status = $2,
 		        resolved_by = CASE WHEN $3 = '' THEN resolved_by ELSE $3 END,
 		        resolved_at = COALESCE($4, resolved_at),
 		        updated_at = NOW()
-		  WHERE id = $1`,
+		  WHERE id = $1 AND status = 'awaiting'`,
 		id, string(status), resolvedBy, nullTime(resolvedAt))
 	if err != nil {
 		return fmt.Errorf("updating stage approval %s: %w", id, err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("updating stage approval: %w", err)
+	}
 	if n == 0 {
-		return fmt.Errorf("stage approval %s: %w", id, store.ErrNotFound)
+		var exists bool
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM stage_approvals WHERE id = $1)`, id).Scan(&exists); err != nil {
+			return fmt.Errorf("checking stage approval: %w", err)
+		}
+		if !exists {
+			return fmt.Errorf("stage approval %s: %w", id, store.ErrNotFound)
+		}
+		return fmt.Errorf("stage approval %s: %w", id, store.ErrConflict)
 	}
 	return nil
 }
 
 // AddVote inserts a vote row and returns the post-insert count. Both
-// statements execute inside a single transaction (DA-H2 fix) so
-// concurrent votes cannot observe a count that omits a just-inserted
-// peer row, which would cause a gate to stall permanently.
+// statements and quorum resolution execute inside a single transaction. The
+// gate-row lock serializes votes and terminal decisions. A committed final vote
+// cannot leave the gate awaiting if the request/process stops before a later read.
 func (s *StageApprovalStore) AddVote(ctx context.Context, v *model.StageApprovalVote) (bool, int, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, 0, fmt.Errorf("adding vote: begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+
+	// Serialize votes and terminal decisions on the gate row. Without this
+	// lock, two distinct votes can each count only their own uncommitted row
+	// and leave a fully voted gate awaiting indefinitely.
+	var status string
+	var required int
+	if err := tx.QueryRowContext(ctx, `SELECT status, required_approvers FROM stage_approvals WHERE id = $1 FOR UPDATE`, v.StageApprovalID).Scan(&status, &required); errors.Is(err, sql.ErrNoRows) {
+		return false, 0, fmt.Errorf("stage approval %s: %w", v.StageApprovalID, store.ErrNotFound)
+	} else if err != nil {
+		return false, 0, fmt.Errorf("locking stage approval: %w", err)
+	}
+	if status != string(model.StageApprovalAwaiting) {
+		return false, 0, fmt.Errorf("stage approval %s: %w", v.StageApprovalID, store.ErrConflict)
+	}
+
+	if required < 1 {
+		required = 1
+	}
+	resolve := func(by string) error {
+		result, err := tx.ExecContext(ctx,
+			`UPDATE stage_approvals
+			    SET status = 'approved',
+			        resolved_by = CASE WHEN $2 = '' THEN resolved_by ELSE $2 END,
+			        resolved_at = NOW(), updated_at = NOW()
+			  WHERE id = $1 AND status = 'awaiting'`, v.StageApprovalID, by)
+		if err != nil {
+			return fmt.Errorf("resolving stage approval quorum: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("resolving stage approval quorum count: %w", err)
+		}
+		if n != 1 {
+			return fmt.Errorf("resolving stage approval quorum: %w", store.ErrConflict)
+		}
+		return nil
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM stage_approval_votes WHERE stage_approval_id = $1`,
+		v.StageApprovalID).Scan(&count); err != nil {
+		return false, 0, fmt.Errorf("counting existing stage approval votes: %w", err)
+	}
+	// Recover a quorum committed by the older split implementation before
+	// admitting another vote. The historical resolver is unknown, not this
+	// caller; preserve it without manufacturing an approver identity.
+	if count >= required {
+		if err := resolve(""); err != nil {
+			return false, 0, err
+		}
+		if err := tx.Commit(); err != nil {
+			return false, 0, fmt.Errorf("recovering vote quorum: commit: %w", err)
+		}
+		return false, count, nil
+	}
 
 	// ON CONFLICT DO NOTHING makes a repeat approval by the same identity
 	// a no-op rather than a unique-violation. RETURNING id fires only when
@@ -172,11 +250,15 @@ func (s *StageApprovalStore) AddVote(ctx context.Context, v *model.StageApproval
 		return false, 0, fmt.Errorf("adding stage approval vote: %w", err)
 	}
 
-	var count int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM stage_approval_votes WHERE stage_approval_id = $1`,
 		v.StageApprovalID).Scan(&count); err != nil {
 		return false, 0, fmt.Errorf("counting stage approval votes: %w", err)
+	}
+	if count >= required {
+		if err := resolve(v.ApproverEmail); err != nil {
+			return false, 0, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return false, 0, fmt.Errorf("adding vote: commit: %w", err)
@@ -207,11 +289,11 @@ func listVotesTx(ctx context.Context, tx *sql.Tx, gateID string) ([]model.StageA
 	return out, rows.Err()
 }
 
-// listVotesBatch fetches all votes for the given set of gate IDs in a
+// listVotesBatchTx fetches all votes for the given set of gate IDs in a
 // single query and returns them grouped by gate ID (DA-H3 fix). Never
 // called with an empty ids slice.
-func (s *StageApprovalStore) listVotesBatch(ctx context.Context, ids []string) (map[string][]model.StageApprovalVote, error) {
-	rows, err := s.db.QueryContext(ctx,
+func listVotesBatchTx(ctx context.Context, tx *sql.Tx, ids []string) (map[string][]model.StageApprovalVote, error) {
+	rows, err := tx.QueryContext(ctx,
 		`SELECT id, stage_approval_id, approver_sub, approver_email, note, created_at
 		   FROM stage_approval_votes
 		  WHERE stage_approval_id = ANY($1)

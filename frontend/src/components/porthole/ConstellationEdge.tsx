@@ -1,8 +1,10 @@
-import { memo, type CSSProperties } from 'react';
-import type { Edge, EdgeProps } from '@xyflow/react';
+import { memo, useId, type CSSProperties } from 'react';
+import { EdgeLabelRenderer, type Edge, type EdgeProps } from '@xyflow/react';
 import type { PipelineEdge } from '../../types/pipeline';
 import { useMotionAllowed } from '../../hooks/useMotionAllowed';
 import { edgeMidpoint, edgePath } from './constellation';
+import type { DependencyDrawing } from '../pipeline/dependencies';
+import './dependency-edge.css';
 
 export interface ConstellationData extends Record<string, unknown> {
   condition?: PipelineEdge['condition'];
@@ -11,6 +13,11 @@ export interface ConstellationData extends Record<string, unknown> {
   /** Run state of the edge: light has passed (done) or is passing (hot). */
   state?: 'idle' | 'done' | 'hot';
   drawDelay?: number;
+  /** Opt-in authored-pipeline view; Compose links keep their own semantics. */
+  dependency?: DependencyDrawing;
+  explanation?: string;
+  zoom?: number;
+  onInspect?: () => void;
 }
 
 export type ConstellationEdgeType = Edge<ConstellationData>;
@@ -27,6 +34,20 @@ export type ConstellationEdgeType = Edge<ConstellationData>;
 function ConstellationEdge({ sourceX, sourceY, targetX, targetY, data, selected }: EdgeProps<ConstellationEdgeType>) {
   const d = edgePath(sourceX, sourceY, targetX, targetY);
   const motion = useMotionAllowed();
+  const marker = `dependency-${useId().replace(/:/g, '')}`;
+  if (data?.dependency) {
+    const dependency = data.dependency;
+    const displaced = dependency.label.x !== dependency.anchor.x || dependency.label.y !== dependency.anchor.y;
+    return <>
+      <g className={`pipeline-dependency${selected ? ' is-selected' : ''} pipeline-dependency-${data.condition ?? 'success'}`}>
+        <defs><marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9 Z" /></marker></defs>
+        <path d={dependency.path} className="pipeline-dependency-hit" />
+        <path d={dependency.path} className="pipeline-dependency-line" markerEnd={`url(#${marker})`} />
+        {displaced && <path d={`M ${dependency.anchor.x} ${dependency.anchor.y} L ${dependency.label.x} ${dependency.label.y}`} className="pipeline-dependency-leader" />}
+      </g>
+      <EdgeLabelRenderer><button type="button" className="pipeline-dependency-number nodrag nopan" style={{ transform: `translate(-50%, -50%) translate(${dependency.label.x}px, ${dependency.label.y}px) scale(${1 / (data.zoom ?? 1)})` }} aria-label={`Dependency ${dependency.number}: ${data.explanation}`} aria-pressed={!!selected} onClick={data.onInspect}><span>{dependency.number}</span></button></EdgeLabelRenderer>
+    </>;
+  }
   const comet = data?.state === 'hot' && motion;
   const cls = [
     'constellation',

@@ -125,7 +125,7 @@ func TestDockerSock_IgnoresCache(t *testing.T) {
 	var buf bytes.Buffer
 	d := &DockerSock{Bin: "true"}
 	_, err := d.Build(context.Background(), Request{
-		ContextDir: "/src", Tags: []string{"t"},
+		ContextDir: t.TempDir(), Tags: []string{"t"},
 		LogWriter: &buf,
 		Cache:     CacheSpec{Mode: "registry", Ref: "reg.example.com/c"},
 	})

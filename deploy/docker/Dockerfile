@@ -12,6 +12,7 @@ COPY frontend/ ./
 # (the client secret is never used in the browser PKCE flow), so it
 # is safe to bake them into the JS bundle.
 ARG VITE_OIDC_ENABLED=false
+ARG VITE_LOCAL_AUTH_ENABLED=false
 ARG VITE_OIDC_AUTHORITY=
 ARG VITE_OIDC_CLIENT_ID=
 ARG VITE_OIDC_REDIRECT_URI=
@@ -22,6 +23,7 @@ ARG VITE_OIDC_SCOPE=
 # SPA is hosted separately (split-origin, e.g. on Vercel).
 ARG VITE_API_BASE_URL=
 ENV VITE_OIDC_ENABLED=$VITE_OIDC_ENABLED \
+    VITE_LOCAL_AUTH_ENABLED=$VITE_LOCAL_AUTH_ENABLED \
     VITE_OIDC_AUTHORITY=$VITE_OIDC_AUTHORITY \
     VITE_OIDC_CLIENT_ID=$VITE_OIDC_CLIENT_ID \
     VITE_OIDC_REDIRECT_URI=$VITE_OIDC_REDIRECT_URI \
@@ -47,6 +49,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 FROM alpine:3.19
 # git:        used by internal/source/github to clone App repos
 # docker-cli: Cooker shells `docker build/push` via a bind-mounted sock
+# docker-cli-compose: native App Compose execution and readiness
 # kubectl:    pinned static binary; internal/deployer/kubectl.go shells to it
 #
 # Runs as a non-root system user (UID/GID 65532 — the standard
@@ -72,7 +75,8 @@ ARG TARGETARCH=amd64
 # Fetch kubectl and verify against the upstream-published SHA256 so a
 # compromised mirror or in-flight tampering cannot inject a malicious
 # binary that would run with docker.sock and kubeconfig access.
-RUN apk add --no-cache ca-certificates git docker-cli \
+RUN apk add --no-cache ca-certificates git docker-cli docker-cli-compose \
+ && docker compose version \
  && wget -qO /usr/local/bin/kubectl \
       https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl \
  && wget -qO /tmp/kubectl.sha256 \

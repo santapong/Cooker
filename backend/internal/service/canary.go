@@ -141,6 +141,11 @@ func (s *CanaryService) Start(ctx context.Context, app *model.App, runID string,
 	if !s.supportsCanary(app) {
 		return nil, ErrCanaryUnsupported
 	}
+	if preflight, ok := s.builder.(interface{ CheckRegistryDeployment(*model.App) error }); ok {
+		if err := preflight.CheckRegistryDeployment(app); err != nil {
+			return nil, err
+		}
+	}
 
 	// Reserve the one-canary-per-app slot FIRST with a pending row, before
 	// building or touching the cluster (PM26-07-06). The partial unique
@@ -229,6 +234,13 @@ func (s *CanaryService) Promote(ctx context.Context, appID string) (*model.AppCa
 	if err != nil {
 		return nil, err
 	}
+	// A retained rollout may predate scoped registry execution. Forward traffic
+	// changes must respect the current supported transport before claiming it.
+	if checker, ok := s.builder.(interface{ CheckRegistryDeployment(*model.App) error }); ok {
+		if err := checker.CheckRegistryDeployment(app); err != nil {
+			return nil, err
+		}
+	}
 	// Claim the transition BEFORE mutating the cluster (PM26-07-02). If a
 	// concurrent sweeper (another replica) or operator already resolved
 	// this canary, we lose the CAS and must not issue a second, possibly
@@ -277,6 +289,8 @@ func (s *CanaryService) Abort(ctx context.Context, appID, reason string) (*model
 	if err != nil {
 		return nil, err
 	}
+	// Preserve recovery of already-running legacy splits. Abort reduces the
+	// canary's traffic and neither builds nor acquires registry authority.
 	// Same CAS guard as Promote (PM26-07-02): claim the transition before
 	// scaling the split down, and no-op if another actor already resolved.
 	won, err := s.canaries.ClaimTerminal(ctx, c.ID, model.CanaryAborted)

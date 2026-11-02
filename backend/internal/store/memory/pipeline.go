@@ -20,7 +20,7 @@ func (s *pipelines) List(_ context.Context, limit, offset int) ([]*model.Pipelin
 	defer s.mu.RUnlock()
 	out := make([]*model.Pipeline, 0, len(s.m))
 	for _, p := range s.m {
-		out = append(out, p)
+		out = append(out, store.CloneTrigger(p))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
 	return paginate(out, limit, offset), nil
@@ -33,13 +33,16 @@ func (s *pipelines) Get(_ context.Context, id string) (*model.Pipeline, error) {
 	if !ok {
 		return nil, fmt.Errorf("pipeline %s: %w", id, store.ErrNotFound)
 	}
-	return p, nil
+	return store.CloneTrigger(p), nil
 }
 
 func (s *pipelines) Create(_ context.Context, p *model.Pipeline) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.m[p.ID] = p
+	if _, exists := s.m[p.ID]; exists {
+		return store.ErrConflict
+	}
+	s.m[p.ID] = store.CloneTrigger(p)
 	return nil
 }
 
@@ -54,7 +57,7 @@ func (s *pipelines) Update(_ context.Context, p *model.Pipeline) error {
 		return fmt.Errorf("pipeline %s: %w", p.ID, store.ErrConflict)
 	}
 	p.Version++
-	s.m[p.ID] = p
+	s.m[p.ID] = store.CloneTrigger(p)
 	return nil
 }
 

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '../auth/OIDCProvider';
 import { settingsApi, type SecretsCheckResult } from '../api/settings';
 import { environmentsApi } from '../api/environments';
 import { tokensApi, type APIToken } from '../api/tokens';
@@ -8,6 +10,9 @@ import { useLicenseStore } from '../stores/licenseStore';
 import { useUIStore } from '../stores/uiStore';
 import { pushToast } from '../stores/toastStore';
 import Badge from '../components/ui/Badge';
+import SourceConnections from '../components/app/SourceConnections';
+import VercelConnections from '../components/settings/VercelConnections';
+import NotificationDeliveries from '../components/settings/NotificationDeliveries';
 import Caps from '../components/ui/Caps';
 import ConfirmButton from '../components/ui/ConfirmButton';
 import { Actions, Check, Field, FormError, Select, TextArea, TextInput } from '../components/ui/form';
@@ -30,6 +35,7 @@ function Section({ title, aside, children }: { title: string; aside?: React.Reac
 
 /** Settings — a single 640px column of small-caps sections (spec §5). */
 export default function SettingsPage() {
+  const registryAdmin = useAuth().user?.roles.includes('admin') === true;
   const calm = useUIStore((s) => s.calmMode);
   const setCalm = useUIStore((s) => s.setCalmMode);
   const mode = useUIStore((s) => s.mode);
@@ -46,6 +52,7 @@ export default function SettingsPage() {
   const [registries, setRegistries] = useState<RegistryConfig[]>([]);
   const [regForm, setRegForm] = useState({ name: '', url: '', username: '', password: '' });
   const [regOpen, setRegOpen] = useState(false);
+  const [registryError, setRegistryError] = useState<string | null>(null);
 
   // clusters
   const [clusters, setClusters] = useState<ClusterConfig[]>([]);
@@ -72,7 +79,10 @@ export default function SettingsPage() {
   const load = useCallback(async () => {
     const [e, r, c, t] = await Promise.all([
       environmentsApi.list({ limit: 100 }).catch(() => [] as Environment[]),
-      settingsApi.listRegistries().catch(() => [] as RegistryConfig[]),
+      settingsApi.listRegistries().then((items) => { setRegistryError(null); return items; }).catch(() => {
+        setRegistryError('Registry connections could not be loaded. Refresh before changing access.');
+        return [] as RegistryConfig[];
+      }),
       settingsApi.listClusters().catch(() => [] as ClusterConfig[]),
       tokensApi.list().catch(() => [] as APIToken[]),
     ]);
@@ -93,8 +103,11 @@ export default function SettingsPage() {
       await fn();
       if (ok) pushToast('success', ok);
     } catch (e) {
-      setError(message(e));
-      pushToast('error', message(e));
+      const summary = key === 'registry' || key === 'del-registry'
+        ? 'Registry connection change could not be saved. Refresh its current status before retrying.'
+        : message(e);
+      setError(summary);
+      pushToast('error', summary);
     } finally {
       setBusy(null);
     }
@@ -115,6 +128,7 @@ export default function SettingsPage() {
 
   const addRegistry = (e: FormEvent) => {
     e.preventDefault();
+    if (!registryAdmin) return;
     void run(
       'registry',
       async () => {
@@ -161,6 +175,10 @@ export default function SettingsPage() {
         </Field>
       </Section>
 
+      <Section title="Git connections"><SourceConnections /></Section>
+      <Section title="Vercel connections"><VercelConnections /></Section>
+      <Section title="Notification deliveries"><NotificationDeliveries /></Section>
+
       <Section title="Secrets backend" aside={secrets && <Badge variant={secrets.ok ? 'ok' : 'fail'}>{secrets.ok ? 'ok' : 'failing'}</Badge>}>
         <p>Round-trips a probe through the configured secrets store.</p>
         <Field label="Environment" hint="Optional — tests the backend that environment resolves to.">
@@ -181,13 +199,16 @@ export default function SettingsPage() {
 
       <Section
         title="Image registries"
-        aside={
+        aside={registryAdmin ? (
           <button type="button" className="hud-btn" onClick={() => setRegOpen((v) => !v)}>
             {regOpen ? 'Cancel' : '＋ Add registry'}
           </button>
-        }
+        ) : undefined}
       >
-        {regOpen && (
+        <p>Connections are granted to specific Apps or native Pipelines in <Link to="/registry">Registry</Link>. Choose the permitted connection in each App or pipeline stage; adding one alone does not enable credential use.</p>
+        {!registryAdmin && <p>An administrator manages registry connections and grants.</p>}
+        <FormError>{registryError}</FormError>
+        {registryAdmin && regOpen && (
           <form onSubmit={addRegistry} className="panel">
             <div className="panel-grid">
               <Field label="Name">
@@ -211,16 +232,16 @@ export default function SettingsPage() {
           </form>
         )}
         <div className="row-list">
-          {registries.length === 0 && <p>No registries configured. Kaniko and BuildKit push anonymously until one is added.</p>}
+          {!registryError && registries.length === 0 && <p>No registry connections configured. An empty selection uses anonymous access only where the registry permits it.</p>}
           {registries.map((r) => (
             <div key={r.id} className="row">
               <span className="grow">
                 {r.name} <span className="mono">· {r.url}</span>
               </span>
               <span className="mono">{r.hasPassword ? 'credentials on file' : r.username ? `user ${r.username}` : 'anonymous'}</span>
-              <ConfirmButton onConfirm={() => run('del-registry', async () => { await settingsApi.deleteRegistry(r.id); await load(); }, 'Registry removed.')}>
+              {registryAdmin && <ConfirmButton onConfirm={() => run('del-registry', async () => { await settingsApi.deleteRegistry(r.id); await load(); }, 'Registry removed.')}>
                 Remove
-              </ConfirmButton>
+              </ConfirmButton>}
             </div>
           ))}
         </div>

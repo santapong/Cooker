@@ -184,22 +184,16 @@ func (r *Runner) fire(ctx context.Context, s Schedule, now time.Time) {
 		_ = r.store.Update(ctx, s)
 		return
 	}
-	// Synthesise a run ID up front so MarkFired records it even if
-	// the executor hasn't run yet. The actual PipelineRun row will
-	// be created by JobQueueRunner when the worker picks up the job.
-	runID := newRunID()
-	if err := r.enqueuer.EnqueueRun(ctx, s.PipelineID, runID); err != nil {
-		slog.Warn("scheduler: enqueue failed", "schedule", s.ID, "err", err)
-		// Don't update next_run_at — retry on the next tick.
-		return
-	}
 	next, err := cron.Next(now, s.LoadLocation())
 	if err != nil {
 		slog.Warn("scheduler: next-after-fire failed", "id", s.ID, "err", err)
 		return
 	}
-	if err := r.store.MarkFired(ctx, s.ID, now, runID, next); err != nil {
-		slog.Warn("scheduler: mark-fired failed", "id", s.ID, "err", err)
+	occurrence := service.ScheduledOccurrence{ScheduleID: s.ID, ScheduleVersion: s.Version,
+		ScheduledFor: s.NextRunAt, PipelineID: s.PipelineID, CronExpr: s.CronExpr,
+		Timezone: s.Timezone, AdmittedAt: now, NextRunAt: next}
+	if err := r.enqueuer.EnqueueScheduledRun(ctx, occurrence); err != nil {
+		slog.Warn("scheduler: occurrence admission failed", "schedule", s.ID, "err", err)
 	}
 }
 
@@ -210,12 +204,6 @@ func (r *Runner) sleep(ctx context.Context, d time.Duration) {
 	case <-ctx.Done():
 	case <-t.C:
 	}
-}
-
-// newRunID returns a synthesised pipeline-run ID. Same shape as the
-// jobqueue's job IDs so logs are visually consistent.
-var newRunID = func() string {
-	return fmt.Sprintf("sched_%d", time.Now().UnixNano())
 }
 
 // Ensure the jobqueue package is referenced so the import isn't

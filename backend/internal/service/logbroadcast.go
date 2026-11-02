@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	"github.com/santapong/cooker/internal/logstore"
@@ -71,13 +72,15 @@ func StageLogChannel(runID, stageID string) string {
 // invariant is what makes the unsynchronised seq++ correct — there is no
 // concurrent writer to race with on this struct.
 type lineWriter struct {
-	broadcast LogBroadcaster
-	store     logstore.Store
-	runID     string
-	stageID   string
-	channel   string
-	seq       int
-	partial   []byte
+	broadcast       LogBroadcaster
+	store           logstore.Store
+	runID           string
+	stageID         string
+	channel         string
+	seq             int
+	partial         []byte
+	storeError      bool
+	retryStoreAfter time.Time
 }
 
 // newLineWriter builds a lineWriter for one stage. Either broadcast or
@@ -102,11 +105,36 @@ func (w *lineWriter) emit(line string) {
 	w.seq++
 	e := logstore.Entry{Seq: w.seq, TS: time.Now().UTC(), Line: line}
 	if w.store != nil {
-		// Best-effort: a store append failure must never fail the run.
-		// The memory backend cannot error; a future durable backend's
-		// error is swallowed here (the canonical post-run log remains
-		// StageRun.Logs).
-		_ = w.store.Append(context.Background(), w.runID, w.stageID, e)
+		if time.Now().Before(w.retryStoreAfter) {
+			return
+		}
+		if w.storeError {
+			e.Line = "[Cooker: earlier log history was unavailable] " + e.Line
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		var err error
+		if sequenced, ok := w.store.(logstore.SequencedStore); ok {
+			e, err = sequenced.AppendNext(ctx, w.runID, w.stageID, e)
+		} else {
+			err = w.store.Append(ctx, w.runID, w.stageID, e)
+		}
+		cancel()
+		if err != nil {
+			// Never silently label an unpersisted line with a durable cursor.
+			// The bounded final capture still contains it; clients are told
+			// history is incomplete. Do not include provider error text.
+			if !w.storeError {
+				slog.Warn("stage log history unavailable", "run", w.runID, "stage", w.stageID)
+				if w.broadcast != nil {
+					w.broadcast(w.channel, []byte(`{"control":"history-unavailable"}`))
+				}
+			}
+			w.storeError = true
+			w.retryStoreAfter = time.Now().Add(5 * time.Second)
+			return
+		}
+		w.storeError = false
+		w.seq = e.Seq
 	}
 	if w.broadcast != nil {
 		if frame := logstore.EncodeFrame(w.runID, w.stageID, e); frame != nil {
@@ -143,6 +171,10 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 		i := bytes.IndexByte(combined, '\n')
 		if i < 0 {
 			// No newline left — buffer the tail and return.
+			for len(combined) > 64*1024 {
+				w.emit(string(combined[:64*1024]))
+				combined = combined[64*1024:]
+			}
 			if len(combined) > 0 {
 				w.partial = append(w.partial[:0], combined...)
 			}
@@ -150,6 +182,11 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 		}
 		// Strip the trailing '\n': the envelope's Line carries no
 		// newline (the frontend re-adds the separator on render).
+		for i > 64*1024 {
+			w.emit(string(combined[:64*1024]))
+			combined = combined[64*1024:]
+			i -= 64 * 1024
+		}
 		w.emit(string(combined[:i]))
 		combined = combined[i+1:]
 	}
