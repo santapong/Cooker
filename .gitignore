@@ -36,3 +36,8 @@ frontend/test-results/
 # Local security scanner reports and Python cache
 security-results/
 __pycache__/
+# Generated static-site artifacts
+website/dist/
+website/public-dist/
+website/__pycache__/
+.vercel/

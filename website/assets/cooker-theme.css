@@ -1,0 +1,45 @@
+/* Cooker product identity, shared by marketing, sign-in, docs and workspace.
+   Dark values come from the accepted charcoal/ember landing and default login;
+   light values follow the accepted paper login. DravenIQ inspires clarity and
+   interaction principles; its canonical assets/tokens.css remains unchanged. */
+:root {
+  /* Dark */
+  --cooker-dark-page: #0b0b0c;
+  --cooker-dark-panel: #141416;
+  --cooker-dark-well: #101012;
+  --cooker-dark-raised: #1c1c1f;
+  --cooker-dark-text: #f2f2f0;
+  --cooker-dark-muted: #a3a39c;
+  --cooker-dark-subtle: #92928a;
+  --cooker-dark-line: #2b2b2e;
+  --cooker-dark-control: #62625e;
+  --cooker-dark-accent: #e07a1f;
+  --cooker-dark-accent-hover: #f2a55d;
+  --cooker-dark-accent-pressed: #d9721c;
+  --cooker-dark-on-accent: #130d07;
+  --cooker-dark-accent-panel: #231a12;
+  --cooker-dark-success: #7ee2a8;
+  --cooker-dark-error: #f29c91;
+  --cooker-dark-warning: #f2a55d;
+  /* Light */
+  --cooker-light-page: #f7f3ec;
+  --cooker-light-panel: #fffdf8;
+  --cooker-light-well: #eee8dd;
+  --cooker-light-raised: #e9e2d6;
+  --cooker-light-text: #282722;
+  --cooker-light-muted: #5f5d55;
+  --cooker-light-subtle: #67645b;
+  --cooker-light-line: #d5cec0;
+  --cooker-light-control: #747066;
+  --cooker-light-accent: #a34e1a;
+  --cooker-light-accent-hover: #914112;
+  --cooker-light-accent-pressed: #7d370e;
+  --cooker-light-on-accent: #fffdf8;
+  --cooker-light-accent-panel: #f5e7d8;
+  --cooker-light-success: #356748;
+  --cooker-light-error: #a54033;
+  --cooker-light-warning: #914112;
+}
+
+/* Selected Ready Block beside the existing product wordmark. */
+.cooker-brand-icon { width:32px; height:32px; display:inline-block; vertical-align:middle; flex:none; margin-right:8px; }

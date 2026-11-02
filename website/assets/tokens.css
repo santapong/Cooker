@@ -1,0 +1,66 @@
+:root {
+  --diq-brand-cyan: #26D9F2;
+  --diq-brand-blue: #0067DF;
+  --diq-brand-silver: #DCE7F4;
+  --diq-brand-void: #060A12;
+  --diq-font-display: "Exo 2", "Trebuchet MS", system-ui, sans-serif;
+  --diq-font-body: Inter, "Noto Sans Thai", system-ui, sans-serif;
+  --diq-font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --diq-space-4: 0.25rem;
+  --diq-space-8: 0.5rem;
+  --diq-space-12: 0.75rem;
+  --diq-space-16: 1rem;
+  --diq-space-24: 1.5rem;
+  --diq-space-32: 2rem;
+  --diq-space-48: 3rem;
+  --diq-space-64: 4rem;
+  --diq-space-96: 6rem;
+  --diq-space-128: 8rem;
+  --diq-radius-small: 0.5rem;
+  --diq-radius-control: 0.75rem;
+  --diq-radius-card: 1rem;
+  --diq-radius-panel: 1.5rem;
+  --diq-motion-micro: 120ms;
+  --diq-motion-ui: 180ms;
+  --diq-motion-reveal: 480ms;
+  --diq-motion-intro: 1200ms;
+  --diq-ease: cubic-bezier(.2,0,0,1);
+}
+:root, [data-theme="dark"] {
+  color-scheme: dark;
+  --diq-bg: #060A12;
+  --diq-surface: #0E1625;
+  --diq-raised: #152238;
+  --diq-border: #28374D;
+  --diq-control: #5D738F;
+  --diq-text: #F3F7FC;
+  --diq-muted: #A7B5C9;
+  --diq-subtle: #8494AC;
+  --diq-action: #26D9F2;
+  --diq-on-action: #07111F;
+  --diq-action-hover: #5CE5F7;
+  --diq-action-pressed: #17BED6;
+  --diq-focus: #26D9F2;
+  --diq-success: #62D9A4;
+  --diq-warning: #F6C66F;
+  --diq-error: #FDA4AF;
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --diq-bg: #F4F7FB;
+  --diq-surface: #FFFFFF;
+  --diq-raised: #EAF0F7;
+  --diq-border: #D4DDE9;
+  --diq-control: #64748B;
+  --diq-text: #0E1625;
+  --diq-muted: #46566D;
+  --diq-subtle: #57657A;
+  --diq-action: #0067DF;
+  --diq-on-action: #FFFFFF;
+  --diq-action-hover: #005AC4;
+  --diq-action-pressed: #004BA5;
+  --diq-focus: #0067DF;
+  --diq-success: #147A50;
+  --diq-warning: #875A00;
+  --diq-error: #B4233A;
+}

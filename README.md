@@ -20,6 +20,12 @@ Build container images, inspect the deployment graph, and ship to a configured r
 
 > **Current status:** the GitHub Compose workflow and frontend improvements are on `develop`, ready for UAT. Human acceptance and live GitHub/cloud acceptance remain pending. These changes are **unreleased**; see the [implementation evidence](docs/plans/2026-09-06-github-compose-deployment.md#verification-record).
 
+## Current delivery plan
+
+The [complete remaining-work plan](docs/plans/2026-10-29-release-and-service-platform/PLAN.md) preserves48 existing product tasks and adds31 delivery/extension tasks for the kitchen landing, native Vercel execution, Sandbox, durable storage, DAG service groups and runtime logs/metrics. See the [79-task register](docs/plans/2026-10-29-release-and-service-platform/TASKS.md) and [actual delivery evidence](docs/plans/2026-10-29-release-and-service-platform/DELIVERY.md). Planned capabilities are not claimed as implemented or accepted.
+
+A [small Vercel health/log example](examples/vercel-service/README.md) is included. Direct provider deployment and a deployment actually performed by Cooker have separate acceptance receipts.
+
 ## Two ways to work
 
 | Workflow | Use it for |

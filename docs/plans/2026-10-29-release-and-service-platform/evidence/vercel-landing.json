@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-29",
+  "provenance": "direct-vercel-connector",
+  "teamId": "team_4xUt8aSlfT696WCBgbsjtJTV",
+  "projectId": "prj_oe2lsOOWP5p5AAafHtkjKsW77d6a",
+  "deploymentId": "dpl_6K1cD8yRt7dN8ksZ39KfBVDBVf8F",
+  "readyState": "READY",
+  "target": "production",
+  "sourceCommit": "c1a59a95cfff377b72c17f11995f2debc5817a1d",
+  "productionUrl": "https://cooker-landing-cbf38579.vercel.app",
+  "artifactSHA256": "447c5f6916b548c2d457d0c035511e6e1b7d8145b6abf22e903c08f535731654",
+  "previewArtifactMatches": true,
+  "authenticatedManifestStatus": 200,
+  "protection": "all_except_custom_domains; preserved",
+  "publicAccessDecision": "No change needed: anonymous production-domain200 with actual Cooker content; preview protection retained.",
+  "rollbackDeployment": "dpl_8VfFfEC9wnK6WwyXNqBVKSvEYbMX",
+  "safeHeaders": {
+    "CSP": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'self'",
+    "nosniff": "nosniff",
+    "permissionsPolicy": "camera=(), microphone=(), geolocation=()"
+  },
+  "browser": {
+    "productionHeadingVerified": true,
+    "motionState": "running",
+    "screenshot": "Production capture initially timed out; viewport screenshot succeeded after pausing motion. Private file: /mnt/data/cooker-release-20261029/hosted-preview/landing-production.png"
+  },
+  "publicAccessEvidence": "public-access.json"
+}
