@@ -36,11 +36,12 @@ test('saved stacks survive reload, search, reopen the right file and keep errors
   await library.getByLabel('Stack name').fill('Staging');
   await library.getByRole('button', { name: 'Save stack', exact: true }).click();
   await page.reload();
-  await expect(library.getByRole('button', { name: 'Open Staging', exact: true })).toBeVisible();
+  await expect(library.getByRole('button', { name: /^Staging\b/ })).toBeVisible();
+  await expect(library.getByRole('button', { name: /^Staging\b/ })).toHaveAccessibleName(/Staging.*staging\.yml.*3 services/);
   await library.getByLabel('Search saved stacks').fill('stag');
-  await expect(library.getByRole('button', { name: 'Open Development', exact: true })).toHaveCount(0);
+  await expect(library.getByRole('button', { name: /^Development\b/ })).toHaveCount(0);
   const reopened = page.waitForRequest((r) => r.url().endsWith('/compose/parse') && r.postDataJSON()?.composePath === 'staging.yml');
-  await library.getByRole('button', { name: 'Open Staging', exact: true }).click();
+  await library.getByRole('button', { name: /^Staging\b/ }).click();
   await reopened;
   await expect(page.locator('.compose-map-file')).toHaveText('staging.yml');
   await settleEntrances(page);
@@ -61,7 +62,7 @@ test('saved stacks survive reload, search, reopen the right file and keep errors
   expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')).toEqual([]);
   await page.screenshot({ path: testInfo.outputPath('compose-library.png') });
   await page.setViewportSize({ width: 760, height: 960 });
-  await expect(library.getByRole('button', { name: 'Open Staging', exact: true })).toBeVisible();
+  await expect(library.getByRole('button', { name: /^Staging\b/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const libraryBox = await library.boundingBox();
   const cardBox = await library.locator('.compose-stack').boundingBox();

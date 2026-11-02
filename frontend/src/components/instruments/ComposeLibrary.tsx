@@ -50,8 +50,8 @@ export default function ComposeLibrary({ graph, composePath, busy, onOpen }: Pro
         )}
         {filtered.map((stack) => (
           <article key={stack.composePath} className={`compose-stack${graph && composePath === stack.composePath ? ' is-current' : ''}`}>
-            <button type="button" className="compose-stack-open" aria-label={`Open ${stack.name}`} disabled={busy} onClick={() => onOpen(stack.composePath)}>
-              <span className="compose-stack-title"><ComposeIcon /><strong>{stack.name}</strong>{graph && composePath === stack.composePath && <span className="compose-current">Open</span>}</span>
+            <button type="button" className="compose-stack-open" title={`Open ${stack.name}`} disabled={busy} onClick={() => onOpen(stack.composePath)}>
+              <span className="compose-stack-title"><ComposeIcon /><strong>{stack.name}</strong>{' '}{graph && composePath === stack.composePath && <span className="compose-current">Open</span>}</span>
               <span className="mono compose-stack-file">{stack.composePath}</span>
               <span className="compose-stack-counts">{stack.services} services · {stack.networks} networks · {stack.volumes} volumes</span>
             </button>

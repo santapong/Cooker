@@ -23,7 +23,8 @@ export default defineConfig({
   expect: { timeout: 5_000 },
   fullyParallel: true,
   retries: CI ? 1 : 0,
-  workers: CI ? 2 : undefined,
+  // Keep the motion and accessibility gate on one browser worker.
+  workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: BASE,
