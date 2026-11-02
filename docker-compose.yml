@@ -21,7 +21,7 @@ services:
       context: .
       dockerfile: deploy/docker/Dockerfile
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       - DATABASE_URL=postgres://cooker:cooker@postgres:5432/cooker?sslmode=disable
       - REDIS_URL=redis://redis:6379

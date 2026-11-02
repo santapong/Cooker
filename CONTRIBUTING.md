@@ -15,7 +15,7 @@ git checkout -b feature/my-feature
 make test                    # build + vet + race tests (backend) and lint/build/test (frontend)
 git commit -s -m "feat: my feature"   # -s adds the DCO sign-off (required, see below)
 git push -u origin feature/my-feature
-# then open a PR against main
+# then open a PR against develop
 ```
 
 ## Before a larger change
@@ -29,7 +29,7 @@ git push -u origin feature/my-feature
 
 ## What CI checks
 
-PRs to `main` (and `claude/**`) run: backend `go build` → `go vet` → `go test -race` (against Postgres);
+PRs to `develop`, `main` (and `claude/**`) run: backend `go build` → `go vet` → `go test -race` (against Postgres);
 frontend `npm ci` → `lint` → `build` → `test`; and a `docker build`. Run `make test` locally first.
 
 ## Good first issues

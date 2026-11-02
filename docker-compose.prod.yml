@@ -47,7 +47,7 @@ services:
   # refuses to start unless the key is owned by its user (uid 70 in the
   # alpine image) and not group/world readable.
   pg-cert-init:
-    image: alpine:3.19
+    image: alpine:3.24
     command:
       - sh
       - -ec

@@ -76,14 +76,14 @@ The honest production-readiness verdict and the open work are in `backlog.md`'s 
 - **No backend URLs in components** — all HTTP goes through `api/`.
 
 ### Branching and PRs
-- Branch from `main`. Names: `claude/<topic>` or `<area>/<topic>`.
+- Branch from `develop`. Names: `claude/<topic>` or `<area>/<topic>`.
 - One PR per logical change; squash-merge.
 - Never push to `main` directly.
 - For stacked work: parent PR's branch is fine as the base, but rebase forward as parents merge (use `git rebase --onto main <parent>` or cherry-pick).
-- All PRs draft until ready for review.
+- All PRs target `develop` and remain draft until ready for review.
 
 ### CI
-- `.github/workflows/ci.yml` runs on PRs to `main` and `claude/**`.
+- `.github/workflows/ci.yml` runs on PRs to `develop`, `main` and `claude/**`.
 - Backend job: `go build` → `go vet` → `go test -race` (against a Postgres service).
 - Frontend job: `npm ci` → `npm run lint` → `npm run build` → `npm test`.
 - Docker job: `docker build` against `deploy/docker/Dockerfile`.
@@ -105,8 +105,8 @@ The honest production-readiness verdict and the open work are in `backlog.md`'s 
 - Don't put `COOKER_OIDC_ENABLED=true` in UAT compose — UAT is auth-off by design; toggling it requires `.env.uat` config (Google or KeepSave preset).
 - Don't change `COOKER_ENV` defaults globally; production-mode strictness is gated by it on purpose.
 - Don't add new fields to `internal/handler/*.go` requests without a corresponding store migration in `internal/store/postgres/migrations/`.
-- Don't change the Go version pin unilaterally. The repo is on Go 1.25 (`backend/go.mod` + `.github/workflows/ci.yml`) with `golang.org/x/time` at v0.15.0; keep `go.mod` and the CI `go-version` in lockstep if either ever moves.
-- **Never run `go mod tidy` in `backend/`.** Tidy evaluates imports as if all build tags are enabled, so it pulls `tailscale.com` in via the opt-in `tsnet` tag (`internal/transport/tsnet/real.go`) — that module requires Go ≥ 1.26 and breaks the docker CI job on `golang:1.25-alpine` (`GOTOOLCHAIN=local`). Add dependencies with targeted `go get <module>@<version>` instead.
+- Don't change the Go version pin unilaterally. The security baseline is Go 1.27.3 (`backend/go.mod`); CI reads that file and the Docker build must use the same release. Keep these in lockstep when moving the toolchain.
+- **Never run `go mod tidy` in `backend/`.** Tidy evaluates imports as if all build tags are enabled, so it pulls `tailscale.com` in via the opt-in `tsnet` tag (`internal/transport/tsnet/real.go`) — broad resolution can add an unrequested transport dependency tree. Use targeted package/module updates and verify the default build graph.
 
 ## Open backlog highlights
 

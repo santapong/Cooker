@@ -1,0 +1,60 @@
+name: Security checks
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main, "fix/security-*"]
+  schedule:
+    - cron: '17 20 * * *' # 03:17 Asia/Bangkok, daily; GitHub schedules use UTC.
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependencies-and-secrets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          # Scheduled jobs originate on the default branch; inspect integration too.
+          ref: ${{ github.event_name == 'schedule' && 'develop' || github.sha }}
+      - name: Check dependency scanner failure boundaries
+        run: python3 -m unittest discover -s scripts/security -p 'test_*.py'
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Inventory the default Go build and test imports
+        working-directory: backend
+        env:
+          GOMAXPROCS: '2'
+          GOTOOLCHAIN: local
+        run: |
+          mkdir -p ../security-results
+          go list -mod=readonly -p=1 -deps -test -f '{{.ImportPath}}' ./... > ../security-results/go-imports.txt
+      - name: Dependency advisories including development dependencies
+        run: python3 scripts/security/dependencies.py --go-imports security-results/go-imports.txt
+      - name: Git history and working tree secrets
+        if: ${{ !cancelled() }}
+        run: bash scripts/security/secrets.sh
+      - name: Report infrastructure policy findings
+        if: ${{ !cancelled() }}
+        run: bash scripts/security/trivy.sh config
+      - name: Preserve redacted scan reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: security-reports
+          path: security-results/
+          if-no-files-found: error
+          retention-days: 14

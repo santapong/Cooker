@@ -7,10 +7,11 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
   build: {
+    target: 'es2020',
     // Production builds ship without sourcemaps; the prior Vite
     // default leaked the entire frontend source tree to anyone
     // with browser dev tools open. Set VITE_SOURCEMAP=true in the
@@ -26,11 +27,13 @@ export default defineConfig({
         // pulls the ~150 KB canvas library.  Only PipelineEditorPage,
         // RunPage, and ComposePage import the canvas components and will
         // therefore pull this chunk lazily.
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          xyflow: ['@xyflow/react'],
-          oidc: ['oidc-client-ts'],
-          zustand: ['zustand'],
+        manualChunks(id) {
+          if (!id.includes('/node_modules/')) return
+          const name = id.split('/node_modules/').pop()!
+          if (/^(react|react-dom|react-router|react-router-dom|scheduler)\//.test(name)) return 'react'
+          if (name.startsWith('@xyflow/')) return 'xyflow'
+          if (name.startsWith('oidc-client-ts/')) return 'oidc'
+          if (name.startsWith('zustand/')) return 'zustand'
         },
       },
     },
@@ -43,7 +46,9 @@ export default defineConfig({
     // one file through Vite's asset pipeline.
     css: { include: [/tokens\.css/] },
   },
+  preview: { host: '127.0.0.1' },
   server: {
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
       '/api': {

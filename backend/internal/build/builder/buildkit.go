@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/moby/buildkit/client"
+	"github.com/tonistiigi/fsutil"
 )
 
 // BuildKit drives image builds via the buildkitd gRPC API.
@@ -40,13 +41,16 @@ func (b *BuildKit) Build(ctx context.Context, req Request) (Result, error) {
 	if _, err := os.Stat(req.ContextDir); err != nil {
 		return Result{}, fmt.Errorf("buildkit: context %q: %w", req.ContextDir, err)
 	}
+	solveOpt, err := solveOptions(req)
+	if err != nil {
+		return Result{}, err
+	}
 	c, err := client.New(ctx, b.Addr)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: dial %s: %v", ErrUnavailable, b.Addr, err)
 	}
 	defer c.Close()
 
-	solveOpt := solveOptions(req)
 	statusCh := make(chan *client.SolveStatus, 8)
 	logsDone := make(chan struct{})
 	go func() {
@@ -82,7 +86,7 @@ func (b *BuildKit) Build(ctx context.Context, req Request) (Result, error) {
 
 // solveOptions assembles the SolveOpt without talking to buildkitd so
 // tests can assert the cache wiring shape directly.
-func solveOptions(req Request) client.SolveOpt {
+func solveOptions(req Request) (client.SolveOpt, error) {
 	dockerfile := req.Dockerfile
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"
@@ -110,12 +114,20 @@ func solveOptions(req Request) client.SolveOpt {
 	if len(req.Platforms) > 0 {
 		frontendAttrs["platform"] = strings.Join(req.Platforms, ",")
 	}
+	contextFS, err := fsutil.NewFS(req.ContextDir)
+	if err != nil {
+		return client.SolveOpt{}, fmt.Errorf("buildkit: context filesystem: %w", err)
+	}
+	dockerfileFS, err := fsutil.NewFS(dockerfileDir)
+	if err != nil {
+		return client.SolveOpt{}, fmt.Errorf("buildkit: dockerfile filesystem: %w", err)
+	}
 	opt := client.SolveOpt{
 		Frontend:      "dockerfile.v0",
 		FrontendAttrs: frontendAttrs,
-		LocalDirs: map[string]string{
-			"context":    req.ContextDir,
-			"dockerfile": dockerfileDir,
+		LocalMounts: map[string]fsutil.FS{
+			"context":    contextFS,
+			"dockerfile": dockerfileFS,
 		},
 		Exports: []client.ExportEntry{{
 			Type:  client.ExporterImage,
@@ -138,7 +150,7 @@ func solveOptions(req Request) client.SolveOpt {
 		opt.CacheImports = []client.CacheOptionsEntry{{Type: "registry", Attrs: importAttrs}}
 		opt.CacheExports = []client.CacheOptionsEntry{{Type: "registry", Attrs: exportAttrs}}
 	}
-	return opt
+	return opt, nil
 }
 
 var _ Builder = (*BuildKit)(nil)

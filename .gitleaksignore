@@ -1,0 +1,5 @@
+# Historical synthetic fixtures reviewed on 2026-11-01. Exact fingerprints only.
+# Invalid bearer placeholder in a historical audit reproduction command.
+3fe671118eb6b7aacd1af0cb62de66d1dd63a47f:docs/audits/2026-05-security-review.md:curl-auth-header:40
+# Precomputed config-test key, now generated in memory in the current source.
+004bfbad22761a88a85a8524d4a63fc09f3107fd:backend/internal/config/config_test.go:generic-api-key:237

@@ -1,5 +1,12 @@
 # Security Policy
 
+## Automated checks
+
+See [Security scanning](docs/guides/SECURITY-SCANNING.md) for code, secret,
+dependency and built-image checks, their failure behavior, and the separate
+integration/default-branch activation steps. Reports do not certify a deployment;
+review findings against the exact source, compiler, image and exposed features.
+
 ## Supported Versions
 
 | Version | Supported          |

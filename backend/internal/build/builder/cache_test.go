@@ -83,9 +83,12 @@ func TestBuildah_BuildJob_CacheFlags(t *testing.T) {
 }
 
 func TestSolveOptions_Cache(t *testing.T) {
-	base := Request{ContextDir: "/src", Tags: []string{"reg.example.com/app:v1"}}
+	base := Request{ContextDir: t.TempDir(), Tags: []string{"reg.example.com/app:v1"}}
 
-	plain := solveOptions(base)
+	plain, err := solveOptions(base)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(plain.CacheImports) != 0 || len(plain.CacheExports) != 0 {
 		t.Fatalf("expected no cache entries without CacheSpec; got %+v / %+v",
 			plain.CacheImports, plain.CacheExports)
@@ -93,7 +96,10 @@ func TestSolveOptions_Cache(t *testing.T) {
 
 	req := base
 	req.Cache = CacheSpec{Mode: "registry", Ref: "reg.example.com/app/cache"}
-	opt := solveOptions(req)
+	opt, err := solveOptions(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(opt.CacheImports) != 1 || len(opt.CacheExports) != 1 {
 		t.Fatalf("expected one import + one export, got %d / %d",
 			len(opt.CacheImports), len(opt.CacheExports))
@@ -107,7 +113,10 @@ func TestSolveOptions_Cache(t *testing.T) {
 
 	req.Cache.Mode = "oci"
 	req.Cache.Inline = true
-	opt = solveOptions(req)
+	opt, err = solveOptions(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if opt.CacheImports[0].Attrs["oci-mediatypes"] != "true" {
 		t.Error("oci mode should set oci-mediatypes on the import")
 	}

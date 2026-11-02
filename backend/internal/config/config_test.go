@@ -279,8 +279,8 @@ func TestEnv_IsProduction(t *testing.T) {
 	}
 }
 
-// 32 random bytes base64-encoded — pre-computed so tests don't need crypto/rand.
-const validSecretKey = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+// Deterministic synthetic key generated in memory; never use this fixture in a deployment.
+var validSecretKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
 
 func TestValidate_DevPermissive(t *testing.T) {
 	cfg := &Config{Env: EnvDev}

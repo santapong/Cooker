@@ -1,4 +1,4 @@
-// Flat config for ESLint v9. Replaces .eslintrc — minimal rules
+// Flat config for ESLint v10. Replaces .eslintrc — minimal rules
 // to keep CI green. Add stricter rules incrementally.
 import js from '@eslint/js'
 import globals from 'globals'
@@ -20,7 +20,10 @@ export default tseslint.config(
       'react-refresh': reactRefresh,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // Preserve the existing Hooks policy while updating the plugin for ESLint 10.
+      // React Compiler adoption and its additional rules are a separate change.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },

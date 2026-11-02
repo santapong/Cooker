@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated output, installed dependencies and excluded bundled agent material"
+paths = [
+  '(^|/)node_modules/',
+  '(^|/)security-results/',
+  '(^|/)\.claude/',
+  '(^|/)frontend/dist/',
+]

@@ -73,7 +73,7 @@ docker compose up --build
 
 Open **http://localhost:8080**. The default Compose file starts Cooker, PostgreSQL and Redis; the Go server serves both the API and the frontend. It does not start a Vite server on port 5173.
 
-This development stack has authentication disabled and uses no-op build, push and deploy backends. It is useful for exploring the interface, but cannot complete real App deployments. Use it only in a trusted local environment. Stop it with `docker compose down`; add `-v` only when intentionally deleting its database volume.
+This development stack binds the app to `127.0.0.1:8080`, has authentication disabled and uses no-op build, push and deploy backends. It is useful for exploring the interface, but cannot complete real App deployments. Keep the loopback binding for desktop development. Exposing it to a LAN requires an authenticated configuration and an explicit port-binding review. Stop it with `docker compose down`; add `-v` only when intentionally deleting its database volume.
 
 ### Exercise real builds and deployments
 

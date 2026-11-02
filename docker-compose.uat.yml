@@ -96,7 +96,7 @@ services:
     # compose service name (what Cooker can resolve), then touch a
     # sentinel so downstream depends_on: service_healthy can gate
     # on the full chain.
-    image: alpine:3.19
+    image: alpine:3.24
     command:
       - sh
       - -c

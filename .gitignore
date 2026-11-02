@@ -32,3 +32,7 @@ Thumbs.db
 # Playwright (frontend/e2e)
 frontend/playwright-report/
 frontend/test-results/
+
+# Local security scanner reports and Python cache
+security-results/
+__pycache__/

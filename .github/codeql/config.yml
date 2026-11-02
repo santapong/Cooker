@@ -1,0 +1,7 @@
+name: Cooker security analysis
+queries:
+  - uses: security-extended
+paths-ignore:
+  - .claude
+  - frontend/dist
+  - frontend/node_modules

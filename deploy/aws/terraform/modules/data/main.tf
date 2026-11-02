@@ -46,12 +46,8 @@ resource "aws_security_group" "data" {
     protocol        = "tcp"
     security_groups = [var.allowed_source_security_group_id]
   }
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # No initiated outbound connections are required by these managed data services.
+  # Security groups are stateful, so replies to permitted ingress still pass.
   tags = { Name = "${var.name_prefix}-data" }
 }
 

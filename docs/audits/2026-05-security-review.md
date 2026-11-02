@@ -37,7 +37,7 @@ The **quick-win list** at the bottom names six items that can land on this branc
 
 - **Location:** `backend/internal/auth/oidc.go:200-205, 217-220, 158-163, 187-189`.
 - **Impact:** The middleware mirrors `err.Error()` from `go-oidc`'s verifier into the response body (`invalid token: <reason>`). Failure modes include `iss mismatch`, `aud mismatch`, `kid not found`, signature parse errors, etc. This gives an attacker a high-fidelity oracle for crafting valid-shaped tokens and for fingerprinting the JWKS rotation cadence. `crash-and-service-quality.md` B.3 already flagged it; **still open** at HEAD.
-- **Repro:** `curl -H 'Authorization: Bearer eyJ...invalid' /api/v1/pipelines` → body contains the upstream library's diagnostic string.
+- **Repro:** `curl -H 'Authorization: Bearer ${INVALID_TOKEN}' /api/v1/pipelines` → body contains the upstream library's diagnostic string.
 - **Recommended fix:** log `err` server-side; return one of two generic strings (`invalid token` for verify errors, `provider unavailable` for discovery errors). Diff sketch:
   ```go
   if err != nil {

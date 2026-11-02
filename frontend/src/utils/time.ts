@@ -15,7 +15,7 @@ export function timeAgo(iso: string | null | undefined, now: number = Date.now()
     [3_600_000, 'h'],
     [86_400_000, 'd'],
   ];
-  let label = '';
+  let label: string;
   if (abs < 3_600_000) label = `${Math.round(abs / units[0][0])}${units[0][1]}`;
   else if (abs < 86_400_000) label = `${Math.round(abs / units[1][0])}${units[1][1]}`;
   else if (abs < 7 * 86_400_000) label = `${Math.round(abs / units[2][0])}${units[2][1]}`;

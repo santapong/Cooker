@@ -2,7 +2,7 @@
 # Builds both frontend and backend into a single OCI-compliant image
 
 # --- Frontend build ---
-FROM node:20-alpine AS frontend-build
+FROM node:24-alpine AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci --ignore-scripts
@@ -31,7 +31,7 @@ ENV VITE_OIDC_ENABLED=$VITE_OIDC_ENABLED \
 RUN npm run build
 
 # --- Backend build ---
-FROM golang:1.25-alpine AS backend-build
+FROM golang:1.27.3-alpine AS backend-build
 WORKDIR /app/backend
 COPY backend/go.mod backend/go.sum* ./
 RUN go mod download
@@ -44,7 +44,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o /cooker ./cmd/cooker/
 
 # --- Final image ---
-FROM alpine:3.19
+FROM alpine:3.24
 # git:        used by internal/source/github to clone App repos
 # docker-cli: Cooker shells `docker build/push` via a bind-mounted sock
 # kubectl:    pinned static binary; internal/deployer/kubectl.go shells to it
@@ -54,19 +54,19 @@ FROM alpine:3.19
 # defaults). UAT compose passes the host's docker group GID via
 # group_add so this user can still access the bind-mounted
 # /var/run/docker.sock; see docker-compose.uat.yml and Makefile.
-ARG KUBECTL_VERSION=v1.29.4
+ARG KUBECTL_VERSION=v1.37.2
 # L (multi-arch): use ARG TARGETARCH so `docker buildx build --platform`
 # works correctly. BuildKit sets TARGETARCH automatically (amd64, arm64,
 # etc.) when building for a non-native platform. Without this, a cross-
 # platform build would download the amd64 binary into an arm64 image.
 ARG TARGETARCH=amd64
-# The alpine:3.19 base tag locks the apk package set. Pinning
+# The alpine:3.24 base tag locks the apk package set. Pinning
 # individual apk versions on top of that is fragile because the
 # 3.19 line backports security fixes (so the -rN revision floats
 # within the same upstream version) — and a CI build in 6 months
 # would fail to find the exact -r revision pinned today. The
 # stronger reproducibility move is to pin the FROM tag to a
-# digest (alpine:3.19@sha256:...) which we'll do once we have a
+# digest (alpine:3.24@sha256:...) which we'll do once we have a
 # digest-pinning workflow.
 #
 # Fetch kubectl and verify against the upstream-published SHA256 so a
