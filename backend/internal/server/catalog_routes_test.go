@@ -115,7 +115,9 @@ func TestCatalogRegisteredRoutesAuthenticateAndCannotExecuteImports(t *testing.T
 		}
 	}
 	runs, _ := st.Runs.List(ctx, "", 0, 0)
-	if len(runs) != 0 { t.Fatal("import execution request created a run") }
+	if len(runs) != 0 {
+		t.Fatal("import execution request created a run")
+	}
 	nativeApps, _ := st.Apps.List(ctx, 0, 0)
 	nativePipelines, _ := st.Pipelines.List(ctx, 0, 0)
 	if len(nativeApps) != 1 || len(nativePipelines) != 0 {

@@ -23,6 +23,8 @@ Full SQL16/HTTP6, combined authenticated Git/provider/runtime acceptance, live V
 
 The normal `npm run build` passed after the final TypeScript correction. No new platform acceptance is inferred from this integration.
 
+Affected race checks passed across 10 packages: 583 test/subtest pass events and 20 opt-in skips. Go formatting was reconciled; all backend Go files pass the formatter check. These race fixtures do not replace the pending PostgreSQL/live-provider campaigns.
+
 ## Workspace convention
 
 Continue in this Cooker folder. Keep backend, frontend, website and roadmap together. Local recovery data stays inside Git administration rather than in additional visible project folders. Native caches may be outside DATA when its noexec mount prevents running tool binaries. No production services, keys, domains, main branch or deployed artifacts are changed by this consolidation.
