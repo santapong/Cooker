@@ -19,6 +19,7 @@ var titleTemplates = map[EventType]*template.Template{
 	EventRunCancelled:    must("run-cancel-t", `⛔ Run cancelled: {{.PipelineName}}`),
 	EventDeploySucceeded: must("deploy-succ-t", `🚀 Deploy succeeded: {{.AppName}} → {{.Environment}}`),
 	EventDeployFailed:    must("deploy-fail-t", `🔥 Deploy failed: {{.AppName}} → {{.Environment}}`),
+	EventDeployCancelled: must("deploy-cancel-t", `⛔ Deploy cancelled: {{.AppID}}`),
 	EventBuildFailed:     must("build-fail-t", `🔨 Build failed: {{.PipelineName}}`),
 	EventCanaryPromoted:  must("canary-prom-t", `📈 Canary promoted: {{.AppName}} → {{.Environment}}`),
 	EventCanaryAborted:   must("canary-abort-t", `↩️ Canary aborted: {{.AppName}} → {{.Environment}}`),
@@ -59,6 +60,7 @@ Error: {{.Error}}
 {{- if .URL}}
 Details: {{.URL}}
 {{- end}}`),
+	EventDeployCancelled: must("deploy-cancel-b", `App {{.AppID}} (run {{.RunID}}) deployment was cancelled.`),
 	EventCanaryPromoted: must("canary-prom-b", `Canary for {{.AppName}} was promoted to 100% in {{.Environment}}.
 {{- if .URL}}
 Details: {{.URL}}

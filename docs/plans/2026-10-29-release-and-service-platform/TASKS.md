@@ -102,7 +102,7 @@ This is the requested Git-versioned execution view. Existing ClickUp identities 
 
 | ID | Task | State | Dependencies |
 |---|---|---|---|
-| [INT-01](#int-01) | Reconcile and integrate the isolated backend candidate | planned / not proven | Original stage gate / none for this slice |
+| [INT-01](#int-01) | Reconcile and integrate the isolated backend candidate | source integrated / full acceptance not proven | Original stage gate / none for this slice |
 | [INT-02](#int-02) | Finish B3 identity master and real-app frontend integration | planned / not proven | SHIP-02, INT-01 |
 
 ## service_groups

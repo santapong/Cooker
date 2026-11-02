@@ -46,6 +46,9 @@ export const pipelineApi = {
     get<{ runId: string; statuses: EnvironmentStatus[] } | EnvironmentStatus[]>(`/pipelines/${pipelineId}/runs/${runId}/env-status`).then((r) =>
       Array.isArray(r) ? r : (r?.statuses ?? []),
     ),
+  // Approval UI needs the raw exact-run envelope; legacy coercion above stays separate.
+  promotionSnapshot: (pipelineId: string, runId: string) =>
+    get<unknown>(`/pipelines/${pipelineId}/runs/${runId}/env-status`),
   // Approval-gate stages (StageTypeApproval). The run page polls
   // stageApprovals to find paused stages, then approves/rejects them.
   stageApprovals: (pipelineId: string, runId: string) =>
@@ -53,12 +56,12 @@ export const pipelineApi = {
       `/pipelines/${pipelineId}/runs/${runId}/stage-approvals`,
     ),
   approveStage: (pipelineId: string, runId: string, stageId: string, note?: string) =>
-    post<{ status: string }>(
+    post<{ runId: string; stageId: string; status: string; gate: StageApproval; approvalsHave: number; approvalsNeed: number }>(
       `/pipelines/${pipelineId}/runs/${runId}/stages/${stageId}/approve`,
       { note: note ?? '' },
     ),
   rejectStage: (pipelineId: string, runId: string, stageId: string, note?: string) =>
-    post<{ status: string }>(
+    post<{ runId: string; stageId: string; status: string; gate: StageApproval }>(
       `/pipelines/${pipelineId}/runs/${runId}/stages/${stageId}/reject`,
       { note: note ?? '' },
     ),
@@ -80,4 +83,3 @@ export const runtimeApi = {
   // WebSocket path for live runtime logs (used by useRuntimeLogs).
   logsPath: (appId: string, svc: string) => `/ws/runtime/${appId}/${svc}/logs`,
 };
-

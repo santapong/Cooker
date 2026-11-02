@@ -8,6 +8,9 @@ import (
 	"context"
 	"errors"
 	"io"
+
+	"github.com/santapong/cooker/internal/build/artifact"
+	"github.com/santapong/cooker/internal/build/registryauth"
 )
 
 // ErrUnavailable is returned when the push backend is not reachable or
@@ -18,11 +21,14 @@ var ErrUnavailable = errors.New("pusher: unavailable")
 // already present on the host (by tag or digest); Target is the
 // fully-qualified destination reference.
 type Request struct {
-	Source string
-	Target string
+	// Artifact, when present, is the exact local build output; Source is only its label.
+	Artifact     *artifact.Image
+	RegistryAuth registryauth.Resolver
+	Source       string
+	Target       string
 	// Auth, when non-nil, supplies {username, password} for the target
-	// registry host. Nil falls back to the local docker config /
-	// credential helpers.
+	// registry host. This legacy explicit callback is trusted by the caller;
+	// accepted executions use RegistryAuth. Nil is anonymous, with no host fallback.
 	Auth func(host string) (user, pass string, ok bool)
 	// LogWriter, when non-nil, receives a stream of human-readable
 	// progress lines from the adapter. At minimum each implementation

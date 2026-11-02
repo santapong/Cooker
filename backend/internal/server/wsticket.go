@@ -113,6 +113,8 @@ func routeRoleRequirement(path string) []auth.Role {
 	switch {
 	case path == "/ws/kubernetes/watch":
 		return wsWriteRoles
+	case strings.HasPrefix(path, nativeRuntimeLogPrefix):
+		return wsWriteRoles
 	case strings.HasPrefix(path, "/ws/runtime/"):
 		return wsWriteRoles
 	default:
@@ -183,6 +185,10 @@ var validWSPaths = []string{
 // registered WS route patterns. A pattern segment beginning with ":" is
 // a wildcard that matches any single non-empty segment.
 func matchWSPath(path string) bool {
+	if strings.HasPrefix(path, nativeRuntimeLogPrefix) {
+		_, ok := nativeRuntimeLogSubject(path)
+		return ok
+	}
 	reqSegs := strings.Split(strings.Trim(path, "/"), "/")
 	for _, pattern := range validWSPaths {
 		patSegs := strings.Split(strings.Trim(pattern, "/"), "/")
@@ -229,10 +235,22 @@ func (s *Server) issueWSTicket(c *gin.Context) {
 		})
 		return
 	}
-	// Normalise: strip any query string the client may have included.
 	path := req.Path
-	if i := strings.IndexByte(path, '?'); i >= 0 {
-		path = path[:i]
+	if strings.HasPrefix(path, nativeRuntimeLogPrefix) {
+		c.Header("Cache-Control", "no-store")
+		c.Header("X-Content-Type-Options", "nosniff")
+		var ok bool
+		path, ok = canonicalNativeRuntimeLogPath(path)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "unknown ws path"})
+			return
+		}
+	} else {
+		// Preserve existing App/build normalization. Native paths reject
+		// queries and fragments rather than changing their identity.
+		if i := strings.IndexByte(path, '?'); i >= 0 {
+			path = path[:i]
+		}
 	}
 	if !matchWSPath(path) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{

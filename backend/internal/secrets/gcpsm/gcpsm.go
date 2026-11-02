@@ -27,6 +27,8 @@ type Manager struct {
 	client    *secretmanager.Client
 	projectID string
 	prefix    string
+	versions  versionClient
+	authority string
 }
 
 // Config holds the SDK construction inputs.
@@ -48,7 +50,7 @@ func New(ctx context.Context, cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Manager{client: c, projectID: cfg.ProjectID, prefix: cfg.Prefix}, nil
+	return &Manager{client: c, projectID: cfg.ProjectID, prefix: cfg.Prefix, authority: versionAuthority(c.Connection().Target())}, nil
 }
 
 func (m *Manager) secretID(envID, key string) string {

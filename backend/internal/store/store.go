@@ -121,12 +121,18 @@ type StageApprovalStore interface {
 	// ListGates returns all gates for a run, each with its Votes populated,
 	// ordered by creation time.
 	ListGates(ctx context.Context, runID string) ([]*model.StageApproval, error)
-	// UpdateGateStatus advances a gate's status (and stamps resolved_at +
-	// resolved_by when non-nil). ErrNotFound if the row is gone.
+	// UpdateGateStatus atomically settles an awaiting gate (and stamps
+	// resolved_at + resolved_by when supplied). ErrConflict if already
+	// resolved or status is not terminal; ErrNotFound if the row is gone.
 	UpdateGateStatus(ctx context.Context, id string, status model.StageApprovalStatus, resolvedBy string, resolvedAt *time.Time) error
 	// AddVote records an approval. It is idempotent per approver:
 	// re-approval by the same ApproverSub is a no-op (added=false). Returns
-	// the resulting distinct-approval count.
+	// the resulting distinct-approval count. Votes serialize against terminal
+	// decisions, and reaching quorum settles the gate as approved in the same
+	// atomic operation. There is no committed final vote without its resolution.
+	// An already satisfied legacy quorum is recovered without adding a vote or
+	// inventing its missing resolver (added=false, current count).
+	// ErrConflict if the gate is already resolved.
 	AddVote(ctx context.Context, v *model.StageApprovalVote) (added bool, count int, err error)
 }
 

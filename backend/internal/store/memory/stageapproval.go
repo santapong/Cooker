@@ -36,6 +36,10 @@ func (s *stageApprovals) findByRunStageLocked(runID, stageID string) *model.Stag
 // map, so callers never see the stored pointer or a shared votes slice.
 func (s *stageApprovals) hydrate(g *model.StageApproval) *model.StageApproval {
 	cp := *g
+	if g.ResolvedAt != nil {
+		resolved := *g.ResolvedAt
+		cp.ResolvedAt = &resolved
+	}
 	stored := s.votes[g.ID]
 	cp.Votes = make([]model.StageApprovalVote, len(stored))
 	copy(cp.Votes, stored)
@@ -89,6 +93,9 @@ func (s *stageApprovals) UpdateGateStatus(_ context.Context, id string, status m
 	if !ok {
 		return fmt.Errorf("stage approval %s: %w", id, store.ErrNotFound)
 	}
+	if g.Status != model.StageApprovalAwaiting || (status != model.StageApprovalApproved && status != model.StageApprovalRejected) {
+		return fmt.Errorf("stage approval %s: %w", id, store.ErrConflict)
+	}
 	g.Status = status
 	if resolvedBy != "" {
 		g.ResolvedBy = resolvedBy
@@ -104,10 +111,35 @@ func (s *stageApprovals) UpdateGateStatus(_ context.Context, id string, status m
 func (s *stageApprovals) AddVote(_ context.Context, v *model.StageApprovalVote) (bool, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.m[v.StageApprovalID]; !ok {
+	g, ok := s.m[v.StageApprovalID]
+	if !ok {
 		return false, 0, fmt.Errorf("stage approval %s: %w", v.StageApprovalID, store.ErrNotFound)
 	}
+	if g.Status != model.StageApprovalAwaiting {
+		return false, 0, fmt.Errorf("stage approval %s: %w", v.StageApprovalID, store.ErrConflict)
+	}
 	existing := s.votes[v.StageApprovalID]
+	threshold := g.RequiredApprovers
+	if threshold < 1 {
+		threshold = 1
+	}
+	resolve := func(count int, by string) {
+		if count >= threshold {
+			now := time.Now()
+			g.Status = model.StageApprovalApproved
+			if by != "" {
+				g.ResolvedBy = by
+			}
+			g.ResolvedAt = &now
+			g.UpdatedAt = now
+		}
+	}
+	// A legacy quorum predates this attempt. Recover it without another vote
+	// or attributing its missing resolution to the caller who discovers it.
+	if len(existing) >= threshold {
+		resolve(len(existing), "")
+		return false, len(existing), nil
+	}
 	for i := range existing {
 		if existing[i].ApproverSub == v.ApproverSub {
 			// Idempotent: same approver, no new row, count unchanged.
@@ -118,5 +150,6 @@ func (s *stageApprovals) AddVote(_ context.Context, v *model.StageApprovalVote) 
 		v.CreatedAt = time.Now()
 	}
 	s.votes[v.StageApprovalID] = append(existing, *v)
+	resolve(len(existing)+1, v.ApproverEmail)
 	return true, len(existing) + 1, nil
 }

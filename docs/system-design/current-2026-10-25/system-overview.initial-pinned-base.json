@@ -1,0 +1,375 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Cooker \u2014 system architecture",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "animation": "none",
+    "repository": {
+      "url": "https://github.com/santapong/Cooker",
+      "revision": "949d4a964abec603c9b0b82f6f8d8b7f9f23d73e"
+    },
+    "views": [
+      {
+        "id": "deploy_path",
+        "label": "Git to deployment",
+        "focus": [
+          "git_hosts",
+          "cooker",
+          "state",
+          "build_infra",
+          "runtime_targets"
+        ],
+        "note": "A verified event becomes durable work; workers deploy the accepted revision and image."
+      },
+      {
+        "id": "provider_catalog",
+        "label": "Vercel visibility",
+        "focus": [
+          "workspace",
+          "cooker",
+          "state",
+          "vercel"
+        ],
+        "note": "Selected snapshots are read-only inventory. Existing-project adoption and a Vercel DAG stage remain planned."
+      },
+      {
+        "id": "identity_secrets",
+        "label": "Identity and credentials",
+        "focus": [
+          "workspace",
+          "identity",
+          "cooker",
+          "state",
+          "secret_stores"
+        ],
+        "note": "User identity, repository access and hosting credentials are separate authority domains."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "workspace",
+      "type": "frontend",
+      "label": "Workspace in your browser",
+      "sublabel": "React UI \u00b7 same-origin API",
+      "pos": [
+        65,
+        330
+      ],
+      "size": [
+        260,
+        96
+      ],
+      "sources": [
+        {
+          "path": "frontend/src/main.tsx",
+          "line": 8,
+          "label": "React entry point"
+        },
+        {
+          "path": "frontend/src/api/client.ts",
+          "line": 24,
+          "label": "Authenticated API client"
+        }
+      ]
+    },
+    {
+      "id": "cooker",
+      "type": "backend",
+      "label": "Cooker application",
+      "sublabel": "Go API + workers + DAG executor",
+      "tag": "One Go process",
+      "pos": [
+        540,
+        330
+      ],
+      "size": [
+        300,
+        110
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/server/server.go",
+          "line": 912,
+          "label": "Embedded background loops"
+        },
+        {
+          "path": "backend/internal/server/router.go",
+          "line": 478,
+          "label": "Served SPA and API"
+        }
+      ]
+    },
+    {
+      "id": "state",
+      "type": "database",
+      "brand": "postgresql",
+      "label": "PostgreSQL",
+      "sublabel": "Definitions \u00b7 jobs \u00b7 runs \u00b7 history",
+      "tag": "Durable queue and encrypted records",
+      "pos": [
+        1060,
+        330
+      ],
+      "size": [
+        310,
+        110
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/server/jobqueue_boot.go",
+          "line": 57,
+          "label": "PostgreSQL job queue"
+        },
+        {
+          "path": "backend/internal/store/postgres/store.go",
+          "line": 92,
+          "label": "Persistent domain stores"
+        }
+      ]
+    },
+    {
+      "id": "identity",
+      "type": "security",
+      "label": "Identity broker",
+      "sublabel": "Optional OIDC \u00b7 GitHub / Google",
+      "tag": "Local sign-in also exists in Cooker",
+      "pos": [
+        65,
+        65
+      ],
+      "size": [
+        290,
+        100
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/server/auth_methods.go",
+          "line": 13,
+          "label": "Available identity methods"
+        },
+        {
+          "path": "docs/user-guide/operations/social-sign-in.md",
+          "line": 79,
+          "label": "Broker callback contract"
+        }
+      ]
+    },
+    {
+      "id": "git_hosts",
+      "type": "external",
+      "label": "Git source providers",
+      "sublabel": "GitHub \u00b7 GitLab \u00b7 Gitea",
+      "tag": "Separate repository connection",
+      "pos": [
+        540,
+        65
+      ],
+      "size": [
+        300,
+        100
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/handler/source_webhook.go",
+          "line": 30,
+          "label": "Authenticated webhook ingress"
+        },
+        {
+          "path": "backend/internal/service/source_access.go",
+          "line": 23,
+          "label": "Provider source adapters"
+        }
+      ]
+    },
+    {
+      "id": "secret_stores",
+      "type": "security",
+      "label": "External secret stores",
+      "sublabel": "KeepSave \u00b7 Vault \u00b7 AWS \u00b7 GCP",
+      "tag": "Optional; database secrets also exist",
+      "pos": [
+        1060,
+        65
+      ],
+      "size": [
+        310,
+        100
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/server/factories.go",
+          "line": 118,
+          "label": "Selected secrets manager"
+        },
+        {
+          "path": "backend/internal/secrets/versions.go",
+          "line": 13,
+          "label": "Immutable version references"
+        }
+      ]
+    },
+    {
+      "id": "vercel",
+      "type": "cloud",
+      "label": "Vercel projects",
+      "sublabel": "Selected snapshots + landing publisher",
+      "tag": "Imported flows are read-only",
+      "pos": [
+        65,
+        665
+      ],
+      "size": [
+        310,
+        110
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/provider/vercel/service.go",
+          "line": 54,
+          "label": "Scoped provider connection"
+        },
+        {
+          "path": "backend/internal/provider/vercel/publication.go",
+          "line": 40,
+          "label": "Dedicated landing publication"
+        }
+      ]
+    },
+    {
+      "id": "build_infra",
+      "type": "external",
+      "label": "Build infrastructure",
+      "sublabel": "BuildKit + OCI image registry",
+      "tag": "Build and image services are external",
+      "pos": [
+        540,
+        665
+      ],
+      "size": [
+        300,
+        110
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/server/factories.go",
+          "line": 39,
+          "label": "Builder and pusher adapters"
+        },
+        {
+          "path": "backend/internal/server/app_execution.go",
+          "line": 23,
+          "label": "App build transport support"
+        }
+      ]
+    },
+    {
+      "id": "runtime_targets",
+      "type": "cloud",
+      "label": "Application runtimes",
+      "sublabel": "Docker \u00b7 Kubernetes \u00b7 ECS \u00b7 Cloud Run",
+      "tag": "Target support varies by execution path",
+      "pos": [
+        1060,
+        665
+      ],
+      "size": [
+        340,
+        110
+      ],
+      "sources": [
+        {
+          "path": "backend/internal/service/app_deployer.go",
+          "line": 342,
+          "label": "Supported App destinations"
+        },
+        {
+          "path": "backend/internal/service/pipeline_source.go",
+          "line": 97,
+          "label": "Source-bound native Docker scope"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "browser_api",
+      "from": "workspace",
+      "to": "cooker",
+      "label": "JWT API / ticketed WS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "browser_identity",
+      "from": "workspace",
+      "to": "identity",
+      "label": "OIDC sign-in",
+      "variant": "security"
+    },
+    {
+      "id": "webhook_ingress",
+      "from": "git_hosts",
+      "to": "cooker",
+      "label": "Signed webhooks",
+      "variant": "emphasis"
+    },
+    {
+      "id": "durable_storage",
+      "from": "cooker",
+      "to": "state",
+      "label": "SQL state + queued jobs",
+      "variant": "emphasis"
+    },
+    {
+      "id": "secret_resolution",
+      "from": "secret_stores",
+      "to": "cooker",
+      "label": "Pinned secret versions",
+      "variant": "security"
+    },
+    {
+      "id": "vercel_api",
+      "from": "cooker",
+      "to": "vercel",
+      "label": "Poll / landing publish"
+    },
+    {
+      "id": "build_publish",
+      "from": "cooker",
+      "to": "build_infra",
+      "label": "Build / publish OCI"
+    },
+    {
+      "id": "deploy_observe",
+      "from": "cooker",
+      "to": "runtime_targets",
+      "label": "Deploy / inspect"
+    },
+    {
+      "id": "runtime_image_pull",
+      "from": "runtime_targets",
+      "to": "build_infra",
+      "label": "Pull immutable digest"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "orange",
+      "title": "One application, several modules",
+      "items": [
+        "API, workers, scheduler, catalog, sync and log hub share the Go process.",
+        "Optional Redis supports tickets, rate limits and fan-out; PostgreSQL owns jobs."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Current source, explicit limits",
+      "items": [
+        "Inspected candidate: base 949d4a9 plus pending changes, 25 October 2026.",
+        "Vercel imported flows stay read-only; wider cloud adapters have separate acceptance."
+      ]
+    }
+  ]
+}

@@ -5,6 +5,9 @@ export interface Environment {
   target: EnvironmentTarget;
   promotion: PromotionPolicy;
   variables: Record<string, string>;
+  plainVars?: Record<string, string>;
+  secretKeys?: string[];
+  version?: number;
   createdAt: string;
 }
 

@@ -1,9 +1,12 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { usePipelineStore } from '../../stores/pipelineStore';
 import type { Stage, StageConfig } from '../../types/pipeline';
 import Badge from '../ui/Badge';
 import Caps from '../ui/Caps';
 import StageSymbol from './StageSymbol';
+import StageEnvironmentBindings from './StageEnvironmentBindings';
+import RegistrySelection from '../registry/RegistrySelection';
+import { dependencyStory, requirementSummary } from './dependencies';
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -71,9 +74,26 @@ function TypeFields({ stage, set }: { stage: Stage; set: (c: Partial<StageConfig
     case 'deploy':
       return (
         <>
+          <Field label="Runtime"><select className="input" value={c.deployRuntime ?? ''} onChange={(event) => set({ deployRuntime: event.target.value ? event.target.value as StageConfig['deployRuntime'] : undefined })}>
+            <option value="">Existing manifest / Helm dispatch</option>
+            <option value="docker">Docker container</option>
+            <option value="compose">Docker Compose · host context</option>
+            {c.deployRuntime && !['docker', 'compose'].includes(c.deployRuntime) && <option value={c.deployRuntime}>{c.deployRuntime} · existing configuration</option>}
+          </select></Field>
+          {(c.deployRuntime === 'docker' || c.deployRuntime === 'compose') ? <>
+            <Field label="Image"><Text value={c.image ?? ''} onChange={(v) => set({ image: v })} placeholder="${stages.push.image}" /></Field>
+            <Field label="Runtime name"><Text value={c.runtimeName ?? ''} onChange={(v) => set({ runtimeName: v })} placeholder="app-web" /></Field>
+            {c.deployRuntime === 'docker' && <Field label="Published ports"><Text value={listToText(c.composePorts)} onChange={(v) => set({ composePorts: textToList(v) })} placeholder="8080:80" /></Field>}
+            {c.deployRuntime === 'compose' && <>
+              <Field label="Compose file"><Text value={c.manifestPath ?? ''} onChange={(v) => set({ manifestPath: v })} placeholder="compose.yaml" /></Field>
+              <Field label="Compose project"><Text value={c.composeProject ?? ''} onChange={(v) => set({ composeProject: v })} placeholder="app" /></Field>
+            </>}
+          </> : <>
           <Field label="Namespace"><Text value={c.namespace ?? ''} onChange={(v) => set({ namespace: v })} placeholder="default" /></Field>
           <Field label="Manifest path"><Text value={c.manifestPath ?? ''} onChange={(v) => set({ manifestPath: v })} placeholder="k8s/deployment.yaml" /></Field>
           <Field label="Helm chart"><Text value={c.helmChart ?? ''} onChange={(v) => set({ helmChart: v })} placeholder="oci://ghcr.io/org/chart" /></Field>
+          </>}
+          <p>Connected Git deployment supports Docker containers in this release. Scoped registry execution supports Docker and host-context Compose; other transports require a later adapter.</p>
         </>
       );
     case 'custom':
@@ -98,48 +118,71 @@ function TypeFields({ stage, set }: { stage: Stage; set: (c: Partial<StageConfig
   }
 }
 
-/** Right-hand stage inspector — slides in when a star is selected. */
-export default function StageInspector() {
+/** Plain-language requirements first; editable configuration stays in a disclosure. */
+export default function StageInspector({ canEdit, onInspectEdge, onConnect }: { canEdit: boolean; onInspectEdge: (id: string) => void; onConnect: (source: string, target: string) => void }) {
   const selectedNodeId = usePipelineStore((s) => s.selectedNodeId);
   const stage = usePipelineStore((s) => s.pipeline?.stages.find((st) => st.id === s.selectedNodeId) ?? null);
   const updateStageConfig = usePipelineStore((s) => s.updateStageConfig);
   const updateStage = usePipelineStore((s) => s.updateStage);
   const removeStage = usePipelineStore((s) => s.removeStage);
   const setSelectedNode = usePipelineStore((s) => s.setSelectedNode);
-  const nameRef = useRef<HTMLInputElement>(null);
+  const pipeline = usePipelineStore((s) => s.pipeline)!;
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const [prerequisite, setPrerequisite] = useState('');
 
   useEffect(() => {
-    nameRef.current?.focus({ preventScroll: true });
+    titleRef.current?.focus({ preventScroll: true });
+    setPrerequisite('');
   }, [selectedNodeId]);
 
   if (!stage) return null;
-  const set = (c: Partial<StageConfig>) => updateStageConfig(stage.id, c);
+  const set = (c: Partial<StageConfig>) => { if (canEdit) updateStageConfig(stage.id, c); };
+  const incoming = pipeline.edges.filter((edge) => edge.target === stage.id);
+  const descriptions: Record<Stage['type'], string> = {
+    build: 'Build a container image from the configured source and Dockerfile.',
+    test: 'Run the configured checks and record whether they succeed.',
+    push: 'Publish the built image to the configured container registry.',
+    deploy: 'Send the configured workload to its deployment target.',
+    approval: 'Pause this run for the required human approval before continuing.',
+    custom: 'Run your configured command or script as a pipeline step.',
+  };
 
   return (
-    <aside className="inspector" aria-label={`Stage ${stage.name}`}>
-      <div className="inspector-head">
+    <aside className="pipeline-inspector" aria-label={`Stage ${stage.name}`}>
+      <div className="pipeline-inspector-heading">
         <StageSymbol kind={stage.type} />
         <Badge variant="muted">{stage.type}</Badge>
-        <span className="spacer" />
-        <button type="button" className="inspector-close" onClick={() => setSelectedNode(null)} aria-label="Close inspector">
+        <button type="button" onClick={() => setSelectedNode(null)} aria-label="Close inspector">
           ×
         </button>
       </div>
-      <input
-        ref={nameRef}
-        className="inspector-name"
+      <h2 ref={titleRef} tabIndex={-1}>{stage.name}</h2>
+      <p>{descriptions[stage.type]}</p>
+      <h3>{requirementSummary(incoming.length)}</h3>
+      <p>{incoming.length > 1 ? 'Every requirement below must be met before this step is eligible to run.' : incoming.length ? 'Select the requirement to see its condition.' : 'This step has no incoming dependencies. Other steps without prerequisites may run alongside it.'}</p>
+      <ol className="pipeline-prerequisites">{incoming.map((edge) => <li key={edge.id}><button type="button" onClick={() => onInspectEdge(edge.id)}><span className="pipeline-number">{pipeline.edges.indexOf(edge)+1}</span>{dependencyStory(edge, pipeline.stages).summary}</button></li>)}</ol>
+      <details className="pipeline-edit-settings"><summary>{canEdit ? 'Edit step and connections' : 'Step configuration'}</summary>
+      <fieldset disabled={!canEdit}>
+      <Field label="Stage name"><input
+        className="input"
         value={stage.name}
-        onChange={(e) => updateStage(stage.id, { name: e.target.value })}
+        onChange={(e) => { if (canEdit) updateStage(stage.id, { name: e.target.value }); }}
         aria-label="Stage name"
         spellCheck={false}
-      />
+      /></Field>
       <TypeFields stage={stage} set={set} />
       <Field label="Timeout"><Text value={stage.config.timeout ?? ''} onChange={(v) => set({ timeout: v })} placeholder="30m" /></Field>
-      <div className="inspector-foot">
-        <button type="button" className="btn-danger" onClick={() => removeStage(stage.id)}>
+      </fieldset>
+      <StageEnvironmentBindings key={stage.id} stage={stage} disabled={!canEdit} onEnvironment={(environmentId) => { if (canEdit) updateStage(stage.id, { environmentId }); }} onConfig={set} />
+      {stage.type !== 'approval' && <RegistrySelection subject={{ kind: 'pipeline', id: pipeline.id }} value={stage.config.registryConnectionIds ?? []} onChange={(registryConnectionIds) => set({ registryConnectionIds })} disabled={!canEdit} label="Registry access for this step" />}
+      {canEdit && <><label>Add a prerequisite<select value={prerequisite} onChange={(event) => setPrerequisite(event.target.value)}><option value="">Choose the step to wait for…</option>{pipeline.stages.filter((item) => item.id !== stage.id && !incoming.some((edge) => edge.source === item.id)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><button type="button" className="hud-btn" disabled={!prerequisite} onClick={() => { onConnect(prerequisite, stage.id); setPrerequisite(''); }}>Add dependency</button></>}
+      <p className="mono">Stage ID: {stage.id}</p>
+      {canEdit && <div className="pipeline-inspector-foot">
+        <button type="button" className="pipeline-remove" onClick={() => removeStage(stage.id)}>
           Remove stage
         </button>
-      </div>
+      </div>}
+      </details>
     </aside>
   );
 }

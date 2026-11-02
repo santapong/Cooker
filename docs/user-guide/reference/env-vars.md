@@ -63,6 +63,8 @@ Every Cooker configuration variable. Generated from `backend/internal/config/con
 | `COOKER_OIDC_REDIRECT_URL` | empty | Must exactly match what's registered with the IdP. | `config.go:279` |
 | `COOKER_OIDC_GROUP_MAP` | empty (built-in defaults) | CSV of `group:role` pairs. See [Auth & RBAC](../operations/auth-and-rbac.md#group-to-role-mapping). | `config.go:281` |
 | `COOKER_OIDC_MFA_ACR_VALUES` | empty (gate disabled) | CSV of acceptable `acr` values for step-up MFA gate. | `config.go:282` |
+| `COOKER_OIDC_BROKER` | empty | Set `keycloak` for brokered GitHub/Google buttons; ordinary OIDC is unchanged. | `config.go` |
+| `COOKER_OIDC_SOCIAL_PROVIDERS` | empty | CSV `github`, `google`, or both, after configuring those exact broker aliases. Requires OIDC, broker, issuer and client. See [setup](../operations/social-sign-in.md). | `config.go` |
 
 ## Local auth
 
@@ -231,6 +233,7 @@ These are baked into the JS bundle at `npm run build`, not read at runtime. Sett
 | Variable | Description |
 |---|---|
 | `VITE_OIDC_ENABLED` | `true` to render the OIDC sign-in flow. |
+| `VITE_LOCAL_AUTH_ENABLED` | `true` when the backend enables local email/password auth, including when OIDC is off. Prevents the frontend from starting as the synthetic development user. Rebuild after changing. |
 | `VITE_OIDC_AUTHORITY` | Issuer URL (same as `COOKER_OIDC_ISSUER_URL`). |
 | `VITE_OIDC_CLIENT_ID` | Client ID. |
 | `VITE_OIDC_REDIRECT_URI` | Redirect URI. |

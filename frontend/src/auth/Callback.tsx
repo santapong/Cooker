@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { User } from 'oidc-client-ts';
 import { useNavigate } from 'react-router-dom';
 import { getUserManager } from './OIDCProvider';
-
-// Design reset (Phase 2): the OIDC redirect-callback logic is plumbing and
-// stays intact; the UI is unstyled pending redesign.
+import Airlock from '../components/airlock/Airlock';
+import AuthHelp from '../components/airlock/AuthHelp';
+import { FormError } from '../components/ui/form';
+import { safeAuthReturnPath } from './socialSignIn';
 export default function Callback() {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
+  const completion = useRef<Promise<User> | null>(null);
 
   useEffect(() => {
     const manager = getUserManager();
@@ -14,27 +17,33 @@ export default function Callback() {
       navigate('/', { replace: true });
       return;
     }
-    manager
-      .signinRedirectCallback()
-      .then(() => navigate('/', { replace: true }))
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : String(err));
+    let active = true;
+    completion.current ??= manager.signinRedirectCallback();
+    completion.current
+      .then((user) => {
+        const state = user.state as { returnTo?: unknown } | undefined;
+        if (active) navigate(safeAuthReturnPath(state?.returnTo), { replace: true });
+      })
+      .catch(() => {
+        if (active) setError('This sign-in expired or could not be verified. Please start again.');
       });
+    return () => { active = false; };
   }, [navigate]);
 
   return (
-    <div style={{ padding: 40 }}>
+    <Airlock full title={error ? 'Sign-in failed' : 'Completing sign-in'}
+      description={error ? 'Your identity provider could not complete this sign-in.' : 'Returning you to your Cooker workspace.'}>
       {error ? (
         <>
-          <h2>Sign-in failed.</h2>
-          <p>{error}</p>
-          <button type="button" onClick={() => navigate('/', { replace: true })}>
+          <FormError>{error}</FormError>
+          <button type="button" className="hud-btn hud-btn-primary btn-block" onClick={() => navigate('/signin', { replace: true })}>
             Back to sign in
           </button>
         </>
       ) : (
-        <p>Completing sign-in…</p>
+        <p className="auth-status" role="status">Completing sign-in…</p>
       )}
-    </div>
+      {error && <AuthHelp />}
+    </Airlock>
   );
 }

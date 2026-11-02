@@ -1,0 +1,8 @@
+{
+  "unit": "cooker-architecture-render-95bf78ebb2fb.scope",
+  "exit": 0,
+  "terminalState": "LoadState=not-found\nActiveState=inactive\nControlGroup=\n",
+  "stderrBytes": 0,
+  "temporaryStorage": "Bounded by one fixed source SVG and <=20million input pixels; no hard filesystem quota claimed.",
+  "browserPhase": "Deferred: workstation available RAM below reserved headroom; Pi memory controller absent and temperature68.1C above trial admission threshold. No Pi execution."
+}

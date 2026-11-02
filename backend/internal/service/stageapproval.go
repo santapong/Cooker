@@ -44,7 +44,7 @@ var ErrGateResolved = errors.New("stageapproval: gate already resolved")
 // the approval count.
 func (s *StageApprovalService) Await(ctx context.Context, runID, stageID string, requiredApprovers int) (*model.StageApproval, error) {
 	if existing, err := s.gates.GetGate(ctx, runID, stageID); err == nil {
-		return existing, nil
+		return s.recoverQuorum(ctx, existing)
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return nil, fmt.Errorf("await: check existing gate: %w", err)
 	}
@@ -60,7 +60,7 @@ func (s *StageApprovalService) Await(ctx context.Context, runID, stageID string,
 		if errors.Is(err, store.ErrConflict) {
 			// Lost a race; return the winner.
 			if existing, gerr := s.gates.GetGate(ctx, runID, stageID); gerr == nil {
-				return existing, nil
+				return s.recoverQuorum(ctx, existing)
 			}
 		}
 		return nil, fmt.Errorf("await: persist gate: %w", err)
@@ -73,7 +73,43 @@ func (s *StageApprovalService) Await(ctx context.Context, runID, stageID string,
 // Get returns the current gate for (run, stage). The executor polls this
 // while blocked; ErrNotFound means no gate exists yet.
 func (s *StageApprovalService) Get(ctx context.Context, runID, stageID string) (*model.StageApproval, error) {
-	return s.gates.GetGate(ctx, runID, stageID)
+	gate, err := s.gates.GetGate(ctx, runID, stageID)
+	if err != nil {
+		return nil, err
+	}
+	return s.recoverQuorum(ctx, gate)
+}
+
+// Recover gates written by the earlier split vote/resolution implementation.
+// An executor re-attaching or polling must not wait forever on committed quorum.
+// The original resolver is unknown; record the recovery time without inventing
+// an approver. The await-only store fence preserves any concurrent veto/winner.
+func (s *StageApprovalService) recoverQuorum(ctx context.Context, gate *model.StageApproval) (*model.StageApproval, error) {
+	if gate.Status != model.StageApprovalAwaiting || gate.ApprovalCount() < normalizeApprovers(gate.RequiredApprovers) {
+		return gate, nil
+	}
+	now := time.Now()
+	if err := s.gates.UpdateGateStatus(ctx, gate.ID, model.StageApprovalApproved, "", &now); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			winner, readErr := s.gates.GetGate(ctx, gate.RunID, gate.StageID)
+			if readErr != nil {
+				return nil, fmt.Errorf("recover stage approval: reload winner: %w", readErr)
+			}
+			if winner.Status != model.StageApprovalAwaiting {
+				return winner, nil
+			}
+		}
+		return nil, fmt.Errorf("recover stage approval quorum: %w", err)
+	}
+	// Return the persisted observation (including database timestamp precision),
+	// not a locally reconstructed status/time after the conditional write.
+	resolved, err := s.gates.GetGate(ctx, gate.RunID, gate.StageID)
+	if err != nil {
+		return nil, fmt.Errorf("recover stage approval: reload result: %w", err)
+	}
+	slog.Info("stage approval quorum recovered", "run", gate.RunID, "stage", gate.StageID,
+		"approvals", gate.ApprovalCount(), "required", gate.RequiredApprovers)
+	return resolved, nil
 }
 
 // List returns all approval gates for a run (awaiting + resolved), each
@@ -99,7 +135,7 @@ func (s *StageApprovalService) List(ctx context.Context, runID string) ([]*model
 // ErrAlreadyApproved so the handler can respond idempotently. Returns
 // ErrGateResolved if the gate has already settled.
 func (s *StageApprovalService) Approve(ctx context.Context, runID, stageID, approverSub, approverEmail, note string) (*model.StageApproval, error) {
-	g, err := s.gates.GetGate(ctx, runID, stageID)
+	g, err := s.Get(ctx, runID, stageID)
 	if err != nil {
 		return nil, fmt.Errorf("approve stage: load gate: %w", err)
 	}
@@ -107,7 +143,7 @@ func (s *StageApprovalService) Approve(ctx context.Context, runID, stageID, appr
 		return g, ErrGateResolved
 	}
 
-	added, count, err := s.gates.AddVote(ctx, &model.StageApprovalVote{
+	added, _, err := s.gates.AddVote(ctx, &model.StageApprovalVote{
 		ID:              uuid.NewString(),
 		StageApprovalID: g.ID,
 		ApproverSub:     approverSub,
@@ -115,7 +151,7 @@ func (s *StageApprovalService) Approve(ctx context.Context, runID, stageID, appr
 		Note:            note,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("approve stage: record vote: %w", err)
+		return s.resolveDecisionConflict(ctx, runID, stageID, fmt.Errorf("approve stage: record vote: %w", err))
 	}
 
 	// Re-read so the returned gate carries the full vote set.
@@ -123,19 +159,15 @@ func (s *StageApprovalService) Approve(ctx context.Context, runID, stageID, appr
 	if err != nil {
 		return nil, fmt.Errorf("approve stage: reload gate: %w", err)
 	}
+	if g.Status != model.StageApprovalAwaiting && g.Status != model.StageApprovalApproved {
+		return g, ErrGateResolved
+	}
 
-	// Advance once the threshold is met (only from a non-terminal awaiting
-	// state, so a late duplicate vote can't re-stamp the row).
-	if count >= g.RequiredApprovers && g.Status == model.StageApprovalAwaiting {
-		now := time.Now()
-		if err := s.gates.UpdateGateStatus(ctx, g.ID, model.StageApprovalApproved, approverEmail, &now); err != nil {
-			return nil, fmt.Errorf("approve stage: advance gate: %w", err)
-		}
-		g.Status = model.StageApprovalApproved
-		g.ResolvedBy = approverEmail
-		g.ResolvedAt = &now
+	// AddVote commits quorum resolution with the vote. This read supplies the
+	// response only; interruption here cannot strand a committed final vote.
+	if g.Status == model.StageApprovalApproved {
 		slog.Info("stage approval gate approved", "run", runID, "stage", stageID,
-			"approvals", count, "required", g.RequiredApprovers)
+			"approvals", g.ApprovalCount(), "required", g.RequiredApprovers)
 	}
 
 	if !added {
@@ -149,7 +181,7 @@ func (s *StageApprovalService) Approve(ctx context.Context, runID, stageID, appr
 // The executor then fails the stage. Returns ErrGateResolved if the gate
 // has already settled.
 func (s *StageApprovalService) Reject(ctx context.Context, runID, stageID, approverEmail, note string) (*model.StageApproval, error) {
-	g, err := s.gates.GetGate(ctx, runID, stageID)
+	g, err := s.Get(ctx, runID, stageID)
 	if err != nil {
 		return nil, fmt.Errorf("reject stage: load gate: %w", err)
 	}
@@ -158,13 +190,30 @@ func (s *StageApprovalService) Reject(ctx context.Context, runID, stageID, appro
 	}
 	now := time.Now()
 	if err := s.gates.UpdateGateStatus(ctx, g.ID, model.StageApprovalRejected, approverEmail, &now); err != nil {
-		return nil, fmt.Errorf("reject stage: settle gate: %w", err)
+		return s.resolveDecisionConflict(ctx, runID, stageID, fmt.Errorf("reject stage: settle gate: %w", err))
 	}
-	g.Status = model.StageApprovalRejected
-	g.ResolvedBy = approverEmail
-	g.ResolvedAt = &now
+	resolved, err := s.gates.GetGate(ctx, runID, stageID)
+	if err != nil {
+		return nil, fmt.Errorf("reject stage: reload result: %w", err)
+	}
 	slog.Info("stage approval gate rejected", "run", runID, "stage", stageID, "by", approverEmail)
-	return g, nil
+	return resolved, nil
+}
+
+// A stale awaiting read cannot authorize replacement of the winning terminal
+// decision. Return that recorded decision so the handler can report an honest
+// conflict, rather than a 500 or a locally invented success state.
+func (s *StageApprovalService) resolveDecisionConflict(ctx context.Context, runID, stageID string, cause error) (*model.StageApproval, error) {
+	if errors.Is(cause, store.ErrConflict) {
+		gate, err := s.gates.GetGate(ctx, runID, stageID)
+		if err != nil {
+			return nil, fmt.Errorf("reload resolved stage approval: %w", err)
+		}
+		if gate.Status != model.StageApprovalAwaiting {
+			return gate, ErrGateResolved
+		}
+	}
+	return nil, cause
 }
 
 // normalizeApprovers treats a non-positive threshold as 1, so a

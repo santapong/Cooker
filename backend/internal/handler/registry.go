@@ -117,6 +117,12 @@ func handleConfigServiceError(c *gin.Context, err error, notFoundMsg string) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 	case errors.Is(err, store.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": notFoundMsg})
+	case errors.Is(err, store.ErrConflict):
+		c.JSON(http.StatusConflict, gin.H{"error": "registry configuration changed or already exists"})
+	case errors.Is(err, model.ErrInvalidRegistryAuthority):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid registry configuration or grants"})
+	case errors.Is(err, service.ErrRegistryCredentialUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "registry credential storage unavailable"})
 	default:
 		slog.Error("settings config service error", "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
@@ -137,13 +143,15 @@ func (h *Handler) ListRegistryConfigs(c *gin.Context) {
 
 func (h *Handler) AddRegistryConfig(c *gin.Context) {
 	var req struct {
-		Name     string `json:"name" binding:"required"`
-		URL      string `json:"url" binding:"required"`
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Name               string   `json:"name" binding:"required"`
+		URL                string   `json:"url" binding:"required"`
+		Username           string   `json:"username"`
+		Password           string   `json:"password"`
+		AllowedAppIDs      []string `json:"allowedAppIds"`
+		AllowedPipelineIDs []string `json:"allowedPipelineIds"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid registry request"})
 		return
 	}
 	if err := validate.Name("name", req.Name); err != nil {
@@ -156,18 +164,44 @@ func (h *Handler) AddRegistryConfig(c *gin.Context) {
 	}
 	now := time.Now()
 	cfg := &model.RegistryConfig{
-		ID:        uuid.New().String(),
-		Name:      req.Name,
-		URL:       req.URL,
-		Username:  req.Username,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:                 uuid.New().String(),
+		Name:               req.Name,
+		URL:                req.URL,
+		Username:           req.Username,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		AllowedAppIDs:      req.AllowedAppIDs,
+		AllowedPipelineIDs: req.AllowedPipelineIDs,
 	}
 	if err := h.Registries.CreateRegistry(c.Request.Context(), cfg, []byte(req.Password)); err != nil {
 		handleConfigServiceError(c, err, "registry not found")
 		return
 	}
 	c.JSON(http.StatusCreated, cfg.Redact())
+}
+
+// UpdateRegistryGrants must be registered behind the Settings admin/MFA policy.
+// Grant mutation is independent of operator-controlled App/Pipeline selection.
+func (h *Handler) UpdateRegistryGrants(c *gin.Context) {
+	var req struct {
+		Version            int64    `json:"version"`
+		AllowedAppIDs      []string `json:"allowedAppIds"`
+		AllowedPipelineIDs []string `json:"allowedPipelineIds"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid registry grants"})
+		return
+	}
+	if h.Registries == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "registry config service not configured"})
+		return
+	}
+	r, err := h.Registries.UpdateRegistryGrants(c.Request.Context(), c.Param("id"), req.Version, req.AllowedAppIDs, req.AllowedPipelineIDs)
+	if err != nil {
+		handleConfigServiceError(c, err, "registry not found")
+		return
+	}
+	c.JSON(http.StatusOK, r.Redact())
 }
 
 func (h *Handler) DeleteRegistryConfig(c *gin.Context) {

@@ -24,6 +24,9 @@ func DeploymentViewPipeline(p *model.Pipeline) *model.Pipeline {
 	for i := range view.Stages {
 		c := &view.Stages[i].Config
 		c.ReviewOnly = true
+		if c.Context != "" {
+			c.Context = "[resolved during app deployment]"
+		}
 		for k := range c.Env {
 			c.Env[k] = "[configured]"
 		}
@@ -87,6 +90,9 @@ func ValidateAppDeployment(app *model.App) error {
 	}
 	if app.BuildPlan != nil {
 		p := app.BuildPlan
+		if err := validateEnvironmentScopePlan(p); err != nil {
+			return err
+		}
 		if p.Kind != model.BuildPlanCompose && p.Kind != model.BuildPlanDockerfile && p.Kind != model.BuildPlanBuildpack {
 			return fmt.Errorf("unknown build plan")
 		}
@@ -141,9 +147,18 @@ func ValidateAppDeployment(app *model.App) error {
 }
 
 type TargetCapability struct {
-	Kind      model.DeployTargetKind `json:"kind"`
-	Available bool                   `json:"available"`
-	Reason    string                 `json:"reason,omitempty"`
+	Kind        model.DeployTargetKind `json:"kind"`
+	Available   bool                   `json:"available"`
+	Reason      string                 `json:"reason,omitempty"`
+	SourceBuild CapabilityState        `json:"sourceBuild"`
+	ServiceLogs CapabilityState        `json:"serviceLogs"`
+}
+
+// CapabilityState describes configured support, not a live provider health
+// check or a guarantee that a particular application will pass inspection.
+type CapabilityState struct {
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 func CheckAppTarget(app *model.App) error {

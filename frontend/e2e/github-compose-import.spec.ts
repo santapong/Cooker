@@ -59,7 +59,7 @@ async function sourceAndPreview(page: Page) {
   await page.goto('/apps/new');
   await page.getByLabel('GitHub account', { exact: false }).selectOption('7');
   await page.getByLabel('Connected repository', { exact: false }).selectOption('acme/shop');
-  await expect(page.getByLabel('Branch or tag', { exact: false })).toHaveValue('develop');
+  await expect(page.getByLabel('Branch or full tag ref', { exact: false })).toHaveValue('develop');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await page.getByLabel('deploy/compose.prod.yaml', { exact: false }).check();
   await page.getByLabel('Compose profiles', { exact: false }).fill('production, worker');
@@ -109,7 +109,7 @@ test('imports private GitHub Compose, previews Dockerfile, binds Cloud SQL to EC
   await page.reload();
   await shared.getByRole('link', { name: 'Open saved app shop' }).click();
   await page.getByRole('link', { name: 'Review source & targets' }).click();
-  await expect(page.getByLabel('GitHub repository', { exact: false })).toHaveValue('acme/shop');
+  await expect(page.getByLabel('Repository path', { exact: false })).toHaveValue('acme/shop');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page.getByLabel('Compose profiles', { exact: false })).toHaveValue('production, worker');
   await expect(page.getByLabel('Compose merge order').locator('li')).toHaveCount(2);
@@ -122,7 +122,7 @@ test('changing GitHub account to public clears the source pin and file selection
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await page.getByLabel('GitHub account', { exact: false }).selectOption('');
-  await page.getByLabel('GitHub repository', { exact: false }).fill('public/another');
+  await page.getByLabel('Repository path', { exact: false }).fill('public/another');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   expect(fixture.inspections.at(-1)?.buildPlan).toMatchObject({ installationId: 0, files: [] });
   expect(fixture.inspections.at(-1)?.buildPlan?.commit).toBeUndefined();
@@ -142,7 +142,7 @@ test('prefix collision can be corrected without losing the reviewed source', asy
   await sourceAndPreview(page);
   await chooseECSAndDatabase(page);
   await page.getByRole('button', { name: 'Save app', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('deployment prefix is already used');
+  await expect(page.getByRole('alert')).toContainText('saved app or deployment prefix changed');
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await page.getByLabel('Deployment prefix', { exact: false }).fill('shop-uat');
   await page.getByRole('button', { name: 'Review deployment', exact: true }).click();

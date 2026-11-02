@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/santapong/cooker/internal/build/builder"
 	"github.com/santapong/cooker/internal/build/buildplan"
 	"github.com/santapong/cooker/internal/build/pusher"
@@ -47,6 +48,13 @@ func derivePushOutputs(res pusher.Result, target string) map[string]string {
 	}
 	if target != "" {
 		out["ref"] = target
+		if res.Digest != "" {
+			if ref, err := name.ParseReference(target); err == nil {
+				if pinned, err := name.NewDigest(ref.Context().Name() + "@" + res.Digest); err == nil {
+					out["image"] = pinned.Name()
+				}
+			}
+		}
 	}
 	return out
 }

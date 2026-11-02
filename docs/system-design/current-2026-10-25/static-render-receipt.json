@@ -1,0 +1,24 @@
+{
+  "kind": "static-derivative-raster",
+  "sourceHTML": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/system-overview.html",
+  "sourceSHA256": "9943d72588188bbefcae37323a5d7015a32dd5d04997020e86b361024722bec1",
+  "svgSHA256": "9a3c4b8d6f2cd2ccd7d46b386dfab1fd03bd4774c27c9abca9a595dbe10ba4a0",
+  "pngSHA256": "f06944998e519fbcea21c1b031757fff74560433f8a1087d69733872597afcb2",
+  "pngBytes": 290077,
+  "width": 2770,
+  "height": 1686,
+  "fixedTheme": "light",
+  "geometryPreserved": true,
+  "fontInheritanceRestored": true,
+  "scriptsOrExternalResources": false,
+  "nativeViewerExport": false,
+  "browserEvidence": "not run; heavy browser admission deferred after host and Pi preflight",
+  "perceptualReview": "pending",
+  "effectiveControls": {
+    "cpu": "50000 100000",
+    "memory": "536870912",
+    "swap": "0",
+    "pids": "32"
+  },
+  "cgroup": "/user.slice/user-1000.slice/user@1000.service/app.slice/cooker-architecture-render-04e19b5a0e01.scope"
+}

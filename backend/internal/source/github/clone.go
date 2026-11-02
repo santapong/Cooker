@@ -9,7 +9,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+
+	"github.com/santapong/cooker/internal/source/gittransport"
 )
 
 // CloneOptions controls public and GitHub App authenticated cloning.
@@ -17,7 +20,8 @@ type CloneOptions struct {
 	// Repo is "owner/name"; CloneURL is derived as
 	// https://github.com/<Repo>.git.
 	Repo string
-	// Branch to check out. Empty means "default branch".
+	// Branch is a bare branch name or a full refs/heads/ or refs/tags/ ref.
+	// Empty means the remote default branch; bare names never fall back to tags.
 	Branch string
 	// Depth clones with --depth=N. Zero means a full clone.
 	Depth int
@@ -49,8 +53,9 @@ func Clone(ctx context.Context, opts CloneOptions) (string, error) {
 	if opts.Commit != "" && !ValidCommit(opts.Commit) {
 		return "", fmt.Errorf("github: commit must be a full SHA")
 	}
-	if strings.HasPrefix(opts.Branch, "-") || strings.ContainsAny(opts.Branch, "\r\n") {
-		return "", fmt.Errorf("github: invalid branch")
+	fullRef, err := cloneRef(opts.Branch)
+	if err != nil {
+		return "", err
 	}
 	if opts.InstallationID != 0 && opts.Token == "" {
 		return "", fmt.Errorf("github: authenticated connection required")
@@ -68,79 +73,101 @@ func Clone(ctx context.Context, opts CloneOptions) (string, error) {
 		return "", fmt.Errorf("github: tmpdir: %w", err)
 	}
 
+	// Fetch an explicit namespace before checking out its immutable commit.
+	// `clone --branch name` can select a same-named tag when the branch is
+	// absent, and does not accept full typed refs consistently.
 	url := "https://github.com/" + opts.Repo + ".git"
-	args := []string{"clone"}
-	if opts.Depth > 0 {
-		args = append(args, "--depth", fmt.Sprintf("%d", opts.Depth))
-	}
-	if opts.Branch != "" {
-		args = append(args, "--branch", opts.Branch)
-	}
-	args = append(args, url, dir)
-
 	out := opts.LogWriter
 	if out == nil {
 		out = io.Discard
 	}
-	commands := [][]string{args}
-	if opts.Commit != "" {
-		// Fetch the reviewed object directly; moving or deleting the original
-		// branch must not substitute a newer checkout or prevent a pinned build.
-		commands = [][]string{{"init", dir}, {"-C", dir, "remote", "add", "origin", url}}
-	}
-	for _, command := range commands {
-		cmd := exec.CommandContext(ctx, bin, command...)
+	run := func(args ...string) error {
+		cmd := exec.CommandContext(ctx, bin, args...)
 		cmd.Env = cloneEnvironment(opts.Token)
 		cmd.Stdout, cmd.Stderr = out, out
-		if err := cmd.Run(); err != nil {
-			_ = os.RemoveAll(dir)
-			return "", fmt.Errorf("git clone: %w", err)
-		}
+		return cmd.Run()
 	}
-	// Strip any hooks the cloned repo shipped. A malicious repo can
-	// stage hooks under .git/hooks that fire on subsequent git
-	// operations (commit, push, checkout) — and Cooker / its
-	// downstream builders may run those operations against the
-	// working tree. Clearing the directory is cheap and removes
-	// the entire class of hook-driven RCE vectors. Belt-and-braces:
-	// also point core.hooksPath to a non-existent path.
-	hooksDir := filepath.Join(dir, ".git", "hooks")
-	if err := os.RemoveAll(hooksDir); err != nil {
+	fail := func(err error) (string, error) {
 		_ = os.RemoveAll(dir)
-		return "", fmt.Errorf("git clone: strip hooks: %w", err)
+		return "", fmt.Errorf("github: cannot checkout source: %w", err)
 	}
-	// Retain an empty hooks directory for tools that expect it.
-	_ = os.MkdirAll(hooksDir, 0o755)
-	disableHooks := exec.CommandContext(ctx, bin, "-C", dir, "config", "core.hooksPath", "/dev/null")
-	disableHooks.Env = cloneEnvironment("")
-	disableHooks.Stdout = io.Discard
-	disableHooks.Stderr = io.Discard
-	_ = disableHooks.Run()
+	if err := run("init", dir); err != nil {
+		return fail(err)
+	}
+	if err := run("-C", dir, "remote", "add", "origin", url); err != nil {
+		return fail(err)
+	}
+	// Keep hooks disabled in the returned working tree as well as in each
+	// isolated Git subprocess. No credential is written into local config.
+	if err := os.RemoveAll(filepath.Join(dir, ".git", "hooks")); err != nil {
+		return fail(err)
+	}
+	if err := run("-C", dir, "config", "core.hooksPath", "/dev/null"); err != nil {
+		return fail(err)
+	}
+	fetchRef := fullRef
 	if opts.Commit != "" {
-		for _, args := range [][]string{{"-C", dir, "fetch", "--depth=1", "origin", opts.Commit}, {"-C", dir, "checkout", "--detach", opts.Commit}} {
-			cmd := exec.CommandContext(ctx, bin, args...)
-			cmd.Env = cloneEnvironment(opts.Token)
-			cmd.Stdout, cmd.Stderr = out, out
-			if err := cmd.Run(); err != nil {
-				_ = os.RemoveAll(dir)
-				return "", fmt.Errorf("github: cannot checkout reviewed commit: %w", err)
-			}
-		}
+		fetchRef = opts.Commit
+	}
+	args := []string{"-C", dir, "fetch", "--no-tags", "--no-recurse-submodules"}
+	if opts.Commit != "" {
+		args = append(args, "--depth=1")
+	} else if opts.Depth > 0 {
+		args = append(args, "--depth", strconv.Itoa(opts.Depth))
+	}
+	args = append(args, "origin", fetchRef)
+	if err := run(args...); err != nil {
+		return fail(err)
+	}
+	// ^{commit} peels annotated tags and rejects blobs/trees. FETCH_HEAD is
+	// local to this fresh directory, so a ref moving later cannot alter it.
+	resolve := exec.CommandContext(ctx, bin, "-C", dir, "rev-parse", "--verify", "FETCH_HEAD^{commit}")
+	resolve.Env = cloneEnvironment("")
+	data, err := resolve.Output()
+	commit := strings.TrimSpace(string(data))
+	if err != nil || gittransport.ValidateCommit(commit) != nil {
+		return fail(fmt.Errorf("source ref does not resolve to a commit"))
+	}
+	if opts.Commit != "" && commit != opts.Commit {
+		return fail(fmt.Errorf("source did not return the reviewed commit"))
+	}
+	if err := run("-C", dir, "checkout", "--detach", commit); err != nil {
+		return fail(err)
 	}
 	return filepath.Clean(dir), nil
 }
 
-func cloneEnvironment(token string) []string {
-	var env []string
-	for _, v := range os.Environ() {
-		if !strings.HasPrefix(v, "GIT_") {
-			env = append(env, v)
+// cloneRef preserves branch/tag identity; only an empty input selects HEAD.
+func cloneRef(value string) (string, error) {
+	if value == "" {
+		return "HEAD", nil
+	}
+	ref := gittransport.Ref{Kind: "branch", Name: value}
+	if strings.HasPrefix(value, "refs/") {
+		switch {
+		case strings.HasPrefix(value, "refs/heads/"):
+			ref.Name = strings.TrimPrefix(value, "refs/heads/")
+		case strings.HasPrefix(value, "refs/tags/"):
+			ref.Kind, ref.Name = "tag", strings.TrimPrefix(value, "refs/tags/")
+		default:
+			return "", fmt.Errorf("github: only branch or tag refs are supported")
 		}
 	}
-	env = append(env, "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.hooksPath", "GIT_CONFIG_VALUE_0=/dev/null")
+	return ref.FullName()
+}
+
+func cloneEnvironment(token string) []string {
+	env := gittransport.Environment("/nonexistent")
 	if token != "" {
-		env[len(env)-3] = "GIT_CONFIG_COUNT=2"
-		env = append(env, "GIT_CONFIG_KEY_1=http.https://github.com/.extraheader", "GIT_CONFIG_VALUE_1=Authorization: Basic "+base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token)))
+		count := 0
+		for i, v := range env {
+			if strings.HasPrefix(v, "GIT_CONFIG_COUNT=") {
+				count, _ = strconv.Atoi(strings.TrimPrefix(v, "GIT_CONFIG_COUNT="))
+				env[i] = "GIT_CONFIG_COUNT=" + strconv.Itoa(count+1)
+				break
+			}
+		}
+		env = append(env, fmt.Sprintf("GIT_CONFIG_KEY_%d=http.https://github.com/.extraheader", count), fmt.Sprintf("GIT_CONFIG_VALUE_%d=Authorization: Basic %s", count, base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token))))
 	}
 	return env
 }

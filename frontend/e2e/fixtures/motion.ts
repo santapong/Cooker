@@ -90,7 +90,9 @@ async function waitForConstellation(page: Page, stars: number): Promise<void> {
 export async function gotoEditor(page: Page): Promise<void> {
   await mockApi(page);
   await page.goto('/pipelines/gates/edit');
-  await waitForConstellation(page, 3);
+  await expect(page.locator('.pipeline-stage-card')).toHaveCount(3);
+  await expect(page.locator('.pipeline-dependency-number')).toHaveCount(2);
+  await settleEntrances(page);
 }
 
 /** Run view on the fixture run, settled. */

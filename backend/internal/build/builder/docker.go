@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/santapong/cooker/internal/build/registryauth"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -49,6 +50,34 @@ func (d *DockerSock) Build(ctx context.Context, req Request) (Result, error) {
 		fmt.Fprintln(req.LogWriter, "cache: registry layer cache not supported on the docker builder; ignoring cache config")
 	}
 
+	var result Result
+	err := registryauth.WithDockerConfig(ctx, req.RegistryAuth, req.RegistryHosts, func(dir string) error {
+		var buildErr error
+		result, buildErr = d.buildScoped(ctx, req, bin, dir)
+		return buildErr
+	})
+	return result, err
+}
+
+func (d *DockerSock) buildScoped(ctx context.Context, req Request, bin, configDir string) (Result, error) {
+	// Auth files must never be included in a caller's build context. A context
+	// such as / or the shared temp root would otherwise allow COPY to persist it.
+	contextPath, err := filepath.Abs(req.ContextDir)
+	if err != nil {
+		return Result{}, registryauth.ErrUnavailable
+	}
+	contextPath, err = filepath.EvalSymlinks(contextPath)
+	if err != nil {
+		return Result{}, registryauth.ErrUnavailable
+	}
+	authPath, err := filepath.EvalSymlinks(configDir)
+	if err != nil {
+		return Result{}, registryauth.ErrUnavailable
+	}
+	rel, err := filepath.Rel(contextPath, authPath)
+	if err != nil || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+		return Result{}, registryauth.ErrUnavailable
+	}
 	args := []string{"build"}
 	if req.Dockerfile != "" {
 		df := req.Dockerfile
@@ -73,6 +102,7 @@ func (d *DockerSock) Build(ctx context.Context, req Request) (Result, error) {
 	args = append(args, req.ContextDir)
 
 	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = registryauth.DockerEnvironment(configDir)
 	out := req.LogWriter
 	if out == nil {
 		out = io.Discard
@@ -84,7 +114,7 @@ func (d *DockerSock) Build(ctx context.Context, req Request) (Result, error) {
 		return Result{}, fmt.Errorf("docker build failed: %w", err)
 	}
 
-	id, err := d.inspectID(ctx, bin, req.Tags[0])
+	id, err := d.inspectID(ctx, bin, req.Tags[0], configDir)
 	if err != nil {
 		// Build succeeded but we couldn't resolve the ID; return partial
 		// success rather than failing — the tags are still usable.
@@ -94,8 +124,9 @@ func (d *DockerSock) Build(ctx context.Context, req Request) (Result, error) {
 }
 
 // inspectID resolves a tag to its content-addressable ID.
-func (d *DockerSock) inspectID(ctx context.Context, bin, tag string) (string, error) {
+func (d *DockerSock) inspectID(ctx context.Context, bin, tag, configDir string) (string, error) {
 	cmd := exec.CommandContext(ctx, bin, "image", "inspect", "--format", "{{.Id}}", tag)
+	cmd.Env = registryauth.DockerEnvironment(configDir)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = io.Discard

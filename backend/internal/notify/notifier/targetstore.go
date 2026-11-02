@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,13 +33,14 @@ type TargetStore interface {
 // MemoryTargetStore is a process-local store for tests and as a
 // fallback when no DB is configured.
 type MemoryTargetStore struct {
-	mu      sync.RWMutex
-	targets map[string]Target
+	mu       sync.RWMutex
+	targets  map[string]Target
+	versions map[string]int64
 }
 
 // NewMemoryTargetStore returns an empty in-memory TargetStore.
 func NewMemoryTargetStore() *MemoryTargetStore {
-	return &MemoryTargetStore{targets: make(map[string]Target)}
+	return &MemoryTargetStore{targets: make(map[string]Target), versions: make(map[string]int64)}
 }
 
 func (m *MemoryTargetStore) ListEnabled(_ context.Context) ([]Target, error) {
@@ -87,6 +89,8 @@ func (m *MemoryTargetStore) Create(_ context.Context, t Target) error {
 	if _, exists := m.targets[t.ID]; exists {
 		return fmt.Errorf("notifier: duplicate target id %s", t.ID)
 	}
+	m.versions[t.ID]++
+	t.Version = m.versions[t.ID]
 	m.targets[t.ID] = t
 	return nil
 }
@@ -94,9 +98,12 @@ func (m *MemoryTargetStore) Create(_ context.Context, t Target) error {
 func (m *MemoryTargetStore) Update(_ context.Context, t Target) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.targets[t.ID]; !ok {
+	previous, ok := m.targets[t.ID]
+	if !ok {
 		return ErrTargetNotFound
 	}
+	m.versions[t.ID] = previous.Version + 1
+	t.Version = m.versions[t.ID]
 	t.UpdatedAt = time.Now().UTC()
 	m.targets[t.ID] = t
 	return nil
@@ -162,9 +169,23 @@ func (p *PostgresTargetStore) sealConfig(cfg []byte) ([]byte, error) {
 // shape) are returned as-is so pre-encryption targets keep working;
 // they are re-sealed on their next Update.
 func (p *PostgresTargetStore) openConfig(cfg []byte) ([]byte, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(cfg, &fields); err != nil || fields == nil {
+		return nil, errors.New("notifier: invalid target config")
+	}
+	_, hasEnc := fields["enc"]
+	_, hasData := fields["data"]
+	for key := range fields {
+		if (strings.EqualFold(key, "enc") && key != "enc") || (strings.EqualFold(key, "data") && key != "data") {
+			return nil, errors.New("notifier: invalid target config envelope")
+		}
+	}
+	if !hasEnc && !hasData {
+		return cfg, nil
+	}
 	var env sealedConfig
-	if err := json.Unmarshal(cfg, &env); err != nil || env.Enc != sealedConfigV1 {
-		return cfg, nil // legacy plaintext (or non-envelope JSON)
+	if err := json.Unmarshal(cfg, &env); err != nil || env.Enc != sealedConfigV1 || !hasEnc || !hasData || len(fields) != 2 || len(env.Data) == 0 {
+		return nil, errors.New("notifier: invalid target config envelope")
 	}
 	if p.codec == nil || !p.codec.Active() {
 		return nil, fmt.Errorf("notifier: target config is encrypted but no COOKER_SECRET_KEY is configured")
@@ -186,7 +207,7 @@ func (p *PostgresTargetStore) List(ctx context.Context) ([]Target, error) {
 
 func (p *PostgresTargetStore) query(ctx context.Context, suffix string) ([]Target, error) {
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT id, name, kind, config, event_types, enabled, created_at, updated_at
+		SELECT id, name, kind, config, event_types, enabled, created_at, updated_at, version
 		  FROM notification_targets `+suffix)
 	if err != nil {
 		return nil, fmt.Errorf("notifier: list targets: %w", err)
@@ -210,7 +231,7 @@ func (p *PostgresTargetStore) query(ctx context.Context, suffix string) ([]Targe
 
 func (p *PostgresTargetStore) Get(ctx context.Context, id string) (Target, error) {
 	row := p.db.QueryRowContext(ctx, `
-		SELECT id, name, kind, config, event_types, enabled, created_at, updated_at
+		SELECT id, name, kind, config, event_types, enabled, created_at, updated_at, version
 		  FROM notification_targets WHERE id = $1`, id)
 	t, err := scanTarget(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -301,7 +322,7 @@ func scanTarget(row scannable) (Target, error) {
 		config     []byte
 		eventTypes pq.StringArray
 	)
-	if err := row.Scan(&t.ID, &t.Name, &t.Kind, &config, &eventTypes, &t.Enabled, &t.CreatedAt, &t.UpdatedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.Name, &t.Kind, &config, &eventTypes, &t.Enabled, &t.CreatedAt, &t.UpdatedAt, &t.Version); err != nil {
 		return Target{}, err
 	}
 	t.Config = json.RawMessage(config)

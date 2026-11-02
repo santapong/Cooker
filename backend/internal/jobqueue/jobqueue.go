@@ -35,7 +35,27 @@ const (
 	StatusSucceeded Status = "succeeded"
 	StatusFailed    Status = "failed"
 	StatusCancelled Status = "cancelled"
+	// NeedsAttention keeps the concurrency key reserved after ownership was
+	// lost. An external deployment may have succeeded; never replay blindly.
+	StatusNeedsAttention Status = "needs_attention"
 )
+
+// LeaseStore protects work across process crashes. LockedAt is the last
+// successful heartbeat. Ownership is unique per claim, not per hostname.
+type LeaseStore interface {
+	Heartbeat(ctx context.Context, owner, jobID string) error
+	Suspend(ctx context.Context, owner, jobID, reason string) error
+	RecoverExpired(ctx context.Context, cutoff time.Time) ([]*Job, error)
+	// Resolve records an operator-verified outcome. It never retries the job.
+	Resolve(ctx context.Context, jobID string, outcome Status, evidence string) error
+	// Cancel stops pending work immediately. Running external work instead
+	// loses its claim and requires reconciliation; cancellation is not proof
+	// that a remote side effect stopped.
+	Cancel(ctx context.Context, jobID string) (Status, error)
+}
+
+// ErrOutcomeUnknown tells the pool that retrying may duplicate external work.
+var ErrOutcomeUnknown = errors.New("jobqueue: external outcome requires reconciliation")
 
 // IsTerminal reports whether the status is a final state.
 func (s Status) IsTerminal() bool {

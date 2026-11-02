@@ -30,7 +30,7 @@ func newPromotionService(envs ...*model.Environment) *PromotionService {
 	return NewPromotionService(st.Promotions, &fakeEnvStore{envs: m})
 }
 
-func TestPromotionService_AutoStrategyShortCircuits(t *testing.T) {
+func TestPromotionService_AutoApprovesWithoutClaimingDeployment(t *testing.T) {
 	svc := newPromotionService(&model.Environment{
 		ID: "dev", Promotion: model.PromotionPolicy{Strategy: "auto"},
 	})
@@ -40,8 +40,8 @@ func TestPromotionService_AutoStrategyShortCircuits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("promote: %v", err)
 	}
-	if p.Status != model.PromotionDeployed {
-		t.Errorf("auto promotion should be deployed immediately, got %s", p.Status)
+	if p.Status != model.PromotionApproved {
+		t.Errorf("auto promotion should be approved but not deployed, got %s", p.Status)
 	}
 	if p.PromotedAt == nil {
 		t.Error("auto promotion should stamp PromotedAt")
@@ -194,8 +194,8 @@ func TestPromotionService_StatusesReflectRows(t *testing.T) {
 	for _, s := range statuses {
 		byEnv[s.EnvironmentID] = s
 	}
-	if byEnv["dev"].Status != model.EnvStatusDeployed {
-		t.Errorf("dev (auto) should be deployed, got %s", byEnv["dev"].Status)
+	if byEnv["dev"].Status != model.EnvStatus(model.PromotionApproved) {
+		t.Errorf("dev (auto) should be approved without deployment, got %s", byEnv["dev"].Status)
 	}
 	staging := byEnv["staging"]
 	if staging.Status != model.EnvStatus(model.PromotionAwaitingApproval) {

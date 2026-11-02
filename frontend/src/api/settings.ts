@@ -1,5 +1,5 @@
-import { get, post, del } from './client';
-import type { RegistryConfig, ClusterConfig } from '../types/infra';
+import { get, post, patch, del } from './client';
+import type { RegistryConfig, RegistryGrantUpdate, ClusterConfig } from '../types/infra';
 
 /** Outcome of one secrets-backend connectivity probe (admin+MFA). */
 export interface SecretsCheckResult {
@@ -12,7 +12,9 @@ export interface SecretsCheckResult {
 export const settingsApi = {
   listRegistries: () => get<RegistryConfig[]>('/settings/registries'),
   addRegistry: (data: { name: string; url: string; username?: string; password?: string }) =>
-    post<{ message: string; name: string }>('/settings/registries', data),
+    post<RegistryConfig>('/settings/registries', data),
+  updateRegistryGrants: (id: string, data: RegistryGrantUpdate) =>
+    patch<RegistryConfig>(`/settings/registries/${encodeURIComponent(id)}/grants`, data),
   deleteRegistry: (id: string) => del(`/settings/registries/${id}`),
 
   listClusters: () => get<ClusterConfig[]>('/settings/clusters'),

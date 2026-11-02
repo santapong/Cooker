@@ -115,6 +115,12 @@ func (k *Kaniko) Build(ctx context.Context, req Request) (Result, error) {
 	if err := validateRequest(req); err != nil {
 		return Result{}, err
 	}
+	// A function callback cannot be transported to a Pod safely. Accepted
+	// executions always supply one (including anonymous plans); do not fall back
+	// to service-account/cloud or image-baked registry authority.
+	if req.RegistryAuth != nil {
+		return Result{}, fmt.Errorf("%w: kaniko scoped registry transport is unsupported", ErrUnavailable)
+	}
 	if k == nil || k.client == nil {
 		return Result{}, fmt.Errorf("%w: kaniko client not configured", ErrUnavailable)
 	}

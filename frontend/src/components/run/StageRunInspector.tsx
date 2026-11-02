@@ -6,6 +6,10 @@ import Badge from '../ui/Badge';
 import Caps from '../ui/Caps';
 import StageSymbol from '../pipeline/StageSymbol';
 import { formatDuration, stageDurationMs, statusVariant } from '../porthole/runState';
+import type { GateLoadState } from './approvalPolicy';
+import { deploymentRuntimeService } from './deploymentRuntime';
+import NativeRuntimePanel from './NativeRuntimePanel';
+import type { NativeRuntimeStatus } from '../../types/nativeRuntime';
 
 function clock(iso: string | null | undefined): string | null {
   if (!iso) return null;
@@ -20,26 +24,35 @@ interface Props {
   now: number;
   onClose: () => void;
   onGate?: (kind: 'approve' | 'reject', note: string) => Promise<void>;
-  /** Deployment view: the app whose compose service this stage deployed. */
+  gateState?: GateLoadState;
+  acceptedVersion?: number;
+  currentVersion?: number;
+  retainedGate?: boolean;
+  canTriage?: boolean;
+  /** Deployment view: the app whose recorded service is inspected. */
   appId?: string;
   /** Run coordinates for AI triage of a failed stage. */
   pipelineId?: string;
   runId?: string;
+  onNativeRuntimeStatus?: (status: NativeRuntimeStatus | null) => void;
 }
 
 /** Right-hand inspector for a stage of a run: timing, error, artifacts, outputs, approval gate, runtime. */
-export default function StageRunInspector({ stage, stageRun, gate, now, onClose, onGate, appId, pipelineId, runId }: Props) {
+export default function StageRunInspector({ stage, stageRun, gate, now, onClose, onGate, gateState = 'unavailable', acceptedVersion, currentVersion, retainedGate = false, canTriage = false, appId, pipelineId, runId, onNativeRuntimeStatus }: Props) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<'approve' | 'reject' | null>(null);
   const [runtime, setRuntime] = useState<ServiceRuntimeStatus | null>(null);
   const [triage, setTriage] = useState<{ advisory: string; model: string } | null>(null);
   const [triaging, setTriaging] = useState(false);
   const [triageError, setTriageError] = useState<string | null>(null);
+  const [gateError, setGateError] = useState<string | null>(null);
   const aiTriage = useCapabilitiesStore((s) => s.capabilities?.aiTriage ?? false);
-  const service = stage.config.composeServiceName;
+  const service = appId ? deploymentRuntimeService(stage)?.id : undefined;
   useEffect(() => {
     setTriage(null);
     setTriageError(null);
+    setNote('');
+    setGateError(null);
   }, [stage.id, runId]);
   const runTriage = async () => {
     if (!pipelineId || !runId) return;
@@ -47,8 +60,8 @@ export default function StageRunInspector({ stage, stageRun, gate, now, onClose,
     setTriageError(null);
     try {
       setTriage(await pipelineApi.triageStage(pipelineId, runId, stage.id));
-    } catch (e) {
-      setTriageError(e instanceof Error ? e.message : String(e));
+    } catch {
+      setTriageError('This failure could not be explained. Check access and retry.');
     } finally {
       setTriaging(false);
     }
@@ -70,14 +83,18 @@ export default function StageRunInspector({ stage, stageRun, gate, now, onClose,
   }, [appId, service, stageRun?.status]);
 
   const duration = stageDurationMs(stageRun, now);
-  const awaiting = stage.type === 'approval' && stageRun?.status === 'running' && (!gate || gate.status === 'awaiting');
+  const awaiting = gate?.status === 'awaiting';
+  const canDecide = !!onGate && gateState === 'ready' && awaiting;
 
   const act = async (kind: 'approve' | 'reject') => {
-    if (!onGate) return;
+    if (!onGate || !canDecide) return;
     setBusy(kind);
+    setGateError(null);
     try {
       await onGate(kind, note);
       setNote('');
+    } catch {
+      setGateError('This decision could not be confirmed. Your note is retained. Refresh the gate before trying again.');
     } finally {
       setBusy(null);
     }
@@ -97,6 +114,8 @@ export default function StageRunInspector({ stage, stageRun, gate, now, onClose,
         </button>
       </div>
       <h2>{stage.name}</h2>
+      {(gate || retainedGate) && <p>Recorded approval gate · stage ID {stage.id} · accepted pipeline version {acceptedVersion ?? 'unavailable'}{currentVersion !== acceptedVersion && ` · current definition version ${currentVersion ?? 'unavailable'}`}. {retainedGate ? 'This gate is absent from the current definition; its original stage name and configuration are not reconstructed.' : currentVersion !== acceptedVersion ? 'The displayed stage name and type come from the current definition.' : ''}</p>}
+      {stage.type === 'approval' && !gate && <p role="status">No verified gate record is available for this stage. Refresh approval gates before recording a decision.</p>}
 
       <div className="kv">
         <Caps>Started</Caps>
@@ -108,7 +127,7 @@ export default function StageRunInspector({ stage, stageRun, gate, now, onClose,
       </div>
 
       {stageRun?.error && <div className="inspector-error">{stageRun.error}</div>}
-      {aiTriage && stageRun?.status === 'failed' && pipelineId && runId && (
+      {canTriage && aiTriage && stageRun?.status === 'failed' && pipelineId && runId && (
         <div className="field">
           <Caps>Triage</Caps>
           {triage ? (
@@ -147,15 +166,18 @@ export default function StageRunInspector({ stage, stageRun, gate, now, onClose,
               ))}
             </div>
           )}
-          <input className="input" value={note} placeholder="Note (optional)" onChange={(e) => setNote(e.target.value)} />
+          {gateState !== 'ready' && <p role="status">Gate information is {gateState === 'loading' ? 'being checked' : 'unavailable'}. Last loaded votes do not authorize a new decision.</p>}
+          {!onGate && <p>An administrator or dedicated approver can decide this gate while the run is active.</p>}
+          {onGate && <><label className="field"><Caps>Approval note (optional)</Caps><input className="input" value={note} onChange={(e) => setNote(e.target.value)} disabled={busy !== null} /></label>
           <div className="gate-actions">
-            <button type="button" className="hud-btn hud-btn-primary" disabled={busy !== null} onClick={() => act('approve')}>
+            <button type="button" className="hud-btn hud-btn-primary" disabled={busy !== null || !canDecide} onClick={() => act('approve')}>
               {busy === 'approve' ? 'Approving…' : 'Approve'}
             </button>
-            <button type="button" className="hud-btn" disabled={busy !== null} onClick={() => act('reject')}>
+            <button type="button" className="hud-btn" disabled={busy !== null || !canDecide} onClick={() => act('reject')}>
               {busy === 'reject' ? 'Rejecting…' : 'Reject'}
             </button>
-          </div>
+          </div></>}
+          {gateError && <p role="alert">{gateError}</p>}
         </div>
       )}
       {gate && !awaiting && gate.status !== 'awaiting' && (
@@ -167,6 +189,7 @@ export default function StageRunInspector({ stage, stageRun, gate, now, onClose,
           </span>
         </div>
       )}
+      {!awaiting && gateError && <div className="field"><p role="alert">{gateError}</p><label className="field"><Caps>Retained approval note</Caps><input className="input" value={note} readOnly /></label></div>}
 
       {stageRun?.artifacts && stageRun.artifacts.length > 0 && (
         <div className="field">
@@ -195,9 +218,11 @@ export default function StageRunInspector({ stage, stageRun, gate, now, onClose,
         </div>
       )}
 
+      {!appId && pipelineId && runId && (stage.type === 'deploy' || stageRun?.runtimeReceipt) && <NativeRuntimePanel subject={{ kind: 'native-stage', pipelineId, runId, stageId: stage.id }} receipt={stageRun?.runtimeReceipt} onStatus={onNativeRuntimeStatus} />}
       {service && (
         <div className="field">
           <Caps>Runtime · {service}</Caps>
+          <p>Current recorded deployment service; this status is separate from the selected run’s outcome.</p>
           {runtime ? (
             <div className="kv">
               <Caps>State</Caps>

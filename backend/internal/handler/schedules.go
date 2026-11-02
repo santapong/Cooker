@@ -16,6 +16,9 @@ import (
 // scheduler.Parse before persistence so an operator typo surfaces
 // as 400 rather than silently disabling the row at runtime.
 type adminScheduleRequest struct {
+	// Optional for older clients. New editors can reject a stale displayed
+	// version even when no fire/edit overlaps the handler's own read.
+	Version    *int   `json:"version,omitempty"`
 	PipelineID string `json:"pipelineId" binding:"required"`
 	Name       string `json:"name,omitempty"`
 	CronExpr   string `json:"cronExpr" binding:"required"`
@@ -27,6 +30,9 @@ type adminScheduleRequest struct {
 // create + update. Mirrors the failure modes the scheduler runner
 // would otherwise hit at firing time.
 func validateScheduleRequest(req *adminScheduleRequest) error {
+	if req.Version != nil && *req.Version < 1 {
+		return errors.New("version must be positive")
+	}
 	if _, err := uuid.Parse(req.PipelineID); err != nil {
 		return errors.New("pipelineId must be a UUID")
 	}
@@ -101,6 +107,7 @@ func (h *Handler) CreateSchedule(c *gin.Context) {
 	}
 	s := scheduler.Schedule{
 		ID:         uuid.New().String(),
+		Version:    1,
 		PipelineID: req.PipelineID,
 		Name:       req.Name,
 		CronExpr:   req.CronExpr,
@@ -148,6 +155,10 @@ func (h *Handler) UpdateSchedule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if req.Version != nil && *req.Version != existing.Version {
+		c.JSON(http.StatusConflict, gin.H{"error": "schedule changed while editing; reload and try again"})
+		return
+	}
 	existing.PipelineID = req.PipelineID
 	existing.Name = req.Name
 	existing.CronExpr = req.CronExpr
@@ -162,6 +173,10 @@ func (h *Handler) UpdateSchedule(c *gin.Context) {
 	}
 	existing.NextRunAt = nextRun
 	if err := h.Schedules.Update(c.Request.Context(), existing); err != nil {
+		if errors.Is(err, scheduler.ErrConflict) {
+			c.JSON(http.StatusConflict, gin.H{"error": "schedule changed while editing; reload and try again"})
+			return
+		}
 		if errors.Is(err, scheduler.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "schedule not found"})
 			return
@@ -169,6 +184,7 @@ func (h *Handler) UpdateSchedule(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	existing.Version++
 	c.JSON(http.StatusOK, existing)
 }
 

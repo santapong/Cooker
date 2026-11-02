@@ -31,7 +31,7 @@
   --star-queued:  #66665f; /* decorative only (never text) */
 
   /* type — self-hosted, see fonts.css */
-  --font-display: 'Space Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-body:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono:    'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
   /* modular scale ×1.25 off 15px body */
@@ -53,8 +53,8 @@
   --sp-7: 48px;
   --page-pad: 32px;
   --row-h: 48px;
-  --rail-w: 64px;
-  --strip-h: 48px;
+  --rail-w: 236px;
+  --strip-h: 72px;
 
   /* shape */
   --radius-1: 6px;
@@ -71,4 +71,29 @@
 
   /* focus ring — never removed */
   --focus: 2px solid var(--ember);
+  --on-ember: #130d07;
+  --ember-hover: #f2a55d;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --void: #eee8dd;
+  --hull-0: #f7f3ec;
+  --hull-1: #fffdf8;
+  --hull-2: #e9e2d6;
+  --line: #d5cec0;
+  --line-strong: #747066;
+  --ink-1: #282722;
+  --ink-2: #5f5d55;
+  --ink-3: #67645b;
+  --ember: #a34e1a;
+  --ember-soft: #f5e7d8;
+  --ember-line: #c08c65;
+  --on-ember: #fffdf8;
+  --ember-hover: #914112;
+  --star-idle: #5f5d55;
+  --star-ok: #356748;
+  --star-fail: #a54033;
+  --star-queued: #747066;
+  --star-running: #a34e1a;
 }

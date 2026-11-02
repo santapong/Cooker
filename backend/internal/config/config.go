@@ -20,13 +20,14 @@ func (e Env) IsProduction() bool { return e == EnvProduction }
 
 // Config holds all application configuration.
 type Config struct {
-	Env            Env
-	Port           int
-	DatabaseURL    string
-	RedisURL       string
-	AllowedOrigins []string
-	SecretKey      string
-	Registry       string
+	Env                Env
+	Port               int
+	DatabaseURL        string
+	RedisURL           string
+	AllowedOrigins     []string
+	SecretKey          string
+	SecretCipherFormat string // COOKER_SECRET_CIPHER_FORMAT: legacy (default) or tagged-v1
+	Registry           string
 	// StaticDir is the on-disk root the SPA is served from. The
 	// official Docker image copies the Vite build to the default path;
 	// override with COOKER_STATIC_DIR when running the binary from
@@ -40,6 +41,7 @@ type Config struct {
 	// cache per stage instead.
 	BuildCacheRepo string
 	BuilderBackend string
+	BuildKit       BuildKitConfig
 	// StageRunner selects the container runtime for Test/Custom stages:
 	// "kube" (one-shot Job), "docker" (`docker run`), or "noop" (default —
 	// no container; dev/test only). Loaded from COOKER_STAGE_RUNNER.
@@ -96,6 +98,16 @@ type Config struct {
 	// deploys, a synthesized Ingress on Kubernetes deploys — and the
 	// app's DeployedURL is populated. Empty Domain disables all of it.
 	Proxy ProxyConfig
+}
+
+// BuildKitConfig identifies an isolated build daemon. Remote production
+// endpoints require mutual TLS; a local Unix socket is also supported.
+type BuildKitConfig struct {
+	Address       string
+	TLSCA         string
+	TLSCert       string
+	TLSKey        string
+	TLSServerName string
 }
 
 // ProxyConfig wires the deployed-app reverse proxy / URL surface.
@@ -253,14 +265,16 @@ type WSTicketConfig struct {
 }
 
 type OIDCConfig struct {
-	Enabled      bool
-	IssuerURL    string
-	ClientID     string
-	ClientSecret string
-	RedirectURL  string
-	Scopes       []string
-	GroupRoleMap map[string]string
-	MFAACRValues []string
+	Enabled         bool
+	Broker          string
+	SocialProviders []string
+	IssuerURL       string
+	ClientID        string
+	ClientSecret    string
+	RedirectURL     string
+	Scopes          []string
+	GroupRoleMap    map[string]string
+	MFAACRValues    []string
 }
 
 type LocalAuthConfig struct {
@@ -408,17 +422,25 @@ func Load() *Config {
 		originDefault = nil
 	}
 	return &Config{
-		Env:             env,
-		Port:            getEnvInt("COOKER_PORT", 8080),
-		DatabaseURL:     getEnv("DATABASE_URL", "postgres://cooker:cooker@localhost:5432/cooker?sslmode=disable"),
-		RedisURL:        getEnv("REDIS_URL", "redis://localhost:6379"),
-		AllowedOrigins:  getEnvCSV("COOKER_ALLOWED_ORIGINS", originDefault),
-		SecretKey:       getEnv("COOKER_SECRET_KEY", ""),
-		Registry:        getEnv("COOKER_REGISTRY", "localhost:5000/cooker"),
-		StaticDir:       getEnv("COOKER_STATIC_DIR", "/usr/share/cooker/static"),
-		ComposeDir:      getEnv("COOKER_COMPOSE_DIR", "."),
-		BuildCacheRepo:  getEnv("COOKER_BUILD_CACHE_REPO", ""),
-		BuilderBackend:  getEnv("COOKER_BUILDER", "noop"),
+		Env:                env,
+		Port:               getEnvInt("COOKER_PORT", 8080),
+		DatabaseURL:        getEnv("DATABASE_URL", "postgres://cooker:cooker@localhost:5432/cooker?sslmode=disable"),
+		RedisURL:           getEnv("REDIS_URL", "redis://localhost:6379"),
+		AllowedOrigins:     getEnvCSV("COOKER_ALLOWED_ORIGINS", originDefault),
+		SecretKey:          getEnv("COOKER_SECRET_KEY", ""),
+		SecretCipherFormat: getEnv("COOKER_SECRET_CIPHER_FORMAT", "legacy"),
+		Registry:           getEnv("COOKER_REGISTRY", "localhost:5000/cooker"),
+		StaticDir:          getEnv("COOKER_STATIC_DIR", "/usr/share/cooker/static"),
+		ComposeDir:         getEnv("COOKER_COMPOSE_DIR", "."),
+		BuildCacheRepo:     getEnv("COOKER_BUILD_CACHE_REPO", ""),
+		BuilderBackend:     getEnv("COOKER_BUILDER", "noop"),
+		BuildKit: BuildKitConfig{
+			Address:       getEnv("COOKER_BUILDKIT_ADDR", ""),
+			TLSCA:         getEnv("COOKER_BUILDKIT_TLS_CA", ""),
+			TLSCert:       getEnv("COOKER_BUILDKIT_TLS_CERT", ""),
+			TLSKey:        getEnv("COOKER_BUILDKIT_TLS_KEY", ""),
+			TLSServerName: getEnv("COOKER_BUILDKIT_TLS_SERVER_NAME", ""),
+		},
 		StageRunner:     getEnv("COOKER_STAGE_RUNNER", "noop"),
 		PusherBackend:   getEnv("COOKER_PUSHER", "noop"),
 		DeployerBackend: getEnv("COOKER_DEPLOYER", "noop"),
@@ -439,14 +461,16 @@ func Load() *Config {
 		WSTicket: WSTicketConfig{Backend: getEnv("COOKER_WS_TICKET_BACKEND", "memory")},
 		WSHub:    WSHubConfig{Backend: getEnv("COOKER_WS_HUB_BACKEND", "memory")},
 		OIDC: OIDCConfig{
-			Enabled:      getEnvBool("COOKER_OIDC_ENABLED", false),
-			IssuerURL:    getEnv("COOKER_OIDC_ISSUER_URL", ""),
-			ClientID:     getEnv("COOKER_OIDC_CLIENT_ID", ""),
-			ClientSecret: getEnv("COOKER_OIDC_CLIENT_SECRET", ""),
-			RedirectURL:  getEnv("COOKER_OIDC_REDIRECT_URL", ""),
-			Scopes:       []string{"openid", "profile", "email", "groups"},
-			GroupRoleMap: parseGroupRoleMap(getEnv("COOKER_OIDC_GROUP_MAP", "")),
-			MFAACRValues: getEnvCSV("COOKER_OIDC_MFA_ACR_VALUES", nil),
+			Enabled:         getEnvBool("COOKER_OIDC_ENABLED", false),
+			Broker:          getEnv("COOKER_OIDC_BROKER", ""),
+			SocialProviders: getEnvCSV("COOKER_OIDC_SOCIAL_PROVIDERS", nil),
+			IssuerURL:       getEnv("COOKER_OIDC_ISSUER_URL", ""),
+			ClientID:        getEnv("COOKER_OIDC_CLIENT_ID", ""),
+			ClientSecret:    getEnv("COOKER_OIDC_CLIENT_SECRET", ""),
+			RedirectURL:     getEnv("COOKER_OIDC_REDIRECT_URL", ""),
+			Scopes:          []string{"openid", "profile", "email", "groups"},
+			GroupRoleMap:    parseGroupRoleMap(getEnv("COOKER_OIDC_GROUP_MAP", "")),
+			MFAACRValues:    getEnvCSV("COOKER_OIDC_MFA_ACR_VALUES", nil),
 		},
 		LocalAuth: LocalAuthConfig{
 			Enabled:       getEnvBool("COOKER_LOCAL_AUTH_ENABLED", false),

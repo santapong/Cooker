@@ -3,3 +3,11 @@
 3fe671118eb6b7aacd1af0cb62de66d1dd63a47f:docs/audits/2026-05-security-review.md:curl-auth-header:40
 # Precomputed config-test key, now generated in memory in the current source.
 004bfbad22761a88a85a8524d4a63fc09f3107fd:backend/internal/config/config_test.go:generic-api-key:237
+
+# Reviewed prose-only false positives in backend acceptance documentation (2026-11-02).
+docs/backend/source-token-replacement.md:generic-api-key:149
+4d4a22d1a16e0115c5d5a808f595ca76a2d80047:docs/backend/source-token-replacement.md:generic-api-key:149
+docs/plans/2026-10-25-vercel-ecosystem/VERIFICATION.md:generic-api-key:17
+4d4a22d1a16e0115c5d5a808f595ca76a2d80047:docs/plans/2026-10-25-vercel-ecosystem/VERIFICATION.md:generic-api-key:17
+docs/plans/2026-10-02-consolidated-feature-roadmap.md:generic-api-key:840
+4d4a22d1a16e0115c5d5a808f595ca76a2d80047:docs/plans/2026-10-02-consolidated-feature-roadmap.md:generic-api-key:840

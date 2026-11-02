@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/system-overview.architecture.json",
+  "output": "/mnt/data/company/apps/Cooker-backend/docs/system-design/current-2026-10-25/system-overview.html",
+  "specification": {
+    "sha256": "dd63a292ecd9e7669f541b3d5db9fb7994cd30f88c2638a4098016f9ba7335fe",
+    "bytes": 6259
+  },
+  "artifact": {
+    "sha256": "0b9bef6ed919025f0db079525a56de9b30cf044bb2f86ba1b24456924e5c2612",
+    "bytes": 723250
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

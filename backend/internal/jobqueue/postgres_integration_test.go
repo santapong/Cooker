@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT jobs_status_check CHECK (
-        status IN ('pending','running','succeeded','failed','cancelled')
+        status IN ('pending','running','succeeded','failed','cancelled','needs_attention')
     )
 );
 CREATE INDEX IF NOT EXISTS jobs_pickup_idx
@@ -276,5 +276,56 @@ func TestLive_NotifyWakesWorker(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("worker did not fire within 3s")
+	}
+}
+
+// Separate pending rows sharing a key must not both be claimed, even when
+// each worker starts before the other transaction commits.
+func TestLive_ConcurrencyKeySerializesClaims(t *testing.T) {
+	db := dialLive(t)
+	st := jobqueue.NewPostgres(db)
+	ctx := context.Background()
+	for i := 0; i < 32; i++ {
+		if _, err := st.Enqueue(ctx, "deploy", nil, jobqueue.EnqueueOptions{ConcurrencyKey: "same-app"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var wg sync.WaitGroup
+	var claimed atomic.Int32
+	start := make(chan struct{})
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			j, err := st.Dequeue(ctx, "worker", nil)
+			if err != nil {
+				t.Error(err)
+			}
+			if j != nil {
+				claimed.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if claimed.Load() != 1 {
+		t.Fatalf("claimed %d concurrent deploys for one app", claimed.Load())
+	}
+	jobs, err := st.RecoverExpired(ctx, time.Now().Add(time.Second))
+	if err != nil || len(jobs) != 1 {
+		t.Fatal(jobs, err)
+	}
+	if j, err := st.Dequeue(ctx, "replacement", nil); j != nil || err != nil {
+		t.Fatal(j, err)
+	}
+	if err := st.Complete(ctx, "worker", jobs[0].ID); err != jobqueue.ErrNotLocked {
+		t.Fatal(err)
+	}
+	if err := st.Resolve(ctx, jobs[0].ID, jobqueue.StatusFailed, "verified target was not changed"); err != nil {
+		t.Fatal(err)
+	}
+	if j, err := st.Dequeue(ctx, "replacement", nil); j == nil || err != nil {
+		t.Fatal(j, err)
 	}
 }

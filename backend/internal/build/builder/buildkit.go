@@ -8,7 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/session"
+	"github.com/santapong/cooker/internal/build/artifact"
+	"github.com/santapong/cooker/internal/build/registryauth"
 	"github.com/tonistiigi/fsutil"
 )
 
@@ -23,10 +27,8 @@ type BuildKit struct {
 	// Addr is the buildkitd endpoint, e.g. "tcp://buildkit:1234" or
 	// "kube-pod://ns/pod".
 	Addr string
-	// OCIRegistryAuth, when non-nil, returns {username, password} for
-	// pushing built images to the given registry host. Reserved for
-	// when an exporter "push=true" path lands.
-	OCIRegistryAuth func(registry string) (string, string, bool)
+	// TLS parameters secure the control channel to a remote isolated builder.
+	TLSCA, TLSCert, TLSKey, TLSServerName string
 }
 
 func NewBuildKit(addr string) *BuildKit { return &BuildKit{Addr: addr} }
@@ -41,16 +43,37 @@ func (b *BuildKit) Build(ctx context.Context, req Request) (Result, error) {
 	if _, err := os.Stat(req.ContextDir); err != nil {
 		return Result{}, fmt.Errorf("buildkit: context %q: %w", req.ContextDir, err)
 	}
-	solveOpt, err := solveOptions(req)
-	if err != nil {
-		return Result{}, err
+	var opts []client.ClientOpt
+	if b.TLSCA != "" {
+		opts = append(opts, client.WithServerConfig(b.TLSServerName, b.TLSCA))
 	}
-	c, err := client.New(ctx, b.Addr)
+	if b.TLSCert != "" {
+		opts = append(opts, client.WithCredentials(b.TLSCert, b.TLSKey))
+	}
+	c, err := client.New(ctx, b.Addr, opts...)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: dial %s: %v", ErrUnavailable, b.Addr, err)
 	}
 	defer c.Close()
 
+	output, err := artifact.NewImage()
+	if err != nil {
+		return Result{}, fmt.Errorf("buildkit: create artifact: %w", err)
+	}
+	retained := false
+	defer func() {
+		if !retained {
+			_ = output.Close()
+		}
+	}()
+	solveOpt, err := solveOptions(req)
+	if err != nil {
+		return Result{}, err
+	}
+	solveOpt.Exports[0].OutputDir = output.OutputDir()
+	solveOpt.Session = []session.Attachable{&registrySession{resolve: func(_ context.Context, host string) (authn.Authenticator, error) {
+		return registryauth.Resolve(ctx, req.RegistryAuth, host)
+	}}}
 	statusCh := make(chan *client.SolveStatus, 8)
 	logsDone := make(chan struct{})
 	go func() {
@@ -78,9 +101,18 @@ func (b *BuildKit) Build(ctx context.Context, req Request) (Result, error) {
 	if resp != nil && resp.ExporterResponse != nil {
 		digest = resp.ExporterResponse["containerimage.digest"]
 	}
+	_, desc, err := output.Contents()
+	if err != nil {
+		return Result{}, fmt.Errorf("buildkit: invalid exported artifact: %w", err)
+	}
+	if digest == "" || digest != desc.Digest.String() {
+		return Result{}, fmt.Errorf("buildkit: exported artifact digest does not match build result")
+	}
+	retained = true
 	return Result{
-		ImageID: digest,
-		Tags:    req.Tags,
+		Artifact: output,
+		ImageID:  digest,
+		Tags:     req.Tags,
 	}, nil
 }
 
@@ -130,8 +162,8 @@ func solveOptions(req Request) (client.SolveOpt, error) {
 			"dockerfile": dockerfileFS,
 		},
 		Exports: []client.ExportEntry{{
-			Type:  client.ExporterImage,
-			Attrs: map[string]string{"name": tagAttr, "push": "false"},
+			Type:  client.ExporterOCI,
+			Attrs: map[string]string{"name": tagAttr, "tar": "false"},
 		}},
 	}
 	if req.Cache.enabled() {

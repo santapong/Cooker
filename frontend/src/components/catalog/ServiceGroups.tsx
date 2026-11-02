@@ -1,0 +1,15 @@
+import { Link } from 'react-router-dom';
+import type { CatalogService } from '../../types/catalog';
+import { catalogHref, deploymentLabel, groupServices, healthLabel } from '../../utils/catalog';
+import { InspectorLink, SourceNotices } from './CatalogShared';
+import { catalogApi } from '../../api/catalog';
+import { useCatalog } from '../../hooks/useCatalog';
+import { timeAgo } from '../../utils/time';
+import ServiceLogInspector from '../app/ServiceLogInspector';
+export function ServiceGroups({ services = [] }: { services?: CatalogService[] }) {
+  return <div className="catalog-service-groups">{groupServices(services).map((group) => <section key={group.label}><h3>{group.label}</h3><div className="catalog-services">{group.items.map((s) => <article className="catalog-service" key={s.id}><div className="workspace-section-head"><h4>{s.name}</h4><span className="badge">{s.definition === 'aggregate' ? 'Application deployment' : s.definition || 'unavailable'}</span></div><Link to={catalogHref(s.appHref, '/apps')}>{s.appName}</Link><p>{s.provider} · {s.environment || 'Unclassified environment'}</p><p>{deploymentLabel(s.status)} · {healthLabel(s.health)}</p>{(s.runtime || s.framework) && <p>{[s.runtime, s.framework].filter(Boolean).join(' · ')}</p>}{s.observedAt && <p className="workspace-note">Recorded {timeAgo(s.observedAt)}</p>}{s.error && <p role="status">{s.error}</p>}<div className="workspace-card-links">{s.deploymentHref && <Link to={catalogHref(s.deploymentHref, '/runs')}>Deployment details</Link>}{s.management === 'vercel' ? <InspectorLink url={s.inspectorUrl} label="Inspect / logs in Vercel ↗" /> : s.href ? <Link to={catalogHref(s.href, catalogHref(s.appHref, '/apps'))}>Inspect service</Link> : null}</div>{s.management === 'cooker' && s.provider === 'docker-host' && s.nativeServiceId && s.deploymentId && <ServiceLogInspector appId={s.appId} service={s.nativeServiceId} />}</article>)}</div></section>)}</div>;
+}
+export default function AppServices({ nativeAppId }: { nativeAppId: string }) {
+  const state = useCatalog(() => catalogApi.services({ appId: nativeAppId, environment: 'production_first', limit: 100 }), nativeAppId);
+  return <section className="panel panel-span"><div className="workspace-section-head"><h2>Recorded services</h2><button className="hud-btn" disabled={state.loading} onClick={state.refresh}>Refresh services</button></div><p className="workspace-note">Deployment inventory, not a live health probe. Configured or unclassified services are shown separately from production.</p><SourceNotices sources={state.data?.sources} />{state.error && <p role="alert">{state.error}</p>}{state.loading ? <p role="status">Loading services…</p> : state.data?.items?.length ? <><ServiceGroups services={state.data.items} />{state.data.total > state.data.items.length && <Link to={'/services?appId=' + encodeURIComponent(nativeAppId)}>View all {state.data.total} services →</Link>}</> : !state.error && <p>No service records are available for this app.</p>}</section>;
+}

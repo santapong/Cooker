@@ -33,3 +33,24 @@ func TestComposeDeployOnlyReviewedServiceWithReadiness(t *testing.T) {
 		t.Fatal("per-service deployment can delete another branch's workloads")
 	}
 }
+
+func TestComposeUsesPrivateImageOverlayAfterBaseFile(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "docker-test")
+	out := filepath.Join(root, "arguments")
+	t.Setenv("COOKER_TEST_ARGUMENTS", out)
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$COOKER_TEST_ARGUMENTS\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&Compose{Bin: bin}).Deploy(context.Background(), Request{Kind: KindCompose, Name: "fixture", ComposeFile: "/base/runtime.yaml", ComposeOverrideFile: "/private/image.json", ComposeService: "api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "-f\n/base/runtime.yaml\n-f\n/private/image.json\nup\n-d") {
+		t.Fatalf("overlay order incorrect: %s", data)
+	}
+}

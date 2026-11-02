@@ -76,6 +76,34 @@ App health polling and cloud container log streaming are incomplete. Acceptance
 should verify application health and external database access from the deployed
 workload. See [setup and UAT](../../guides/GITHUB-COMPOSE-DEPLOYMENT.md).
 
+## Candidate deployment-history behavior
+
+The source/registry candidate is under local acceptance and is not yet activated
+on the owner's localhost4644 build. Its App history distinguishes these cases:
+
+- **Rejected before deployment:** the accepted registry permission or version
+  changed before execution. The failed attempt has a run link but no image or
+  deployment to roll back to. Review access and start a new deployment.
+- **Needs attention:** Cooker cannot safely determine or acknowledge the outcome.
+  Inspect the recorded run and actual workload before resolving it; this status
+  is not permission to deploy again automatically.
+- **History unavailable:** Cooker could not read the history. **Refresh history**
+  retries the read; previously loaded attempts remain labelled as stale. Only a
+  successful empty response shows **No deploys yet**.
+
+A rejected attempt remains in history without hiding a previously recorded
+runtime from service/log inspection. Runtime readiness and application health
+are still separate observations; an earlier failed or uncertain deployment does
+not become successful because it remains available to inspect.
+
+For developers, queue acknowledgement and deployment outcome are distinct. A
+handled rejection may complete its queue job while its deployment run stays
+failed. If acknowledgement is lost after that failure was committed, the queue
+can need attention while the exact failed attempt remains unchanged. This narrow
+before-execution behavior does not establish recovery after runtime effects.
+The [full roadmap](../../plans/2026-10-02-consolidated-feature-roadmap.md) records
+the separate acceptance gates.
+
 ## Related guides
 
 - [Pipelines](pipelines.md): DAG semantics and execution.

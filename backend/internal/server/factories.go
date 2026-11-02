@@ -36,12 +36,17 @@ func newStore(ctx context.Context, cfg *config.Config) (*store.Store, error) {
 	return st, nil
 }
 
-func selectBuilder(kind string, k8s config.KubernetesConfig) (builder.Builder, error) {
+func selectBuilder(kind string, k8s config.KubernetesConfig, bk config.BuildKitConfig) (builder.Builder, error) {
 	switch kind {
 	case "docker":
 		return builder.NewDockerSock(), nil
 	case "buildkit":
-		return builder.NewBuildKit(""), nil
+		if bk.Address == "" {
+			return nil, fmt.Errorf("COOKER_BUILDKIT_ADDR is required")
+		}
+		b := builder.NewBuildKit(bk.Address)
+		b.TLSCA, b.TLSCert, b.TLSKey, b.TLSServerName = bk.TLSCA, bk.TLSCert, bk.TLSKey, bk.TLSServerName
+		return b, nil
 	case "kaniko":
 		return builder.NewKaniko(builder.KanikoConfig{
 			Kubeconfig:     k8s.Kubeconfig,

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/crypto"
@@ -22,10 +23,31 @@ type notifierDeps struct {
 	TargetStore notifier.TargetStore
 	// DB is the dedicated small pool behind the Postgres target
 	// store; nil when the memory fallback is in use.
-	DB *sql.DB
+	DB     *sql.DB
+	Outbox *notifier.Outbox
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func (d *notifierDeps) start() {
+	if d == nil || d.Outbox == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	d.cancel = cancel
+	d.done = make(chan struct{})
+	go func() { defer close(d.done); d.Outbox.Run(ctx) }()
 }
 
 func (d *notifierDeps) closeAll() {
+	if d != nil && d.cancel != nil {
+		d.cancel()
+		select {
+		case <-d.done:
+		case <-time.After(6 * time.Second):
+			slog.Warn("notifier: delivery drain timed out; pending claims will require inspection")
+		}
+	}
 	if d != nil && d.DB != nil {
 		_ = d.DB.Close()
 	}
@@ -50,10 +72,10 @@ func bootNotifier(ctx context.Context, cfg *config.Config, codec *crypto.Codec) 
 	if err != nil {
 		return nil, fmt.Errorf("notifier: open db: %w", err)
 	}
-	// Dispatch is bursty and short-lived: ListEnabled once per event.
-	// Two connections cover concurrent events without another big pool.
-	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(1)
+	// Acceptance, reconciliation, target resolution, and status reads share this
+	// small pool. External sends hold no SQL transaction or target-row lock.
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(2)
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("notifier: ping: %w", err)
@@ -62,9 +84,14 @@ func bootNotifier(ctx context.Context, cfg *config.Config, codec *crypto.Codec) 
 		slog.Warn("notifier: COOKER_SECRET_KEY not set; notification-target configs will be stored unencrypted")
 	}
 	ts := notifier.NewPostgresTargetStore(db).WithCodec(codec)
+	registry := defaultNotifierRegistry()
+	outbox := notifier.NewOutbox(db, ts, registry)
+	dispatcher := notifier.NewDispatcher(ts, registry)
+	dispatcher.Outbox = outbox
 	return &notifierDeps{
-		Dispatcher:  notifier.NewDispatcher(ts, defaultNotifierRegistry()),
+		Dispatcher:  dispatcher,
 		TargetStore: ts,
+		Outbox:      outbox,
 		DB:          db,
 	}, nil
 }

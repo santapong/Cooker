@@ -11,8 +11,11 @@ import (
 	"github.com/santapong/cooker/internal/config"
 	"github.com/santapong/cooker/internal/jobqueue"
 	"github.com/santapong/cooker/internal/notify/notifier"
+	"github.com/santapong/cooker/internal/provider/vercel"
+	"github.com/santapong/cooker/internal/scheduler"
 	"github.com/santapong/cooker/internal/service"
 	"github.com/santapong/cooker/internal/store"
+	storepg "github.com/santapong/cooker/internal/store/postgres"
 )
 
 // jobQueueDeps bundles the resources bootJobQueue spins up so the
@@ -26,6 +29,9 @@ type jobQueueDeps struct {
 	Listener *jobqueue.PqListener
 	DB       *sql.DB
 	Enqueuer *service.JobQueueEnqueuer
+	Runner   *service.JobQueueRunner
+	AppQueue *service.AppDeployQueue
+	Registry *jobqueue.Registry
 }
 
 // closeAll releases every resource held by the deps in reverse boot
@@ -48,7 +54,7 @@ func (d *jobQueueDeps) closeAll() {
 // rather than reaching into postgres.NewStore's internals — the
 // listener already needs a dedicated connection, and a second small
 // pool of 8 connections costs less than expanding the store API.
-func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec *service.Executor, dispatcher *notifier.Dispatcher) (*jobQueueDeps, error) {
+func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec *service.Executor, dispatcher *notifier.Dispatcher, apps ...*service.AppDeployer) (*jobQueueDeps, error) {
 	if !cfg.JobQueue.Enabled {
 		slog.Info("jobqueue: disabled", "flag", "COOKER_JOBQUEUE_ENABLED=false")
 		return &jobQueueDeps{}, nil
@@ -71,6 +77,27 @@ func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec
 	}
 
 	pgStore := jobqueue.NewPostgres(db)
+	if dispatcher != nil && dispatcher.Outbox != nil {
+		pgStore.BeforePrune = dispatcher.Outbox.CaptureTerminalJob
+	}
+	pgStore.OnTransition = func(ctx context.Context, tx *sql.Tx, j *jobqueue.Job) error {
+		if err := storepg.SyncJobRun(ctx, tx, j); err != nil {
+			return err
+		}
+		return vercel.PublicationTransition(ctx, tx, j)
+	}
+	pgStore.OnEnqueue = func(ctx context.Context, tx *sql.Tx, j *jobqueue.Job) error {
+		if err := storepg.SyncRegistryAuthorityAdmission(ctx, tx, j); err != nil {
+			return err
+		}
+		if err := scheduler.SyncOccurrenceAdmission(ctx, tx, j); err != nil {
+			return err
+		}
+		if err := storepg.SyncTriggerAdmission(ctx, tx, j); err != nil {
+			return err
+		}
+		return vercel.PublicationAdmission(ctx, tx, j)
+	}
 
 	// The notifier dispatcher is booted once, unconditionally, in
 	// bootNotifier and shared here — the queue path and the inline
@@ -78,6 +105,12 @@ func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec
 	reg := jobqueue.NewRegistry()
 	runner := service.NewJobQueueRunner(st, exec, dispatcher)
 	reg.Register(service.JobKindPipelineRun, runner.Handle)
+	var appQueue *service.AppDeployQueue
+	if len(apps) > 0 && apps[0] != nil {
+		d := apps[0]
+		appQueue = &service.AppDeployQueue{Jobs: pgStore, Store: st, Deployer: d, ResolveCommit: d.Source.ResolveCommit, Deadline: runDeadline}
+		reg.Register(service.JobKindAppDeploy, appQueue.Handle)
+	}
 
 	// PqListener is best-effort: a failure here means workers fall
 	// back to PollEvery (5s default) instead of getting near-instant
@@ -95,6 +128,12 @@ func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec
 		Size:           cfg.JobQueue.Workers,
 		WorkerIDPrefix: cfg.JobQueue.WorkerIDPrefix,
 		Notifier:       listenerOrNil(listener),
+		OnHeartbeat:    service.HeartbeatJobRun(st),
+		OnRecovery:     service.RecoverJobRun(st),
+		OnComplete:     service.NotifyCompletedJob(st, dispatcher),
+		ClaimContext: func(ctx context.Context, j *jobqueue.Job) context.Context {
+			return store.WithRunClaim(ctx, j.ID, j.LockedBy, nil)
+		},
 	})
 	if err != nil {
 		if listener != nil {
@@ -104,7 +143,8 @@ func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec
 		return nil, fmt.Errorf("jobqueue: new pool: %w", err)
 	}
 
-	enqueuer := service.NewJobQueueEnqueuer(pgStore)
+	enqueuer := service.NewJobQueueEnqueuer(pgStore, st.Pipelines)
+	enqueuer.PrepareSecrets = exec.PreparePipelineSecrets
 
 	slog.Info("jobqueue: enabled",
 		"workers", cfg.JobQueue.Workers,
@@ -117,6 +157,9 @@ func bootJobQueue(ctx context.Context, cfg *config.Config, st *store.Store, exec
 		Listener: listener,
 		DB:       db,
 		Enqueuer: enqueuer,
+		Runner:   runner,
+		AppQueue: appQueue,
+		Registry: reg,
 	}, nil
 }
 

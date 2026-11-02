@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"time"
 )
@@ -40,18 +38,18 @@ func (w *WebhookNotifier) Kind() string { return "webhook" }
 func (w *WebhookNotifier) Send(ctx context.Context, target Target, event Event) error {
 	var cfg WebhookConfig
 	if err := target.DecodeConfig(&cfg); err != nil {
-		return fmt.Errorf("webhook: decode config: %w", err)
+		return invalidConfig()
 	}
 	if cfg.URL == "" {
-		return fmt.Errorf("webhook: target %s missing url", target.ID)
+		return invalidConfig()
 	}
 	buf, err := json.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("webhook: marshal event: %w", err)
+		return invalidConfig()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, bytes.NewReader(buf))
 	if err != nil {
-		return fmt.Errorf("webhook: build request: %w", err)
+		return invalidConfig()
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if cfg.BearerToken != "" {
@@ -60,14 +58,22 @@ func (w *WebhookNotifier) Send(ctx context.Context, target Target, event Event) 
 	for k, v := range cfg.Headers {
 		req.Header.Set(k, v)
 	}
+	// A stable receiver-visible identity allows cooperative deduplication.
+	// This does not imply the receiver implements exactly-once delivery.
+	if event.ID != "" {
+		req.Header.Set("X-Cooker-Event-ID", event.ID)
+		req.Header.Set("Idempotency-Key", event.ID)
+	}
+	// Go's transport treats Idempotency-Key as replayable when GetBody exists.
+	// Keep retries in the durable policy rather than silently replaying a POST.
+	req.GetBody = nil
 	resp, err := w.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("webhook: post: %w", err)
+		return uncertainSend()
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("webhook: status %d: %s", resp.StatusCode, string(b))
+		return receiverFailure(resp.StatusCode)
 	}
 	return nil
 }

@@ -1,0 +1,18 @@
+.service-log-inspector { margin-top: 16px; }
+.service-log-browser { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px; min-width: 0; }
+.service-log-browser h5 { font-size: 15px; margin: 0; }
+.service-log-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; border: 0; padding: 0; margin: 18px 0 0; min-width: 0; }
+.service-log-fields label { display: grid; gap: 7px; font-size: 12px; min-width: 0; }
+.service-log-fields legend { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.service-log-fields .input { width: 100%; min-width: 0; }
+.service-log-fields button { align-self: end; }
+.service-log-identity { font-size: 12px; margin: 16px 0; }
+.service-log-identity summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--ink-2); }
+.service-log-identity dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; }
+.service-log-identity dt { color: var(--ink-2); }
+.service-log-identity dd { margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); }
+.service-log-output { max-height: 380px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--hull-0); color: var(--ink-1); }
+.service-log-output pre { font: 12px/1.75 var(--font-mono); margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.service-log-paging { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; font-size: 12px; }
+.service-log-paging span { flex-basis: 100%; color: var(--ink-2); }
+@media (max-width: 600px) { .service-log-fields { grid-template-columns: minmax(0, 1fr); } .service-log-browser .workspace-section-head { flex-wrap: wrap; } }

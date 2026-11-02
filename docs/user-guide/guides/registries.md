@@ -1,156 +1,86 @@
-# Registries
+# Registry access
 
-Cooker pushes built images to OCI-compliant registries. The pusher is selected by `COOKER_PUSHER`:
+Candidate documentation checked 3 October 2026. Scoped access and its UI are
+locally verified on frozen inputs; genuine private-registry/runtime acceptance
+and owner rollout remain open. The current localhost4644 owner build does not
+contain this slice. The [full plan](../../plans/2026-10-02-consolidated-feature-roadmap.md)
+tracks the remaining gates.
 
-- `noop` — no push (default).
-- `docker` — shells out to the local Docker daemon's push code.
-- `crane` — uses `go-containerregistry`. Works against any OCI-compliant registry.
+Cooker uses an OCI registry to publish built images and pull images for supported
+runtimes. Registry credentials are private authentication input. They are not
+build arguments, application environment values or a consequence of matching a
+hostname.
 
-`crane` is the production-recommended pusher. `docker` is dev-host only.
+## Administrator: connect and grant
 
-## Configure a registry
+1. Open **Registry** and add the connection’s name, endpoint, optional username
+   and password/token. The password is write-only; the page reports whether
+   credentials are stored.
+2. Save the App or native pipeline first so it has a stable ID.
+3. Expand the connection’s grants. Choose the exact Apps and native pipelines
+   permitted to use it, then save the grant lists.
+4. Use **Revoke all access** to save explicit empty grants when access must stop.
 
-Registries are stored as `RegistryConfig` records (`POST /api/v1/settings/registries`). Each record has:
+Imported Vercel apps/flows cannot receive executable registry grants. Renaming an
+App does not change its identity. A partial or unavailable target list is labelled;
+existing unlisted grants are retained for review instead of silently erased.
+Registry mutations require the existing administrator/MFA policy. A concurrent
+edit returns409: reload the current version and review before trying again.
 
-- A name.
-- A URL (e.g. `ghcr.io`, `us-docker.pkg.dev/my-project/my-repo`).
-- Optional username + password / token (sealed via `Codec`).
+## Operator: select access for a deployment
 
-> **Partial frontend.** The Settings / Registries page exists but is rudimentary. Most operators wire registries via API today. Roadmap `A4` polishes this.
+For an App, open its **Registry access** panel and choose granted connections,
+then **Save registry selections**. The saved build plan owns that selection;
+derived deployment graphs retain App scope.
 
-### Add via API
+For a native pipeline, select connections under **Registry access for this step**
+in each stage’s inspector, then save the pipeline. Build, Push and runtime Pull
+can have distinct selections. The server validates each stage’s exact scope.
 
-```bash
-curl -X POST https://cooker.example.com/api/v1/settings/registries \
-     -H 'Authorization: Bearer <jwt>' \
-     -H 'Content-Type: application/json' \
-     -d '{
-       "name":"ghcr",
-       "url":"ghcr.io/your-org",
-       "username":"your-username",
-       "password":"<github-token>"
-     }'
-```
+Empty selection means anonymous access. Unavailable, unverified or revoked IDs
+stay visible and cannot authorize credentials. Remove them explicitly or select
+**Use anonymous access**. A stale App draft is retained on conflict until an
+explicit reload; polling does not silently replace its version.
 
-`POST` requires `admin` role.
+## Runtime and credential behavior
 
-## Per-registry setup
+Metadata-only checks run before source and private environment inspection. Before
+admission, Cooker pins selected connection/configuration generations and supported
+credential versions. Registry and database credential rows are fenced in the same
+transaction as the accepted job and receipt. Workers check grants and evidence
+again. Revoking access stops a fresh worker effect; an existing receipt remains
+available for inspection and retry recovery.
 
-### Docker Hub (`docker.io`)
+BuildKit session authentication, Crane publication and Docker/Compose/test pulls
+use their accepted request scope or explicit anonymous access. They do not borrow
+the host’s Docker login or an unrelated same-host connection. The current scoped
+deployment transports are Docker and host-context Compose. Kubernetes/Helm/cloud
+pull transports need separate adapters; connected authored source deployment
+currently supports Docker only.
 
-```json
-{
-  "name":   "dockerhub",
-  "url":    "docker.io/your-namespace",
-  "username":"your-dockerhub-username",
-  "password":"<dockerhub access token>"
-}
-```
+Private Settings credential environments are hidden from general environment
+inventory and cannot become App/native runtime bindings. Rotation does not copy
+plaintext into jobs, run receipts or browser responses. Older external credentials
+without immutable references require explicit replacement; there is no silent
+migration to the latest value.
 
-Use an access token, not your account password. Generate at https://hub.docker.com/settings/security.
+An endpoint path identifies configuration, not a repository ACL. Registry-side
+token permissions still govern allowed repositories. Configuring an ECR or Google
+registry credential is separate from AWS/GCP service management and cloud IAM;
+those ecosystems have their own roadmap acceptance.
 
-### GitHub Container Registry (`ghcr.io`)
+## Developer interfaces
 
-```json
-{
-  "name":   "ghcr",
-  "url":    "ghcr.io/your-github-username-or-org",
-  "username":"your-github-username",
-  "password":"<github PAT with write:packages>"
-}
-```
+| Operation | Interface |
+| --- | --- |
+| Read nonsecret connection metadata | `GET /api/v1/settings/registries` |
+| Create connection | `POST /api/v1/settings/registries` |
+| Update grants | `PATCH /api/v1/settings/registries/:id/grants` with `version`, `allowedAppIds`, `allowedPipelineIds` |
+| Select App connections | App `buildPlan.registryConnectionIds` on its versioned PUT |
+| Select native stage connections | Stage `config.registryConnectionIds` on the versioned pipeline PUT |
 
-GHCR uses GitHub PATs (classic or fine-grained). The classic PAT needs the `write:packages` scope; fine-grained needs the "Packages: read & write" permission on the target org.
-
-### AWS Elastic Container Registry (ECR)
-
-ECR uses short-lived tokens, not static credentials. The supported path today is **static IAM credentials with `aws ecr get-login-password` rotated externally**:
-
-```json
-{
-  "name":   "ecr",
-  "url":    "<account>.dkr.ecr.<region>.amazonaws.com/<repo>",
-  "username":"AWS",
-  "password":"<output of `aws ecr get-login-password`>"
-}
-```
-
-> **Partial.** Native IRSA / instance-profile auth for ECR is not yet wired into the pusher. Roadmap `A5` tracks "ECR with IRSA". Today operators run a CronJob that calls `get-login-password` and updates the secret via `PUT /api/v1/settings/registries`. Acceptable but operationally painful.
-
-### Google Artifact Registry / GCR
-
-Same shape as ECR for now — use a service account key:
-
-```json
-{
-  "name":   "gar",
-  "url":    "<region>-docker.pkg.dev/<project>/<repo>",
-  "username":"_json_key",
-  "password":"<contents of service-account-key.json>"
-}
-```
-
-> **Partial.** Native Workload Identity auth is roadmap `A6`.
-
-### Quay.io
-
-```json
-{
-  "name":   "quay",
-  "url":    "quay.io/your-namespace",
-  "username":"your-quay-username",
-  "password":"<robot token>"
-}
-```
-
-Use a robot account, not your user account.
-
-### Harbor
-
-```json
-{
-  "name":   "harbor",
-  "url":    "harbor.example.com/<project>",
-  "username":"harbor-robot",
-  "password":"<robot token>"
-}
-```
-
-Harbor must have its TLS cert trusted by the Cooker container's CA bundle. If you're using a private CA, mount it into the pod at `/etc/ssl/certs/ca-certificates.crt`.
-
-### Self-hosted Distribution (`registry:5000`)
-
-UAT compose uses this. With auth-less Distribution:
-
-```json
-{
-  "name":"uat",
-  "url":"registry:5000/cooker"
-}
-```
-
-For production deployments of Distribution, configure HTPasswd or token auth and set `username` / `password` accordingly.
-
-## How a Push stage uses the config
-
-A Push stage (`StageTypePush`) resolves its `registry` field against the configured registries by **URL prefix match**. The first registry whose URL is a prefix of the stage's `registry` value wins. This means:
-
-- Stage config `registry: ghcr.io/your-org` matches a registry config with `url: ghcr.io/your-org` exactly, or with `url: ghcr.io` (less specific).
-- If no registry config matches, the push uses no credentials. For public registries (the bundled `registry:5000`), this works. For real registries, the push will fail with `denied: requested access to the resource is denied`.
-
-## Pull-through (downstream of Cooker)
-
-Cooker pushes; your K8s cluster pulls. The pull side is a Kubernetes concern, not a Cooker one:
-
-- For public registries: nothing to configure.
-- For private registries: create an `imagePullSecret` in the target namespace and reference it in your Deployment's `imagePullSecrets`. See [Kubernetes deploy](kubernetes-deploy.md).
-
-## OCI conformance
-
-Cooker pushes via `go-containerregistry`, which implements the OCI distribution-spec v1.1 natively. The push path is exercised against the upstream conformance suite weekly via `.github/workflows/oci-conformance.yml`. The referrers API is supported for SBOM / signature attachment.
-
-## Cross-references
-
-- **[Stages: Push](../concepts/stages.md#push-stagetypepush)** — what a Push stage configures.
-- **[Kubernetes deploy](kubernetes-deploy.md)** — the pull side.
-- **[Reference: env vars](../reference/env-vars.md#general)** — `COOKER_REGISTRY` default.
+New grants default empty. A known connection version with omitted grant arrays
+means empty grants; an older/malformed response without version evidence remains
+unverified. Supported selections are bounded to32 unique IDs. Full authority,
+legacy compatibility, ephemeral auth files and verification limits are documented
+in [Registry authority](../../backend/registry-authority.md).

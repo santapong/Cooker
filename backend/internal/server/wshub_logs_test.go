@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -169,6 +170,38 @@ func TestHandleStageLogs_ReconnectSinceFiltersBacklog(t *testing.T) {
 
 	if f := readFrame(t, conn); f.Seq != 4 {
 		t.Fatalf("live frame after reconnect: seq = %d, want 4", f.Seq)
+	}
+}
+
+type unavailableHistory struct{}
+
+func (unavailableHistory) Append(context.Context, string, string, logstore.Entry) error {
+	return errors.New("database unavailable")
+}
+func (unavailableHistory) Read(context.Context, string, string, int) ([]logstore.Entry, error) {
+	return nil, errors.New("database unavailable")
+}
+
+func TestHandleStageLogsReportsHistoryReadFailure(t *testing.T) {
+	h := newLogHub(t)
+	h.SetLogStore(unavailableHistory{})
+	conn := dial(t, stageLogServer(t, h, "r", "s"))
+	if f := readFrame(t, conn); f.Control != "history-unavailable" {
+		t.Fatalf("missing history error: %+v", f)
+	}
+}
+
+func TestHandleStageLogsReportsRetentionGapBeforeTail(t *testing.T) {
+	h := newLogHub(t)
+	store := logstore.NewMemory(6, 16)
+	h.SetLogStore(store)
+	appendN(t, store, "r", "s", "old", "new", "end")
+	conn := dial(t, stageLogServer(t, h, "r", "s"))
+	if f := readFrame(t, conn); f.Control != "history-truncated" {
+		t.Fatalf("missing retention gap: %+v", f)
+	}
+	if f := readFrame(t, conn); f.Seq != 2 || f.Line != "new" {
+		t.Fatalf("bad retained tail: %+v", f)
 	}
 }
 

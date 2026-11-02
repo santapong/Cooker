@@ -100,6 +100,9 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile
+      args:
+        # Match the local-auth backend below; Vite reads this at build time.
+        VITE_LOCAL_AUTH_ENABLED: "true"
     ports:
       - "8080:8080"
     environment:

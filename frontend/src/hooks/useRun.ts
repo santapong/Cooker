@@ -3,11 +3,14 @@ import { pipelineApi } from '../api/pipelines';
 import type { Pipeline, PipelineRun, RunStatus, StageApproval } from '../types/pipeline';
 import { isTerminal } from '../components/porthole/runState';
 import { useWebSocket } from './useWebSocket';
+import { readGateSnapshot, type GateLoadState } from '../components/run/approvalPolicy';
 
 export interface UseRunResult {
   pipeline: Pipeline | null;
   run: PipelineRun | null;
   gates: StageApproval[];
+  gateState: GateLoadState;
+  gateError: string | null;
   error: string | null;
   loaded: boolean;
   terminal: boolean;
@@ -29,6 +32,9 @@ export function useRun(pipelineId: string, runId: string): UseRunResult {
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
   const [run, setRun] = useState<PipelineRun | null>(null);
   const [gates, setGates] = useState<StageApproval[]>([]);
+  const [gateState, setGateState] = useState<GateLoadState>('loading');
+  const [gateError, setGateError] = useState<string | null>(null);
+  const gateRequest = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const loaded = !!pipeline && !!run && run.id === runId;
   const terminal = isTerminal(run?.status);
@@ -57,11 +63,21 @@ export function useRun(pipelineId: string, runId: string): UseRunResult {
   const refreshGates = useCallback(async () => {
     const { pipelineId: pid, runId: rid } = idsRef.current;
     if (!pid || !rid) return;
+    const request = ++gateRequest.current;
+    setGateState('loading');
+    setGateError(null);
+    const current = () => request === gateRequest.current && idsRef.current.pipelineId === pid && idsRef.current.runId === rid;
     try {
       const res = await pipelineApi.stageApprovals(pid, rid);
-      setGates(res?.gates ?? []);
+      if (!current()) return;
+      const next = readGateSnapshot(res, rid);
+      if (next === null) throw new Error('Gate snapshot unavailable.');
+      setGates(next);
+      setGateState('ready');
     } catch {
-      /* gates are optional */
+      if (!current()) return;
+      setGateState('unavailable');
+      setGateError('Approval gates could not be verified. Refresh before recording a decision.');
     }
   }, []);
 
@@ -71,6 +87,9 @@ export function useRun(pipelineId: string, runId: string): UseRunResult {
     setError(null);
     setRun(null);
     setGates([]);
+    gateRequest.current++;
+    setGateState('loading');
+    setGateError(null);
     setPipeline(null);
     Promise.all([pipelineApi.get(pipelineId), pipelineApi.getRun(pipelineId, runId)])
       .then(async ([initial, r]) => {
@@ -80,8 +99,8 @@ export function useRun(pipelineId: string, runId: string): UseRunResult {
         sourcePending.current = p.stages.length === 0;
         setRun(r);
       })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      .catch(() => {
+        if (!cancelled) setError('This run could not be loaded. Check access and refresh.');
       });
     return () => {
       cancelled = true;
@@ -117,14 +136,13 @@ export function useRun(pipelineId: string, runId: string): UseRunResult {
   }, [loaded, terminal, refresh]);
 
   // Approval gates: fetch once when loaded, then poll while a gate can still change.
-  const hasApproval = !!pipeline?.stages.some((s) => s.type === 'approval');
   useEffect(() => {
-    if (!loaded || !hasApproval) return;
+    if (!loaded) return;
     void refreshGates();
     if (terminal) return;
     const t = window.setInterval(() => void refreshGates(), GATE_POLL_MS);
     return () => window.clearInterval(t);
-  }, [loaded, hasApproval, terminal, refreshGates]);
+  }, [loaded, terminal, refreshGates]);
 
-  return { pipeline, run, gates, error, loaded, terminal, refresh, refreshGates };
+  return { pipeline, run, gates, gateState, gateError, error, loaded, terminal, refresh, refreshGates };
 }

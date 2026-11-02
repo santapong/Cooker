@@ -42,16 +42,19 @@ export interface NavItem {
 }
 
 export const NAV_GROUPS: NavGroup[] = [
-  { id: 'build', label: 'Build' },
-  { id: 'infra', label: 'Infrastructure' },
-  { id: 'operate', label: 'Operate' },
+  { id: 'build', label: 'Workspace' },
+  { id: 'infra', label: 'Destinations & configuration' },
+  { id: 'operate', label: 'Manage' },
 ];
 
 const prefix = (base: string) => [base, `${base}/*`];
 
 export const NAV_ITEMS: NavItem[] = [
+  { id: 'overview', label: 'Overview', to: '/', group: 'build', icon: AppsIcon, matchPatterns: ['/', '/overview'] },
+  { id: 'apps', label: 'Apps', to: '/apps', group: 'build', icon: AppsIcon, matchPatterns: prefix('/apps') },
   { id: 'pipelines', label: 'Pipelines', to: '/pipelines', group: 'build', icon: PipelinesIcon, matchPatterns: prefix('/pipelines') },
-  { id: 'apps', label: 'Apps', to: '/apps', group: 'build', icon: AppsIcon, matchPatterns: ['/', ...prefix('/apps')] },
+  { id: 'services', label: 'Services', to: '/services', group: 'build', icon: ComposeIcon, matchPatterns: prefix('/services') },
+  { id: 'runs', label: 'Runs', to: '/runs', group: 'build', icon: AnalyticsIcon, matchPatterns: prefix('/runs') },
 
   { id: 'docker', label: 'Docker', to: '/docker', group: 'infra', icon: DockerIcon, matchPatterns: prefix('/docker') },
   { id: 'compose', label: 'Compose', to: '/docker/compose', group: 'infra', icon: ComposeIcon, matchPatterns: prefix('/docker/compose') },
@@ -67,6 +70,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'audit', label: 'Audit', to: '/admin/audit', group: 'operate', icon: AuditIcon, matchPatterns: prefix('/admin/audit') },
   { id: 'analytics', label: 'Analytics', to: '/analytics', group: 'operate', icon: AnalyticsIcon, matchPatterns: prefix('/analytics') },
   { id: 'settings', label: 'Settings', to: '/settings', group: 'operate', icon: SettingsIcon, matchPatterns: prefix('/settings') },
+  { id: 'docs', label: 'Documentation', to: '/docs', group: 'operate', icon: TemplatesIcon, matchPatterns: prefix('/docs') },
 ];
 
 /** Number of static path segments in a pattern — the specificity score. */
@@ -95,4 +99,9 @@ export function activeNavId(pathname: string): string | null {
 
 export function navItemById(id: string): NavItem | undefined {
   return NAV_ITEMS.find((i) => i.id === id);
+}
+
+/** Catalog reads are available to every signed-in role; management pages are admin-only. */
+export function navItemVisible(item: NavItem, roles: string[] = []): boolean {
+  return item.id === 'templates' || !item.to.startsWith('/admin/') || roles.includes('admin');
 }

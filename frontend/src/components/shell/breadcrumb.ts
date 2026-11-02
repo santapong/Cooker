@@ -52,6 +52,9 @@ export function buildBreadcrumb(pathname: string): Crumb[] {
     }));
   }
 
+  if (pathname.startsWith('/apps/synced/')) return [{ label: 'Apps', to: '/apps' }, { label: 'Synced app' }];
+  if (pathname.startsWith('/pipelines/synced/')) return [{ label: 'Pipelines', to: '/pipelines' }, { label: 'Provider flow' }];
+
   const crumbs: Crumb[] = navChain(item).map((n) => ({ label: n.label, to: n.to }));
   const base = segmentsOf(item.to);
   const rest = segmentsOf(pathname).slice(base.length);

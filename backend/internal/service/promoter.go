@@ -16,24 +16,42 @@ import (
 
 // Promoter handles promotion logic between environments (Dev → Staging → Production).
 type Promoter struct {
-	environments []*model.Environment
+	environments          []*model.Environment
+	privateEnvironmentIDs map[string]bool
 }
 
 // NewPromoter creates a promoter with the given environments.
 func NewPromoter(envs []*model.Environment) *Promoter {
-	sorted := make([]*model.Environment, len(envs))
-	copy(sorted, envs)
+	sorted := make([]*model.Environment, 0, len(envs))
+	private := map[string]bool{}
+	for _, env := range envs {
+		if env == nil {
+			continue
+		}
+		if model.IsRegistryCredentialEnvironment(env) {
+			private[env.ID] = true
+			continue
+		}
+		sorted = append(sorted, env)
+	}
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].Order < sorted[j].Order
 	})
-	return &Promoter{environments: sorted}
+	return &Promoter{environments: sorted, privateEnvironmentIDs: private}
 }
 
 // NextEnvironment returns the next environment in the promotion chain, or nil if at the end.
 func (p *Promoter) NextEnvironment(currentEnvID string) *model.Environment {
+	if p.privateEnvironment(currentEnvID) {
+		return nil
+	}
 	for i, env := range p.environments {
-		if env.ID == currentEnvID && i+1 < len(p.environments) {
-			return p.environments[i+1]
+		if env.ID == currentEnvID {
+			for _, next := range p.environments[i+1:] {
+				if !model.IsRegistryCredentialEnvironment(next) {
+					return next
+				}
+			}
 		}
 	}
 	return nil
@@ -41,7 +59,7 @@ func (p *Promoter) NextEnvironment(currentEnvID string) *model.Environment {
 
 // ShouldAutoPromote checks if the next environment allows automatic promotion.
 func (p *Promoter) ShouldAutoPromote(nextEnv *model.Environment) bool {
-	return nextEnv.Promotion.Strategy == "auto"
+	return nextEnv != nil && !model.IsRegistryCredentialEnvironment(nextEnv) && nextEnv.Promotion.Strategy == "auto"
 }
 
 // Promote attempts to promote a pipeline run to the next environment.
@@ -78,6 +96,9 @@ func (p *Promoter) Promote(run *model.PipelineRun, currentEnvID string, approved
 
 // ApprovePromotion approves a pending promotion and triggers deployment.
 func (p *Promoter) ApprovePromotion(run *model.PipelineRun, envID string, approvedBy string) error {
+	if p.privateEnvironment(envID) {
+		return fmt.Errorf("credential-only environments cannot be used by workloads")
+	}
 	for i := range run.EnvironmentStatuses {
 		es := &run.EnvironmentStatuses[i]
 		if es.EnvironmentID == envID && es.Status == model.EnvStatusAwaitingApproval {
@@ -90,6 +111,18 @@ func (p *Promoter) ApprovePromotion(run *model.PipelineRun, envID string, approv
 		}
 	}
 	return fmt.Errorf("no pending promotion found for environment %s", envID)
+}
+
+func (p *Promoter) privateEnvironment(id string) bool {
+	if model.IsRegistryCredentialEnvironmentID(id) || p.privateEnvironmentIDs[id] {
+		return true
+	}
+	for _, env := range p.environments {
+		if env.ID == id && model.IsRegistryCredentialEnvironment(env) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- Persistent promotion/approval flow (HS26-05-01 / -08 / -14) ---
@@ -129,8 +162,8 @@ var ErrAlreadyApproved = errors.New("promoter: already approved by this user")
 
 // Promote records (or returns the existing) promotion of run → the
 // target environment. The target's PromotionPolicy decides the outcome:
-//   - strategy "auto": the promotion is created terminal (deployed) with
-//     no approval required.
+//   - strategy "auto": the promotion is approved with no human gate.
+//     Only a target execution result can establish deployed status.
 //   - strategy "manual": the promotion is created awaiting_approval; a
 //     RequiredApprovers count is snapshotted from the policy.
 //
@@ -138,7 +171,7 @@ var ErrAlreadyApproved = errors.New("promoter: already approved by this user")
 // the existing promotion instead of erroring, so a double-click in the
 // UI is harmless.
 func (s *PromotionService) Promote(ctx context.Context, runID, pipelineID, environmentID, requestedBy string) (*model.RunPromotion, error) {
-	env, err := s.envs.Get(ctx, environmentID)
+	env, err := s.publicEnvironment(ctx, environmentID)
 	if err != nil {
 		return nil, fmt.Errorf("promote: load target env: %w", err)
 	}
@@ -164,8 +197,8 @@ func (s *PromotionService) Promote(ctx context.Context, runID, pipelineID, envir
 	}
 
 	if env.Promotion.Strategy == "auto" {
-		// Auto short-circuits: no gate, immediately terminal.
-		p.Status = model.PromotionDeployed
+		// Approval is not evidence that a target was deployed.
+		p.Status = model.PromotionApproved
 		p.PromotedAt = &now
 		p.RequiredApprovers = 0
 	} else {
@@ -195,6 +228,9 @@ func (s *PromotionService) Promote(ctx context.Context, runID, pipelineID, envir
 // returns the unchanged promotion together with ErrAlreadyApproved so
 // the handler can respond idempotently.
 func (s *PromotionService) Approve(ctx context.Context, runID, environmentID, approverSub, approverEmail, note string) (*model.RunPromotion, error) {
+	if _, err := s.publicEnvironment(ctx, environmentID); err != nil {
+		return nil, fmt.Errorf("approve: load target env: %w", err)
+	}
 	p, err := s.promotions.GetPromotion(ctx, runID, environmentID)
 	if err != nil {
 		return nil, fmt.Errorf("approve: load promotion: %w", err)
@@ -246,9 +282,31 @@ func (s *PromotionService) Statuses(ctx context.Context, runID string) ([]model.
 	}
 	out := make([]model.EnvironmentStatus, 0, len(promos))
 	for _, p := range promos {
+		if _, err := s.publicEnvironment(ctx, p.EnvironmentID); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("env-status: load target env: %w", err)
+		}
 		out = append(out, p.ToEnvironmentStatus())
 	}
 	return out, nil
+}
+
+// Promotion targets must be public workload scopes even for non-HTTP callers
+// or previously persisted promotions. Hide private identities as missing.
+func (s *PromotionService) publicEnvironment(ctx context.Context, id string) (*model.Environment, error) {
+	if model.IsRegistryCredentialEnvironmentID(id) {
+		return nil, fmt.Errorf("environment unavailable: %w", store.ErrNotFound)
+	}
+	env, err := s.envs.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if env == nil || model.IsRegistryCredentialEnvironment(env) {
+		return nil, fmt.Errorf("environment unavailable: %w", store.ErrNotFound)
+	}
+	return env, nil
 }
 
 // requiredApprovers normalises the policy's threshold for a manual gate.

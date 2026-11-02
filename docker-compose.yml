@@ -31,6 +31,8 @@ services:
       - COOKER_BUILDER=noop
       - COOKER_PUSHER=noop
       - COOKER_DEPLOYER=noop
+      - COOKER_JOBQUEUE_ENABLED=${COOKER_JOBQUEUE_ENABLED:-false}
+      - COOKER_SECRET_KEY=${COOKER_SECRET_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

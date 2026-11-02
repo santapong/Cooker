@@ -115,8 +115,8 @@ func TestDispatcherCollectsErrorsPerTarget(t *testing.T) {
 		t.Fatal("want joined error, got nil")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "a boom") || !strings.Contains(msg, "b boom") {
-		t.Fatalf("joined error missing per-target context: %s", msg)
+	if !strings.Contains(msg, "send_outcome_unknown") || strings.Contains(msg, "boom") {
+		t.Fatalf("joined error must use safe uncertainty codes: %s", msg)
 	}
 }
 

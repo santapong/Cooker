@@ -21,6 +21,9 @@ type Pipeline struct {
 	// means "use the cluster default". Validated to [10s, 24h] at the
 	// API layer; clamped again at spawn time.
 	RunDeadline string `json:"runDeadline,omitempty" db:"run_deadline"`
+	// Source selects an approved repository for source-bound native builds.
+	// Accepted jobs pin provider identity/version and an exact commit separately.
+	Source *PipelineSourceConfig `json:"source,omitempty"`
 }
 
 // SetDefaults normalises nil collections on a Pipeline to their empty
@@ -69,6 +72,9 @@ type Stage struct {
 
 // StageConfig holds type-specific configuration for a pipeline stage.
 type StageConfig struct {
+	// RegistryConnectionIDs are operator selections, intersected with each
+	// administrator-managed registry's pipeline scope. Empty means anonymous.
+	RegistryConnectionIDs []string `json:"registryConnectionIds,omitempty"`
 	// Build
 	Dockerfile  string            `json:"dockerfile,omitempty"`
 	Context     string            `json:"context,omitempty"`

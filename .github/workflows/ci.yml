@@ -98,10 +98,9 @@ jobs:
           DATABASE_URL: postgres://cooker:cooker@localhost:5432/cooker_test?sslmode=disable
           COOKER_INTEGRATION_DATABASE_URL: postgres://cooker:cooker@localhost:5432/cooker_test?sslmode=disable
         run: |
-          # Run all packages in one invocation so go test can parallelise
-          # across packages (bounded by GOMAXPROCS). The race detector stays
-          # on. P26-05-34: replaces the per-package sequential for-loop.
-          go test -race -timeout 120s ./...
+          # Legacy queue persistence tests share and recreate database tables.
+          # Serialize packages and test cases against this disposable database.
+          go test -race -p=1 -parallel=1 -timeout 120s ./...
       - name: govulncheck
         working-directory: backend
         # CWE-1104: surface known-vulnerable dependencies and reachable
@@ -149,12 +148,21 @@ jobs:
         env:
           CI: "1"
         run: npm run test:e2e
+      - name: E2E (Docker log snapshot controls)
+        working-directory: frontend
+        env:
+          CI: "1"
+        # Separate local-auth build and output preserve the ordinary fixture
+        # bundle/report. These tests use owned API fixtures, not Docker/cloud.
+        run: npm run test:e2e:runtime-logs
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: playwright-report
-          path: frontend/playwright-report/
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/runtime-logs/
           if-no-files-found: ignore
           retention-days: 7
 

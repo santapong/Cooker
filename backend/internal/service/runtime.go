@@ -3,13 +3,17 @@ package service
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/santapong/cooker/internal/deploy/deploytarget"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/santapong/cooker/internal/model"
+	"github.com/santapong/cooker/internal/store"
 )
 
 // RuntimeStatus is the live state of one deployed service's
@@ -45,7 +49,16 @@ type RuntimeService struct {
 	KubectlBin string
 	// Namespace is the default K8s namespace when the App target omits
 	// one.
-	Namespace string
+	Namespace  string
+	Kubeconfig string
+	// Store binds runtime reads to the recorded deployment rather than a
+	// caller-supplied service name. The server always configures this.
+	Store *store.Store
+	// SecretGenerationBound is set only when secret writes advance the same
+	// Environment.Version checked by the recorded deployment's resolver.
+	SecretGenerationBound bool
+	logSessionsMu         sync.Mutex
+	logSessions           *runtimeLogSessionCache
 }
 
 // NewRuntimeService constructs a runtime service.
@@ -74,12 +87,31 @@ func isDocker(app *model.App) bool {
 
 // Status returns the live state of the named service for the app.
 func (r *RuntimeService) Status(ctx context.Context, app *model.App, serviceName string) (RuntimeStatus, error) {
+	if r.Store != nil {
+		observed, err := r.observe(ctx, app)
+		if err != nil {
+			return RuntimeStatus{}, err
+		}
+		return r.observedStatus(ctx, app, serviceName, observed)
+	}
 	name := runtimeWorkloadName(app, serviceName)
 	for _, b := range app.DeployTarget.ExternalServices {
 		if b.Service == serviceName {
 			return RuntimeStatus{Runtime: "external", Ref: b.Resource, State: "external", Message: "Database lifecycle and health are managed by its provider"}, nil
 		}
 	}
+	return r.workloadStatus(ctx, app, name, "")
+}
+
+func (r *RuntimeService) observedStatus(ctx context.Context, app *model.App, service string, observed *runtimeObservation) (RuntimeStatus, error) {
+	bound, name, err := observed.workload(app, service)
+	if err != nil {
+		return RuntimeStatus{}, err
+	}
+	return r.workloadStatus(ctx, bound, name, observed.deployment.RunID)
+}
+
+func (r *RuntimeService) workloadStatus(ctx context.Context, app *model.App, name, runID string) (RuntimeStatus, error) {
 	if app.DeployTarget.Kind == model.DeployTargetECS || app.DeployTarget.Kind == model.DeployTargetCloudRun {
 		t, err := deploytarget.Lookup(app.DeployTarget.Kind)
 		if err != nil {
@@ -95,10 +127,13 @@ func (r *RuntimeService) Status(ctx context.Context, app *model.App, serviceName
 		}
 		return RuntimeStatus{Runtime: string(t.Kind()), Ref: name, State: state, Healthy: st.Healthy}, nil
 	}
-	if isDocker(app) {
-		return r.dockerStatus(ctx, name)
+	if app.DeployTarget.Kind != model.DeployTargetDockerHost && app.DeployTarget.Kind != model.DeployTargetKubernetes {
+		return RuntimeStatus{}, fmt.Errorf("runtime inspection is unsupported for target %s", app.DeployTarget.Kind)
 	}
-	return r.kubeStatus(ctx, app, name)
+	if isDocker(app) {
+		return r.dockerStatus(ctx, name, runID)
+	}
+	return r.kubeStatus(ctx, app, name, runID)
 }
 
 // Logs streams the named service's container/pod logs to out until the
@@ -110,12 +145,18 @@ func (r *RuntimeService) Logs(ctx context.Context, app *model.App, serviceName s
 			return fmt.Errorf("external database logs are available from its provider")
 		}
 	}
+	if r.Store != nil {
+		return fmt.Errorf("recorded service logs require an immutable deployment log session")
+	}
 	if app.DeployTarget.Kind == model.DeployTargetECS || app.DeployTarget.Kind == model.DeployTargetCloudRun {
 		t, err := deploytarget.Lookup(app.DeployTarget.Kind)
 		if err != nil {
 			return err
 		}
 		return t.Logs(ctx, name, out)
+	}
+	if app.DeployTarget.Kind != model.DeployTargetDockerHost && app.DeployTarget.Kind != model.DeployTargetKubernetes {
+		return fmt.Errorf("runtime logs are unsupported for target %s", app.DeployTarget.Kind)
 	}
 	if isDocker(app) {
 		return runStream(ctx, out, r.dockerBin(), "logs", "--follow", "--tail", "200", name)
@@ -128,6 +169,9 @@ func (r *RuntimeService) Logs(ctx context.Context, app *model.App, serviceName s
 	args := []string{"logs", "--follow", "--tail", "200", "-l", "app=" + name}
 	if ns != "" {
 		args = append(args, "-n", ns)
+	}
+	if r.Kubeconfig != "" {
+		args = append(args, "--kubeconfig", r.Kubeconfig)
 	}
 	return runStream(ctx, out, r.kubectlBin(), args...)
 }
@@ -145,25 +189,42 @@ func runtimeWorkloadName(app *model.App, service string) string {
 	return sanitize(service) // Compatibility for deployments made before prefixes.
 }
 
-func (r *RuntimeService) dockerStatus(ctx context.Context, name string) (RuntimeStatus, error) {
+func (r *RuntimeService) dockerStatus(ctx context.Context, name string, runIDs ...string) (RuntimeStatus, error) {
 	bin := r.dockerBin()
 	if _, err := exec.LookPath(bin); err != nil {
 		return RuntimeStatus{Runtime: "docker", Ref: name, Message: "docker CLI not found"}, nil
 	}
-	// {{.State.Status}}|{{.Config.Image}}
-	out, err := exec.CommandContext(ctx, bin, "inspect", "-f", "{{.State.Status}}|{{.Config.Image}}", name).Output()
+	format := "{{.State.Status}}|{{.Config.Image}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}"
+	if len(runIDs) > 0 && runIDs[0] != "" {
+		format += "|{{index .Config.Labels \"" + RuntimeRunLabel + "\"}}"
+	}
+	out, err := exec.CommandContext(ctx, bin, "inspect", "-f", format, name).Output()
 	if err != nil {
 		return RuntimeStatus{Runtime: "docker", Ref: name, State: "unknown", Message: "not found"}, nil
 	}
-	parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 2)
-	st := RuntimeStatus{Runtime: "docker", Ref: name, State: parts[0], Healthy: parts[0] == "running"}
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 4)
+	st := RuntimeStatus{Runtime: "docker", Ref: name, State: parts[0]}
+	if len(runIDs) > 0 && runIDs[0] != "" && (len(parts) != 4 || parts[3] != runIDs[0]) {
+		return RuntimeStatus{Runtime: "docker", Ref: name, State: "unknown", Message: "container does not match recorded deployment"}, nil
+	}
 	if len(parts) > 1 {
 		st.Image = parts[1]
+	}
+	if st.State == "running" {
+		if len(parts) >= 3 && parts[2] != "" {
+			st.Healthy = parts[2] == "healthy"
+			st.Message = "container health check: " + parts[2]
+			if !st.Healthy {
+				st.State = "degraded"
+			}
+		} else {
+			st.Message = "running; no container health check is configured"
+		}
 	}
 	return st, nil
 }
 
-func (r *RuntimeService) kubeStatus(ctx context.Context, app *model.App, name string) (RuntimeStatus, error) {
+func (r *RuntimeService) kubeStatus(ctx context.Context, app *model.App, name string, runIDs ...string) (RuntimeStatus, error) {
 	bin := r.kubectlBin()
 	if _, err := exec.LookPath(bin); err != nil {
 		return RuntimeStatus{Runtime: "kubernetes", Ref: name, Message: "kubectl not found"}, nil
@@ -172,9 +233,15 @@ func (r *RuntimeService) kubeStatus(ctx context.Context, app *model.App, name st
 	if ns == "" {
 		ns = r.Namespace
 	}
-	args := []string{"get", "deployment", name, "-o", "jsonpath={.status.readyReplicas}/{.status.replicas} {.spec.template.spec.containers[0].image}"}
+	args := []string{"get", "deployment", name, "-o", "jsonpath={.status.readyReplicas}/{.spec.replicas}/{.status.updatedReplicas}/{.metadata.generation}/{.status.observedGeneration} {.spec.template.spec.containers[0].image}"}
+	if len(runIDs) > 0 && runIDs[0] != "" {
+		args[4] += " {.spec.template.metadata.labels.io\\.cooker\\.run-id}"
+	}
 	if ns != "" {
 		args = append(args, "-n", ns)
+	}
+	if r.Kubeconfig != "" {
+		args = append(args, "--kubeconfig", r.Kubeconfig)
 	}
 	out, err := exec.CommandContext(ctx, bin, args...).Output()
 	if err != nil {
@@ -182,14 +249,23 @@ func (r *RuntimeService) kubeStatus(ctx context.Context, app *model.App, name st
 	}
 	fields := strings.Fields(strings.TrimSpace(string(out)))
 	st := RuntimeStatus{Runtime: "kubernetes", Ref: name, State: "unknown"}
+	if len(runIDs) > 0 && runIDs[0] != "" && (len(fields) != 3 || fields[2] != runIDs[0]) {
+		st.Message = "workload does not match recorded deployment"
+		return st, nil
+	}
 	if len(fields) > 0 {
 		// fields[0] is "<readyReplicas>/<replicas>" from the jsonpath
 		// template. Only treat it as a replica ratio when it actually
 		// contains the "/" the template emits — otherwise leave State as
 		// "unknown" rather than surfacing a stray token (e.g. the image)
 		// as the state.
-		if rt := strings.SplitN(fields[0], "/", 2); len(rt) == 2 {
-			st.Healthy = rt[0] == rt[1] && rt[0] != "0" && rt[0] != ""
+		if rt := strings.Split(fields[0], "/"); len(rt) == 5 {
+			readyCount, readyErr := strconv.Atoi(rt[0])
+			totalCount, totalErr := strconv.Atoi(rt[1])
+			updated, updatedErr := strconv.Atoi(rt[2])
+			generation, genErr := strconv.Atoi(rt[3])
+			observed, observedErr := strconv.Atoi(rt[4])
+			st.Healthy = readyErr == nil && totalErr == nil && updatedErr == nil && genErr == nil && observedErr == nil && totalCount > 0 && readyCount == totalCount && updated == totalCount && observed >= generation
 			ready, total := rt[0], rt[1]
 			if ready == "" {
 				ready = "0"
@@ -215,10 +291,11 @@ func (r *RuntimeService) kubeStatus(ctx context.Context, app *model.App, name st
 // line until the context is cancelled or the process exits.
 func runStream(ctx context.Context, out io.Writer, bin string, args ...string) error {
 	if _, err := exec.LookPath(bin); err != nil {
-		fmt.Fprintf(out, "[runtime] %s not found\n", bin)
-		return nil
+		return fmt.Errorf("runtime log adapter is unavailable: %s not found", bin)
 	}
-	cmd := exec.CommandContext(ctx, bin, args...)
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(streamCtx, bin, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -229,11 +306,17 @@ func runStream(ctx context.Context, out io.Writer, bin string, args ...string) e
 	}
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var writeErr error
 	for sc.Scan() {
 		if _, werr := fmt.Fprintln(out, sc.Text()); werr != nil {
+			writeErr = werr
+			cancel()
 			break
 		}
 	}
-	_ = cmd.Wait()
-	return nil
+	if sc.Err() != nil {
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	return errors.Join(writeErr, sc.Err(), waitErr)
 }

@@ -7,6 +7,9 @@ import (
 	"context"
 	"errors"
 	"io"
+
+	"github.com/santapong/cooker/internal/build/artifact"
+	"github.com/santapong/cooker/internal/build/registryauth"
 )
 
 // ErrUnavailable is returned when the underlying build system is not
@@ -16,6 +19,11 @@ var ErrUnavailable = errors.New("builder: unavailable")
 
 // Request describes a single image build.
 type Request struct {
+	// RegistryAuth resolves private base-image and cache credentials for this build.
+	RegistryAuth registryauth.Resolver
+	// RegistryHosts is the exact accepted selection for scoped CLI credentials.
+	// Empty means anonymous even when the host has a Docker login configured.
+	RegistryHosts []string
 	// ContextDir is the absolute path to the build context on the host.
 	ContextDir string
 	// Dockerfile is the path (relative to ContextDir) of the Dockerfile.
@@ -55,6 +63,8 @@ func (c CacheSpec) enabled() bool {
 
 // Result reports the outcome of a successful build.
 type Result struct {
+	// Artifact is a transient OCI handoff. It must never be serialized; the run owns cleanup.
+	Artifact *artifact.Image `json:"-"`
 	// ImageID is the content-addressable digest of the resulting image
 	// (sha256:...). Empty if the backend cannot report one (e.g., in a
 	// multi-arch build where the manifest list digest is what matters).

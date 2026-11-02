@@ -3,6 +3,8 @@
 // database/ (the default, AES-GCM + JSONB) and keepsave/ (delegates
 // to a KeepSave server over HTTP). Selection is driven by
 // COOKER_SECRETS_BACKEND.
+// Accepted deployment plans use the optional VersionedManager in versions.go
+// for external backends; editing continues through Manager below.
 package secrets
 
 import (
@@ -14,6 +16,23 @@ import (
 // exist on the given environment. Adapters MUST translate backend-
 // specific 404-equivalents to this sentinel; callers use errors.Is.
 var ErrNotFound = errors.New("secrets: not found")
+
+// ErrGenerationConflict means the caller's environment generation no longer
+// matches the stored configuration. A conditional edit must not mutate data.
+var ErrGenerationConflict = errors.New("secrets: environment generation changed")
+
+// ErrKeyCollision prevents a value from being both readable configuration and
+// a protected secret in the same environment.
+var ErrKeyCollision = errors.New("secrets: key is already readable configuration")
+
+// ConditionalEditor is optional. Its generation is Environment.Version, which
+// advances for both configuration and database-secret edits. External secret
+// versioning alone does not implement this compare-and-swap contract. Callers
+// must never downgrade an unsupported conditional edit to Manager.Put/Delete.
+type ConditionalEditor interface {
+	PutAtGeneration(ctx context.Context, envID, key string, value []byte, generation int) (int, error)
+	DeleteAtGeneration(ctx context.Context, envID, key string, generation int) (int, error)
+}
 
 // Manager is the interface every secrets backend implements. Methods
 // are scoped by the Cooker environment ID; adapters that address by

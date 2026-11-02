@@ -28,7 +28,11 @@ func writeRuntimeCompose(resolved *resolvedCompose, app *model.App, root, regist
 		s.Build = nil
 		s.Profiles = nil
 		s.Environment = ct.MappingWithEquals{}
-		for k, v := range mergeEnv(opts.appEnv, svc.Environment) {
+		selectedEnv, err := serviceEnvironment(app.BuildPlan, svc.Name, opts.appEnv)
+		if err != nil {
+			return "", err
+		}
+		for k, v := range mergeEnv(selectedEnv, svc.Environment) {
 			value := v
 			s.Environment[k] = &value
 		}

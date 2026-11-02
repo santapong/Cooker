@@ -1,8 +1,10 @@
 # Cooker user guide
 
-Cooker provides visual pipelines and reviewed GitHub Compose deployments. Its Go
-server serves the API and React frontend on port 8080. The current September
-`develop` candidate is ready for UAT; live GitHub and cloud acceptance are pending.
+Cooker provides visual pipelines, reviewed application deployments, and a shared
+view of selected hosting projects. Its Go server serves the API and React frontend
+on port 8080 by default. The isolated backend candidate includes further Git and
+registry work; check the [current status](../backend/current-status-2026-10-02.md)
+for the distinction between verified local code and the running UAT build.
 
 ![Repository selection, Compose files, preview, destination and review](../images/compose-workflow.svg)
 
@@ -15,6 +17,8 @@ server serves the API and React frontend on port 8080. The current September
 | Understand Apps, Pipelines and Environments | [Product concepts](concepts/apps.md) |
 | Save and reopen Compose stacks | [Compose library and registries](guides/compose-library.md) |
 | Author a custom stage graph | [Your first pipeline](guides/first-pipeline.md) |
+| Review branch/tag deployment through a native DAG | [Connected Git pipelines](guides/native-git-pipelines.md) |
+| Grant and select container registry credentials | [Registry access](guides/registries.md) |
 | Configure targets | [Hosts and targets](concepts/hosts-and-targets.md) |
 | Prepare a production installation | [Helm install](getting-started/helm-install.md) and [Auth & RBAC](operations/auth-and-rbac.md) |
 | Configure logs, metrics and tracing | [Observability](operations/observability.md) |
@@ -27,10 +31,16 @@ resolves ordered overrides/profiles, and saves a full Git SHA with your prefix a
 bindings. Deployment starts from the App page. Reviewed Compose Apps require
 explicit reinspection for source updates and use manual deployment.
 
-Source builds require Docker builder + Docker pusher today. Production-mode
-validation rejects both, so this App path is for dev/UAT. Image-only plans and
-separately authored pipelines still have their own target/configuration checks.
-The presence of an adapter does not establish support for every Compose feature.
+The backend candidate supports the BuildKit builder with the Crane pusher for
+source builds. Docker builder with Docker pusher remains a development option;
+production validation rejects that pair. Stage outputs must be enabled for the
+immutable image handoff. See the [build handoff](../backend/buildkit-handoff.md)
+for configuration and the limits of its recorded acceptance.
+
+Scoped registry deployment currently supports Cooker-local Docker and Compose.
+Connected Git native pipelines use Docker deployment stages. Image-only plans,
+standalone image builds and other configured adapters have separate checks; their
+presence does not prove that a particular cloud or Compose feature is supported.
 
 For ECS plus Cloud SQL, provision infrastructure, database access and networking
 separately. Cooker maps an existing external database into the application's

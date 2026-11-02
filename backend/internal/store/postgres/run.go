@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/lib/pq"
 	"time"
 
 	"github.com/santapong/cooker/internal/model"
@@ -46,7 +47,7 @@ func (s *RunStore) List(ctx context.Context, pipelineID string, limit, offset in
 		          '[]'::jsonb) AS stage_runs,
 		        env_statuses, variables,
 		        created_at, started_at, finished_at, error, heartbeat_at,
-		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash, pipeline_version
+		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash, pipeline_version, source
 		   FROM pipeline_runs WHERE pipeline_id = $1
 		  ORDER BY created_at DESC
 		  LIMIT $2 OFFSET $3`,
@@ -82,7 +83,7 @@ func (s *RunStore) GetSummary(ctx context.Context, id string) (*model.PipelineRu
 		          '[]'::jsonb) AS stage_runs,
 		        env_statuses, variables,
 		        created_at, started_at, finished_at, error, heartbeat_at,
-		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash, pipeline_version
+		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash, pipeline_version, source
 		   FROM pipeline_runs WHERE id = $1`, id)
 	r, err := scanRun(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -96,31 +97,34 @@ func (s *RunStore) GetSummary(ctx context.Context, id string) (*model.PipelineRu
 // neither re-marshals the other JSONB blobs nor clobbers concurrent
 // heartbeat/status writes.
 func (s *RunStore) UpdateProgress(ctx context.Context, id string, stageRuns []model.StageRun) error {
-	stripped := make([]model.StageRun, len(stageRuns))
-	copy(stripped, stageRuns)
-	for i := range stripped {
-		stripped[i].Logs = ""
-	}
-	stageJSON, err := json.Marshal(stripped)
-	if err != nil {
-		return fmt.Errorf("marshal stage_runs: %w", err)
-	}
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE pipeline_runs SET stage_runs=$2 WHERE id=$1`, id, stageJSON)
-	if err != nil {
-		return fmt.Errorf("updating run progress: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
-	}
-	return nil
+	return withRunClaim(ctx, s.db, id, func(writer claimWriter) error {
+		stripped := make([]model.StageRun, len(stageRuns))
+		copy(stripped, stageRuns)
+		for i := range stripped {
+			stripped[i].Logs = ""
+		}
+		stageJSON, err := json.Marshal(stripped)
+		if err != nil {
+			return fmt.Errorf("marshal stage_runs: %w", err)
+		}
+		res, err := writer.ExecContext(ctx,
+			`UPDATE pipeline_runs SET stage_runs=$2 WHERE id=$1`, id, stageJSON)
+		if err != nil {
+			return fmt.Errorf("updating run progress: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+		}
+		return nil
+
+	})
 }
 
 func (s *RunStore) Get(ctx context.Context, id string) (*model.PipelineRun, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, pipeline_id, status, stage_runs, env_statuses, variables,
 		        created_at, started_at, finished_at, error, heartbeat_at,
-		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash, pipeline_version
+		        started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash, pipeline_version, source
 		   FROM pipeline_runs WHERE id = $1`, id)
 	r, err := scanRun(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -130,6 +134,10 @@ func (s *RunStore) Get(ctx context.Context, id string) (*model.PipelineRun, erro
 }
 
 func (s *RunStore) Create(ctx context.Context, r *model.PipelineRun) error {
+	sourceJSON, err := marshalRunSource(r.Source)
+	if err != nil {
+		return err
+	}
 	stageJSON, err := json.Marshal(r.StageRuns)
 	if err != nil {
 		return fmt.Errorf("marshal stage_runs: %w", err)
@@ -161,15 +169,19 @@ func (s *RunStore) Create(ctx context.Context, r *model.PipelineRun) error {
 		  (id, pipeline_id, status, stage_runs, env_statuses, variables,
 		   created_at, started_at, finished_at, error,
 		   started_by_user_sub, started_by_email, started_by_groups, started_by_token_hash,
-		   pipeline_version)
-		 VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz, NOW()),$8,$9,$10,$11,$12,$13,$14,$15)
+		   pipeline_version,source)
+		 VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz, NOW()),$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		 RETURNING created_at`,
 		r.ID, r.PipelineID, string(r.Status), stageJSON, envJSON, varsJSON,
 		createdAt,
 		nullTime(r.StartedAt), nullTime(r.FinishedAt), r.Error,
 		r.StartedByUserSub, r.StartedByEmail, groupsJSON, r.StartedByTokenHash,
-		r.PipelineVersion).Scan(&r.CreatedAt)
+		r.PipelineVersion, sourceJSON).Scan(&r.CreatedAt)
 	if err != nil {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return store.ErrConflict
+		}
 		return fmt.Errorf("creating run: %w", err)
 	}
 	return nil
@@ -186,33 +198,55 @@ func nonNilStrings(s []string) []string {
 }
 
 func (s *RunStore) Update(ctx context.Context, r *model.PipelineRun) error {
-	stageJSON, err := json.Marshal(r.StageRuns)
+	sourceJSON, err := marshalRunSource(r.Source)
 	if err != nil {
-		return fmt.Errorf("marshal stage_runs: %w", err)
+		return err
 	}
-	envJSON, err := json.Marshal(r.EnvironmentStatuses)
-	if err != nil {
-		return fmt.Errorf("marshal env_statuses: %w", err)
-	}
-	varsJSON, err := json.Marshal(r.Variables)
-	if err != nil {
-		return fmt.Errorf("marshal variables: %w", err)
-	}
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE pipeline_runs
+	return withRunClaim(ctx, s.db, r.ID, func(writer claimWriter) error {
+		stageJSON, err := json.Marshal(r.StageRuns)
+		if err != nil {
+			return fmt.Errorf("marshal stage_runs: %w", err)
+		}
+		envJSON, err := json.Marshal(r.EnvironmentStatuses)
+		if err != nil {
+			return fmt.Errorf("marshal env_statuses: %w", err)
+		}
+		varsJSON, err := json.Marshal(r.Variables)
+		if err != nil {
+			return fmt.Errorf("marshal variables: %w", err)
+		}
+		res, err := writer.ExecContext(ctx,
+			`UPDATE pipeline_runs
 		    SET status=$2, stage_runs=$3, env_statuses=$4, variables=$5,
-		        started_at=$6, finished_at=$7, error=$8, heartbeat_at=$9
-		  WHERE id=$1`,
-		r.ID, string(r.Status), stageJSON, envJSON, varsJSON,
-		nullTime(r.StartedAt), nullTime(r.FinishedAt), r.Error, nullTime(r.HeartbeatAt))
-	if err != nil {
-		return fmt.Errorf("updating run: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("run %s: %w", r.ID, store.ErrNotFound)
-	}
-	return nil
+		        started_at=$6, finished_at=$7, error=$8, heartbeat_at=$9,
+		        source=CASE WHEN $10::jsonb IS NULL THEN source
+		                    WHEN source IS NULL THEN $10::jsonb
+		                    ELSE $10::jsonb ||
+		                      CASE WHEN source ? 'checkedOutAt' AND NOT ($10::jsonb ? 'checkedOutAt')
+		                           THEN jsonb_build_object('checkedOutAt',source->'checkedOutAt')
+		                           ELSE '{}'::jsonb END END
+		  WHERE id=$1 AND ($10::jsonb IS NULL OR source IS NULL OR
+		       ((source-'checkedOutAt')=($10::jsonb-'checkedOutAt') AND
+		        (source->>'checkedOutAt' IS NULL OR $10::jsonb->>'checkedOutAt' IS NULL OR
+		         (source->>'checkedOutAt')::timestamptz=($10::jsonb->>'checkedOutAt')::timestamptz)))`,
+			r.ID, string(r.Status), stageJSON, envJSON, varsJSON,
+			nullTime(r.StartedAt), nullTime(r.FinishedAt), r.Error, nullTime(r.HeartbeatAt), sourceJSON)
+		if err != nil {
+			return fmt.Errorf("updating run: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			var exists int
+			if err := writer.QueryRowContext(ctx, `SELECT 1 FROM pipeline_runs WHERE id=$1`, r.ID).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("run %s: %w", r.ID, store.ErrNotFound)
+			} else if err != nil {
+				return err
+			}
+			return store.ErrConflict
+		}
+		return nil
+
+	})
 }
 
 // UpdateStatus writes only the lifecycle columns (status, finished_at,
@@ -220,33 +254,39 @@ func (s *RunStore) Update(ctx context.Context, r *model.PipelineRun) error {
 // heartbeat_at untouched, so a status-only transition neither re-marshals
 // the JSONB blobs (F18) nor clobbers the coordinator's heartbeat (F2).
 func (s *RunStore) UpdateStatus(ctx context.Context, id string, status model.RunStatus, finishedAt *time.Time, errMsg string) error {
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE pipeline_runs SET status=$2, finished_at=$3, error=$4 WHERE id=$1`,
-		id, string(status), nullTime(finishedAt), errMsg)
-	if err != nil {
-		return fmt.Errorf("update run status: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
-	}
-	return nil
+	return withRunClaim(ctx, s.db, id, func(writer claimWriter) error {
+		res, err := writer.ExecContext(ctx,
+			`UPDATE pipeline_runs SET status=$2, finished_at=$3, error=$4 WHERE id=$1`,
+			id, string(status), nullTime(finishedAt), errMsg)
+		if err != nil {
+			return fmt.Errorf("update run status: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+		}
+		return nil
+
+	})
 }
 
 // UpdateHeartbeat writes only the heartbeat_at column. Cheap and safe
 // to call from the run coordinator's 30-second ticker without
 // thrashing JSONB encoders.
 func (s *RunStore) UpdateHeartbeat(ctx context.Context, id string, ts time.Time) error {
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE pipeline_runs SET heartbeat_at=$2 WHERE id=$1`, id, ts)
-	if err != nil {
-		return fmt.Errorf("heartbeat run %s: %w", id, err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
-	}
-	return nil
+	return withRunClaim(ctx, s.db, id, func(writer claimWriter) error {
+		res, err := writer.ExecContext(ctx,
+			`UPDATE pipeline_runs SET heartbeat_at=$2 WHERE id=$1`, id, ts)
+		if err != nil {
+			return fmt.Errorf("heartbeat run %s: %w", id, err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("run %s: %w", id, store.ErrNotFound)
+		}
+		return nil
+
+	})
 }
 
 // SweepOrphans marks rows that were status='running' but whose
@@ -260,6 +300,7 @@ func (s *RunStore) SweepOrphans(ctx context.Context, threshold time.Duration) (i
 		        error='orphaned: heartbeat stale at boot',
 		        finished_at=NOW()
 		  WHERE status='running'
+ AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.payload->>'runId' = pipeline_runs.id AND j.status IN ('pending','running','needs_attention'))
 		    AND (heartbeat_at IS NULL OR heartbeat_at < NOW() - $1::interval)`,
 		fmt.Sprintf("%d milliseconds", threshold.Milliseconds()))
 	if err != nil {
@@ -272,15 +313,20 @@ func (s *RunStore) SweepOrphans(ctx context.Context, threshold time.Duration) (i
 func scanRun(row scannable) (*model.PipelineRun, error) {
 	r := &model.PipelineRun{}
 	var status string
-	var stageJSON, envJSON, varsJSON, groupsJSON []byte
+	var stageJSON, envJSON, varsJSON, groupsJSON, sourceJSON []byte
 	var started, finished, heartbeat sql.NullTime
 	var errStr sql.NullString
 	if err := row.Scan(&r.ID, &r.PipelineID, &status, &stageJSON, &envJSON, &varsJSON,
 		&r.CreatedAt, &started, &finished, &errStr, &heartbeat,
-		&r.StartedByUserSub, &r.StartedByEmail, &groupsJSON, &r.StartedByTokenHash, &r.PipelineVersion); err != nil {
+		&r.StartedByUserSub, &r.StartedByEmail, &groupsJSON, &r.StartedByTokenHash, &r.PipelineVersion, &sourceJSON); err != nil {
 		return nil, err
 	}
 	r.Status = model.RunStatus(status)
+	if len(sourceJSON) > 0 {
+		if err := json.Unmarshal(sourceJSON, &r.Source); err != nil || r.Source.Validate() != nil {
+			return nil, model.ErrInvalidRunSource
+		}
+	}
 	if err := json.Unmarshal(stageJSON, &r.StageRuns); err != nil {
 		return nil, fmt.Errorf("unmarshal stage_runs: %w", err)
 	}
@@ -311,6 +357,23 @@ func scanRun(row scannable) (*model.PipelineRun, error) {
 		r.Error = errStr.String
 	}
 	return r, nil
+}
+
+// Only the typed public projection is persisted. No accepted plan, provider
+// response, source contents, credentials or temporary checkout paths are stored.
+func marshalRunSource(source *model.PipelineRunSource) (any, error) {
+	if source.Validate() != nil {
+		return nil, model.ErrInvalidRunSource
+	}
+	if source == nil {
+		return nil, nil
+	}
+	cp := source.Clone()
+	if cp.CheckedOutAt != nil {
+		utc := cp.CheckedOutAt.UTC()
+		cp.CheckedOutAt = &utc
+	}
+	return json.Marshal(cp)
 }
 
 func nullTime(t *time.Time) sql.NullTime {

@@ -51,7 +51,7 @@ export interface LogFrame {
 // ControlFrame is the drop signal the backend sends when it truncates the
 // live stream (its in-memory buffer overflowed).
 export interface ControlFrame {
-  control: 'stream-truncated';
+  control: 'stream-truncated' | 'history-truncated' | 'history-unavailable';
 }
 
 // StageLogState is the full mutable-by-copy buffer state. The hook keeps
@@ -90,7 +90,7 @@ export function isControlFrame(v: unknown): v is ControlFrame {
   return (
     typeof v === 'object' &&
     v !== null &&
-    (v as Record<string, unknown>).control === 'stream-truncated'
+    ['stream-truncated', 'history-truncated', 'history-unavailable'].includes(String((v as Record<string, unknown>).control))
   );
 }
 

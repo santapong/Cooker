@@ -67,6 +67,11 @@ func PipelineDeployHook(client *Client, st *store.Store, pipelineNameFor func(ct
 			Groups: append([]string(nil), run.StartedByGroups...),
 		}
 
+		if strings.HasPrefix(run.StartedByUserSub, "cooker:trigger:") && run.StartedByEmail == "automation:"+strings.TrimPrefix(run.StartedByUserSub, "cooker:trigger:") {
+			actor.Kind = "service"
+			actor.Groups = nil
+		}
+
 		// 4. Call out.
 		decision, err := client.AuthorizeOnBehalf(ctx, actor, svc, envName, run.ID)
 		if err != nil {

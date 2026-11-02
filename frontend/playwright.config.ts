@@ -45,7 +45,7 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
-      testIgnore: /perf\.spec\.ts$/,
+      testIgnore: [/perf\.spec\.ts$/, /local-auth\.spec\.ts$/, /runtime-logs\.spec\.ts$/, /environment-editing\.spec\.ts$/, /dockerfile-environment\.spec\.ts$/, /source-token-replacement\.spec\.ts$/],
     },
     {
       name: 'perf',

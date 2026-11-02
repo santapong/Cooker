@@ -16,7 +16,18 @@ import (
 // after the insert (slice 2) so listeners wake instantly.
 type Postgres struct {
 	db *sql.DB
+	// OnTransition commits domain state with recovery/cancellation/resolution.
+	// Configure once before starting workers; an error rolls back both changes.
+	OnTransition func(context.Context, *sql.Tx, *Job) error
+	OnEnqueue    func(context.Context, *sql.Tx, *Job) error
+	// BeforePrune retains durable notification sources until their receipt and
+	// deliveries commit. Failure prevents deletion, never changes job outcome.
+	BeforePrune func(context.Context, *sql.Tx, *Job) error
 }
+
+func (p *Postgres) AtomicTriggerAdmission() bool { return p.OnEnqueue != nil }
+
+func (p *Postgres) AtomicLifecycle() bool { return p.OnTransition != nil }
 
 // NewPostgres wraps an existing *sql.DB. The caller owns the
 // connection pool lifecycle; this type does not close it.
@@ -58,13 +69,26 @@ func (p *Postgres) Enqueue(ctx context.Context, kind string, payload json.RawMes
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	_, err := p.db.ExecContext(ctx, `
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }() // Commit/operation errors determine the result.
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO jobs (id, kind, payload, status, max_attempts, run_at,
 		                  concurrency_key, created_at, updated_at)
 		VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $7)
 	`, j.ID, j.Kind, []byte(j.Payload), j.MaxAttempts, j.RunAt, j.ConcurrencyKey, j.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("jobqueue: enqueue: %w", err)
+	}
+	if p.OnEnqueue != nil {
+		if err := p.OnEnqueue(ctx, tx, j); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	// Best-effort wake-up. NOTIFY accepts an optional payload; we
 	// keep it empty so listeners just re-poll — the work of picking
@@ -92,7 +116,41 @@ func (p *Postgres) Dequeue(ctx context.Context, workerID string, kinds []string)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	kindsArr := pgTextArray(kinds)
+	// A row lock alone cannot serialize different jobs with the same key.
+	// Take a transaction advisory lock, then recheck in a fresh READ COMMITTED
+	// statement so a concurrent claimant's commit is visible.
+	var pickedID, pickedKey string
+	err = tx.QueryRowContext(ctx, `
+   SELECT j.id, j.concurrency_key FROM jobs j
+   WHERE j.status = 'pending' AND j.run_at <= NOW()
+     AND ($1::text[] = '{}' OR j.kind = ANY($1::text[]))
+     AND (j.concurrency_key = '' OR NOT EXISTS (
+       SELECT 1 FROM jobs held WHERE held.concurrency_key = j.concurrency_key
+         AND held.status IN ('running', 'needs_attention')))
+   ORDER BY j.run_at, j.created_at, j.id LIMIT 1 FOR UPDATE SKIP LOCKED
+ `, pgTextArray(kinds)).Scan(&pickedID, &pickedKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("jobqueue: pick: %w", err)
+	}
+	if pickedKey != "" {
+		var acquired bool
+		if err := tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1, 72117))`, pickedKey).Scan(&acquired); err != nil {
+			return nil, err
+		}
+		if !acquired {
+			return nil, nil
+		}
+		var held bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE concurrency_key = $1 AND status IN ('running', 'needs_attention'))`, pickedKey).Scan(&held); err != nil {
+			return nil, err
+		}
+		if held {
+			return nil, nil
+		}
+	}
 
 	var (
 		id             string
@@ -112,24 +170,6 @@ func (p *Postgres) Dequeue(ctx context.Context, workerID string, kinds []string)
 		updatedAt      time.Time
 	)
 	row := tx.QueryRowContext(ctx, `
-		WITH picked AS (
-			SELECT j.id
-			  FROM jobs j
-			 WHERE j.status = 'pending'
-			   AND j.run_at <= NOW()
-			   AND ($1::text[] = '{}' OR j.kind = ANY($1::text[]))
-			   AND (
-			       j.concurrency_key = ''
-			       OR NOT EXISTS (
-			           SELECT 1 FROM jobs j2
-			            WHERE j2.concurrency_key = j.concurrency_key
-			              AND j2.status = 'running'
-			       )
-			   )
-			 ORDER BY j.run_at
-			 LIMIT 1
-			 FOR UPDATE SKIP LOCKED
-		)
 		UPDATE jobs
 		   SET status = 'running',
 		       locked_by = $2,
@@ -137,11 +177,11 @@ func (p *Postgres) Dequeue(ctx context.Context, workerID string, kinds []string)
 		       started_at = NOW(),
 		       attempts = attempts + 1,
 		       updated_at = NOW()
-		 WHERE id = (SELECT id FROM picked)
+		 WHERE id = $1
 		 RETURNING id, kind, payload, status, attempts, max_attempts, run_at,
 		           locked_by, locked_at, started_at, finished_at, last_error,
 		           concurrency_key, created_at, updated_at
-	`, kindsArr, workerID)
+	`, pickedID, workerID)
 	err = row.Scan(&id, &kind, &payload, &status, &attempts, &maxAttempts, &runAt,
 		&lockedBy, &lockedAt, &startedAt, &finishedAt, &lastError,
 		&concurrencyKey, &createdAt, &updatedAt)
@@ -199,41 +239,18 @@ func (p *Postgres) Complete(ctx context.Context, workerID, jobID string) error {
 }
 
 func (p *Postgres) Fail(ctx context.Context, workerID, jobID string, lastError string) error {
-	res, err := p.db.ExecContext(ctx, `
-		UPDATE jobs
-		   SET status = 'failed',
-		       finished_at = NOW(),
-		       last_error = $3,
-		       locked_by = '',
-		       updated_at = NOW()
-		 WHERE id = $1 AND locked_by = $2 AND status = 'running'
-	`, jobID, workerID, lastError)
-	if err != nil {
-		return fmt.Errorf("jobqueue: fail: %w", err)
-	}
-	return checkOwnedRowAffected(res, ctx, p.db, jobID)
+	_, err := p.transition(ctx, `UPDATE jobs SET status='failed', finished_at=NOW(),last_error=$3,locked_by='',updated_at=NOW()
+ WHERE id=$1 AND locked_by=$2 AND status='running' RETURNING id,kind,payload,status,last_error`, jobID, workerID, lastError)
+	return err
 }
 
 func (p *Postgres) Reschedule(ctx context.Context, workerID, jobID string, nextRunAt time.Time, lastError string) error {
-	res, err := p.db.ExecContext(ctx, `
-		UPDATE jobs
-		   SET status = CASE WHEN attempts >= max_attempts
-		                     THEN 'failed' ELSE 'pending' END,
-		       run_at = CASE WHEN attempts >= max_attempts
-		                     THEN run_at ELSE $3 END,
-		       finished_at = CASE WHEN attempts >= max_attempts
-		                          THEN NOW() ELSE NULL END,
-		       last_error = $4,
-		       locked_by = '',
-		       locked_at = NULL,
-		       started_at = NULL,
-		       updated_at = NOW()
-		 WHERE id = $1 AND locked_by = $2 AND status = 'running'
-	`, jobID, workerID, nextRunAt, lastError)
-	if err != nil {
-		return fmt.Errorf("jobqueue: reschedule: %w", err)
-	}
-	return checkOwnedRowAffected(res, ctx, p.db, jobID)
+	_, err := p.transition(ctx, `UPDATE jobs SET
+ status=CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'pending' END,
+ finished_at=CASE WHEN attempts >= max_attempts THEN NOW() ELSE NULL END,
+ locked_by='', locked_at=NULL, run_at=$3, last_error=$4, updated_at=NOW()
+ WHERE id=$1 AND locked_by=$2 AND status='running' RETURNING id,kind,payload,status,last_error`, jobID, workerID, nextRunAt, lastError)
+	return err
 }
 
 func (p *Postgres) Get(ctx context.Context, jobID string) (*Job, error) {
@@ -297,6 +314,9 @@ func (p *Postgres) Stats(ctx context.Context) (map[Status]int, error) {
 // COALESCE(finished_at, updated_at) guards against a terminal row
 // missing its finish stamp.
 func (p *Postgres) DeleteOlderThan(ctx context.Context, cutoff time.Time) (int, error) {
+	if p.BeforePrune != nil {
+		return p.pruneWithReceipt(ctx, cutoff)
+	}
 	res, err := p.db.ExecContext(ctx,
 		`DELETE FROM jobs
 		  WHERE status IN ('succeeded','failed','cancelled')
@@ -306,6 +326,48 @@ func (p *Postgres) DeleteOlderThan(ctx context.Context, cutoff time.Time) (int, 
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil
+}
+
+func (p *Postgres) pruneWithReceipt(ctx context.Context, cutoff time.Time) (int, error) {
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("jobqueue: retention transaction unavailable")
+	}
+	defer tx.Rollback()
+	// Bound a sweep transaction; subsequent sweeps continue the backlog. Lock
+	// the same rows as reconciliation so source removal cannot race capture.
+	rows, err := tx.QueryContext(ctx, `SELECT id,kind,payload,status,finished_at,updated_at FROM jobs
+	WHERE status IN ('succeeded','failed','cancelled') AND COALESCE(finished_at,updated_at)<$1
+	ORDER BY COALESCE(finished_at,updated_at),id LIMIT 1000 FOR UPDATE SKIP LOCKED`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("jobqueue: retention source read unavailable")
+	}
+	var jobs []*Job
+	for rows.Next() {
+		var j Job
+		if err := rows.Scan(&j.ID, &j.Kind, &j.Payload, &j.Status, &j.FinishedAt, &j.UpdatedAt); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("jobqueue: retention source read unavailable")
+		}
+		jobs = append(jobs, &j)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return 0, fmt.Errorf("jobqueue: retention source read unavailable")
+	}
+	for _, j := range jobs {
+		if err := p.BeforePrune(ctx, tx, j); err != nil {
+			return 0, fmt.Errorf("jobqueue: notification capture unavailable; terminal jobs retained")
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM jobs WHERE id=$1`, j.ID); err != nil {
+			return 0, fmt.Errorf("jobqueue: retention deletion unavailable")
+		}
+	}
+	if tx.Commit() != nil {
+		return 0, fmt.Errorf("jobqueue: retention commit unconfirmed")
+	}
+	return len(jobs), nil
 }
 
 // checkOwnedRowAffected disambiguates a zero-rows-affected result.

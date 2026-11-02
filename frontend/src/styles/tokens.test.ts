@@ -5,8 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import css from './tokens.css?raw';
 
-function token(name: string): string {
-  const m = css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`));
+function token(name: string, source = css): string {
+  const m = source.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`));
   if (!m) throw new Error(`token --${name} not found or not a hex colour`);
   return m[1];
 }
@@ -51,5 +51,19 @@ describe('brand palette contrast', () => {
     const voidHex = token('void');
     expect(contrast(token('star-ok'), voidHex)).toBeGreaterThanOrEqual(4.5);
     expect(contrast(token('star-fail'), voidHex)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe('Paper theme contrast', () => {
+  const light = css.slice(css.indexOf("[data-theme='light']"));
+  const value = (name: string) => token(name, light);
+  it('keeps body, secondary, muted, and status text readable on light panels', () => {
+    for (const ink of ['ink-1', 'ink-2', 'ink-3', 'ember', 'star-ok', 'star-fail', 'star-running']) {
+      for (const surface of ['hull-0', 'hull-1']) expect(contrast(value(ink), value(surface))).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+  it('keeps primary buttons and control borders distinguishable', () => {
+    expect(contrast(value('on-ember'), value('ember'))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(value('line-strong'), value('hull-1'))).toBeGreaterThanOrEqual(3);
   });
 });

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"time"
 
@@ -21,37 +20,34 @@ func (e *Executor) executeBuild(ctx context.Context, runID string, stage *model.
 	if stage.Config.ReviewOnly {
 		return fmt.Errorf("use App Deploy to resolve this saved deployment graph")
 	}
-	logs := newCappedBuffer(stageLogCap)
-	// LogWriter receives the on-disk capture by default. When a
-	// broadcaster is wired (production wiring via WithLogBroadcaster),
-	// stream each \n-terminated line to the WebSocket hub on the
-	// per-stage channel as well so the run page can tail logs live
-	// instead of polling. The broadcaster is best-effort: backpressure
-	// at the hub drops on the far side, never on the executor goroutine.
-	var writer io.Writer = logs
-	lw := e.newStageLineWriter(runID, stage)
-	if lw != nil {
-		writer = io.MultiWriter(logs, lw)
+	contextDir, dockerfile, err := PipelineStageBuildPaths(ctx, stage)
+	if err != nil {
+		return err
 	}
-	defer func() {
-		if lw != nil {
-			lw.flush()
-		}
-		sr.Logs = logs.String()
-	}()
+	writer, finishLogs := e.newStageOutput(ctx, runID, stage, sr)
+	defer finishLogs()
+	resolve, hosts, err := e.stageRegistry(ctx, stage)
+	if err != nil {
+		return err
+	}
 	req := builder.Request{
-		ContextDir: stage.Config.Context,
-		Dockerfile: stage.Config.Dockerfile,
-		Tags:       stage.Config.Tags,
-		BuildArgs:  stage.Config.BuildArgs,
-		Target:     stage.Config.BuildTarget,
-		Platforms:  stage.Config.Platforms,
-		LogWriter:  writer,
-		Cache:      builderCacheSpec(stage.Config.Cache),
+		RegistryAuth:  resolve,
+		RegistryHosts: hosts,
+		ContextDir:    contextDir,
+		Dockerfile:    dockerfile,
+		Tags:          stage.Config.Tags,
+		BuildArgs:     stage.Config.BuildArgs,
+		Target:        stage.Config.BuildTarget,
+		Platforms:     stage.Config.Platforms,
+		LogWriter:     writer,
+		Cache:         builderCacheSpec(stage.Config.Cache),
 	}
 	res, err := e.builder.Build(ctx, req)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
+	}
+	if err := keepBuildArtifact(ctx, res.Artifact, res.Tags); err != nil {
+		return err
 	}
 	for _, tag := range res.Tags {
 		sr.Artifacts = append(sr.Artifacts, model.Artifact{
@@ -196,18 +192,13 @@ func (e *Executor) executeTest(ctx context.Context, runID string, stage *model.S
 // stage outcome. A non-zero exit fails the stage; a runtime error
 // (ErrUnavailable, lost API) also fails it but with the wrapped cause.
 func (e *Executor) runStageContainer(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun, req stagerunner.Request) error {
-	logs := newCappedBuffer(stageLogCap)
-	var writer io.Writer = logs
-	lw := e.newStageLineWriter(runID, stage)
-	if lw != nil {
-		writer = io.MultiWriter(logs, lw)
+	resolve, hosts, err := e.stageRegistry(ctx, stage)
+	if err != nil {
+		return err
 	}
-	defer func() {
-		if lw != nil {
-			lw.flush()
-		}
-		sr.Logs = logs.String()
-	}()
+	req.RegistryAuth, req.RegistryHosts = resolve, hosts
+	writer, finishLogs := e.newStageOutput(ctx, runID, stage, sr)
+	defer finishLogs()
 	req.LogWriter = writer
 
 	runner := e.stageRunner
@@ -239,20 +230,14 @@ func (e *Executor) executePush(ctx context.Context, runID string, stage *model.S
 	// per-line tee forwards each "Pushing..." / "Pushed image to..."
 	// line to the stage's WebSocket channel for live tailing. Closes
 	// dag-performance.md §4 High #2 for the push half. T2.
-	logs := newCappedBuffer(stageLogCap)
-	var writer io.Writer = logs
-	lw := e.newStageLineWriter(runID, stage)
-	if lw != nil {
-		writer = io.MultiWriter(logs, lw)
-	}
-	defer func() {
-		if lw != nil {
-			lw.flush()
-		}
-		sr.Logs = logs.String()
-	}()
+	writer, finishLogs := e.newStageOutput(ctx, runID, stage, sr)
+	defer finishLogs()
 
-	req := pusher.Request{Source: source, Target: target, LogWriter: writer}
+	resolve, _, err := e.stageRegistry(ctx, stage)
+	if err != nil {
+		return err
+	}
+	req := pusher.Request{Source: source, Target: target, LogWriter: writer, Artifact: findBuildArtifact(ctx, source), RegistryAuth: resolve}
 	res, err := e.pusher.Push(ctx, req)
 	if err != nil {
 		return fmt.Errorf("push: %w", err)
@@ -272,22 +257,22 @@ func (e *Executor) executePush(ctx context.Context, runID string, stage *model.S
 }
 
 func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model.Stage, sr *model.StageRun) error {
+	// Clear observation metadata before any attempt (including preflight).
+	// Failed retries must never retain a receipt from an earlier start.
+	sr.RuntimeReceipt, sr.RuntimeBindingWarning = nil, ""
 	if stage.Config.ReviewOnly {
 		return fmt.Errorf("use App Deploy to resolve this saved deployment graph")
 	}
+	resolve, hosts, registryErr := e.stageRegistry(ctx, stage)
+	if registryErr != nil {
+		return registryErr
+	}
+	if _, accepted := ctx.Value(acceptedRegistryAuthorityKey{}).(acceptedRegistryAuthority); accepted && stage.Config.DeployRuntime != "docker" && stage.Config.DeployRuntime != "compose" {
+		return fmt.Errorf("%w: accepted registry transport is unavailable for this deployment runtime", deployer.ErrUnavailable)
+	}
 	if stage.Config.DeployRuntime == "ecs" || stage.Config.DeployRuntime == "cloud-run" {
-		logs := newCappedBuffer(stageLogCap)
-		var writer io.Writer = logs
-		lw := e.newStageLineWriter(runID, stage)
-		if lw != nil {
-			writer = io.MultiWriter(logs, lw)
-		}
-		defer func() {
-			if lw != nil {
-				lw.flush()
-			}
-			sr.Logs = logs.String()
-		}()
+		writer, finishLogs := e.newStageOutput(ctx, runID, stage, sr)
+		defer finishLogs()
 		if err := e.executeCloudDeploy(ctx, stage, writer); err != nil {
 			return err
 		}
@@ -330,18 +315,8 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 	// forwards each to the stage's WebSocket channel when a broadcaster
 	// is configured. Closes dag-performance.md §4 High #2 for the
 	// deploy half. T2.
-	logs := newCappedBuffer(stageLogCap)
-	var writer io.Writer = logs
-	lw := e.newStageLineWriter(runID, stage)
-	if lw != nil {
-		writer = io.MultiWriter(logs, lw)
-	}
-	defer func() {
-		if lw != nil {
-			lw.flush()
-		}
-		sr.Logs = logs.String()
-	}()
+	writer, finishLogs := e.newStageOutput(ctx, runID, stage, sr)
+	defer finishLogs()
 
 	// Note: stage.Config.ManifestPath is a path; a future revision
 	// should read it here (or the App deployer should synthesize the
@@ -350,17 +325,26 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 	// field so Noop tests still pass and the kubectl backend sees a
 	// clear validation error.
 	req := deployer.Request{
-		Kind:        kind,
-		Namespace:   stage.Config.Namespace,
-		HelmChart:   stage.Config.HelmChart,
-		HelmValues:  stage.Config.HelmValues,
-		ReleaseName: stage.Name,
-		Image:       stage.Config.Image,
-		LogWriter:   writer,
+		RegistryAuth:  resolve,
+		RegistryHosts: hosts,
+		Kind:          kind,
+		Namespace:     stage.Config.Namespace,
+		HelmChart:     stage.Config.HelmChart,
+		HelmValues:    stage.Config.HelmValues,
+		ReleaseName:   stage.Name,
+		Image:         stage.Config.Image,
+		LogWriter:     writer,
 	}
 	switch kind {
 	case deployer.KindManifest:
 		req.Manifest = []byte(stage.Config.ManifestPath)
+		if stage.Config.RuntimeName != "" {
+			var err error
+			req.Manifest, err = stampRuntimeManifest(req.Manifest, runID)
+			if err != nil {
+				return err
+			}
+		}
 	case deployer.KindDockerRun:
 		// Per-service docker run: name from the compose service, with
 		// resource limits and the build/image tag from the stage.
@@ -386,6 +370,11 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 				req.Network = e.proxy.Network
 			}
 		}
+		if req.Labels == nil {
+			req.Labels = map[string]string{}
+		}
+		req.Labels[RuntimeRunLabel] = runID
+		req.Labels[RuntimeStageLabel] = stage.ID
 	case deployer.KindCompose:
 		req.Name = stage.Config.ComposeServiceName
 		if stage.Config.ComposeProject != "" {
@@ -393,10 +382,21 @@ func (e *Executor) executeDeploy(ctx context.Context, runID string, stage *model
 			req.ComposeService = stage.Config.ComposeServiceName
 		}
 		req.ComposeFile = stage.Config.ManifestPath // reused field: compose-file path
+		if req.ComposeService != "" && req.Image != "" {
+			file, cleanup, err := composeImageOverride(req.ComposeService, req.Image, runID)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+			req.ComposeOverrideFile = file
+		}
 	}
 	res, err := dep.Deploy(ctx, req)
 	if err != nil {
 		return fmt.Errorf("deploy: %w", err)
+	}
+	if kind == deployer.KindDockerRun {
+		assignRuntimeReceipt(ctx, runID, stage.ID, req, res, sr)
 	}
 	resType := "k8s-resource"
 	if kind == deployer.KindDockerRun || kind == deployer.KindCompose {

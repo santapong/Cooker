@@ -43,9 +43,11 @@ const valueField = "value"
 // Manager satisfies secrets.Manager using Vault KV v2 with one secret
 // per key at <mount>/<prefix>/<envID>/<key>.
 type Manager struct {
-	client *vault.Client
-	mount  string
-	prefix string
+	client    *vault.Client
+	mount     string
+	prefix    string
+	authority string
+	versions  versionClient
 }
 
 // Config holds the SDK-construction inputs. Address must be a full
@@ -72,6 +74,9 @@ func New(cfg Config) (*Manager, error) {
 	if cfg.Address == "" {
 		return nil, errors.New("vault: COOKER_SECRETS_VAULT_ADDR is required")
 	}
+	// Unsupported version-reference authorities do not change legacy editing
+	// behavior (e.g. an existing Unix-socket SDK address). Pin fails closed.
+	authority, _ := secrets.CanonicalAuthority(cfg.Address)
 	c, err := vault.New(
 		vault.WithAddress(cfg.Address),
 	)
@@ -83,11 +88,27 @@ func New(cfg Config) (*Manager, error) {
 			return nil, err
 		}
 	}
+	var pinned *vault.Client
+	if authority != "" {
+		pinned, err = vault.New(vault.WithAddress(cfg.Address), vault.WithDisableRedirects())
+		if err != nil {
+			return nil, secrets.ErrVersionUnavailable
+		}
+		if cfg.Token != "" {
+			if err := pinned.SetToken(cfg.Token); err != nil {
+				return nil, secrets.ErrVersionUnavailable
+			}
+		}
+	}
 	mount := cfg.Mount
 	if mount == "" {
 		mount = "secret"
 	}
-	return &Manager{client: c, mount: mount, prefix: cfg.Prefix}, nil
+	m := &Manager{client: c, mount: mount, prefix: cfg.Prefix, authority: authority}
+	if pinned != nil {
+		m.versions = &pinned.Secrets
+	}
+	return m, nil
 }
 
 // dirPath is the KV v2 path that holds all keys for an environment; it

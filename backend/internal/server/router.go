@@ -8,9 +8,13 @@ import (
 
 	"github.com/santapong/cooker/internal/auth"
 	"github.com/santapong/cooker/internal/governance"
+	"github.com/santapong/cooker/internal/provider/vercel"
+	"github.com/santapong/cooker/internal/service"
 )
 
 func (s *Server) registerRoutes() {
+	preview := vercel.LandingPreview()
+	s.router.GET("/landing-preview/*path", func(c *gin.Context) { preview.ServeHTTP(c.Writer, c.Request) })
 	if s.localAuth != nil {
 		// CWE-307: signup/signin are unauthenticated credential endpoints
 		// registered on s.router OUTSIDE the /api/v1 per-user limiter, so a
@@ -26,7 +30,7 @@ func (s *Server) registerRoutes() {
 	}
 	s.router.GET("/api/v1/auth/methods", s.authMethods)
 
-	api := s.router.Group("/api/v1", s.oidcMW.Handler())
+	api := s.router.Group("/api/v1", nativeRuntimeLogHeaders(), s.oidcMW.Handler())
 	api.Use(auditMiddleware(s.audit))
 
 	// Optional-feature discovery for the frontend (authenticated so
@@ -34,6 +38,20 @@ func (s *Server) registerRoutes() {
 	api.GET("/capabilities", func(c *gin.Context) { s.handler.GetCapabilities(c) })
 
 	h := s.handler
+	api.GET("/catalog/apps", h.ListCatalogApps)
+	api.GET("/catalog/apps/:id", h.GetCatalogApp)
+	api.GET("/catalog/services", h.ListCatalogServices)
+	api.GET("/catalog/pipelines", h.ListCatalogPipelines)
+	api.GET("/catalog/pipelines/:id", h.GetCatalogPipeline)
+	api.GET("/integrations/vercel", h.GetVercelView)
+	api.GET("/integrations/neon", h.ListNeonConnections)
+	api.GET("/integrations/neon/connections/:id", h.GetNeonConnection)
+	api.GET("/integrations/vercel/landing", h.GetVercelLanding)
+	api.GET("/integrations/vercel/landing/operations/:id", h.GetVercelPublication)
+	api.GET("/integrations/vercel/landing/adoptions", h.ListVercelLandingAdoptions)
+	api.GET("/integrations/vercel/landing/adoptions/:id", h.GetVercelLandingAdoption)
+	api.GET("/integrations/vercel/landing/update-reviews", h.ListVercelLandingUpdateReviews)
+	api.GET("/integrations/vercel/landing/update-reviews/:id", h.GetVercelLandingUpdateReview)
 	writeRole := auth.RequireRole(auth.RoleOperator, auth.RoleAdmin)
 	adminRole := auth.RequireRole(auth.RoleAdmin)
 	mfa := auth.RequireMFA(s.config.OIDC.MFAACRValues...)
@@ -72,6 +90,12 @@ func (s *Server) registerRoutes() {
 			expensive, idempotencyMiddleware(s.idempotency), h.RunPipeline)
 		pipelines.GET("/:id/runs", h.ListPipelineRuns)
 		pipelines.GET("/:id/runs/:runId", h.GetPipelineRun)
+		pipelines.GET("/:id/runs/:runId/stages/:stageId/runtime", h.GetNativeStageRuntime)
+		pipelines.GET("/:id/runs/:runId/stages/:stageId/log-replicas", writeRole, h.GetNativeStageLogReplicas)
+		pipelines.POST("/:id/runs/:runId/stages/:stageId/log-sessions", writeRole, h.OpenNativeStageLogSession)
+		pipelines.GET("/:id/runs/:runId/stages/:stageId/log-sessions/:sessionId", writeRole, h.GetNativeStageLogSession)
+		pipelines.GET("/:id/runs/:runId/stages/:stageId/log-sessions/:sessionId/download", writeRole, h.DownloadNativeStageLogSession)
+		pipelines.DELETE("/:id/runs/:runId/stages/:stageId/log-sessions/:sessionId", writeRole, h.CloseNativeStageLogSession)
 		pipelines.POST("/:id/runs/:runId/cancel", writeRole, h.CancelPipelineRun)
 		pipelines.GET("/:id/runs/:runId/logs/:stageId", h.GetStageLogs)
 		// Run diff (roadmap M3): compare a run against last-success (or
@@ -127,6 +151,45 @@ func (s *Server) registerRoutes() {
 		// Queryable audit trail (roadmap M5). Backed by the db audit
 		// sink; the memory store serves a bounded ring in dev.
 		admin.GET("/audit", h.ListAuditEvents)
+		admin.GET("/notification-deliveries", h.ListNotificationDeliveries)
+		admin.GET("/notification-deliveries/:id", h.GetNotificationDelivery)
+		admin.GET("/integrations/vercel/connections", h.ListVercelConnections)
+		admin.POST("/integrations/neon/connections", expensive, h.CreateNeonConnection)
+		admin.PUT("/integrations/neon/connections/:id", expensive, h.UpdateNeonConnection)
+		admin.DELETE("/integrations/neon/connections/:id", h.DeleteNeonConnection)
+		admin.POST("/integrations/neon/connections/:id/sync", expensive, h.SyncNeonConnection)
+		admin.GET("/integrations/neon/connections/:id/projects", expensive, h.DiscoverNeonProjects)
+		admin.GET("/integrations/neon/connections/:id/projects/:projectId/branches/:branchId/databases", expensive, h.GetNeonDatabases)
+		admin.GET("/integrations/neon/connections/:id/projects/:projectId/endpoints", expensive, h.GetNeonEndpoints)
+		admin.POST("/integrations/vercel/landing/adoptions", expensive, h.CreateVercelLandingAdoption)
+		admin.PUT("/integrations/vercel/landing/adoptions/:id", expensive, h.UpdateVercelLandingAdoption)
+		admin.POST("/integrations/vercel/landing/update-reviews", expensive, h.CreateVercelLandingUpdateReview)
+		admin.POST("/integrations/vercel/landing/review", expensive, h.ReviewVercelLanding)
+		admin.POST("/integrations/vercel/landing/operations/:id/deploy", expensive, h.DeployVercelLanding)
+		admin.POST("/integrations/vercel/landing/operations/:id/check", expensive, h.CheckVercelPublication)
+		admin.POST("/integrations/vercel/connections", expensive, h.CreateVercelConnection)
+		admin.PUT("/integrations/vercel/connections/:id", expensive, h.UpdateVercelConnection)
+		admin.DELETE("/integrations/vercel/connections/:id", h.DeleteVercelConnection)
+		admin.GET("/integrations/vercel/connections/:id/projects", expensive, h.ListVercelProjects)
+		admin.POST("/integrations/vercel/connections/:id/sync", expensive, h.SyncVercelConnection)
+		admin.GET("/source-connections", h.ListSourceConnections)
+		admin.POST("/source-connections", h.CreateSourceConnection)
+		admin.PUT("/source-connections/:id", h.UpdateSourceConnection)
+		admin.POST("/source-connections/:id/token-replacement", h.ReplaceSourceToken)
+		admin.GET("/trigger-rules", h.ListTriggerRules)
+		admin.POST("/trigger-rules/preview", h.PreviewTriggerRule)
+		admin.POST("/trigger-rules", h.SaveTriggerRule)
+		admin.POST("/trigger-rules/:id/disable", h.DisableTriggerRule)
+		admin.POST("/trigger-rules/:id/check", h.CheckTriggerRef)
+		admin.GET("/trigger-deliveries/:id", h.GetTriggerDelivery)
+		admin.GET("/trigger-deliveries", h.ListTriggerDeliveries)
+		admin.GET("/trigger-deliveries/:id/history", h.GetTriggerDeliveryHistory)
+		admin.GET("/webhook-attempts", h.ListWebhookAttempts)
+		admin.GET("/trigger-intents", h.ListTriggerIntents)
+		admin.GET("/trigger-intents/:id", h.GetTriggerIntent)
+		admin.POST("/trigger-intents/:id/approve", h.ApproveTriggerIntent)
+		admin.GET("/jobs/:id", h.GetJob)
+		admin.POST("/jobs/:id/resolve", h.ResolveJob)
 	}
 
 	docker := api.Group("/docker")
@@ -203,6 +266,7 @@ func (s *Server) registerRoutes() {
 	environments := api.Group("/environments")
 	{
 		environments.GET("", h.ListEnvironments)
+		environments.GET("/:id/secret-keys", h.ListEnvironmentSecretKeys)
 		environments.POST("", writeRole, h.CreateEnvironment)
 		environments.PUT("/:id", writeRole, h.UpdateEnvironment)
 		environments.DELETE("/:id", adminRole, mfa, h.DeleteEnvironment)
@@ -241,6 +305,7 @@ func (s *Server) registerRoutes() {
 
 	apps := api.Group("/apps")
 	{
+		apps.GET("/source-connections", h.AppSourceConnections)
 		apps.GET("", h.ListApps)
 		apps.POST("", writeRole, h.CreateApp)
 		// Pre-import build detection for the New-App wizard. Static
@@ -284,6 +349,12 @@ func (s *Server) registerRoutes() {
 		// Deployment-view runtime panel: live container/pod state for one
 		// service of the app's compose deployment DAG.
 		apps.GET("/:id/services/:svc/runtime", h.GetServiceRuntime)
+		// Runtime log snapshots share the live stream's operator/admin boundary.
+		apps.GET("/:id/services/:svc/log-replicas", writeRole, h.GetServiceLogReplicas)
+		apps.POST("/:id/services/:svc/log-sessions", writeRole, h.OpenServiceLogSession)
+		apps.GET("/:id/services/:svc/log-sessions/:sessionId", writeRole, h.GetServiceLogSession)
+		apps.GET("/:id/services/:svc/log-sessions/:sessionId/download", writeRole, h.DownloadServiceLogSession)
+		apps.DELETE("/:id/services/:svc/log-sessions/:sessionId", writeRole, h.CloseServiceLogSession)
 	}
 
 	hosts := api.Group("/hosts")
@@ -308,6 +379,7 @@ func (s *Server) registerRoutes() {
 		s.webhookRateLimiter = wl
 		webhookLimit = wl.webhookMiddleware()
 	}
+	s.router.POST("/webhooks/connections/:id", webhookLimit, h.SourceWebhook)
 	s.router.POST("/webhooks/github", webhookLimit, idempotencyMiddleware(s.idempotency), h.GitHubWebhook)
 	s.router.POST("/webhooks/gitlab", webhookLimit, idempotencyMiddleware(s.idempotency), h.GitLabWebhook)
 	s.router.POST("/webhooks/bitbucket", webhookLimit, idempotencyMiddleware(s.idempotency), h.BitbucketWebhook)
@@ -349,8 +421,9 @@ func (s *Server) registerRoutes() {
 	settings := api.Group("/settings")
 	{
 		settings.GET("/registries", h.ListRegistryConfigs)
-		settings.POST("/registries", adminRole, h.AddRegistryConfig)
-		settings.DELETE("/registries/:id", adminRole, h.DeleteRegistryConfig)
+		settings.POST("/registries", adminRole, mfa, h.AddRegistryConfig)
+		settings.PATCH("/registries/:id/grants", adminRole, mfa, h.UpdateRegistryGrants)
+		settings.DELETE("/registries/:id", adminRole, mfa, h.DeleteRegistryConfig)
 		settings.GET("/clusters", h.ListClusterConfigs)
 		settings.POST("/clusters", adminRole, h.AddClusterConfig)
 		settings.DELETE("/clusters/:id", adminRole, h.DeleteClusterConfig)
@@ -368,7 +441,7 @@ func (s *Server) registerRoutes() {
 
 	api.POST("/ws-tickets", s.issueWSTicket)
 
-	ws := s.router.Group("/ws", s.wsTicketGate())
+	ws := s.router.Group("/ws", nativeRuntimeLogHeaders(), s.wsTicketGate())
 	{
 		ws.GET("/pipeline-run/:runId", func(c *gin.Context) {
 			s.wsHub.HandlePipelineRun(c.Writer, c.Request, c.Param("runId"))
@@ -391,6 +464,26 @@ func (s *Server) registerRoutes() {
 				return
 			}
 			s.wsHub.HandleRuntimeLogs(c.Writer, c.Request, appID, svc, produce)
+		})
+		ws.GET("/pipelines/:pipelineId/runs/:runId/stages/:stageId/runtime-logs", func(c *gin.Context) {
+			c.Header("Cache-Control", "no-store")
+			c.Header("X-Content-Type-Options", "nosniff")
+			if s.wsHub == nil || h.Runtime == nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": service.ErrRuntimeLogUnavailable.Error()})
+				return
+			}
+			subject, ok := nativeRuntimeLogSubject(c.Request.URL.Path)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": service.ErrRuntimeLogRequest.Error()})
+				return
+			}
+			channel, produce, err := h.PrepareNativeStageLogs(c.Request.Context(), subject)
+			if err != nil {
+				status, message := nativeRuntimeLogError(err)
+				c.JSON(status, gin.H{"error": message})
+				return
+			}
+			s.wsHub.handleNativeRuntimeLogs(c.Writer, c.Request, channel, produce)
 		})
 		ws.GET("/kubernetes/watch", func(c *gin.Context) {
 			s.wsHub.HandleKubeWatch(c.Writer, c.Request, c.Query("namespace"), c.Query("resource"))

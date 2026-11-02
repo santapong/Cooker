@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { appsApi } from '../api/apps';
 import type { AppDeployRecord, AppDriftReport, AppModel } from '../types/app';
 import Badge from '../components/ui/Badge';
 import Caps from '../components/ui/Caps';
 import Panel from '../components/ui/Panel';
+import AppServices from '../components/catalog/ServiceGroups';
+import AutomationPanel from '../components/app/AutomationPanel';
+import AppEnvironmentBindings from '../components/app/AppEnvironmentBindings';
+import AppRegistryAccess from '../components/app/AppRegistryAccess';
+import { useAuth } from '../auth/OIDCProvider';
 import ConfirmButton from '../components/ui/ConfirmButton';
-import { Actions, Field, TextInput } from '../components/ui/form';
+import { Actions } from '../components/ui/form';
 import { ChartRows, type ChartRow, type ChartStatus } from '../components/list/StarChart';
 import { usePortholeTransition } from '../hooks/usePortholeTransition';
 import { pushToast } from '../stores/toastStore';
@@ -25,34 +30,52 @@ export default function AppDetailPage() {
   const { id = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const open = usePortholeTransition();
+  const { user } = useAuth();
+  const canEdit = !!user?.roles.some((role) => role === 'admin' || role === 'operator');
+  const isAdmin = !!user?.roles.includes('admin');
   const [app, setApp] = useState<AppModel | null>(null);
   const [history, setHistory] = useState<AppDeployRecord[]>([]);
+  const [historyUnavailable, setHistoryUnavailable] = useState(false);
+  const refreshVersion = useRef(0);
   const [drift, setDrift] = useState<AppDriftReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deploying, setDeploying] = useState(false);
-  const [secret, setSecret] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!id) return;
+    const version = ++refreshVersion.current;
     try {
       const [a, h, d] = await Promise.all([
-        appsApi.get(id),
-        appsApi.listDeploys(id).then((r) => r?.deploys ?? []).catch(() => [] as AppDeployRecord[]),
+        appsApi.get(id).catch(() => null),
+        appsApi.listDeploys(id).then((r) => r?.deploys ?? []).catch(() => null),
         appsApi.drift(id).catch(() => null),
       ]);
-      setApp(a);
-      setHistory(h);
+      if (version !== refreshVersion.current) return;
+      setHistoryUnavailable(h === null);
+      if (h !== null) setHistory(h);
+      else setHistory((previous) => previous.filter((row) => row.appId === id));
       setDrift(d);
-      setError(null);
-    } catch (e) {
-      setError(message(e));
+      if (a === null) setError('App details are unavailable. Try refreshing.');
+      else {
+        setApp(a);
+        setError(null);
+      }
+    } catch {
+      if (version !== refreshVersion.current) return;
+      setError('App details are unavailable. Try refreshing.');
     }
   }, [id]);
 
+  const invalidateRefresh = useCallback(() => { refreshVersion.current++; }, []);
+
   useEffect(() => {
+    setApp(null);
+    setHistory([]);
+    setHistoryUnavailable(false);
     void refresh();
-  }, [refresh]);
+    return invalidateRefresh;
+  }, [refresh, invalidateRefresh]);
   // Poll faster while a canary is in flight.
   const canaryLive = app?.activeCanary?.status === 'progressing';
   useEffect(() => {
@@ -90,21 +113,6 @@ export default function AppDetailPage() {
       await appsApi.rollback(id, deployId);
       pushToast('success', 'Rollback started.');
       window.setTimeout(() => void refresh(), 3000);
-    } catch (e) {
-      pushToast('error', message(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const saveSecret = async () => {
-    if (!secret.trim()) return;
-    setBusy('secret');
-    try {
-      await appsApi.setWebhookSecret(id, secret.trim());
-      pushToast('success', 'Webhook secret saved.');
-      setSecret('');
-      await refresh();
     } catch (e) {
       pushToast('error', message(e));
     } finally {
@@ -163,7 +171,6 @@ export default function AppDetailPage() {
   }
   if (!app) return <div className="detail" />;
 
-  const webhookUrl = `${window.location.origin}/api/v1/webhooks/github`;
   const health = app.healthStatus ?? 'unknown';
   const rows: ChartRow[] = history.map((d, i) => {
     const portholeUrl = d.pipelineId ? `/apps/${id}/deployments/${d.pipelineId}/${d.runId}` : null;
@@ -172,7 +179,7 @@ export default function AppDetailPage() {
       name: d.imageRef ? d.imageRef.split('/').pop() ?? d.imageRef : `run ${shortId(d.runId)}`,
       sub: d.digest ? d.digest.slice(0, 19) : undefined,
       status: deployStatus(d.status),
-      meta: [d.kind, d.status, timeAgo(d.createdAt)],
+      meta: [d.kind === 'rejected' ? 'Rejected before deployment' : d.kind, d.status, timeAgo(d.createdAt)],
       trailing: (
         <>
           {portholeUrl && (
@@ -186,7 +193,7 @@ export default function AppDetailPage() {
               porthole ↗
             </a>
           )}
-          {i > 0 && d.status === 'success' && d.kind === 'deploy' && d.imageRef && (
+          {canEdit && i > 0 && d.status === 'success' && d.kind === 'deploy' && d.imageRef && (
             <ConfirmButton className="hud-btn" confirmLabel="Roll back?" onConfirm={() => rollback(d.id)} disabled={busy !== null}>
               Roll back
             </ConfirmButton>
@@ -198,6 +205,7 @@ export default function AppDetailPage() {
 
   return (
     <div className="detail">
+      {error && <div className="form-error" role="alert">{error}</div>}
       <header className="detail-head">
         <div className="grow">
           <h1>{app.name}</h1>
@@ -217,7 +225,7 @@ export default function AppDetailPage() {
             {app.buildPlan?.commit && <span>commit {app.buildPlan.commit.slice(0, 12)}</span>}
             {app.deployTarget?.prefix && <span>prefix {app.deployTarget.prefix}</span>}
             {app.environmentId && <span>env {shortId(app.environmentId)}</span>}
-            <span>{app.autoDeploy ? 'auto-deploy' : 'manual deploy'}</span>
+            <span>Manual deploy · optional Git rules</span>
             {app.deployedURL && (
               <a href={app.deployedURL} target="_blank" rel="noreferrer">
                 Open app ↗
@@ -226,33 +234,27 @@ export default function AppDetailPage() {
           </div>
         </div>
         <Actions>
-          {app.buildPlan?.kind === 'compose' && <Link className="hud-btn" to={`/apps/new?appId=${encodeURIComponent(app.id)}`}>Review source & targets</Link>}
-          <button type="button" className="hud-btn hud-btn-primary" onClick={deploy} disabled={deploying}>
+          {canEdit && app.buildPlan?.kind === 'compose' && <Link className="hud-btn" to={`/apps/new?appId=${encodeURIComponent(app.id)}`}>Review source & targets</Link>}
+          {canEdit && <button type="button" className="hud-btn hud-btn-primary" onClick={deploy} disabled={deploying}>
             {deploying ? 'Deploying…' : '▶ Deploy'}
-          </button>
-          <ConfirmButton className="hud-btn" confirmLabel="Delete app?" onConfirm={remove}>
+          </button>}
+          {isAdmin && <ConfirmButton className="hud-btn" confirmLabel="Delete app?" onConfirm={remove}>
             Delete
-          </ConfirmButton>
+          </ConfirmButton>}
         </Actions>
       </header>
 
       <div className="panel-grid">
-        <Panel title="Deploy history" aside={`${history.length} ${history.length === 1 ? 'deploy' : 'deploys'}`} className="panel-span">
-          {rows.length ? <ChartRows rows={rows} hasThumbs={false} /> : <p>No deploys yet. Press Deploy to build, push and roll out {app.branch}.</p>}
+        <AppServices nativeAppId={app.id} />
+        <Panel title="Deploy history" aside={historyUnavailable ? 'Unavailable' : `${history.length} ${history.length === 1 ? 'attempt' : 'attempts'}`} className="panel-span">
+          <button className="hud-btn" onClick={() => void refresh()}>Refresh history</button>
+          {historyUnavailable && <p role="alert">Deployment history is unavailable.{rows.length ? ' Showing the last loaded attempts.' : ' Try refreshing.'}</p>}
+          {rows.length ? <ChartRows rows={rows} hasThumbs={false} /> : !historyUnavailable && <p>No deploys yet. Press Deploy to build, push and roll out {app.branch}.</p>}
         </Panel>
 
-        <Panel title="Webhook" aside={app.hasWebhook ? 'configured' : 'not configured'}>
-          <p>Point a GitHub push webhook at this URL; auto-deploy uses it.</p>
-          <code className="code">{webhookUrl}</code>
-          <Field label="Secret">
-            <TextInput type="password" autoComplete="off" value={secret} placeholder="shared secret" onChange={(e) => setSecret(e.target.value)} />
-          </Field>
-          <Actions>
-            <button type="button" className="hud-btn" onClick={saveSecret} disabled={!secret.trim() || busy !== null}>
-              {busy === 'secret' ? 'Saving…' : 'Save secret'}
-            </button>
-          </Actions>
-        </Panel>
+        <Panel title="Git deployment rules" className="panel-span"><AutomationPanel app={app} onChanged={refresh} /></Panel>
+        <Panel title="Configuration & protected key bindings" className="panel-span"><AppEnvironmentBindings key={app.id} app={app} onSaved={refresh} /></Panel>
+        <Panel title="Registry access" className="panel-span"><AppRegistryAccess key={app.id} app={app} onSaved={refresh} /></Panel>
 
         <Panel title="Drift" aside={drift?.status ?? 'unknown'}>
           {drift ? (
@@ -281,11 +283,11 @@ export default function AppDetailPage() {
 
         <Panel title="Rollout" aside={app.canary?.strategy ?? 'rolling'}>
           <div className="option-grid" role="group" aria-label="Strategy">
-            <button type="button" className="option" aria-pressed={(app.canary?.strategy ?? 'rolling') === 'rolling'} onClick={() => setStrategy('rolling')} disabled={busy !== null}>
+            <button type="button" className="option" aria-pressed={(app.canary?.strategy ?? 'rolling') === 'rolling'} onClick={() => setStrategy('rolling')} disabled={!canEdit || busy !== null}>
               <Caps>Rolling</Caps>
               <small>Replace the running version</small>
             </button>
-            <button type="button" className="option" aria-pressed={app.canary?.strategy === 'canary'} onClick={() => setStrategy('canary')} disabled={busy !== null}>
+            <button type="button" className="option" aria-pressed={app.canary?.strategy === 'canary'} onClick={() => setStrategy('canary')} disabled={!canEdit || busy !== null}>
               <Caps>Canary</Caps>
               <small>Shift traffic, then promote</small>
             </button>
@@ -306,7 +308,7 @@ export default function AppDetailPage() {
                   </>
                 )}
               </div>
-              {app.activeCanary.status === 'progressing' && (
+              {canEdit && app.activeCanary.status === 'progressing' && (
                 <Actions>
                   <ConfirmButton className="hud-btn hud-btn-primary" confirmLabel="Promote to 100%?" onConfirm={() => canaryAction('promote')} disabled={busy !== null}>
                     Promote

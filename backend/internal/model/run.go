@@ -6,11 +6,12 @@ import "time"
 type RunStatus string
 
 const (
-	RunStatusPending   RunStatus = "pending"
-	RunStatusRunning   RunStatus = "running"
-	RunStatusSuccess   RunStatus = "success"
-	RunStatusFailed    RunStatus = "failed"
-	RunStatusCancelled RunStatus = "cancelled"
+	RunStatusNeedsAttention RunStatus = "needs_attention"
+	RunStatusPending        RunStatus = "pending"
+	RunStatusRunning        RunStatus = "running"
+	RunStatusSuccess        RunStatus = "success"
+	RunStatusFailed         RunStatus = "failed"
+	RunStatusCancelled      RunStatus = "cancelled"
 	// RunStatusSkipped marks a stage whose incoming edge conditions
 	// resolved to "don't run" (dag-adaptation Primitive #2). Terminal,
 	// stage-level only — a PipelineRun itself is never skipped.
@@ -43,6 +44,9 @@ type PipelineRun struct {
 	StageRuns           []StageRun          `json:"stageRuns"`
 	EnvironmentStatuses []EnvironmentStatus `json:"environmentStatuses"`
 	Variables           map[string]string   `json:"variables"`
+	// Source is safe lineage derived from admitted source metadata. Older runs
+	// remain nil; only a worker after verified checkout sets CheckedOutAt.
+	Source *PipelineRunSource `json:"source,omitempty"`
 	// CreatedAt is set once at insert time and never changes. Clients use
 	// it to sort or paginate run history because StartedAt is null for
 	// pending runs.
@@ -84,6 +88,13 @@ type StageRun struct {
 	// in the existing stage_runs JSONB column (no migration). Capped:
 	// per-key value <= 4 KiB, per-stage total <= 32 KiB.
 	Outputs map[string]string `json:"outputs,omitempty"`
+	// RuntimeReceipt is optional deployment-time identity, never reconstructed
+	// from an artifact name or a later pipeline definition. It is retained in
+	// the existing stage_runs JSONB alongside the recorded operation outcome.
+	RuntimeReceipt *RuntimeReceipt `json:"runtimeReceipt,omitempty"`
+	// RuntimeBindingWarning is a fixed code when successful deployment could
+	// not provide a safe receipt. It does not change the stage outcome.
+	RuntimeBindingWarning string `json:"runtimeBindingWarning,omitempty"`
 }
 
 // Artifact represents a pipeline output, tracked as an OCI content-addressable reference.
@@ -136,6 +147,7 @@ func (r *PipelineRun) Clone() *PipelineRun {
 	cp.StartedAt = cloneTimePtr(r.StartedAt)
 	cp.FinishedAt = cloneTimePtr(r.FinishedAt)
 	cp.HeartbeatAt = cloneTimePtr(r.HeartbeatAt)
+	cp.Source = r.Source.Clone()
 
 	if r.StageRuns != nil {
 		cp.StageRuns = make([]StageRun, len(r.StageRuns))
@@ -169,6 +181,10 @@ func (s StageRun) clone() StageRun {
 	cp := s
 	cp.StartedAt = cloneTimePtr(s.StartedAt)
 	cp.FinishedAt = cloneTimePtr(s.FinishedAt)
+	if s.RuntimeReceipt != nil {
+		receipt := *s.RuntimeReceipt
+		cp.RuntimeReceipt = &receipt
+	}
 	if s.Artifacts != nil {
 		cp.Artifacts = append([]Artifact(nil), s.Artifacts...)
 	}

@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+frontend/node_modules
+.vite/
+test-results/
 
 # Build output
 bin/

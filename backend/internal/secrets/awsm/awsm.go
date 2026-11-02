@@ -22,8 +22,11 @@ import (
 
 // Manager satisfies secrets.Manager against AWS Secrets Manager.
 type Manager struct {
-	client *secretsmanager.Client
-	prefix string
+	client    *secretsmanager.Client
+	prefix    string
+	region    string
+	authority string
+	versions  versionClient
 }
 
 // Config holds the SDK-construction inputs. Region is required if it
@@ -47,9 +50,12 @@ func New(ctx context.Context, cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+	c := secretsmanager.NewFromConfig(awsCfg)
 	return &Manager{
-		client: secretsmanager.NewFromConfig(awsCfg),
-		prefix: cfg.Prefix,
+		client:    c,
+		prefix:    cfg.Prefix,
+		region:    awsCfg.Region,
+		authority: versionAuthority(c.Options().BaseEndpoint),
 	}, nil
 }
 

@@ -172,6 +172,8 @@ export function statusVariant(status: string | undefined | null): BadgeVariant {
       return 'ok';
     case 'failed':
       return 'fail';
+    case 'needs_attention':
+      return 'ember';
     case 'running':
       return 'running';
     default:

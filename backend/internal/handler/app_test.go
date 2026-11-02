@@ -111,12 +111,8 @@ func seedWebhookApp(t *testing.T, r *gin.Engine, name, repo string, autoDeploy b
 	return got, secret
 }
 
-// TestGitHubWebhook_Valid_HMAC_TriggersDeploy proves HS26-05-02 is
-// closed: a signature-verified push to a matching branch of an
-// auto-deploy app now CREATES a run (attributed to the webhook) and
-// dispatches it down the same path the manual Deploy button uses —
-// rather than firing a bare 202 with nothing behind it.
-func TestGitHubWebhook_Valid_HMAC_TriggersDeploy(t *testing.T) {
+// Legacy signatures remain checked, but unattended deployment requires an approved connection rule.
+func TestGitHubWebhook_ValidHMACRequiresSourceConnection(t *testing.T) {
 	h := newTestHandler(t)
 	// Same wiring as the manual Deploy button: a real AppDeployer (noop
 	// executor) plus a RunSpawner. captureSpawner records the dispatch
@@ -143,46 +139,20 @@ func TestGitHubWebhook_Valid_HMAC_TriggersDeploy(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	if w.Code != http.StatusAccepted {
+	if w.Code != http.StatusConflict {
 		t.Fatalf("webhook: %d %s", w.Code, w.Body.String())
 	}
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	if body["commit"] != "deadbeef" || body["branch"] != "main" {
-		t.Errorf("body: %v", body)
+	if body["code"] != "source_connection_required" || body["appId"] != got.ID || body["runId"] != nil {
+		t.Fatalf("unsafe legacy receipt: %v", body)
 	}
-	// The 202 must carry a runId the client can subscribe to — the whole
-	// point of HS26-05-02 is that a run is created, not just acknowledged.
-	runID, _ := body["runId"].(string)
-	if runID == "" {
-		t.Fatalf("expected a runId in the webhook response, got %v", body)
+	if len(spawner.runIDs) != 0 {
+		t.Fatal("legacy webhook started unapproved work")
 	}
-
-	// The deploy must have been dispatched onto the run coordinator for
-	// exactly the run the response named.
-	if len(spawner.runIDs) != 1 || spawner.runIDs[0] != runID {
-		t.Fatalf("expected one spawned deploy for run %s, got %v", runID, spawner.runIDs)
-	}
-
-	// A run row must exist (the handler creates it before Spawn — the
-	// F-07 fix), attributed to the webhook rather than a human. An empty
-	// StartedByUserSub correctly signals "no human actor" to the deploy
-	// governance hook, matching the manual DeployApp stub.
-	run, err := h.Store.Runs.Get(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("run %s not created by webhook: %v", runID, err)
-	}
-	if run.StartedByEmail != "webhook:github" {
-		t.Errorf("run.StartedByEmail = %q, want webhook:github", run.StartedByEmail)
-	}
-	if run.StartedByUserSub != "" {
-		t.Errorf("webhook run must have no human subject, got %q", run.StartedByUserSub)
-	}
-	if run.PipelineID != got.ID {
-		t.Errorf("run.PipelineID = %q, want app id %q", run.PipelineID, got.ID)
-	}
-	if run.Status != model.RunStatusRunning {
-		t.Errorf("run.Status = %q, want running", run.Status)
+	runs, err := h.Store.Runs.List(context.Background(), "", 0, 0)
+	if err != nil || len(runs) != 0 {
+		t.Fatal("legacy webhook created run", err)
 	}
 }
 

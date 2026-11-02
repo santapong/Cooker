@@ -51,8 +51,8 @@ export default function TelemetryConsole({ title, open, onToggle, events, lines,
         <span className="console-meta mono">
           {loading ? 'loading…' : `${count} ${count === 1 ? 'line' : 'lines'}`}
         </span>
-        <span className="console-spacer" />
         {modeSwitch}
+        <span className="console-spacer" />
         {trailing}
       </div>
       {open && (

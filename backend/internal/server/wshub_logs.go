@@ -69,13 +69,43 @@ func (h *WebSocketHub) HandleStageLogs(w http.ResponseWriter, r *http.Request, r
 		send:    make(chan []byte, 256),
 		channel: stageLogChannel(runID, stageID),
 	}
-	h.register <- client
+	if !h.registerClient(client) {
+		return
+	}
 
 	// 5. Replay the backlog directly on conn (single conn-writer: writePump
 	//    has not started yet). On any write error tear the client down and
 	//    bail before starting the pumps.
 	if h.logStore != nil {
-		entries, _ := h.logStore.Read(r.Context(), runID, stageID, since)
+		var entries []logstore.Entry
+		var err error
+		latest := 0
+		if history, ok := h.logStore.(logstore.HistoryStore); ok {
+			entries, latest, err = history.History(r.Context(), runID, stageID, since)
+		} else {
+			entries, err = h.logStore.Read(r.Context(), runID, stageID, since)
+		}
+		control := ""
+		if err != nil {
+			control = "history-unavailable"
+		}
+		if len(entries) > 0 && entries[0].Seq > since+1 {
+			control = "history-truncated"
+		}
+		if len(entries) == 0 && latest > since {
+			control = "history-truncated"
+		}
+		if len(entries) == 0 && latest == 0 && since > 0 {
+			control = "history-unavailable"
+		}
+		if control != "" {
+			_ = conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if werr := conn.WriteJSON(map[string]string{"control": control}); werr != nil {
+				h.unregisterClient(client)
+				_ = conn.Close()
+				return
+			}
+		}
 		for _, e := range entries {
 			frame := logstore.EncodeFrame(runID, stageID, e)
 			if frame == nil {
@@ -85,7 +115,7 @@ func (h *WebSocketHub) HandleStageLogs(w http.ResponseWriter, r *http.Request, r
 			if werr := conn.WriteMessage(websocket.TextMessage, frame); werr != nil {
 				// Client went away mid-replay: unregister (so the hub stops
 				// buffering) and close. Do NOT start the pumps.
-				h.unregister <- client
+				h.unregisterClient(client)
 				_ = conn.Close()
 				return
 			}

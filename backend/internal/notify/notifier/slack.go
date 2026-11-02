@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"time"
 )
@@ -58,10 +56,10 @@ type slackPayload struct {
 func (s *SlackNotifier) Send(ctx context.Context, target Target, event Event) error {
 	var cfg SlackConfig
 	if err := target.DecodeConfig(&cfg); err != nil {
-		return fmt.Errorf("slack: decode config: %w", err)
+		return invalidConfig()
 	}
 	if cfg.WebhookURL == "" {
-		return fmt.Errorf("slack: target %s missing webhookUrl", target.ID)
+		return invalidConfig()
 	}
 	body := event.Title() + "\n" + event.Body()
 	payload := slackPayload{
@@ -72,21 +70,20 @@ func (s *SlackNotifier) Send(ctx context.Context, target Target, event Event) er
 	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("slack: marshal payload: %w", err)
+		return invalidConfig()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.WebhookURL, bytes.NewReader(buf))
 	if err != nil {
-		return fmt.Errorf("slack: build request: %w", err)
+		return invalidConfig()
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := s.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("slack: post: %w", err)
+		return uncertainSend()
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("slack: status %d: %s", resp.StatusCode, string(b))
+		return receiverFailure(resp.StatusCode)
 	}
 	return nil
 }

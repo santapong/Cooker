@@ -1,9 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-// Theme: the redesign (docs/plans/2026-07-cosmic-frontend-redesign.md) is
-// dark-only. `themeMode` keeps its type so the store contract survives, but
-// 'light' is deferred and no UI control is wired to setThemeMode.
+// Accepted charcoal and Paper workspace themes share semantic tokens.
 export type ThemeMode = 'light' | 'dark';
 
 export type UIMode = 'simple' | 'pro';

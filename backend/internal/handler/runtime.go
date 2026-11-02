@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/santapong/cooker/internal/service"
 )
 
 // GetServiceRuntime returns a snapshot of the live container/pod state
@@ -44,6 +45,7 @@ func (h *Handler) RuntimeLogsProducer(appID, serviceID string) (func(ctx context
 		return nil, false
 	}
 	return func(ctx context.Context, out io.Writer) error {
-		return h.Runtime.Logs(ctx, app, serviceID, out)
+		resolver := &service.AppEnvResolver{Environments: h.Store.Environments, Secrets: h.Secrets}
+		return h.Runtime.StreamDeploymentLogs(ctx, app, serviceID, h.Jobs, resolver, out)
 	}, true
 }

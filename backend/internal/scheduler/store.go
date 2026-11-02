@@ -12,6 +12,9 @@ import (
 // ErrNotFound is returned by Get when no schedule matches the ID.
 var ErrNotFound = errors.New("scheduler: schedule not found")
 
+// ErrConflict rejects a stale edit or an occurrence read before an edit/fire.
+var ErrConflict = errors.New("scheduler: schedule changed")
+
 // Store persists schedules. Both implementations (Postgres + Memory)
 // must implement DueBefore so the scheduler tick can fetch the ready
 // set without scanning the full table on every wakeup.
@@ -71,6 +74,7 @@ func (m *MemoryStore) Create(_ context.Context, s Schedule) error {
 		s.CreatedAt = now
 	}
 	s.UpdatedAt = now
+	s.Version = 1
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, exists := m.schedules[s.ID]; exists {
@@ -83,9 +87,14 @@ func (m *MemoryStore) Create(_ context.Context, s Schedule) error {
 func (m *MemoryStore) Update(_ context.Context, s Schedule) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.schedules[s.ID]; !ok {
+	existing, ok := m.schedules[s.ID]
+	if !ok {
 		return ErrNotFound
 	}
+	if s.Version != existing.Version {
+		return ErrConflict
+	}
+	s.Version++
 	s.UpdatedAt = time.Now().UTC()
 	m.schedules[s.ID] = s
 	return nil
@@ -125,6 +134,7 @@ func (m *MemoryStore) MarkFired(_ context.Context, id string, firedAt time.Time,
 	s.LastRunID = runID
 	s.NextRunAt = nextRunAt
 	s.UpdatedAt = time.Now().UTC()
+	s.Version++
 	m.schedules[id] = s
 	return nil
 }
@@ -142,7 +152,7 @@ func (p *PostgresStore) List(ctx context.Context) ([]Schedule, error) {
 
 func (p *PostgresStore) query(ctx context.Context, suffix string) ([]Schedule, error) {
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT id, pipeline_id, name, cron_expr, timezone, last_run_at,
+		SELECT id, version, pipeline_id, name, cron_expr, timezone, last_run_at,
 		       last_run_id, next_run_at, enabled, created_at, updated_at
 		  FROM schedules `+suffix)
 	if err != nil {
@@ -162,7 +172,7 @@ func (p *PostgresStore) query(ctx context.Context, suffix string) ([]Schedule, e
 
 func (p *PostgresStore) Get(ctx context.Context, id string) (Schedule, error) {
 	row := p.db.QueryRowContext(ctx, `
-		SELECT id, pipeline_id, name, cron_expr, timezone, last_run_at,
+		SELECT id, version, pipeline_id, name, cron_expr, timezone, last_run_at,
 		       last_run_id, next_run_at, enabled, created_at, updated_at
 		  FROM schedules WHERE id = $1`, id)
 	s, err := scanSchedule(row)
@@ -195,15 +205,18 @@ func (p *PostgresStore) Update(ctx context.Context, s Schedule) error {
 	res, err := p.db.ExecContext(ctx, `
 		UPDATE schedules
 		   SET pipeline_id=$2, name=$3, cron_expr=$4, timezone=$5,
-		       next_run_at=$6, enabled=$7, updated_at=NOW()
-		 WHERE id=$1`,
-		s.ID, s.PipelineID, s.Name, s.CronExpr, s.Timezone, s.NextRunAt, s.Enabled)
+		       next_run_at=$6, enabled=$7, updated_at=NOW(), version=version+1
+		 WHERE id=$1 AND version=$8`,
+		s.ID, s.PipelineID, s.Name, s.CronExpr, s.Timezone, s.NextRunAt, s.Enabled, s.Version)
 	if err != nil {
 		return fmt.Errorf("scheduler: update: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return ErrNotFound
+		if _, err := p.Get(ctx, s.ID); err != nil {
+			return err
+		}
+		return ErrConflict
 	}
 	return nil
 }
@@ -222,7 +235,7 @@ func (p *PostgresStore) Delete(ctx context.Context, id string) error {
 
 func (p *PostgresStore) DueBefore(ctx context.Context, cutoff time.Time) ([]Schedule, error) {
 	rows, err := p.db.QueryContext(ctx, `
-		SELECT id, pipeline_id, name, cron_expr, timezone, last_run_at,
+		SELECT id, version, pipeline_id, name, cron_expr, timezone, last_run_at,
 		       last_run_id, next_run_at, enabled, created_at, updated_at
 		  FROM schedules
 		 WHERE enabled = TRUE AND next_run_at <= $1
@@ -248,7 +261,7 @@ func (p *PostgresStore) MarkFired(ctx context.Context, id string, firedAt time.T
 		   SET last_run_at = $2,
 		       last_run_id = $3,
 		       next_run_at = $4,
-		       updated_at = NOW()
+		       updated_at = NOW(), version = version + 1
 		 WHERE id = $1`,
 		id, firedAt, runID, nextRunAt)
 	if err != nil {
@@ -272,7 +285,7 @@ func scanSchedule(row scannable) (Schedule, error) {
 		name      sql.NullString
 		lastRunID sql.NullString
 	)
-	if err := row.Scan(&s.ID, &s.PipelineID, &name, &s.CronExpr, &s.Timezone,
+	if err := row.Scan(&s.ID, &s.Version, &s.PipelineID, &name, &s.CronExpr, &s.Timezone,
 		&lastRunAt, &lastRunID, &s.NextRunAt, &s.Enabled,
 		&s.CreatedAt, &s.UpdatedAt); err != nil {
 		return Schedule{}, err

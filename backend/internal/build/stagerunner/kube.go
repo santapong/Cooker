@@ -91,6 +91,9 @@ func NewKube(cfg KubeConfig) (*Kube, error) {
 // Run submits the stage Job, streams its pod logs to req.LogWriter, waits
 // for completion, and reports the container's exit code.
 func (k *Kube) Run(ctx context.Context, req Request) (Result, error) {
+	if req.RegistryAuth != nil {
+		return Result{}, fmt.Errorf("%w: accepted registry transport is not implemented for Kubernetes stages", ErrUnavailable)
+	}
 	if err := validateRequest(req); err != nil {
 		return Result{}, err
 	}

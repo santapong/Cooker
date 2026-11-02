@@ -53,14 +53,25 @@ type BuildPlan struct {
 	Path       string            `json:"path,omitempty"`       // e.g., "Dockerfile", "docker-compose.yml"
 	Args       map[string]string `json:"args,omitempty"`       // Build args / buildpack env
 	Buildpacks []string          `json:"buildpacks,omitempty"` // Paketo buildpack IDs
+	// RegistryConnectionIDs selects administrator-granted connections. IDs alone
+	// confer no authority; admission pins grants, versions and credential scope.
+	RegistryConnectionIDs []string `json:"registryConnectionIds,omitempty"`
 	// Source identity and ordered Compose inputs are persisted in build_plan JSONB.
-	Commit         string   `json:"commit,omitempty"`
-	InstallationID int64    `json:"installationId,omitempty"`
-	Files          []string `json:"files,omitempty"`
-	Profiles       []string `json:"profiles,omitempty"`
+	Commit                  string   `json:"commit,omitempty"`
+	SourceConnectionID      string   `json:"sourceConnectionId,omitempty"`
+	SourceRepositoryID      string   `json:"sourceRepositoryId,omitempty"`
+	SourceConnectionVersion int      `json:"sourceConnectionVersion,omitempty"`
+	InstallationID          int64    `json:"installationId,omitempty"`
+	Files                   []string `json:"files,omitempty"`
+	Profiles                []string `json:"profiles,omitempty"`
 	// Variables contains non-secret Compose interpolation inputs. Secrets belong
 	// in the linked Environment; they are never copied into this configuration.
 	Variables map[string]string `json:"variables,omitempty"`
+	// Empty scope preserves legacy injection. "service" enables explicit
+	// runtime key allowlists per Compose service; omitted services get no
+	// linked environment. The mode preserves deny-all when the map is empty.
+	EnvironmentScope   string              `json:"environmentScope,omitempty"`
+	ServiceEnvironment map[string][]string `json:"serviceEnvironment,omitempty"`
 }
 
 // DeployTarget pins an App to a specific runtime.
@@ -176,6 +187,8 @@ type AppDeployKind string
 const (
 	AppDeployKindDeploy   AppDeployKind = "deploy"
 	AppDeployKindRollback AppDeployKind = "rollback"
+	// Rejected records a determinate attempt before source/build/runtime effects.
+	AppDeployKindRejected AppDeployKind = "rejected"
 )
 
 // AppDeploy is one row of an app's deploy history (roadmap M3).

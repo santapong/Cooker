@@ -1,4 +1,18 @@
 /* ── Run view: canvas region, telemetry console, stage-run inspector ── */
+.run-source-receipt { flex: none; max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-1); background: var(--hull-1); padding: 0 14px; margin-bottom: 12px; }
+.run-source-receipt summary { min-height: 44px; padding: 12px 0; font-size: 12px; cursor: pointer; overflow-wrap: anywhere; }
+.run-source-receipt p { color: var(--ink-3); font-size: 12px; line-height: 1.6; margin: 0 0 12px; }
+.run-source-receipt dl { display: grid; grid-template-columns: minmax(100px, 140px) minmax(0, 1fr); gap: 8px 14px; font-size: 12px; margin: 0 0 16px; }
+.run-source-receipt dt { color: var(--ink-3); }
+.run-source-receipt dd { margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); }
+@media (max-width:600px) { .run-source-receipt dl { grid-template-columns: minmax(0, 1fr); gap: 4px; } .run-source-receipt dd { margin-bottom: 8px; } }
+
+/* Keep the run's title and actions in layout rather than over the diagram. */
+.run-porthole { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); }
+.run-porthole .hud-tl { position: static; grid-column: 1; grid-row: 1; min-width: 0; padding: 18px 12px 14px 26px; }
+.run-porthole .hud-title { overflow-wrap: anywhere; }
+.run-porthole .hud-tr { position: static; grid-column: 2; grid-row: 1; padding: 14px 26px 14px 0; }
+.run-porthole .porthole-scene { position: relative; inset: auto; grid-column: 1 / -1; grid-row: 2; min-height: 0; }
 
 .run-canvas {
   position: absolute;
@@ -121,3 +135,26 @@
 
 .hud-meta { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: var(--sp-3); }
 .hud-meta a { color: var(--ink-2); }
+
+/* On narrow screens, inspection and telemetry share space without overlays. */
+@media (max-width: 860px) {
+  .run-porthole { flex: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; }
+  .run-porthole .hud-tl { padding: 18px 20px 10px; }
+  .run-porthole .hud-tr { grid-column: 1; grid-row: 2; flex-wrap: wrap; padding: 0 20px 16px; }
+  .run-porthole .hud-stats { text-align: left; overflow-wrap: anywhere; }
+  .run-porthole .hud-actions { flex-basis: 100%; flex-wrap: wrap; }
+  .run-porthole .porthole-scene { grid-row: 3; display: flex; flex-direction: column; min-width: 0; }
+  .run-porthole .run-canvas { position: relative; inset: auto; height: 320px; flex: none; }
+  .run-porthole .run-canvas.console-open { bottom: auto; }
+  .run-porthole .console { position: relative; inset: auto; height: auto; flex: none; }
+  .run-porthole .console.is-open { height: 260px; }
+  .run-porthole .console-head { height: auto; min-height: 44px; flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+  .run-porthole .console-toggle { flex: 1 1 100%; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+  .run-porthole .console-dot { flex: none; }
+  .run-porthole .console-mode { flex: none; margin-left: auto; }
+  .run-porthole .console-mode button { min-height: 36px; }
+  .run-porthole .console-spacer { display: none; }
+  .run-porthole .console-head .hud-meta { flex-basis: 100%; min-width: 0; flex-wrap: wrap; overflow-wrap: anywhere; }
+  .run-porthole .console-body { padding-inline: 12px; }
+  .run-porthole .inspector { position: relative; inset: auto; width: auto; max-width: none; max-height: 360px; margin: 12px; flex: none; }
+}

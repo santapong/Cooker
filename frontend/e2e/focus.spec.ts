@@ -14,7 +14,7 @@ test.describe('spec §6.3 — focus after the list → porthole transition', () 
     await page.locator('a.chart-name').first().click();
     await expect(page).toHaveURL(/\/pipelines\/gates\/edit$/);
     await expect.poll(() => active(page), { timeout: 5_000 }).toMatch(/^H1\..*hud-title/);
-    await expect(page.locator('.star')).toHaveCount(3);
+    await expect(page.locator('.pipeline-stage-card')).toHaveCount(3);
   });
 
   test('a direct deep link also lands focus on the porthole heading', async ({ page }) => {

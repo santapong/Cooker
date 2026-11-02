@@ -1,0 +1,7 @@
+{
+  "unit": "cooker-architecture-render-04e19b5a0e01.scope",
+  "exit": 0,
+  "terminalState": "LoadState=not-found\nActiveState=inactive\nControlGroup=\n",
+  "stderrBytes": 0,
+  "browserPhase": "Not run; local reserved memory headroom not met; Pi lacks memory controller and temperature68.1C exceeds trial admission. No Pi execution."
+}

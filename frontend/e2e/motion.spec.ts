@@ -12,10 +12,11 @@ test.describe('spec §6.1 — reduced motion substitutes, never deletes', () => 
     await page.emulateMedia({ reducedMotion: 'reduce' });
   });
 
-  test('the porthole still opens (by opacity) and nothing animates transform', async ({ page }) => {
+  test('the rectangular editor stays readable without animated transforms', async ({ page }) => {
     await gotoEditor(page);
     expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), 'reduced-motion emulation is in force').toBe(true);
-    await expect.poll(() => page.locator('.porthole').evaluate((el) => getComputedStyle(el).opacity), { timeout: 2_000 }).toBe('1');
+    await expect(page.locator('.pipeline-map')).toBeVisible();
+    await expect(page.locator('.pipeline-stage-card')).toHaveCount(3);
     const anims = await runningAnimations(page);
     for (const a of anims) {
       expect(a.props, `${a.name} on ${a.target} must not animate transform under reduced motion`).not.toContain('transform');
@@ -23,8 +24,8 @@ test.describe('spec §6.1 — reduced motion substitutes, never deletes', () => 
     }
   });
 
-  test('scene entrances resolve to opacity fades', async ({ page }) => {
-    await gotoEditor(page);
+  test('run scene entrances resolve to opacity fades', async ({ page }) => {
+    await gotoRun(page);
     expect(await entranceAnimationNames(page)).toEqual({ star: 'fade-in', edge: 'fade-in' });
   });
 
@@ -39,8 +40,8 @@ test.describe('spec §6.1 — reduced motion substitutes, never deletes', () => 
 });
 
 test.describe('spec §6.2 — flash ceiling (SC 2.3.1) and the motion budget', () => {
-  test('twinkle runs ≥ 7 s and no infinite opacity loop cycles faster than 3 Hz', async ({ page }) => {
-    await gotoEditor(page);
+  test('run-view twinkle runs ≥ 7 s and no infinite opacity loop cycles faster than 3 Hz', async ({ page }) => {
+    await gotoRun(page);
     const twinkles = await page.$$eval('.starfield .tw', (els) =>
       els.map((el) => {
         const a = el.getAnimations()[0];
@@ -57,12 +58,12 @@ test.describe('spec §6.2 — flash ceiling (SC 2.3.1) and the motion budget', (
     }
     const names = new Set(anims.map((a) => a.name));
     expect(names.has('drift1') && names.has('drift2') && names.has('twinkle'), 'ambient starfield motion is present under full motion').toBe(true);
-    // Only the ambient drift may move on transform while idle.
-    for (const a of anims.filter((x) => x.props.includes('transform'))) expect(AMBIENT.has(a.name), `${a.name} moves on transform at idle`).toBe(true);
+    // The read-only run also has a deliberately slow running-stage halo.
+    for (const a of anims.filter((x) => x.props.includes('transform'))) expect(AMBIENT.has(a.name) || a.name === 'halo-pulse', `${a.name} unexpectedly moves on transform`).toBe(true);
   });
 
-  test('scene entrances use their full-motion keyframes', async ({ page }) => {
-    await gotoEditor(page);
+  test('run scene entrances use their full-motion keyframes', async ({ page }) => {
+    await gotoRun(page);
     expect(await entranceAnimationNames(page)).toEqual({ star: 'star-in', edge: 'draw' });
   });
 

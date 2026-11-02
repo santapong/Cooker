@@ -3,8 +3,10 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/lib/pq"
 
 	"github.com/santapong/cooker/internal/model"
 	"github.com/santapong/cooker/internal/store"
@@ -21,7 +23,7 @@ func NewRegistryConfigStore(db *sql.DB) *RegistryConfigStore { return &RegistryC
 
 // registryConfigColumns is the SELECT projection shared by List and
 // Get. Keep in sync with scanRegistryConfig.
-const registryConfigColumns = `id, name, url, username, password_ref, created_at, updated_at`
+const registryConfigColumns = `id, name, url, username, password_ref, created_at, updated_at, version, allowed_app_ids, allowed_pipeline_ids`
 
 func (s *RegistryConfigStore) List(ctx context.Context) ([]*model.RegistryConfig, error) {
 	rows, err := s.db.QueryContext(ctx, `
@@ -55,14 +57,41 @@ func (s *RegistryConfigStore) Get(ctx context.Context, id string) (*model.Regist
 }
 
 func (s *RegistryConfigStore) Create(ctx context.Context, r *model.RegistryConfig) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO registry_configs (id, name, url, username, password_ref, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		r.ID, r.Name, r.URL, r.Username, r.PasswordRef, r.CreatedAt, r.UpdatedAt)
+	if r == nil || r.ID == "" || !model.ValidRegistryIDs(r.AllowedAppIDs, 256) || !model.ValidRegistryIDs(r.AllowedPipelineIDs, 256) {
+		return model.ErrInvalidRegistryAuthority
+	}
+	apps, _ := json.Marshal(append([]string{}, r.AllowedAppIDs...))
+	pipelines, _ := json.Marshal(append([]string{}, r.AllowedPipelineIDs...))
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO registry_configs (id, name, url, username, password_ref, created_at, updated_at, allowed_app_ids, allowed_pipeline_ids)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING version`,
+		r.ID, r.Name, r.URL, r.Username, r.PasswordRef, r.CreatedAt, r.UpdatedAt, apps, pipelines).Scan(&r.Version)
 	if err != nil {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return store.ErrConflict
+		}
 		return fmt.Errorf("creating registry config: %w", err)
 	}
 	return nil
+}
+
+func (s *RegistryConfigStore) UpdateGrants(ctx context.Context, id string, expectedVersion int64, appIDs, pipelineIDs []string) (*model.RegistryConfig, error) {
+	if expectedVersion < 1 || !model.ValidRegistryIDs(appIDs, 256) || !model.ValidRegistryIDs(pipelineIDs, 256) {
+		return nil, model.ErrInvalidRegistryAuthority
+	}
+	apps, _ := json.Marshal(append([]string{}, appIDs...))
+	pipelines, _ := json.Marshal(append([]string{}, pipelineIDs...))
+	r, err := scanRegistryConfig(s.db.QueryRowContext(ctx, `UPDATE registry_configs
+		SET allowed_app_ids=$3, allowed_pipeline_ids=$4, updated_at=NOW()
+		WHERE id=$1 AND version=$2 RETURNING `+registryConfigColumns, id, expectedVersion, apps, pipelines))
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, getErr := s.Get(ctx, id); errors.Is(getErr, store.ErrNotFound) {
+			return nil, store.ErrNotFound
+		}
+		return nil, store.ErrConflict
+	}
+	return r, err
 }
 
 func (s *RegistryConfigStore) Delete(ctx context.Context, id string) error {
@@ -78,11 +107,15 @@ func (s *RegistryConfigStore) Delete(ctx context.Context, id string) error {
 
 func scanRegistryConfig(row scannable) (*model.RegistryConfig, error) {
 	r := &model.RegistryConfig{}
+	var apps, pipelines []byte
 	if err := row.Scan(
 		&r.ID, &r.Name, &r.URL, &r.Username, &r.PasswordRef,
-		&r.CreatedAt, &r.UpdatedAt,
+		&r.CreatedAt, &r.UpdatedAt, &r.Version, &apps, &pipelines,
 	); err != nil {
 		return nil, err
+	}
+	if json.Unmarshal(apps, &r.AllowedAppIDs) != nil || json.Unmarshal(pipelines, &r.AllowedPipelineIDs) != nil || !model.ValidRegistryIDs(r.AllowedAppIDs, 256) || !model.ValidRegistryIDs(r.AllowedPipelineIDs, 256) {
+		return nil, model.ErrInvalidRegistryAuthority
 	}
 	return r, nil
 }

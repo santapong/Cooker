@@ -9,7 +9,7 @@
 Build container images, inspect the deployment graph, and ship to a configured runtime from a self-hosted Go + React application.
 
 [![CI](https://github.com/santapong/Cooker/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/santapong/Cooker/actions/workflows/ci.yml)
-[![Go](https://img.shields.io/badge/Go-1.25-00ADD8)](backend/go.mod)
+[![Go](https://img.shields.io/badge/Go-1.27-00ADD8)](backend/go.mod)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 
 [Get started](#get-started) · [Import from GitHub](#from-github-to-a-reviewed-deployment) · [Documentation](docs/README.md) · [Changelog](CHANGELOG.md)
@@ -22,9 +22,13 @@ Build container images, inspect the deployment graph, and ship to a configured r
 
 ## Current delivery plan
 
+The frontend/backend/security source is consolidated in this checkout. See the [2 November integration record](docs/maintenance/2026-11-02-consolidation.md) for checks and outstanding acceptance.
+
 The [complete remaining-work plan](docs/plans/2026-10-29-release-and-service-platform/PLAN.md) preserves48 existing product tasks and adds31 delivery/extension tasks for the kitchen landing, native Vercel execution, Sandbox, durable storage, DAG service groups and runtime logs/metrics. See the [79-task register](docs/plans/2026-10-29-release-and-service-platform/TASKS.md) and [actual delivery evidence](docs/plans/2026-10-29-release-and-service-platform/DELIVERY.md). Planned capabilities are not claimed as implemented or accepted.
 
 A [small Vercel health/log example](examples/vercel-service/README.md) is included. Direct provider deployment and a deployment actually performed by Cooker have separate acceptance receipts.
+
+> **Backend integration candidate:** durable App jobs, reviewed branch/tag rules, encrypted Git connections, service configuration permissions, durable redacted stage logs, and BuildKit/Crane image publication are implemented for local acceptance. Real Docker/n8n and private Gitea tests have run. The full backend roadmap and hosted/cloud release gates remain open. Start with the [capability guide](docs/backend/README.md), [migration instructions](docs/backend/operator-guide.md), and [current evidence](docs/plans/2026-09-28-backend-implementation.md).
 
 ## Two ways to work
 
@@ -43,7 +47,7 @@ The Porthole interface gives each stage type a distinct symbol. Shape identifies
 4. **Destination:** choose a prefix, image registry and configured compute target. Optionally bind a Compose database to an existing external database through a Cooker Environment.
 5. **Review:** check workload names and diagnostics, then **Save app**. Start execution with **Deploy** on the App page.
 
-The saved plan pins a full Git commit SHA. Branch updates require an explicit new inspection and review; reviewed Compose apps use manual deployment. Preview does not build or deploy anything.
+The saved plan pins a full Git commit SHA. Manual deployment remains the default. In this backend candidate, an administrator can explicitly enable a reviewed branch/tag rule; deployment configuration changes require renewed review. Preview does not build or deploy anything.
 
 ![GitHub source is reviewed in Cooker, built with Docker, pushed to an image registry and deployed to existing ECS Fargate infrastructure; the application connects to an existing GCP Cloud SQL database](docs/images/github-compose.svg)
 
@@ -91,7 +95,7 @@ make uat-up
 
 The UAT stack includes a local registry and k3s. It requires host Docker access and registry configuration. GitHub App access and cloud destinations require additional operator setup.
 
-**Current source-build constraint:** GitHub App builds require `COOKER_BUILDER=docker` and `COOKER_PUSHER=docker`. Production-mode validation rejects both backends, so this source-build path is currently for dev/UAT. Do not disable production safeguards to treat it as a production-ready path. Separately configured pipeline builders have different capabilities.
+**Source-build setup in this candidate:** Apps support `COOKER_BUILDER=buildkit` with `COOKER_PUSHER=crane` through a verified OCI artifact handoff. Configure an isolated BuildKit daemon; production TCP endpoints require mutual TLS. The Docker/Docker pair remains development-only. See the [configuration and acceptance limits](docs/backend/buildkit-handoff.md). Full production application acceptance remains pending.
 
 ### Host Cooker
 
@@ -110,7 +114,7 @@ The wizard reports unavailable targets and unsupported Compose fields before dep
 
 ## Architecture and operations
 
-Cooker serves a React 18 / TypeScript frontend and a Go 1.25 API on port 8080. PostgreSQL persists Apps, pipelines, environments and runs. Optional Redis backends support rate limiting, WebSocket tickets and broadcast fan-out.
+Cooker serves a React 18 / TypeScript frontend and a Go 1.27 API on port 8080. PostgreSQL persists Apps, pipelines, environments and runs. Optional Redis backends support rate limiting, WebSocket tickets and broadcast fan-out.
 
 - **Authentication:** local authentication and/or OIDC, with role-based permissions. The GitHub App connection supplies repository access; it is separate from user sign-in.
 - **Secrets:** selectable database, KeepSave, Vault, AWS or GCP backends. External database bindings reference Environment key names.
@@ -121,7 +125,7 @@ Read the [system design](docs/system-design/README.md), [environment variable re
 
 ## Development and checks
 
-Requires Go 1.25 and Node.js 20 or later. Install frontend dependencies with `npm ci` in `frontend/`.
+Requires Go 1.27.3 and Node.js 24 or later. Install frontend dependencies with `npm ci` in `frontend/`.
 
 ```sh
 # From backend/

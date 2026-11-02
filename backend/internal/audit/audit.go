@@ -49,8 +49,12 @@ type Sink interface {
 // (and to document intent at the package boundary). Paths use Gin's
 // route-template form (not the raw URL).
 var redactedRoutes = map[string]bool{
-	"/api/v1/environments/:id/secrets/:key": true,
-	"/api/v1/apps/:id/webhook":              true,
+	"/api/v1/admin/integrations/neon/connections":       true,
+	"/api/v1/admin/integrations/neon/connections/:id":   true,
+	"/api/v1/admin/integrations/vercel/connections":     true,
+	"/api/v1/admin/integrations/vercel/connections/:id": true,
+	"/api/v1/environments/:id/secrets/:key":             true,
+	"/api/v1/apps/:id/webhook":                          true,
 }
 
 // IsRedacted reports whether a route's request body must be excluded

@@ -104,7 +104,7 @@
       "dependencies": [],
       "dependencyCoverage": "Use original stage gates; exact task dependencies not reconstructed by assumption.",
       "owner": "unassigned",
-      "acceptance": "Owner follows Apps \u2192 Services \u2192 flow \u2192 release \u2192 provider dashboard; both themes, narrow screens, keyboard access and role restrictions pass",
+      "acceptance": "Owner follows Apps → Services → flow → release → provider dashboard; both themes, narrow screens, keyboard access and role restrictions pass",
       "originalWork": "Complete actual workspace acceptance",
       "implementationObservation": "implemented_pending_acceptance",
       "sourceObservationDate": "2026-10-02 through 2026-10-27; not a new execution",
@@ -236,7 +236,7 @@
       "dependencies": [],
       "dependencyCoverage": "Use original stage gates; exact task dependencies not reconstructed by assumption.",
       "owner": "unassigned",
-      "acceptance": "Signed delivery \u2192 exact branch/tag \u2192 server-reviewed App \u2192 durable job \u2192 production build/digest \u2192 Docker readiness and service logs",
+      "acceptance": "Signed delivery → exact branch/tag → server-reviewed App → durable job → production build/digest → Docker readiness and service logs",
       "originalWork": "Hosted GitHub acceptance using one permitted disposable private repository",
       "implementationObservation": "implementation_present_hosted_acceptance_missing",
       "sourceObservationDate": "2026-10-02 through 2026-10-27; not a new execution",
@@ -610,7 +610,7 @@
       "dependencies": [],
       "dependencyCoverage": "Use original stage gates; exact task dependencies not reconstructed by assumption.",
       "owner": "unassigned",
-      "acceptance": "Exact retained account/project + reviewed public bundle \u2192 one durable operation \u2192 retained deployment ID \u2192 readiness and production alias; no duplicate project",
+      "acceptance": "Exact retained account/project + reviewed public bundle → one durable operation → retained deployment ID → readiness and production alias; no duplicate project",
       "originalWork": "Update the existing Cooker landing project",
       "implementationObservation": "new_project_publisher_only",
       "sourceObservationDate": "2026-10-02 through 2026-10-27; not a new execution",
@@ -1188,14 +1188,15 @@
       "title": "Reconcile and integrate the isolated backend candidate",
       "kind": "product_extension",
       "phase": "integration",
-      "state": "planned",
+      "state": "source_integrated",
       "fullAcceptance": "not_proven",
       "priority": "P1",
       "dependencies": [],
       "owner": "unassigned",
       "acceptance": "Freeze the current backend candidate, review all pending changes and migration/worker compatibility, qualify scoped tests and stopped SQL/HTTP runner replacements, then integrate via develop. Preserve700-path pending work until reviewed; do not bulk-commit it with this landing release.",
       "evidence": [],
-      "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance."
+      "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance.",
+      "integrationNote": "2 November: source consolidated into the canonical company/apps/Cooker checkout for develop integration; full acceptance remains not_proven. See docs/maintenance/2026-11-02-consolidation.md."
     },
     {
       "id": "INT-02",
@@ -1243,7 +1244,7 @@
         "INT-02"
       ],
       "owner": "unassigned",
-      "acceptance": "Environment\u2192destination\u2192service grouping with stable IDs, separate branch/join ports, crossing/condition explanations, collapse/expand preserving external edges and keyboard step list. Check small/medium/large graphs, target collisions and phone navigation. Existing Stage.Group is only a starting point.",
+      "acceptance": "Environment→destination→service grouping with stable IDs, separate branch/join ports, crossing/condition explanations, collapse/expand preserving external edges and keyboard step list. Check small/medium/large graphs, target collisions and phone navigation. Existing Stage.Group is only a starting point.",
       "evidence": [],
       "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance."
     },
@@ -1344,7 +1345,7 @@
         "STO-01"
       ],
       "owner": "unassigned",
-      "acceptance": "Track filesystem snapshots separately from running process state; version snapshot identity/retention and invoke reviewed startup on resume. Prove stop\u2192resume file continuity, missing/expired snapshot and incompatible source/image behavior without replaying external deployment.",
+      "acceptance": "Track filesystem snapshots separately from running process state; version snapshot identity/retention and invoke reviewed startup on resume. Prove stop→resume file continuity, missing/expired snapshot and incompatible source/image behavior without replaying external deployment.",
       "evidence": [],
       "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance."
     },
@@ -1585,7 +1586,7 @@
         "REL-EXT-01"
       ],
       "owner": "unassigned",
-      "acceptance": "On coherent frozen inputs: source\u2192parallel tasks\u2192review\u2192deployment\u2192correct node group\u2192actual scoped logs/metrics\u2192sandbox persistence\u2192cancel/restart/restore/rollback. Retain failures and prove owned cleanup; no full acceptance from unrelated passing slices.",
+      "acceptance": "On coherent frozen inputs: source→parallel tasks→review→deployment→correct node group→actual scoped logs/metrics→sandbox persistence→cancel/restart/restore/rollback. Retain failures and prove owned cleanup; no full acceptance from unrelated passing slices.",
       "evidence": [],
       "budget": "One coherent slice and affected checks; actual host/account budget admitted before execution. No invented dates, estimates or paid-resource allowance."
     },

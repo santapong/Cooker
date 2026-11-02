@@ -50,7 +50,11 @@ func ValidatePipelineDAG(p *model.Pipeline) []string {
 				e.Source, e.Target, e.Condition,
 			))
 		}
-		deps[e.Target] = append(deps[e.Target], e.Source)
+		// Diagnose dangling references independently; only declared nodes
+		// participate in ancestor and cycle checks.
+		if stageIDs[e.Source] && stageIDs[e.Target] {
+			deps[e.Target] = append(deps[e.Target], e.Source)
+		}
 	}
 
 	// Inter-stage outputs reference validation (Primitive #3,
@@ -94,19 +98,12 @@ func ValidatePipelineDAG(p *model.Pipeline) []string {
 		}
 	}
 
-	// If we already found structural problems, skip the cycle check —
-	// an unknown dependency would cause dagrunner to error on that node
-	// rather than giving a clean "DAG contains a cycle" message.
-	if len(errs) > 0 {
-		return errs
-	}
-
 	dag := dagrunner.NewDAG()
 	for _, s := range p.Stages {
 		dag.AddNode(s.ID, deps[s.ID])
 	}
 
-	return dag.Validate()
+	return append(errs, dag.Validate()...)
 }
 
 // BuildDAGFromPipeline converts a pipeline into an executable DAG.

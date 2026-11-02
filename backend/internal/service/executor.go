@@ -11,6 +11,7 @@ import (
 	"github.com/santapong/cooker/internal/build/builder"
 	"github.com/santapong/cooker/internal/build/buildplan"
 	"github.com/santapong/cooker/internal/build/pusher"
+	"github.com/santapong/cooker/internal/build/registryauth"
 	"github.com/santapong/cooker/internal/build/stagerunner"
 	"github.com/santapong/cooker/internal/deploy/deployer"
 	"github.com/santapong/cooker/internal/gitops"
@@ -113,9 +114,12 @@ type RunUpdater func(ctx context.Context, run *model.PipelineRun) error
 // Production wiring injects real Builder/Pusher/Deployer; tests
 // inject mocks.
 type Executor struct {
-	builder  builder.Builder
-	pusher   pusher.Pusher
-	deployer deployer.Deployer
+	envResolver       *AppEnvResolver
+	registryAuth      registryauth.Resolver
+	registryAuthority *RegistryAuthorityService
+	builder           builder.Builder
+	pusher            pusher.Pusher
+	deployer          deployer.Deployer
 	// dockerDeployer and composeDeployer back per-service deploy stages
 	// whose DeployRuntime is "docker"/"compose" (Docker-host targets).
 	// Nil falls back to the default deployer, so non-Docker installs are
@@ -170,6 +174,10 @@ type DeployGovernanceHook func(ctx context.Context, run *model.PipelineRun, stag
 
 // Option configures a new Executor. Use the With* constructors.
 type Option func(*Executor)
+
+func WithEnvironmentResolver(resolver *AppEnvResolver) Option {
+	return func(e *Executor) { e.envResolver = resolver }
+}
 
 // WithBuilder injects the image builder used by build stages.
 // Passing nil is a no-op (the default Noop builder is kept).
@@ -331,6 +339,14 @@ func (e *Executor) broadcastStatus(runID, stageID, status string) {
 	}
 }
 
+// pipelinePreflightError proves rejection before the DAG stage runner was
+// entered. Queue workers must not infer this boundary from a terminal status:
+// a failed run can also follow an uncertain external mutation.
+type pipelinePreflightError struct{ cause error }
+
+func (e *pipelinePreflightError) Error() string { return e.cause.Error() }
+func (e *pipelinePreflightError) Unwrap() error { return e.cause }
+
 // Execute runs a pipeline and returns the terminal RunResult plus
 // any error from the DAG runner. The returned RunResult.Status is
 // guaranteed terminal — RunStatusSuccess, RunStatusFailed, or
@@ -350,10 +366,31 @@ func (e *Executor) broadcastStatus(runID, stageID, status string) {
 //   - Any other runner error → RunStatusFailed.
 //   - Clean return → RunStatusSuccess.
 func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.PipelineRun) (model.RunResult, error) {
+	ctx = WithLogSecrets(ctx, nil)
+	var registryErr error
+	ctx, registryErr = e.prepareExecutionRegistry(ctx, p)
+	if registryErr != nil {
+		return e.finalize(run, registryErr, false), &pipelinePreflightError{cause: registryErr}
+	}
+	if err := RequirePipelineSourceContext(ctx, p); err != nil {
+		return e.finalize(run, err, false), &pipelinePreflightError{cause: err}
+	}
+	for _, stage := range p.Stages {
+		if model.IsRegistryCredentialEnvironmentID(stage.EnvironmentID) {
+			err := fmt.Errorf("credential-only environments cannot be used by workloads")
+			return e.finalize(run, err, false), &pipelinePreflightError{cause: err}
+		}
+	}
+	stageSecrets, secretErr := e.resolvePipelineSecrets(ctx, p)
+	if secretErr != nil {
+		return e.finalize(run, secretErr, false), &pipelinePreflightError{cause: secretErr}
+	}
+	ctx, releaseArtifacts := withBuildArtifacts(ctx)
+	defer releaseArtifacts()
 	for _, stage := range p.Stages {
 		if stage.Config.ReviewOnly {
 			err := fmt.Errorf("use App Deploy to resolve this saved deployment graph")
-			return e.finalize(run, err, false), err
+			return e.finalize(run, err, false), &pipelinePreflightError{cause: err}
 		}
 	}
 	// Bind run-id to the logger so every line emitted from this
@@ -370,7 +407,7 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 		// started executing stages. Stamp run.Status + FinishedAt so the
 		// handler closure can persist verbatim without re-deriving state.
 		wrapped := fmt.Errorf("building DAG: %w", err)
-		return e.finalize(run, wrapped, run.Status == model.RunStatusCancelled), wrapped
+		return e.finalize(run, wrapped, run.Status == model.RunStatusCancelled), &pipelinePreflightError{cause: wrapped}
 	}
 
 	stageMap := make(map[string]*model.Stage)
@@ -501,6 +538,12 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 				execStage = cp
 			}
 		}
+		if values := stageSecrets[nodeID]; len(values) != 0 && ierrInterp == nil {
+			cp := *execStage
+			cp.Config = execStage.Config
+			cp.Config.Env = mergeEnv(execStage.Config.Env, values)
+			execStage = &cp
+		}
 
 		// Apply per-stage timeout. stage.Config.Timeout is a Go-format
 		// duration string (e.g. "5m", "1h"); fall back to a 30-minute
@@ -562,6 +605,9 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 				case model.StageTypePush:
 					return e.executePush(ctx, run.ID, execStage, stageRun)
 				case model.StageTypeDeploy:
+					// Reset even when governance denies the next attempt before
+					// executeDeploy is reached.
+					stageRun.RuntimeReceipt, stageRun.RuntimeBindingWarning = nil, ""
 					// Pre-stage governance check (Milestone C). Runs once
 					// per stage attempt — retries don't re-prompt the gate.
 					// On enforce-deny the stage fails immediately with the
@@ -585,6 +631,9 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			})
 		}
 
+		if secretErr := protectStageMetadata(ctx, stageRun); secretErr != nil && stageErr == nil {
+			stageErr = secretErr
+		}
 		endTime := time.Now()
 		stageRun.FinishedAt = &endTime
 
@@ -596,12 +645,12 @@ func (e *Executor) Execute(ctx context.Context, p *model.Pipeline, run *model.Pi
 			} else {
 				stageRun.Status = model.RunStatusFailed
 			}
-			stageRun.Error = stageErr.Error()
+			stageRun.Error = RedactLogText(ctx, stageErr.Error())
 			observability.ObserveStageDuration(string(stage.Type), "failed", duration)
 			e.broadcastStatus(run.ID, stage.ID, string(stageRun.Status))
 			// Terminal status: the drain goroutine flushes immediately
 			// when it receives the "failed" StatusUpdate from the runner.
-			return stageErr
+			return redactLogError(ctx, stageErr)
 		}
 
 		if next, terr := runstate.TransitionStage(stageRun.Status, runstate.EventSucceed); terr == nil {

@@ -10,14 +10,16 @@ import (
 
 // New returns an in-memory aggregate store. Safe for concurrent use.
 func New() *store.Store {
+	runStore := &runs{m: map[string]*model.PipelineRun{}}
+	appStore := &apps{m: map[string]*model.App{}}
 	return store.New(store.Components{
-		Pipelines:      &pipelines{m: map[string]*model.Pipeline{}},
-		Runs:           &runs{m: map[string]*model.PipelineRun{}},
+		Pipelines:      &catalogPipelines{pipelines: &pipelines{m: map[string]*model.Pipeline{}}, runs: runStore},
+		Runs:           runStore,
 		Environments:   &environments{m: map[string]*model.Environment{}},
 		Promotions:     &promotions{m: map[string]*model.RunPromotion{}, approvals: map[string][]model.PromotionApproval{}},
 		StageApprovals: &stageApprovals{m: map[string]*model.StageApproval{}, votes: map[string][]model.StageApprovalVote{}},
-		Apps:           &apps{m: map[string]*model.App{}},
-		AppDeploys:     &appDeploys{m: map[string]*model.AppDeploy{}},
+		Apps:           appStore,
+		AppDeploys:     &appDeploys{m: map[string]*model.AppDeploy{}, apps: appStore, runs: runStore},
 		AppCanaries:    &appCanaries{m: map[string]*model.AppCanary{}},
 		AuditEvents:    &auditEvents{},
 		Hosts:          &hosts{m: map[string]*model.Host{}},

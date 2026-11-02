@@ -17,6 +17,7 @@ import "time"
 // Schedule mirrors a row in the schedules table.
 type Schedule struct {
 	ID         string     `json:"id"`
+	Version    int        `json:"version"`
 	PipelineID string     `json:"pipelineId"`
 	Name       string     `json:"name,omitempty"`
 	CronExpr   string     `json:"cronExpr"`

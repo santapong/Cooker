@@ -82,8 +82,20 @@ export async function mockApi(page: Page): Promise<void> {
   // WebSocket tickets: 403 makes the hooks stop quietly (401 would redirect to sign-in).
   await page.route('**/api/v1/ws-tickets', (route) => route.fulfill({ status: 403, json: { error: 'forbidden' } }));
   await page.route('**/api/v1/capabilities', (route) => route.fulfill({ json: { aiTriage: false, cloudInventory: false, feedback: false } }));
+  await page.route('**/api/v1/admin/integrations/vercel/connections', (route) => route.fulfill({ json: { connections: [] } }));
+  await page.route('**/api/v1/admin/notification-deliveries**', (route) => route.fulfill({ json: { items: [], total: 0, mode: 'Owned fixture; no messages sent', pendingSourceJobs: 0, pendingSourceRepairJobs: 0 } }));
+  await page.route('**/api/v1/integrations/vercel', (route) => route.fulfill({ json: { connections: [], projects: [], deployments: [], syncIntervalSeconds: 120, historyLimit: 100 } }));
+  await page.route('**/api/v1/integrations/vercel/landing', (route) => route.fulfill({ json: { artifact: { name: 'Cooker landing fixture', fileCount: 3, bytes: 4096, sha256: 'a'.repeat(64), previewUrl: '/landing-preview/' }, operations: [] } }));
   await page.route('**/api/v1/environments**', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/v1/apps?*', (route) => route.fulfill({ json: [] }));
+  await page.route('**/api/v1/catalog/apps?*', (route) => route.fulfill({ json: { items: [], total: 0, limit: 24, offset: 0, sources: [] } }));
+  await page.route('**/api/v1/catalog/services?*', (route) => route.fulfill({ json: { items: [], total: 0, limit: 50, offset: 0, sources: [] } }));
+  await page.route('**/api/v1/catalog/pipelines?*', (route) => {
+    const providerOnly = new URL(route.request().url()).searchParams.get('management') === 'vercel';
+    const items = providerOnly ? [] : [{ id: 'gates', nativePipelineId: 'gates', name: 'gates', provider: 'cooker', management: 'cooker', kind: 'cooker-dag', href: '/pipelines/gates/edit', stages: 3, freshness: { state: 'recorded' }, capabilities: { edit: true, deploy: true, inspect: true, logs: true }, latestDeployment: { id: 'r1', provider: 'cooker', status: 'running', environment: 'unclassified', createdAt: '2026-09-05T00:00:00Z', href: '/pipelines/gates/runs/r1' } }];
+    return route.fulfill({ json: { items, total: items.length, limit: 50, offset: 0, sources: [] } });
+  });
+
   await page.route('**/api/v1/settings/registries', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/v1/settings/clusters', (route) => route.fulfill({ json: [] }));
   await page.route('**/api/v1/tokens**', (route) => route.fulfill({ json: { tokens: [] } }));

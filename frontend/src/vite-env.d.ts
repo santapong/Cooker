@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+  /** Match COOKER_LOCAL_AUTH_ENABLED at frontend build time. */
+  readonly VITE_LOCAL_AUTH_ENABLED?: string;
   readonly VITE_OIDC_ENABLED?: string;
   readonly VITE_OIDC_AUTHORITY?: string;
   readonly VITE_OIDC_CLIENT_ID?: string;

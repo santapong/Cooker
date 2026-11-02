@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/santapong/cooker/internal/build/registryauth"
 	"io"
 	"os/exec"
 	"sort"
@@ -62,7 +63,11 @@ func (d *DockerRun) Run(ctx context.Context, req Request) (Result, error) {
 	cmd.Stdout = out
 	cmd.Stderr = out
 
-	if err := cmd.Run(); err != nil {
+	err := registryauth.WithDockerConfig(ctx, req.RegistryAuth, req.RegistryHosts, func(dir string) error {
+		cmd.Env = registryauth.DockerEnvironment(dir)
+		return cmd.Run()
+	})
+	if err != nil {
 		// A non-zero container exit is a *stage* failure, not a runtime
 		// failure: report the code with a nil error so the executor marks
 		// the stage failed (rather than treating it as "runner broken").

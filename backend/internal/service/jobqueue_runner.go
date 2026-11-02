@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log/slog"
+	"slices"
+	"time"
 
 	"github.com/santapong/cooker/internal/jobqueue"
 	"github.com/santapong/cooker/internal/model"
@@ -25,9 +27,12 @@ const JobKindPipelineRun = "pipeline-run"
 // the existing /api/v1/pipelines/:id/runs/:runId polling endpoint
 // reflects the outcome.
 type JobQueueRunner struct {
-	store      *store.Store
-	executor   *Executor
-	dispatcher *notifier.Dispatcher // optional; nil = no notifications
+	store             *store.Store
+	executor          *Executor
+	dispatcher        *notifier.Dispatcher // optional; nil = no notifications
+	SourcePreparer    *PipelineSourcePreparer
+	NativeAutomation  *PipelineAutomation
+	RegistryAuthority *RegistryAuthorityService
 }
 
 // NewJobQueueRunner constructs a runner. dispatcher may be nil when
@@ -40,8 +45,14 @@ func NewJobQueueRunner(st *store.Store, exec *Executor, disp *notifier.Dispatche
 // runJobPayload is the wire shape carried by a pipeline-run job.
 // Encoded by service.JobQueueEnqueuer and decoded here.
 type runJobPayload struct {
-	PipelineID string `json:"pipelineId"`
-	RunID      string `json:"runId"`
+	PipelineID string                       `json:"pipelineId"`
+	RunID      string                       `json:"runId"`
+	Pipeline   *model.Pipeline              `json:"pipeline,omitempty"`
+	Run        *model.PipelineRun           `json:"run,omitempty"`
+	Secrets    *PipelineSecretPlan          `json:"secretVersions,omitempty"`
+	Source     *model.PipelineSourcePlan    `json:"source,omitempty"`
+	Trigger    *model.PipelineTriggerProof  `json:"trigger,omitempty"`
+	Registry   *model.RegistryAuthorityPlan `json:"registryAuthority,omitempty"`
 }
 
 // Handle is the jobqueue.HandlerFunc registered for JobKindPipelineRun.
@@ -62,13 +73,89 @@ func (r *JobQueueRunner) Handle(ctx context.Context, job *jobqueue.Job) error {
 	if payload.PipelineID == "" || payload.RunID == "" {
 		return fmt.Errorf("jobqueue runner: missing pipelineId/runId in payload")
 	}
-	p, err := r.store.Pipelines.Get(ctx, payload.PipelineID)
-	if err != nil {
-		return fmt.Errorf("jobqueue runner: get pipeline %s: %w", payload.PipelineID, err)
+	p := payload.Pipeline
+	if p == nil {
+		// Legacy jobs are accepted only against their captured version below.
+		var err error
+		p, err = r.store.Pipelines.Get(ctx, payload.PipelineID)
+		if err != nil {
+			return fmt.Errorf("jobqueue runner: get pipeline %s: %w", payload.PipelineID, err)
+		}
+	}
+	if p.ID != payload.PipelineID {
+		return fmt.Errorf("jobqueue runner: snapshot identity mismatch")
+	}
+	if payload.Run != nil {
+		planned := payload.Run
+		if payload.Pipeline == nil || planned.ID != payload.RunID || planned.PipelineID != payload.PipelineID || planned.PipelineVersion != p.Version || planned.Status != model.RunStatusPending || planned.CreatedAt.IsZero() || planned.StartedAt != nil || planned.FinishedAt != nil {
+			return fmt.Errorf("jobqueue runner: invalid pending run snapshot")
+		}
+	}
+	var sourceReceipt *model.PipelineRunSource
+	if p.Source != nil {
+		if payload.Pipeline == nil || payload.Run == nil {
+			return fmt.Errorf("source-bound jobs require immutable pipeline and actor snapshots")
+		}
+		if payload.Trigger == nil && (payload.Source == nil || payload.Source.ReviewPolicy != "manual") {
+			return fmt.Errorf("accepted automatic source requires its trigger authority")
+		}
+		if payload.Source == nil || ValidatePipelineSourcePlan(p, payload.Source) != nil {
+			return fmt.Errorf("accepted native source metadata is unavailable")
+		}
+		var err error
+		sourceReceipt, err = model.RunSourceFromAcceptedPlan(payload.Source)
+		if err != nil {
+			return fmt.Errorf("accepted native source receipt is invalid")
+		}
+		if payload.Run != nil {
+			if payload.Run.Source != nil && payload.Run.Source.CheckedOutAt != nil {
+				return fmt.Errorf("admission cannot claim verified checkout")
+			}
+			payload.Run = payload.Run.Clone()
+			payload.Run.Source = sourceReceipt.Clone()
+		}
+	} else if payload.Source != nil || payload.Trigger != nil || payload.Run != nil && payload.Run.Source != nil {
+		return fmt.Errorf("source metadata does not belong to this pipeline")
 	}
 	run, err := r.store.Runs.Get(ctx, payload.RunID)
+	if errors.Is(err, store.ErrNotFound) && payload.Run != nil {
+		// The queue is the admission record. View creation can race the HTTP
+		// response or recovery; Create must never overwrite their newer state.
+		if createErr := r.store.Runs.Create(ctx, payload.Run.Clone()); createErr != nil && !errors.Is(createErr, store.ErrConflict) {
+			return fmt.Errorf("jobqueue runner: recreate accepted run: %w", createErr)
+		}
+		run, err = r.store.Runs.Get(ctx, payload.RunID)
+	}
 	if err != nil {
 		return fmt.Errorf("jobqueue runner: get run %s: %w", payload.RunID, err)
+	}
+	if run.PipelineID != payload.PipelineID {
+		return fmt.Errorf("jobqueue runner: run identity mismatch")
+	}
+	if planned := payload.Run; planned != nil && (run.PipelineVersion != planned.PipelineVersion || run.StartedByUserSub != planned.StartedByUserSub || run.StartedByEmail != planned.StartedByEmail || run.StartedByTokenHash != planned.StartedByTokenHash || !slices.Equal(run.StartedByGroups, planned.StartedByGroups)) {
+		return fmt.Errorf("jobqueue runner: run actor or version differs from accepted plan")
+	}
+	if sourceReceipt != nil {
+		merged, err := model.MergeRunSource(run.Source, sourceReceipt)
+		if err != nil {
+			return fmt.Errorf("run source differs from the accepted plan")
+		}
+		run.Source = merged
+	} else if run.Source != nil {
+		return fmt.Errorf("run source does not belong to this pipeline")
+	}
+
+	if run.Status == model.RunStatusSuccess || run.Status == model.RunStatusFailed || run.Status == model.RunStatusCancelled {
+		return nil
+	}
+	if run.Status == model.RunStatusNeedsAttention {
+		return jobqueue.ErrOutcomeUnknown
+	}
+	if payload.Pipeline == nil && run.PipelineVersion != 0 && run.PipelineVersion != p.Version {
+		return fmt.Errorf("jobqueue runner: pipeline changed after run was queued")
+	}
+	if r.executor == nil {
+		return fmt.Errorf("jobqueue runner: executor is unavailable")
 	}
 
 	// Execute. Per F2 (handler-layering audit), Execute owns terminal
@@ -77,30 +164,103 @@ func (r *JobQueueRunner) Handle(ctx context.Context, job *jobqueue.Job) error {
 	// inline coordinator path does; without one the job inherits the
 	// worker's ctx as before.
 	execErr := error(nil)
+	startedExecution := false
+	// A new preflight rejection says nothing about effects from an earlier
+	// attempt. Preserve uncertainty for runs whose execution already started.
+	freshExecution := run.Status == model.RunStatusPending && run.StartedAt == nil
+	for _, stage := range run.StageRuns {
+		if stage.StartedAt != nil {
+			freshExecution = false
+		}
+	}
 	if r.executor != nil {
-		execCtx := ctx
+		execCtx := withAcceptedPipelineSecrets(ctx, payload.Secrets)
+		if r.RegistryAuthority != nil || r.executor.registryAuthority != nil || payload.Registry != nil {
+			// Workers never use inline preparation. An omitted runner option
+			// must not turn absent durable evidence into fresh credentials.
+			authority := r.RegistryAuthority
+			if authority == nil {
+				authority = r.executor.registryAuthority
+			}
+			execErr = validateNativeRegistryTransports(p)
+			if execErr == nil && authority != nil {
+				execErr = ValidatePipelineRuntimeEnvironments(execCtx, authority.Environments, p)
+			}
+			if execErr == nil && validateNativeRegistryPlan(p, payload.Registry) != nil {
+				execErr = model.ErrInvalidRegistryAuthority
+			} else if execErr == nil {
+				execErr = authority.ValidateCurrent(execCtx, model.RegistrySubject{Kind: "pipeline", ID: p.ID}, payload.Registry)
+			}
+			execCtx = WithAcceptedRegistryAuthority(execCtx, model.RegistrySubject{Kind: "pipeline", ID: p.ID}, payload.Registry)
+		}
 		if d := PipelineRunDeadline(p); d > 0 {
 			var cancel context.CancelFunc
-			execCtx, cancel = context.WithTimeout(ctx, d)
+			execCtx, cancel = context.WithTimeout(execCtx, d)
 			defer cancel()
 		}
-		_, execErr = r.executor.Execute(execCtx, p, run)
+		if execErr == nil && p.Source != nil {
+			if payload.Source == nil || r.SourcePreparer == nil {
+				execErr = fmt.Errorf("accepted native source is unavailable")
+			} else if payload.Trigger != nil && (r.NativeAutomation == nil || r.NativeAutomation.ValidateQueued(execCtx, job, p, run, payload.Source, payload.Trigger) != nil) {
+				execErr = fmt.Errorf("accepted native source authority is unavailable")
+			} else {
+				var prepared *PreparedPipelineSource
+				prepared, execErr = r.SourcePreparer.Open(execCtx, p, payload.Source, payload.Trigger != nil)
+				if execErr == nil {
+					defer prepared.Close()
+					checkedAt := prepared.CheckedOutAt
+					confirmed := sourceReceipt.Clone()
+					confirmed.CheckedOutAt = &checkedAt
+					if run.Source.CheckedOutAt != nil {
+						confirmed.CheckedOutAt = run.Source.Clone().CheckedOutAt
+					}
+					run.Source, execErr = model.MergeRunSource(run.Source, confirmed)
+					if execErr == nil {
+						if recorder, ok := r.store.Runs.(store.RunSourceCheckoutRecorder); ok {
+							if err := recorder.RecordSourceCheckout(execCtx, run.ID, run.Source); err != nil {
+								execErr = redactedLogError{cause: err, text: "verified checkout persistence is unavailable"}
+							}
+						} else {
+							execErr = fmt.Errorf("verified checkout persistence is unavailable")
+						}
+					}
+					if execErr == nil {
+						execCtx = WithPipelineSourceCheckout(execCtx, prepared)
+					}
+				}
+			}
+		} else if execErr == nil && (payload.Source != nil || payload.Trigger != nil) {
+			execErr = fmt.Errorf("source metadata does not belong to this pipeline")
+		}
+		if execErr == nil {
+			startedExecution = true
+			_, execErr = r.executor.Execute(execCtx, p, run)
+		} else {
+			r.executor.finalize(run, execErr, false)
+		}
 	}
-	if updateErr := r.store.Runs.Update(ctx, run); updateErr != nil {
-		// Persist failure is logged but doesn't override the executor
-		// error: callers care about the executor outcome first. The
-		// orphan sweep will eventually fail-out the row if Update
-		// continues to fail.
-		slog.Warn("jobqueue runner: update run failed", "run", run.ID, "err", updateErr)
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if updateErr := r.store.Runs.Update(recordCtx, run); updateErr != nil {
+		return fmt.Errorf("%w: persist run outcome: %v", jobqueue.ErrOutcomeUnknown, updateErr)
+	}
+	var preflight *pipelinePreflightError
+	if execErr != nil && freshExecution && (!startedExecution || errors.As(execErr, &preflight)) {
+		// Authority/checkout rejection occurred before any native stage. Its
+		// persisted failure is determinate, not an ambiguous deployment effect.
+		return execErr
+	}
+	if ctx.Err() != nil || execErr != nil {
+		return fmt.Errorf("%w: execution interrupted: %v", jobqueue.ErrOutcomeUnknown, execErr)
 	}
 
-	r.dispatchOutcome(ctx, p, run, execErr)
+	if _, queued := store.RunClaimFromContext(ctx); !queued {
+		r.dispatchOutcome(ctx, p, run, execErr)
+	}
 
-	// execErr surfaces to the job framework only when it's an
-	// infrastructure problem we want to retry. Today the executor
-	// returns nil for normal failure (run.Status carries the bad
-	// news); a non-nil execErr means an unexpected runtime issue,
-	// which is worth a retry.
+	// Normal stage failures are already persisted on the run. Infrastructure
+	// ambiguity returns ErrOutcomeUnknown above and is never auto-replayed.
+
 	return execErr
 }
 

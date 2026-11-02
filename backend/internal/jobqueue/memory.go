@@ -22,6 +22,21 @@ func NewMemory() *Memory {
 	return &Memory{jobs: make(map[string]*Job)}
 }
 
+// WithClaim holds the claim lock through a domain write, matching the database
+// store's transaction-level ownership lock. Lock order is job then domain row.
+func (m *Memory) WithClaim(_ context.Context, owner, id string, write func() error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.jobs[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if j.Status != StatusRunning || j.LockedBy != owner {
+		return ErrNotLocked
+	}
+	return write()
+}
+
 // Enqueue implements Store.
 func (m *Memory) Enqueue(_ context.Context, kind string, payload json.RawMessage, opts EnqueueOptions) (*Job, error) {
 	if kind == "" {
@@ -73,7 +88,7 @@ func (m *Memory) Dequeue(_ context.Context, workerID string, kinds []string) (*J
 
 	runningKeys := make(map[string]bool)
 	for _, j := range m.jobs {
-		if j.Status == StatusRunning && j.ConcurrencyKey != "" {
+		if (j.Status == StatusRunning || j.Status == StatusNeedsAttention) && j.ConcurrencyKey != "" {
 			runningKeys[j.ConcurrencyKey] = true
 		}
 	}

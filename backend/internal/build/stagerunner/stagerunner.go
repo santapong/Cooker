@@ -15,6 +15,7 @@ package stagerunner
 import (
 	"context"
 	"errors"
+	"github.com/santapong/cooker/internal/build/registryauth"
 	"io"
 )
 
@@ -26,6 +27,9 @@ var ErrUnavailable = errors.New("stagerunner: unavailable")
 
 // Request describes a single containerized stage execution.
 type Request struct {
+	// RegistryAuth/Hosts carry only accepted image-pull scope, never runtime env.
+	RegistryAuth  registryauth.Resolver
+	RegistryHosts []string
 	// Image is the OCI image the command runs in (e.g. "node:20-alpine").
 	// Required: a Test/Custom stage with no image is a config error.
 	Image string

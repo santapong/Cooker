@@ -17,12 +17,26 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // DockerRun runs one container per Deploy call via `docker run`.
 type DockerRun struct {
 	// Bin overrides the docker binary path. Empty means "docker" on PATH.
 	Bin string
+}
+
+// dockerRunLogWriter preserves serialized progress writes when the stdout
+// capture gives os/exec separate stdout and stderr copy goroutines.
+type dockerRunLogWriter struct {
+	mu     sync.Mutex
+	writer io.Writer
+}
+
+func (w *dockerRunLogWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writer.Write(p)
 }
 
 // NewDockerRun constructs a docker-run deployer.
@@ -57,26 +71,48 @@ func (d *DockerRun) Deploy(ctx context.Context, req Request) (Result, error) {
 	if out == nil {
 		out = io.Discard
 	}
+	out = &dockerRunLogWriter{writer: out}
+	var result Result
+	err := withRegistryDockerEnvironment(ctx, req, func(env []string) error {
+		if req.RegistryAuth != nil {
+			if err := prepareDockerRuntimeImage(ctx, bin, req.Image, env, out); err != nil {
+				return err
+			}
+		}
 
-	// Replace any existing container of the same name (best-effort).
-	// L dockerrun.go:63: log the error (e.g. "No such container") to
-	// the writer so operators can see it in the run log rather than
-	// the error being fully discarded.
-	logf(out, "Removing existing container %s (if any)\n", name)
-	if rmOut, rmErr := exec.CommandContext(ctx, bin, "rm", "-f", name).CombinedOutput(); rmErr != nil {
-		logf(out, "docker rm -f %s: %v (output: %s)\n", name, rmErr, strings.TrimSpace(string(rmOut)))
-	}
+		// Replace any existing container of the same name (best-effort).
+		// L dockerrun.go:63: log the error (e.g. "No such container") to
+		// the writer so operators can see it in the run log rather than
+		// the error being fully discarded.
+		logf(out, "Removing existing container %s (if any)\n", name)
+		rm := exec.CommandContext(ctx, bin, "rm", "-f", name)
+		rm.Env = env
+		if rmOut, rmErr := rm.CombinedOutput(); rmErr != nil {
+			logf(out, "docker rm -f %s: %v (output: %s)\n", name, rmErr, strings.TrimSpace(string(rmOut)))
+		}
 
-	args := dockerRunArgs(name, req.Image, req.Env, req.Ports, req.Resources, req.Labels, req.Network)
-	logf(out, "Starting container %s with image %s\n", name, req.Image)
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Stdout = out
-	cmd.Stderr = out
-	if err := cmd.Run(); err != nil {
-		return Result{}, fmt.Errorf("docker run %s: %w", name, err)
-	}
-	logf(out, "Started container %s from %s\n", name, req.Image)
-	return Result{AppliedResources: []string{"container/" + name}}, nil
+		args := dockerRunArgs(name, req.Image, req.Env, req.Ports, req.Resources, req.Labels, req.Network)
+		logf(out, "Starting container %s with image %s\n", name, req.Image)
+		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd.Env = env
+		// Retain a bounded copy of the actual detached-start ID while keeping
+		// the existing progress stream. An oversized capture never fails start.
+		started := &runtimeReceiptBuffer{}
+		cmd.Stdout = io.MultiWriter(out, started)
+		cmd.Stderr = out
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("docker run %s: %w", name, err)
+		}
+		logf(out, "Started container %s from %s\n", name, req.Image)
+		result = Result{AppliedResources: []string{"container/" + name}}
+		result.RuntimeReceipt = d.captureRuntimeReceipt(ctx, req, name, env, started)
+		if result.RuntimeReceipt == nil {
+			result.RuntimeBindingWarning = RuntimeBindingUnavailable
+			logf(out, "Runtime receipt unavailable; deployment started successfully\n")
+		}
+		return nil
+	})
+	return result, err
 }
 
 // dockerRunArgs builds the argv for `docker run -d --restart=always
