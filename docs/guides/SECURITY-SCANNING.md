@@ -8,7 +8,7 @@ Cooker's security checks cover source code, secrets, exact dependency versions a
 | --- | --- | --- |
 | CodeQL Go and JavaScript/TypeScript | PRs to develop/main, pushes to those branches and security fix branches; weekly schedule | Runs security-extended queries and uploads code-scanning alerts. Go uses a manual build. |
 | OSV dependency lookup | Same PR/push targets; daily schedule | Checks Go requirements and npm lockfile versions, including development packages. Fails for advisory matches requiring review, unsupported inventory, API failure or incomplete pagination. |
-| Gitleaks | Same security workflow | Checks the current branch history and working tree. Reports are redacted. Only exact historical synthetic-fixture fingerprints are ignored. |
+| Gitleaks | Same security workflow | Checks the current branch history and working tree. Reports are redacted. Only exact reviewed synthetic-fixture and prose false-positive fingerprints are ignored. |
 | govulncheck | Backend CI | Pinned analyzer checks reachable Go vulnerabilities using the selected build toolchain. Findings fail the step. |
 | npm audit | Frontend CI | Includes development dependencies; high/critical findings fail the step. |
 | Trivy image scan | After CI builds and loads `cooker:ci` | Checks the actual built image's OS/library inventory. High/critical matches fail the step; the JSON report remains available. |

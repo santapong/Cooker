@@ -12,7 +12,7 @@ curl --fail --silent --show-error --location --retry 2 --max-time 60 \
 printf '%s  %s\n' "$checksum" "$directory/gitleaks.tar.gz" | sha256sum --check --status
 tar -xzf "$directory/gitleaks.tar.gz" -C "$directory" gitleaks
 mkdir -p security-results
-# The ignore file contains only two exact historical synthetic-fixture fingerprints.
+# The ignore file contains exact reviewed synthetic-fixture and prose fingerprints only.
 status=0
 "$directory/gitleaks" git . --log-opts='HEAD -- . :(exclude).claude' \
   --config .gitleaks.toml --gitleaks-ignore-path .gitleaksignore --ignore-gitleaks-allow --redact=100 --no-banner --no-color --timeout 180 \

@@ -15,11 +15,13 @@ The combined source retains the published kitchen website, the backend automatio
 
 ## Validation
 
-The first combined backend run compiled and recorded 3,356 passing test/subtest events, 28 skips and one failing Vercel fixture. The Vercel package passed after the fixture correction; the final affected recheck is recorded below. Go vet passed. Database/live Docker/provider opt-ins were not enabled.
+The first combined backend run compiled and recorded 3,356 passing test/subtest events, 28 skips and one failing Vercel fixture. The Vercel package passed after the fixture correction; the affected final fixture recheck also passed. Go vet passed. Database/live Docker/provider opt-ins were not enabled.
 
-Frontend TypeScript passed after the Router import correction. ESLint passed with 11 existing warnings; Vite production bundling passed. The first unit run passed 53 files / 518 tests and could not load the Router-dependent file; the corrected file then passed all five tests. No browser campaign is implied by these unit/build checks. Seven security-script tests passed. Detailed logs and bounded-executor receipts are retained locally.
+Frontend TypeScript passed after the Router import correction. ESLint passed with 11 existing warnings; Vite production bundling passed. The first unit run passed 53 files / 518 tests and could not load the Router-dependent file; the corrected file then passed all five tests. No browser campaign is implied by these unit/build checks. Seven security-script tests, workflow validation, and redacted working-tree/history secret scans passed. Detailed logs and bounded-executor receipts are retained locally.
 
 Full SQL16/HTTP6, combined authenticated Git/provider/runtime acceptance, live Vercel/Neon authority and release acceptance remain open. Historical evidence remains limited to its original inputs. The existing 79-task roadmap retains those requirements.
+
+The normal `npm run build` passed after the final TypeScript correction. No new platform acceptance is inferred from this integration.
 
 ## Workspace convention
 
